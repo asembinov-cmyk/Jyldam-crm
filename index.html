@@ -135,6 +135,9 @@
   .filters input,.filters select{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
     border-radius:9px;background:var(--card);color:var(--ink);min-width:140px}
   .filters .search{flex:1;min-width:200px}
+  .filters .date-field{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .filters .date-field span{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding-left:2px}
+  .filters .date-field input{min-width:150px}
 
   .subtabs{display:flex;gap:6px;margin-bottom:22px;flex-wrap:wrap}
   .subtabs button{font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:9px 15px;border-radius:30px;
@@ -212,6 +215,7 @@
     .resp-table .status-pick{max-width:60%}
     .resp-table .qty-edit{width:80px}
     .resp-table .status-time{text-align:right;width:100%}
+    .filters .date-field input{min-width:0;width:100%}
   }
 </style>
 </head>
@@ -513,7 +517,7 @@ function showInfo(title,bodyHtml){showModal(title,bodyHtml,null,{readonly:true})
   else showLogin();
 })();
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
-let pf={q:'',city:'',courier:'',sales:'',processor:'',status:''};
+let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:'',dateTo:''};
 
 function visiblePickups(){
   if(isCourier()){
@@ -545,6 +549,9 @@ function renderPickups(){
         <select id="pfcity"><option value="">Все города</option>${S.cities.map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
         ${isStaff()?`<select id="pfcourier"><option value="">Все курьеры</option>${S.couriers.map(c=>`<option value="${c.id}" ${pf.courier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select>`:''}
         <select id="pfstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
+        <label class="date-field"><span>Дата по</span><input type="date" id="pfdateto" value="${esc(pf.dateTo)}"></label>
+        ${(pf.dateFrom||pf.dateTo)?`<button class="btn ghost sm" id="pfdateclear" style="align-self:flex-end">Сбросить даты</button>`:''}
       </div>
       <div id="pickupTable"></div>
     </div>`;
@@ -553,6 +560,9 @@ function renderPickups(){
   $('pfcity').onchange=e=>{pf.city=e.target.value;drawPickups();};
   if($('pfcourier'))$('pfcourier').onchange=e=>{pf.courier=e.target.value;drawPickups();};
   $('pfstatus').onchange=e=>{pf.status=e.target.value;drawPickups();};
+  $('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
+  $('pfdateto').onchange=e=>{pf.dateTo=e.target.value;renderPickups();};
+  if($('pfdateclear'))$('pfdateclear').onclick=()=>{pf.dateFrom='';pf.dateTo='';renderPickups();};
   drawPickups();
 }
 function filteredPickups(){
@@ -561,6 +571,9 @@ function filteredPickups(){
     if(pf.city&&p.city_id!==pf.city)return false;
     if(pf.courier&&p.courier_id!==pf.courier)return false;
     if(pf.status&&p.status_id!==pf.status)return false;
+    const pd=(p.pickup_date||'').slice(0,10);
+    if(pf.dateFrom&&(!pd||pd<pf.dateFrom))return false;
+    if(pf.dateTo&&(!pd||pd>pf.dateTo))return false;
     if(q){const hay=[p.name,phoneDisplay(p.phone),cityName(p.city_id),districtName(p.district_id),courierName(p.courier_id),p.address].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   }).sort((a,b)=>(b.pickup_date||'').localeCompare(a.pickup_date||''));
