@@ -178,6 +178,32 @@
   .hist .dot{width:10px;height:10px;border-radius:50%;margin-top:4px;flex:none}
   .hist .when{color:var(--muted);font-size:12px}
 
+  /* ── Компактные карточки заказов для курьера ── */
+  .cour-cards{display:flex;flex-direction:column;gap:12px}
+  .cour-card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+  .cc-head{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;cursor:pointer;user-select:none}
+  .cc-main{flex:1;min-width:0}
+  .cc-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .cc-id{font-family:'Fraunces',serif;font-weight:900;font-size:17px;color:var(--rust-dk);letter-spacing:.5px}
+  .cc-client{font-weight:600;font-size:15px;line-height:1.25;margin-bottom:2px;word-break:break-word}
+  .cc-addr{font-size:13.5px;color:var(--ink);line-height:1.35;word-break:break-word}
+  .cc-phone{display:inline-block;margin-top:4px;font-size:13.5px}
+  .cc-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none;text-align:right}
+  .cc-sum{font-family:'Fraunces',serif;font-weight:900;font-size:18px;color:var(--moss);line-height:1;white-space:nowrap}
+  .cc-sum small{display:block;font-family:'Spline Sans',sans-serif;font-weight:600;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+  .cc-chev{font-size:13px;color:var(--muted);transition:transform .2s}
+  .cour-card.open .cc-chev{transform:rotate(180deg)}
+  .cc-statusrow{display:flex;align-items:center;gap:8px;padding:0 16px 12px}
+  .cc-statusrow .status-pick{flex:1;min-width:0}
+  .cc-body{display:none;border-top:1px solid #eee6d6;padding:6px 16px 14px;background:var(--paper)}
+  .cour-card.open .cc-body{display:block}
+  .cc-row{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #eee6d6;font-size:13.5px}
+  .cc-row:last-of-type{border-bottom:none}
+  .cc-row .lbl{color:var(--muted);font-weight:600;flex:none}
+  .cc-row .vl{text-align:right;word-break:break-word}
+  .cc-actions{display:flex;gap:8px;padding-top:12px}
+  .cc-actions .btn{flex:1;justify-content:center}
+
   @media (max-width:760px){
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
     .page-head h1{font-size:24px}
@@ -735,16 +761,17 @@ function filteredOrders(){
     if(of.status&&o.status_id!==of.status)return false;
     if(of.delivery&&o.delivery_id!==of.delivery)return false;
     if(of.partner&&o.partner_id!==of.partner)return false;
-    if(q){const hay=[o.code,o.track,o.client,o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    if(q){const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
 }
 function drawOrders(){
   const el=$('orderTable');const rows=filteredOrders();
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
+  if(isCourier()){drawCourierOrderCards(el,rows);return;}
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
-    <th>ID</th><th>Дата забора</th>${staff?'<th>Партнёр</th>':''}<th>Отправитель</th><th>ФИО клиента</th><th>Вес</th>
+    <th>ID</th><th>Дата забора</th>${staff?'<th>Партнёр</th>':''}<th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Менеджер продаж</th><th>Обработчик</th><th>Стоимость</th><th>Оплата</th><th>ИП для Почты</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>`<tr>
@@ -752,6 +779,7 @@ function drawOrders(){
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
       ${staff?`<td data-label="Партнёр">${o.partner_id?esc(partnerName(o.partner_id)):'—'}</td>`:''}
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
+      <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
@@ -776,6 +804,57 @@ function drawOrders(){
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
     const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});if(u){o.status_id=u.status_id;toast('Статус обновлён');}});
 }
+/* Компактные карточки заказов для курьера: свёрнуто — ID/ФИО/телефон/адрес/сумма/статус, по тапу разворачивается остальное */
+function drawCourierOrderCards(el,rows){
+  el.innerHTML=`<div class="cour-cards">${rows.map(o=>{
+    const ph=phoneStored(o.phone);
+    const sum=o.cost?(+o.cost).toLocaleString('ru-RU')+' ₸':'—';
+    const city=isCourierDelivery(o.delivery_id)?courierCityName(o.courier_city_id):'';
+    return `<div class="cour-card" data-card="${o.id}">
+      <div class="cc-head" data-toggle="${o.id}">
+        <div class="cc-main">
+          <div class="cc-top"><span class="cc-id">${esc(o.code)}</span></div>
+          <div class="cc-client">${esc(o.client)||'Без имени'}</div>
+          <div class="cc-addr">${city?`<strong>${esc(city)}</strong> · `:''}${esc(o.address)||'адрес не указан'}</div>
+          ${ph?`<div class="cc-phone">${phoneLink(o.phone)}</div>`:''}
+        </div>
+        <div class="cc-right">
+          <div class="cc-sum">${esc(sum)}<small>сумма</small></div>
+          <span class="cc-chev">▾</span>
+        </div>
+      </div>
+      <div class="cc-statusrow">
+        <select class="status-pick" data-ostatus="${o.id}" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}">
+          <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+      </div>
+      <div class="cc-body">
+        <div class="cc-row"><span class="lbl">Дата забора</span><span class="vl">${esc(fmtDate(o.pickup_date))}</span></div>
+        <div class="cc-row"><span class="lbl">Отправитель</span><span class="vl">${esc(o.sender)||'—'}</span></div>
+        <div class="cc-row"><span class="lbl">Тип доставки</span><span class="vl">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</span></div>
+        <div class="cc-row"><span class="lbl">Вес</span><span class="vl">${o.weight?esc(o.weight)+' кг':'—'}</span></div>
+        <div class="cc-row"><span class="lbl">Кол-во товаров</span><span class="vl">${esc(o.qty||0)}</span></div>
+        <div class="cc-row"><span class="lbl">Индекс</span><span class="vl">${esc(o.index)||'—'}</span></div>
+        <div class="cc-row"><span class="lbl">Трек-код</span><span class="vl">${esc(o.track)||'—'}</span></div>
+        <div class="cc-actions">
+          <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
+          <button class="btn sm ghost" data-oview="${o.id}">Открыть</button>
+        </div>
+      </div>
+    </div>`;}).join('')}</div>`;
+  // тап по шапке — разворачивает/сворачивает (но не по ссылке-телефону)
+  el.querySelectorAll('[data-toggle]').forEach(h=>h.onclick=e=>{
+    if(e.target.closest('a'))return; // не сворачивать при клике на телефон
+    h.closest('.cour-card').classList.toggle('open');
+  });
+  el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=e=>{e.stopPropagation();orderModal(b.dataset.oview,true);});
+  el.querySelectorAll('[data-obc]').forEach(b=>b.onclick=e=>{e.stopPropagation();showBarcode(b.dataset.obc);});
+  el.querySelectorAll('[data-ostatus]').forEach(sel=>{
+    sel.onclick=e=>e.stopPropagation(); // выбор статуса не сворачивает карточку
+    sel.onchange=async()=>{const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
+      const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});
+      if(u){o.status_id=u.status_id;sel.style.borderColor=(statusObj(u.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}};
+  });
+}
 function renderBarcode(svgEl,code){if(!svgEl||!code)return;try{if(window.JsBarcode)JsBarcode(svgEl,code,{format:'CODE128',width:2,height:70,displayValue:true,fontSize:16,margin:6});}catch(e){console.error(e);}}
 function showBarcode(id){const o=S.orders.find(x=>x.id===id);if(!o)return;
   showInfo(`Штрих-код · заказ ${esc(o.code)}`,`<div style="text-align:center;padding:10px 0"><svg id="bcView"></svg><div style="margin-top:10px;color:var(--muted);font-size:13px">${esc(o.client||'')} ${o.track?('· трек '+esc(o.track)):''}</div></div>`);
@@ -786,7 +865,7 @@ function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
   const code=o?o.code:genOrderCode();
-  const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',courier_city_id:'',address:'',qty:'',status_id:(S.statuses[0]?S.statuses[0].id:''),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
+  const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',address:'',qty:'',status_id:(S.statuses[0]?S.statuses[0].id:''),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
   const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
     <div class="grid2">
@@ -795,6 +874,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Партнёр</label><select id="o_partner" ${dis}><option value="">—</option>${S.partners.map(p=>`<option value="${p.id}" ${d.partner_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Отправитель</label><input id="o_sender" value="${esc(d.sender)}" ${dis}></div>
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
+      <div class="field"><label>Телефон клиента</label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="o_weight" value="${esc(d.weight)}" ${dis}></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -813,7 +893,7 @@ function orderModal(id,readonly){
     </div>`,
     ro?null:async()=>{
       const row={code,partner_id:val('o_partner')||null,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
-        weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),
+        weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),phone:phoneVal('o_phone'),
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
         qty:parseInt(val('o_qty')||'0',10)||0,status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
@@ -823,6 +903,7 @@ function orderModal(id,readonly){
       else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);}
       toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
     },{readonly:ro});
+  attachPhone('o_phone',d.phone);
   setTimeout(()=>renderBarcode($('o_barcode'),code),60);
   if(!ro){
     const fillCouriers=cityId=>{
