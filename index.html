@@ -160,6 +160,31 @@
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
     .page-head h1{font-size:24px}nav.tabs{order:3;width:100%;margin-left:0}
     .user-box{margin-left:auto;border-left:none;padding-left:0}
+    /* Адаптивная таблица заявок: строки -> карточки */
+    .resp-table{border:0}
+    .resp-table thead{display:none}
+    .resp-table,.resp-table tbody,.resp-table tr,.resp-table td{display:block;width:100%}
+    .table-scroll{overflow-x:visible}
+    .resp-table tr{
+      background:var(--card);border:1px solid var(--line);border-radius:14px;
+      box-shadow:var(--shadow);margin-bottom:14px;padding:6px 4px;overflow:hidden;
+    }
+    .resp-table td{
+      display:flex;justify-content:space-between;align-items:center;gap:12px;
+      padding:9px 14px;border-bottom:1px solid #eee6d6;text-align:right;
+    }
+    .resp-table tr td:last-child{border-bottom:0}
+    .resp-table td::before{
+      content:attr(data-label);font-size:11px;font-weight:700;text-transform:uppercase;
+      letter-spacing:.04em;color:var(--muted);text-align:left;flex:0 0 42%;
+    }
+    .resp-table td[data-label=""]::before{display:none}
+    .resp-table td.cell-actions{justify-content:flex-end}
+    .resp-table td.cell-actions .row-actions{width:100%;justify-content:stretch;gap:8px}
+    .resp-table td.cell-actions .btn{flex:1;justify-content:center}
+    .resp-table .status-pick{max-width:60%}
+    .resp-table .qty-edit{width:80px}
+    .resp-table .status-time{text-align:right;width:100%}
   }
 </style>
 </head>
@@ -508,24 +533,24 @@ function drawPickups(){
   const el=$('pickupTable');const rows=filteredPickups();
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
   const staff=isStaff();
-  el.innerHTML=`<div class="table-scroll"><table><thead><tr>
+  el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
     ${staff?'<th>Курьер</th><th>Менеджер продаж</th><th>Обработчик</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`<tr>
-      <td>${esc(fmtDate(p.pickup_date))}</td>
-      <td><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
-      <td><strong>${esc(p.name)}</strong></td>
-      <td>${esc(p.address)||'—'}</td>
-      <td>${esc(phoneDisplay(p.phone))||'—'}</td>
-      <td>${esc(districtName(p.district_id))}</td>
-      ${staff?`<td>${p.courier_id?`<span class="pill moss">${esc(courierName(p.courier_id))}</span>`:'<span style="color:var(--muted)">не назначен</span>'}</td>
-      <td>${p.sales_id?esc(salesName(p.sales_id)):'—'}</td>
-      <td>${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>`:''}
-      <td>${staff?`<input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}">`:`<span class="qty">${esc(p.orders||0)}</span>`}</td>
-      <td><select class="status-pick" data-pstatus="${p.id}" style="border-color:${(statusObj(p.status_id)||{}).color||'var(--line)'}">
+      <td data-label="Дата">${esc(fmtDate(p.pickup_date))}</td>
+      <td data-label="Город"><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
+      <td data-label="Наименование"><strong>${esc(p.name)}</strong></td>
+      <td data-label="Адрес">${esc(p.address)||'—'}</td>
+      <td data-label="Номер">${esc(phoneDisplay(p.phone))||'—'}</td>
+      <td data-label="Район">${esc(districtName(p.district_id))}</td>
+      ${staff?`<td data-label="Курьер">${p.courier_id?`<span class="pill moss">${esc(courierName(p.courier_id))}</span>`:'<span style="color:var(--muted)">не назначен</span>'}</td>
+      <td data-label="Менеджер продаж">${p.sales_id?esc(salesName(p.sales_id)):'—'}</td>
+      <td data-label="Обработчик">${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>`:''}
+      <td data-label="Заказов">${can('pickups','edit')?`<input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}">`:`<span class="qty">${esc(p.orders||0)}</span>`}</td>
+      <td data-label="Статус"><select class="status-pick" data-pstatus="${p.id}" style="border-color:${(statusObj(p.status_id)||{}).color||'var(--line)'}">
         <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         <div class="status-time">${p.status_at?('изм.: '+fmtDateTime(p.status_at)):''} ${(p.status_history&&p.status_history.length)?`· <button class="link-btn" data-phist="${p.id}">история</button>`:''}</div></td>
-      <td><div class="row-actions">
+      <td data-label="" class="cell-actions"><div class="row-actions">
         ${can('pickups','edit')?`<button class="btn sm ghost" data-pedit="${p.id}">Изменить</button>`:`<button class="btn sm ghost" data-pview="${p.id}">Открыть</button>`}
         ${can('pickups','delete')?`<button class="btn sm danger" data-pdel="${p.id}">Удалить</button>`:''}
       </div></td></tr>`).join('')}</tbody></table></div>`;
@@ -669,27 +694,27 @@ function drawOrders(){
   const el=$('orderTable');const rows=filteredOrders();
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
   const staff=isStaff();
-  el.innerHTML=`<div class="table-scroll"><table><thead><tr>
+  el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>ID</th><th>Дата забора</th>${staff?'<th>Партнёр</th>':''}<th>Отправитель</th><th>ФИО клиента</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Менеджер продаж</th><th>Обработчик</th><th>Стоимость</th><th>Оплата</th><th>ИП для Почты</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>`<tr>
-      <td><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
-      <td>${esc(fmtDate(o.pickup_date))}</td>
-      ${staff?`<td>${o.partner_id?esc(partnerName(o.partner_id)):'—'}</td>`:''}
-      <td>${esc(o.sender)||'—'}</td><td>${esc(o.client)||'—'}</td>
-      <td>${o.weight?esc(o.weight)+' кг':'—'}</td>
-      <td>${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
-      <td>${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
-      <td>${esc(o.address)||'—'}</td><td>${esc(o.qty||0)}</td>
-      <td>${o.order_courier_id?`<span class="pill moss">${esc(orderCourierName(o.order_courier_id))}</span>`:'—'}</td>
-      <td><select class="status-pick" data-ostatus="${o.id}" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}">
+      <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
+      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
+      ${staff?`<td data-label="Партнёр">${o.partner_id?esc(partnerName(o.partner_id)):'—'}</td>`:''}
+      <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
+      <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
+      <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
+      <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
+      <td data-label="Адрес">${esc(o.address)||'—'}</td><td data-label="Кол-во">${esc(o.qty||0)}</td>
+      <td data-label="Курьер">${o.order_courier_id?`<span class="pill moss">${esc(orderCourierName(o.order_courier_id))}</span>`:'—'}</td>
+      <td data-label="Статус"><select class="status-pick" data-ostatus="${o.id}" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}">
         <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></td>
-      <td>${esc(o.index)||'—'}</td><td>${esc(o.track)||'—'}</td>
-      ${staff?`<td>${o.sales_id?esc(salesName(o.sales_id)):'—'}</td><td>${o.processor_id?esc(processorName(o.processor_id)):'—'}</td>
-      <td>${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td>${esc(fmtDate(o.pay_date))}</td>
-      <td>${o.post_ip_id?esc(postIpName(o.post_ip_id)):'—'}</td>`:''}
-      <td><div class="row-actions">
+      <td data-label="Индекс">${esc(o.index)||'—'}</td><td data-label="Трек-код">${esc(o.track)||'—'}</td>
+      ${staff?`<td data-label="Менеджер продаж">${o.sales_id?esc(salesName(o.sales_id)):'—'}</td><td data-label="Обработчик">${o.processor_id?esc(processorName(o.processor_id)):'—'}</td>
+      <td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Оплата">${esc(fmtDate(o.pay_date))}</td>
+      <td data-label="ИП для Почты">${o.post_ip_id?esc(postIpName(o.post_ip_id)):'—'}</td>`:''}
+      <td data-label="" class="cell-actions"><div class="row-actions">
         <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
         ${can('orders','edit')?`<button class="btn sm ghost" data-oedit="${o.id}">Изменить</button>`:`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`}
         ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
