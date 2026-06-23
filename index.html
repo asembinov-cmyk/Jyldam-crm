@@ -1186,7 +1186,6 @@ function createStaffModal(){
       <div class="field"><label>Должность</label><input id="n_pos" placeholder="Напр. Оператор"></div>
       <div class="field"><label>Телефон (логин)</label><input id="n_phone" inputmode="numeric"></div>
       <div class="field"><label>Пароль</label><input id="n_pass" type="text" autocomplete="off" placeholder="мин. 6 символов"></div>
-      <div class="field"><label>Город</label><select id="n_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Роль</label><select id="n_role"><option value="">— не назначена —</option>${S.roles.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></div>
       <div class="field full"><span class="hint">Сотрудник входит по номеру телефона и паролю. Пароль задаёте вы и передаёте ему.</span></div>
     </div>`,
@@ -1199,7 +1198,7 @@ function createStaffModal(){
       const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
       toast('Создаём сотрудника…');
       const out=await callCreateUser({phone,password:pass,full_name:name,
-        city_id:val('n_city')||null,position:val('n_pos').trim(),role_id:roleId||null,role:legacy});
+        position:val('n_pos').trim(),role_id:roleId||null,role:legacy});
       if(out.error){toast('Ошибка: '+out.error);return false;}
       S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       toast('Сотрудник создан');renderUsers();return true;
