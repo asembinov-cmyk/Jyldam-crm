@@ -607,6 +607,7 @@ function filteredPickups(){
 function drawPickups(){
   const el=$('pickupTable');const rows=filteredPickups();
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
+  if(isCourier()){drawCourierPickupCards(el,rows);return;}
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
@@ -635,6 +636,52 @@ function drawPickups(){
   el.querySelectorAll('[data-phist]').forEach(b=>b.onclick=()=>showPickupHistory(b.dataset.phist));
   el.querySelectorAll('[data-pstatus]').forEach(sel=>sel.onchange=()=>setPickupStatus(sel.dataset.pstatus,sel.value));
   el.querySelectorAll('[data-pqty]').forEach(inp=>{
+    const commit=async()=>{const p=S.pickups.find(x=>x.id===inp.dataset.pqty);if(!p)return;
+      const v=Math.max(0,parseInt(inp.value||'0',10)||0);if(p.orders===v)return;
+      await dbUpdate('pickups',p.id,{orders:v});p.orders=v;toast('Кол-во обновлено');};
+    inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
+  });
+}
+/* Компактные карточки заявок на забор для курьера-заборщика: свёрнуто — наименование/адрес/телефон/статус */
+function drawCourierPickupCards(el,rows){
+  el.innerHTML=`<div class="cour-cards">${rows.map(p=>{
+    const ph=phoneStored(p.phone);
+    return `<div class="cour-card" data-card="${p.id}">
+      <div class="cc-head" data-toggle="${p.id}">
+        <div class="cc-main">
+          <div class="cc-client">${esc(p.name)||'Без названия'}</div>
+          <div class="cc-addr">${esc(p.address)||'адрес не указан'}</div>
+          ${ph?`<div class="cc-phone">${phoneLink(p.phone)}</div>`:''}
+        </div>
+        <div class="cc-right"><span class="cc-chev">▾</span></div>
+      </div>
+      <div class="cc-statusrow">
+        <select class="status-pick" data-pstatus="${p.id}" style="border-color:${(statusObj(p.status_id)||{}).color||'var(--line)'}">
+          <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+      </div>
+      <div class="cc-body">
+        <div class="cc-row"><span class="lbl">Дата</span><span class="vl">${esc(fmtDate(p.pickup_date))}</span></div>
+        <div class="cc-row"><span class="lbl">Город</span><span class="vl">${esc(cityName(p.city_id))}</span></div>
+        <div class="cc-row"><span class="lbl">Район</span><span class="vl">${esc(districtName(p.district_id))}</span></div>
+        <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}"></span></div>
+        ${(p.status_history&&p.status_history.length)?`<div class="cc-row"><span class="lbl">Статус изменён</span><span class="vl">${p.status_at?esc(fmtDateTime(p.status_at)):'—'} · <button class="link-btn" data-phist="${p.id}">история</button></span></div>`:''}
+        <div class="cc-actions">
+          <button class="btn sm ghost" data-pview="${p.id}">Открыть</button>
+        </div>
+      </div>
+    </div>`;}).join('')}</div>`;
+  el.querySelectorAll('[data-toggle]').forEach(h=>h.onclick=e=>{
+    if(e.target.closest('a'))return;
+    h.closest('.cour-card').classList.toggle('open');
+  });
+  el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=e=>{e.stopPropagation();pickupModal(b.dataset.pview,true);});
+  el.querySelectorAll('[data-phist]').forEach(b=>b.onclick=e=>{e.stopPropagation();showPickupHistory(b.dataset.phist);});
+  el.querySelectorAll('[data-pstatus]').forEach(sel=>{
+    sel.onclick=e=>e.stopPropagation();
+    sel.onchange=()=>{setPickupStatus(sel.dataset.pstatus,sel.value);};
+  });
+  el.querySelectorAll('[data-pqty]').forEach(inp=>{
+    inp.onclick=e=>e.stopPropagation();
     const commit=async()=>{const p=S.pickups.find(x=>x.id===inp.dataset.pqty);if(!p)return;
       const v=Math.max(0,parseInt(inp.value||'0',10)||0);if(p.orders===v)return;
       await dbUpdate('pickups',p.id,{orders:v});p.orders=v;toast('Кол-во обновлено');};
