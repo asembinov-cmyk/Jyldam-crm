@@ -417,6 +417,8 @@ function phoneStored(v){let d=(v||'').replace(/\D/g,'');if(d.length===11&&(d[0]=
 function fmt10(d){d=(d||'').slice(0,10);let o='';if(d.length>0)o+='('+d.slice(0,3);if(d.length>=3)o+=')';
   if(d.length>3)o+=' '+d.slice(3,6);if(d.length>6)o+='-'+d.slice(6,8);if(d.length>8)o+='-'+d.slice(8,10);return o;}
 function phoneDisplay(v){const d=phoneStored(v);return d?'+7 '+fmt10(d):'';}
+// кликабельный телефон для звонка с мобильного
+function phoneLink(v){const d=phoneStored(v);if(!d)return '—';return `<a href="tel:+7${d}" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)">${esc('+7 '+fmt10(d))}</a>`;}
 function attachPhone(id,initial){
   const el=$(id);if(!el)return;
   if(!el.parentElement.classList.contains('phone-wrap')){
@@ -484,7 +486,11 @@ function showInfo(title,bodyHtml){showModal(title,bodyHtml,null,{readonly:true})
 let pf={q:'',city:'',courier:'',sales:'',processor:'',status:''};
 
 function visiblePickups(){
-  if(isCourier()){const ids=myPickupCourierIds();return S.pickups.filter(p=>ids.includes(p.courier_id));}
+  if(isCourier()){
+    const ids=myPickupCourierIds();
+    const today=new Date().toISOString().slice(0,10);
+    return S.pickups.filter(p=>ids.includes(p.courier_id) && (p.pickup_date||'').slice(0,10)===today);
+  }
   return S.pickups;
 }
 function renderPickups(){
@@ -541,7 +547,7 @@ function drawPickups(){
       <td data-label="Город"><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
       <td data-label="Наименование"><strong>${esc(p.name)}</strong></td>
       <td data-label="Адрес">${esc(p.address)||'—'}</td>
-      <td data-label="Номер">${esc(phoneDisplay(p.phone))||'—'}</td>
+      <td data-label="Номер">${phoneLink(p.phone)}</td>
       <td data-label="Район">${esc(districtName(p.district_id))}</td>
       ${staff?`<td data-label="Курьер">${p.courier_id?`<span class="pill moss">${esc(courierName(p.courier_id))}</span>`:'<span style="color:var(--muted)">не назначен</span>'}</td>
       <td data-label="Менеджер продаж">${p.sales_id?esc(salesName(p.sales_id)):'—'}</td>
@@ -751,7 +757,7 @@ function orderModal(id,readonly){
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
       <div class="field"><label>Кол-во товаров</label><input type="number" min="0" id="o_qty" value="${esc(d.qty)}" ${dis}></div>
-      <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
+      <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.statuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
       <div class="field"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
@@ -776,7 +782,15 @@ function orderModal(id,readonly){
     },{readonly:ro});
   setTimeout(()=>renderBarcode($('o_barcode'),code),60);
   if(!ro){
-    const ds=$('o_delivery');ds.onchange=()=>{const f=$('cityField');if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city'))$('o_city').value='';}};
+    const fillCouriers=cityId=>{
+      const sel=$('o_ocourier');if(!sel)return;
+      const cur=sel.value;
+      const opts=S.order_couriers.filter(c=>!cityId||c.courier_city_id===cityId);
+      sel.innerHTML='<option value="">—</option>'+opts.map(c=>`<option value="${c.id}">${esc(c.fio)}</option>`).join('');
+      if(opts.find(c=>c.id===cur))sel.value=cur; // сохранить выбор, если курьер из этого города
+    };
+    const ds=$('o_delivery');ds.onchange=()=>{const f=$('cityField');if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city')){$('o_city').value='';fillCouriers('');}}};
+    const cityEl=$('o_city');if(cityEl)cityEl.onchange=()=>fillCouriers(cityEl.value);
     const ps=$('o_partner');ps.onchange=()=>{const pt=S.partners.find(x=>x.id===ps.value);if(pt){
       if(!$('o_sender').value.trim())$('o_sender').value=pt.name;
       if(pt.sales_id)$('o_sales').value=pt.sales_id;if(pt.processor_id)$('o_proc').value=pt.processor_id;}};
@@ -827,7 +841,7 @@ function dirPartners(){
   const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>Наименование</th><th>Город</th><th>Район</th><th>Адрес</th><th>Телефон</th><th>Менеджер продаж</th><th>Обработчик</th><th></th></tr></thead><tbody>${rows.map(p=>`<tr>
     <td><strong>${esc(p.name)}</strong></td><td><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
     <td>${p.district_id?`<span class="pill moss">${esc(districtName(p.district_id))}</span>`:'—'}</td>
-    <td>${esc(p.address)||'—'}</td><td>${esc(phoneDisplay(p.phone))||'—'}</td>
+    <td>${esc(p.address)||'—'}</td><td>${phoneLink(p.phone)}</td>
     <td>${p.sales_id?esc(salesName(p.sales_id)):'—'}</td><td>${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>
     <td>${dirActions(p.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Список партнёров пуст</div></div>`;
   dirShell('Справочник партнёров',S.partners.length,()=>partnerModal(),t);bindDir('partners','partners',partnerModal);
@@ -888,7 +902,7 @@ function dirCouriers(){
   const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Город</th><th>Район</th><th>Номер</th><th>Уд. личности</th><th>Аккаунт</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
     <td><strong>${esc(c.fio)}</strong></td><td><span class="pill gold">${esc(cityName(c.city_id))}</span></td>
     <td>${c.district_id?`<span class="pill moss">${esc(districtName(c.district_id))}</span>`:'—'}</td>
-    <td>${esc(phoneDisplay(c.phone))||'—'}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
+    <td>${phoneLink(c.phone)}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
     <td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Нет курьеров</div></div>`;
   dirShell('Справочник курьеров (заборщики)',S.couriers.length,()=>courierModal(),t);bindDir('couriers','couriers',courierModal);
 }
@@ -914,23 +928,23 @@ function courierModal(id){
 /* Курьеры по заказам */
 function dirOrderCouriers(){
   const rows=[...S.order_couriers].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
-  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Город</th><th>Номер</th><th>Уд. личности</th><th>Аккаунт</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
-    <td><strong>${esc(c.fio)}</strong></td><td><span class="pill gold">${esc(cityName(c.city_id))}</span></td>
-    <td>${esc(phoneDisplay(c.phone))||'—'}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
+  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Курьерский город</th><th>Номер</th><th>Уд. личности</th><th>Аккаунт</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
+    <td><strong>${esc(c.fio)}</strong></td><td><span class="pill gold">${esc(courierCityName(c.courier_city_id))}</span></td>
+    <td>${phoneLink(c.phone)}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
     <td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Нет курьеров по заказам</div></div>`;
   dirShell('Справочник курьеров по заказам',S.order_couriers.length,()=>orderCourierModal(),t);bindDir('order_couriers','order_couriers',orderCourierModal);
 }
 function orderCourierModal(id){
-  const c=id?S.order_couriers.find(x=>x.id===id):{fio:'',city_id:'',phone:'',id_doc:'',account_id:''};
-  if(!S.cities.length){toast('Сначала добавьте город');return;}
+  const c=id?S.order_couriers.find(x=>x.id===id):{fio:'',courier_city_id:'',phone:'',id_doc:'',account_id:''};
+  if(!S.courier_cities.length){toast('Сначала добавьте курьерский город');return;}
   showModal(id?'Курьер по заказам':'Новый курьер по заказам',`
     <div class="field"><label>ФИО</label><input id="oc_fio" value="${esc(c.fio)}"></div>
-    <div class="field"><label>Город</label><select id="oc_city"><option value="">—</option>${S.cities.map(ct=>`<option value="${ct.id}" ${c.city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Курьерский город</label><select id="oc_city"><option value="">—</option>${S.courier_cities.map(ct=>`<option value="${ct.id}" ${c.courier_city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Номер телефона</label><input id="oc_phone" inputmode="numeric"></div>
     <div class="field"><label>Данные уд. личности</label><textarea id="oc_id" rows="2">${esc(c.id_doc)}</textarea></div>
     ${courierAccountField('oc_account',c.account_id)}`,
-    async()=>{const fio=val('oc_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('oc_city')){toast('Выберите город');return false;}
-      const row={fio,city_id:val('oc_city'),phone:phoneVal('oc_phone'),id_doc:val('oc_id').trim(),account_id:val('oc_account')||null};
+    async()=>{const fio=val('oc_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('oc_city')){toast('Выберите курьерский город');return false;}
+      const row={fio,courier_city_id:val('oc_city'),phone:phoneVal('oc_phone'),id_doc:val('oc_id').trim(),account_id:val('oc_account')||null};
       if(id){const u=await dbUpdate('order_couriers',id,row);if(!u)return false;Object.assign(S.order_couriers.find(x=>x.id===id),u);}
       else{const u=await dbInsert('order_couriers',row);if(!u)return false;S.order_couriers.push(u);}
       toast('Сохранено');renderSettings();return true;});
@@ -949,7 +963,7 @@ function courierAccountField(fieldId,current){
 function managersTable(key,emptyText,onAdd,modalFn){
   const rows=[...S[key]].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
   const t=rows.length?`<table><thead><tr><th>ФИО</th><th>Номер телефона</th><th></th></tr></thead><tbody>${rows.map(m=>`<tr>
-    <td><strong>${esc(m.fio)}</strong></td><td>${esc(phoneDisplay(m.phone))||'—'}</td><td>${dirActions(m.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Список пуст</div>${emptyText}</div>`;
+    <td><strong>${esc(m.fio)}</strong></td><td>${phoneLink(m.phone)}</td><td>${dirActions(m.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Список пуст</div>${emptyText}</div>`;
   return t;
 }
 function dirSales(){const t=managersTable('sales','Добавьте менеджеров по продажам.');
@@ -1053,7 +1067,7 @@ function renderStaff(){
     <div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Логин (телефон)</th><th>Город</th><th>Должность</th><th>Роль</th><th></th></tr></thead>
     <tbody>${rows.map(u=>`<tr>
       <td><strong>${esc(u.full_name||'—')}</strong></td>
-      <td>${u.phone?esc(phoneDisplay(u.phone)):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
+      <td>${u.phone?phoneLink(u.phone):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
       <td>${u.city_id?esc(cityName(u.city_id)):'—'}</td>
       <td>${esc(u.position)||'—'}</td>
       <td><span class="pill ${(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='admin'?'gold':'moss'}">${esc(u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'—'))}</span></td>
