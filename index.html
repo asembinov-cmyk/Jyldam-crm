@@ -93,6 +93,10 @@
     color:var(--muted);padding:11px 16px;border-bottom:1px solid var(--line);white-space:nowrap;
     background:linear-gradient(var(--paper),var(--card))}
   tbody td{padding:12px 16px;border-bottom:1px solid #eee6d6;vertical-align:middle}
+  .filter-row th{padding:6px 10px;background:var(--paper);border-bottom:1px solid var(--line)}
+  .dir-filter{width:100%;font:inherit;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;
+    padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink)}
+  .dir-filter:focus{outline:2px solid rgba(182,80,43,.25);border-color:var(--rust)}
   /* Десктоп: читабельные колонки заявок/заказов */
   @media (min-width:761px){
     .resp-table td[data-label="Номер"]{white-space:nowrap}
@@ -844,16 +848,65 @@ function bindDir(table,arrKey,modalFn,deps){
   });
 }
 
+/* ---- Универсальный построитель справочника с фильтром по каждой графе ---- */
+// состояние фильтров по справочникам: { arrKey: { colKey: value } }
+const dirFilters={};
+function dirGrid(cfg){
+  // cfg: {title, arrKey, table, modalFn, cols:[{key,label,text(row),cell(row)?,filter:'text'|'select',options(rows)?}], emptyText}
+  const arr=S[cfg.arrKey]||[];
+  if(!dirFilters[cfg.arrKey])dirFilters[cfg.arrKey]={};
+  const f=dirFilters[cfg.arrKey];
+  // применяем фильтры
+  const filtered=arr.filter(row=>cfg.cols.every(c=>{
+    const fv=f[c.key];if(!fv)return true;
+    const cellText=(c.text?c.text(row):'')+'';
+    if(c.filter==='select')return cellText===fv; // для select сравниваем по тексту значения
+    return cellText.toLowerCase().includes(fv.toLowerCase());
+  }));
+  if(cfg.sort)filtered.sort(cfg.sort);
+  // строка фильтров
+  const filterRow=`<tr class="filter-row">${cfg.cols.map(c=>{
+    if(c.filter==='select'){
+      const vals=[...new Set(arr.map(r=>c.text?c.text(r):'').filter(Boolean))].sort();
+      return `<th><select class="dir-filter" data-fk="${c.key}"><option value="">Все</option>${vals.map(v=>`<option value="${esc(v)}" ${f[c.key]===v?'selected':''}>${esc(v)}</option>`).join('')}</select></th>`;
+    }
+    if(c.filter==='none')return `<th></th>`;
+    return `<th><input class="dir-filter" data-fk="${c.key}" placeholder="фильтр…" value="${esc(f[c.key]||'')}"></th>`;
+  }).join('')}<th></th></tr>`;
+  const head=`<tr>${cfg.cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}<th></th></tr>`;
+  const body=filtered.length?filtered.map(row=>`<tr>${cfg.cols.map(c=>`<td>${c.cell?c.cell(row):esc(c.text?c.text(row):'')||'—'}</td>`).join('')}<td>${dirActions(row.id)}</td></tr>`).join('')
+    :`<tr><td colspan="${cfg.cols.length+1}" style="text-align:center;color:var(--muted);padding:30px">Ничего не найдено</td></tr>`;
+  const table=arr.length?`<div class="table-scroll"><table><thead>${head}${filterRow}</thead><tbody>${body}</tbody></table></div>`
+    :`<div class="empty"><div class="big">${esc(cfg.emptyText||'Список пуст')}</div></div>`;
+  dirShell(cfg.title,arr.length,()=>cfg.modalFn(),table);
+  // привязки
+  bindDir(cfg.table,cfg.arrKey,cfg.modalFn);
+  $('dirContent').querySelectorAll('.dir-filter').forEach(el=>{
+    const ev=el.tagName==='SELECT'?'onchange':'oninput';
+    el[ev]=()=>{f[el.dataset.fk]=el.value;redrawDirGrid(cfg);};
+  });
+}
+function redrawDirGrid(cfg){
+  // перерисовываем только тело+фильтры, сохраняя фокус — проще целиком, но вернём фокус
+  const active=document.activeElement;const fk=active&&active.dataset?active.dataset.fk:null;const pos=active&&active.selectionStart;
+  dirGrid(cfg);
+  if(fk){const el=$('dirContent').querySelector(`.dir-filter[data-fk="${fk}"]`);if(el){el.focus();try{el.setSelectionRange(pos,pos);}catch(e){}}}
+}
+
 /* Партнёры */
 function dirPartners(){
-  const rows=[...S.partners].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>Наименование</th><th>Город</th><th>Район</th><th>Адрес</th><th>Телефон</th><th>Менеджер продаж</th><th>Обработчик</th><th></th></tr></thead><tbody>${rows.map(p=>`<tr>
-    <td><strong>${esc(p.name)}</strong></td><td><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
-    <td>${p.district_id?`<span class="pill moss">${esc(districtName(p.district_id))}</span>`:'—'}</td>
-    <td>${esc(p.address)||'—'}</td><td>${phoneLink(p.phone)}</td>
-    <td>${p.sales_id?esc(salesName(p.sales_id)):'—'}</td><td>${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>
-    <td>${dirActions(p.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Список партнёров пуст</div></div>`;
-  dirShell('Справочник партнёров',S.partners.length,()=>partnerModal(),t);bindDir('partners','partners',partnerModal);
+  dirGrid({title:'Справочник партнёров',arrKey:'partners',table:'partners',modalFn:partnerModal,
+    emptyText:'Список партнёров пуст',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[
+      {key:'name',label:'Наименование',filter:'text',text:p=>p.name||'',cell:p=>`<strong>${esc(p.name)}</strong>`},
+      {key:'city',label:'Город',filter:'select',text:p=>cityName(p.city_id),cell:p=>`<span class="pill gold">${esc(cityName(p.city_id))}</span>`},
+      {key:'district',label:'Район',filter:'select',text:p=>p.district_id?districtName(p.district_id):'',cell:p=>p.district_id?`<span class="pill moss">${esc(districtName(p.district_id))}</span>`:'—'},
+      {key:'address',label:'Адрес',filter:'text',text:p=>p.address||''},
+      {key:'phone',label:'Телефон',filter:'text',text:p=>phoneDisplay(p.phone),cell:p=>phoneLink(p.phone)},
+      {key:'sales',label:'Менеджер продаж',filter:'select',text:p=>p.sales_id?salesName(p.sales_id):''},
+      {key:'proc',label:'Обработчик',filter:'select',text:p=>p.processor_id?processorName(p.processor_id):''},
+    ]});
 }
 function partnerModal(id){
   const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:''};
@@ -876,11 +929,13 @@ function partnerModal(id){
 }
 /* Города */
 function dirCities(){
-  const rows=[...S.cities].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const t=rows.length?`<table><thead><tr><th>Город</th><th>Районов</th><th>Курьеров</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
-    <td><strong>${esc(c.name)}</strong></td><td>${S.districts.filter(d=>d.city_id===c.id).length}</td>
-    <td>${S.couriers.filter(k=>k.city_id===c.id).length}</td><td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет городов</div></div>`;
-  dirShell('Справочник городов',S.cities.length,()=>cityModal(),t);bindDir('cities','cities',cityModal);
+  dirGrid({title:'Справочник городов',arrKey:'cities',table:'cities',modalFn:cityModal,emptyText:'Нет городов',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[
+      {key:'name',label:'Город',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`},
+      {key:'distr',label:'Районов',filter:'none',text:c=>String(S.districts.filter(d=>d.city_id===c.id).length)},
+      {key:'cour',label:'Курьеров',filter:'none',text:c=>String(S.couriers.filter(k=>k.city_id===c.id).length)},
+    ]});
 }
 function cityModal(id){const c=id?S.cities.find(x=>x.id===id):{name:''};
   showModal(id?'Город':'Новый город',`<div class="field"><label>Название города</label><input id="c_name" value="${esc(c.name)}"></div>`,
@@ -890,10 +945,12 @@ function cityModal(id){const c=id?S.cities.find(x=>x.id===id):{name:''};
       toast('Сохранено');renderSettings();return true;});}
 /* Районы */
 function dirDistricts(){
-  const rows=[...S.districts].sort((a,b)=>cityName(a.city_id).localeCompare(cityName(b.city_id))||(a.name||'').localeCompare(b.name||''));
-  const t=rows.length?`<table><thead><tr><th>Район</th><th>Город</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr>
-    <td><strong>${esc(d.name)}</strong></td><td><span class="pill gold">${esc(cityName(d.city_id))}</span></td><td>${dirActions(d.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет районов</div></div>`;
-  dirShell('Справочник районов',S.districts.length,()=>districtModal(),t);bindDir('districts','districts',districtModal);
+  dirGrid({title:'Справочник районов',arrKey:'districts',table:'districts',modalFn:districtModal,emptyText:'Нет районов',
+    sort:(a,b)=>cityName(a.city_id).localeCompare(cityName(b.city_id))||(a.name||'').localeCompare(b.name||''),
+    cols:[
+      {key:'name',label:'Район',filter:'text',text:d=>d.name||'',cell:d=>`<strong>${esc(d.name)}</strong>`},
+      {key:'city',label:'Город',filter:'select',text:d=>cityName(d.city_id),cell:d=>`<span class="pill gold">${esc(cityName(d.city_id))}</span>`},
+    ]});
 }
 function districtModal(id){const d=id?S.districts.find(x=>x.id===id):{name:'',city_id:''};
   if(!S.cities.length){toast('Сначала добавьте город');return;}
@@ -907,13 +964,16 @@ function districtModal(id){const d=id?S.districts.find(x=>x.id===id):{name:'',ci
       toast('Сохранено');renderSettings();return true;});}
 /* Курьеры-заборщики */
 function dirCouriers(){
-  const rows=[...S.couriers].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
-  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Город</th><th>Район</th><th>Номер</th><th>Уд. личности</th><th>Аккаунт</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
-    <td><strong>${esc(c.fio)}</strong></td><td><span class="pill gold">${esc(cityName(c.city_id))}</span></td>
-    <td>${c.district_id?`<span class="pill moss">${esc(districtName(c.district_id))}</span>`:'—'}</td>
-    <td>${phoneLink(c.phone)}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
-    <td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Нет курьеров</div></div>`;
-  dirShell('Справочник курьеров (заборщики)',S.couriers.length,()=>courierModal(),t);bindDir('couriers','couriers',courierModal);
+  dirGrid({title:'Справочник курьеров (заборщики)',arrKey:'couriers',table:'couriers',modalFn:courierModal,emptyText:'Нет курьеров',
+    sort:(a,b)=>(a.fio||'').localeCompare(b.fio||''),
+    cols:[
+      {key:'fio',label:'ФИО',filter:'text',text:c=>c.fio||'',cell:c=>`<strong>${esc(c.fio)}</strong>`},
+      {key:'city',label:'Город',filter:'select',text:c=>cityName(c.city_id),cell:c=>`<span class="pill gold">${esc(cityName(c.city_id))}</span>`},
+      {key:'district',label:'Район',filter:'select',text:c=>c.district_id?districtName(c.district_id):'',cell:c=>c.district_id?`<span class="pill moss">${esc(districtName(c.district_id))}</span>`:'—'},
+      {key:'phone',label:'Номер',filter:'text',text:c=>phoneDisplay(c.phone),cell:c=>phoneLink(c.phone)},
+      {key:'iddoc',label:'Уд. личности',filter:'text',text:c=>c.id_doc||''},
+      {key:'acc',label:'Аккаунт',filter:'select',text:c=>c.account_id?accountEmail(c.account_id):''},
+    ]});
 }
 function courierModal(id){
   const c=id?S.couriers.find(x=>x.id===id):{fio:'',city_id:'',district_id:'',phone:'',id_doc:'',account_id:''};
@@ -936,12 +996,15 @@ function courierModal(id){
 }
 /* Курьеры по заказам */
 function dirOrderCouriers(){
-  const rows=[...S.order_couriers].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
-  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Курьерский город</th><th>Номер</th><th>Уд. личности</th><th>Аккаунт</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
-    <td><strong>${esc(c.fio)}</strong></td><td><span class="pill gold">${esc(courierCityName(c.courier_city_id))}</span></td>
-    <td>${phoneLink(c.phone)}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
-    <td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Нет курьеров по заказам</div></div>`;
-  dirShell('Справочник курьеров по заказам',S.order_couriers.length,()=>orderCourierModal(),t);bindDir('order_couriers','order_couriers',orderCourierModal);
+  dirGrid({title:'Справочник курьеров по заказам',arrKey:'order_couriers',table:'order_couriers',modalFn:orderCourierModal,emptyText:'Нет курьеров по заказам',
+    sort:(a,b)=>(a.fio||'').localeCompare(b.fio||''),
+    cols:[
+      {key:'fio',label:'ФИО',filter:'text',text:c=>c.fio||'',cell:c=>`<strong>${esc(c.fio)}</strong>`},
+      {key:'ccity',label:'Курьерский город',filter:'select',text:c=>courierCityName(c.courier_city_id),cell:c=>`<span class="pill gold">${esc(courierCityName(c.courier_city_id))}</span>`},
+      {key:'phone',label:'Номер',filter:'text',text:c=>phoneDisplay(c.phone),cell:c=>phoneLink(c.phone)},
+      {key:'iddoc',label:'Уд. личности',filter:'text',text:c=>c.id_doc||''},
+      {key:'acc',label:'Аккаунт',filter:'select',text:c=>c.account_id?accountEmail(c.account_id):''},
+    ]});
 }
 function orderCourierModal(id){
   const c=id?S.order_couriers.find(x=>x.id===id):{fio:'',courier_city_id:'',phone:'',id_doc:'',account_id:''};
@@ -969,16 +1032,12 @@ function courierAccountField(fieldId,current){
     <span class="hint">Создайте пользователя-курьера во вкладке «Пользователи», затем привяжите здесь.</span></div>`;
 }
 /* Менеджеры */
-function managersTable(key,emptyText,onAdd,modalFn){
-  const rows=[...S[key]].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
-  const t=rows.length?`<table><thead><tr><th>ФИО</th><th>Номер телефона</th><th></th></tr></thead><tbody>${rows.map(m=>`<tr>
-    <td><strong>${esc(m.fio)}</strong></td><td>${phoneLink(m.phone)}</td><td>${dirActions(m.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Список пуст</div>${emptyText}</div>`;
-  return t;
-}
-function dirSales(){const t=managersTable('sales','Добавьте менеджеров по продажам.');
-  dirShell('Менеджеры по продажам',S.sales.length,()=>managerModal('sales','sales_managers'),t);bindDir('sales_managers','sales',id=>managerModal('sales','sales_managers',id));}
-function dirProcessors(){const t=managersTable('processors','Добавьте обработчиков.');
-  dirShell('Менеджеры-обработчики',S.processors.length,()=>managerModal('processors','processors'),t);bindDir('processors','processors',id=>managerModal('processors','processors',id));}
+function managerCols(){return [
+  {key:'fio',label:'ФИО',filter:'text',text:m=>m.fio||'',cell:m=>`<strong>${esc(m.fio)}</strong>`},
+  {key:'phone',label:'Номер телефона',filter:'text',text:m=>phoneDisplay(m.phone),cell:m=>phoneLink(m.phone)},
+];}
+function dirSales(){dirGrid({title:'Менеджеры по продажам',arrKey:'sales',table:'sales_managers',modalFn:id=>managerModal('sales','sales_managers',id),emptyText:'Список пуст',sort:(a,b)=>(a.fio||'').localeCompare(b.fio||''),cols:managerCols()});}
+function dirProcessors(){dirGrid({title:'Менеджеры-обработчики',arrKey:'processors',table:'processors',modalFn:id=>managerModal('processors','processors',id),emptyText:'Список пуст',sort:(a,b)=>(a.fio||'').localeCompare(b.fio||''),cols:managerCols()});}
 function managerModal(arrKey,table,id){
   const m=id?S[arrKey].find(x=>x.id===id):{fio:'',phone:''};
   showModal(id?'Изменить':'Новая запись',`
@@ -993,10 +1052,12 @@ function managerModal(arrKey,table,id){
 }
 /* Статусы */
 function dirStatuses(){
-  const rows=S.statuses;
-  const t=rows.length?`<table><thead><tr><th>Статус</th><th>Заявок</th><th>Заказов</th><th></th></tr></thead><tbody>${rows.map(s=>`<tr>
-    <td>${statusBadge(s.id)}</td><td>${S.pickups.filter(p=>p.status_id===s.id).length}</td><td>${S.orders.filter(o=>o.status_id===s.id).length}</td><td>${dirActions(s.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет статусов</div></div>`;
-  dirShell('Справочник статусов',S.statuses.length,()=>statusModal(),t);bindDir('statuses','statuses',statusModal);
+  dirGrid({title:'Справочник статусов',arrKey:'statuses',table:'statuses',modalFn:statusModal,emptyText:'Нет статусов',
+    cols:[
+      {key:'name',label:'Статус',filter:'text',text:s=>s.name||'',cell:s=>statusBadge(s.id)},
+      {key:'pk',label:'Заявок',filter:'none',text:s=>String(S.pickups.filter(p=>p.status_id===s.id).length)},
+      {key:'or',label:'Заказов',filter:'none',text:s=>String(S.orders.filter(o=>o.status_id===s.id).length)},
+    ]});
 }
 function statusModal(id){const s=id?S.statuses.find(x=>x.id===id):{name:'',color:'#c08a2d'};
   showModal(id?'Статус':'Новый статус',`
@@ -1009,9 +1070,9 @@ function statusModal(id){const s=id?S.statuses.find(x=>x.id===id):{name:'',color
       toast('Сохранено');renderSettings();return true;});}
 /* Тип доставки */
 function dirDelivery(){
-  const rows=[...S.delivery].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const t=rows.length?`<table><thead><tr><th>Тип доставки</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr><td><strong>${esc(d.name)}</strong></td><td>${dirActions(d.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет типов</div></div>`;
-  dirShell('Типы доставки',S.delivery.length,()=>deliveryModal(),t);bindDir('delivery_types','delivery',deliveryModal);
+  dirGrid({title:'Типы доставки',arrKey:'delivery',table:'delivery_types',modalFn:deliveryModal,emptyText:'Нет типов',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[{key:'name',label:'Тип доставки',filter:'text',text:d=>d.name||'',cell:d=>`<strong>${esc(d.name)}</strong>`}]});
 }
 function deliveryModal(id){const d=id?S.delivery.find(x=>x.id===id):{name:''};
   showModal(id?'Тип доставки':'Новый тип',`<div class="field"><label>Наименование</label><input id="dl_name" value="${esc(d.name)}"></div>`,
@@ -1021,9 +1082,9 @@ function deliveryModal(id){const d=id?S.delivery.find(x=>x.id===id):{name:''};
       toast('Сохранено');renderSettings();return true;});}
 /* Курьерские города */
 function dirCourierCities(){
-  const rows=[...S.courier_cities].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const t=rows.length?`<table><thead><tr><th>Город</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет городов</div></div>`;
-  dirShell('Курьерские города',S.courier_cities.length,()=>courierCityModal(),t);bindDir('courier_cities','courier_cities',courierCityModal);
+  dirGrid({title:'Курьерские города',arrKey:'courier_cities',table:'courier_cities',modalFn:courierCityModal,emptyText:'Нет городов',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[{key:'name',label:'Город',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`}]});
 }
 function courierCityModal(id){const c=id?S.courier_cities.find(x=>x.id===id):{name:''};
   showModal(id?'Курьерский город':'Новый город',`<div class="field"><label>Название города</label><input id="cc_name" value="${esc(c.name)}"></div>`,
@@ -1033,9 +1094,9 @@ function courierCityModal(id){const c=id?S.courier_cities.find(x=>x.id===id):{na
       toast('Сохранено');renderSettings();return true;});}
 /* ИП для Почты */
 function dirPostIp(){
-  const rows=[...S.post_ips].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const t=rows.length?`<table><thead><tr><th>ИП</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет записей</div></div>`;
-  dirShell('ИП для Почты',S.post_ips.length,()=>postIpModal(),t);bindDir('post_ips','post_ips',postIpModal);
+  dirGrid({title:'ИП для Почты',arrKey:'post_ips',table:'post_ips',modalFn:postIpModal,emptyText:'Нет записей',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[{key:'name',label:'ИП',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`}]});
 }
 function postIpModal(id){const c=id?S.post_ips.find(x=>x.id===id):{name:''};
   showModal(id?'ИП для Почты':'Новое ИП',`<div class="field"><label>Наименование</label><input id="ip_name" value="${esc(c.name)}"></div>`,
