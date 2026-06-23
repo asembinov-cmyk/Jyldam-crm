@@ -886,7 +886,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
       <div class="field"><label>Менеджер по продажам</label><select id="o_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="o_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
-      <div class="field"><label>Стоимость доставки (₸)</label><input type="number" min="0" id="o_cost" value="${esc(d.cost)}" ${dis}></div>
+      <div class="field"><label>Стоимость доставки (₸)</label><input type="number" min="0" id="o_cost" value="${esc(d.cost)}" ${dis}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span></div>
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field full"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
@@ -913,11 +913,18 @@ function orderModal(id,readonly){
       sel.innerHTML='<option value="">—</option>'+opts.map(c=>`<option value="${c.id}">${esc(c.fio)}</option>`).join('');
       if(opts.find(c=>c.id===cur))sel.value=cur; // сохранить выбор, если курьер из этого города
     };
-    const ds=$('o_delivery');ds.onchange=()=>{const f=$('cityField');if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city')){$('o_city').value='';fillCouriers('');}}};
+    const applyTariff=()=>{
+      const pt=S.partners.find(x=>x.id===$('o_partner').value);if(!pt)return;
+      const courier=isCourierDelivery($('o_delivery').value);
+      const t=courier?pt.tariff_courier:pt.tariff_post;
+      if(t!=null&&t!==''){$('o_cost').value=t;}
+    };
+    const ds=$('o_delivery');ds.onchange=()=>{const f=$('cityField');if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city')){$('o_city').value='';fillCouriers('');}}applyTariff();};
     const cityEl=$('o_city');if(cityEl)cityEl.onchange=()=>fillCouriers(cityEl.value);
     const ps=$('o_partner');ps.onchange=()=>{const pt=S.partners.find(x=>x.id===ps.value);if(pt){
       if(!$('o_sender').value.trim())$('o_sender').value=pt.name;
-      if(pt.sales_id)$('o_sales').value=pt.sales_id;if(pt.processor_id)$('o_proc').value=pt.processor_id;}};
+      if(pt.sales_id)$('o_sales').value=pt.sales_id;if(pt.processor_id)$('o_proc').value=pt.processor_id;}
+      applyTariff();};
   }
 }
 /* ================= МОДУЛЬ: СПРАВОЧНИКИ ================= */
@@ -1017,10 +1024,12 @@ function dirPartners(){
       {key:'phone',label:'Телефон',filter:'text',text:p=>phoneDisplay(p.phone),cell:p=>phoneLink(p.phone)},
       {key:'sales',label:'Менеджер продаж',filter:'select',text:p=>p.sales_id?salesName(p.sales_id):''},
       {key:'proc',label:'Обработчик',filter:'select',text:p=>p.processor_id?processorName(p.processor_id):''},
+      {key:'tpost',label:'Тариф почта',filter:'none',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
+      {key:'tcour',label:'Тариф курьер',filter:'none',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
     ]});
 }
 function partnerModal(id){
-  const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:''};
+  const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:'',tariff_post:'',tariff_courier:''};
   const dOpts=cid=>S.districts.filter(d=>!cid||d.city_id===cid);
   showModal(id?'Партнёр':'Новый партнёр',`
     <div class="field"><label>Наименование</label><input id="p_name" value="${esc(p.name)}"></div>
@@ -1029,9 +1038,14 @@ function partnerModal(id){
     <div class="field"><label>Адрес</label><input id="p_addr" value="${esc(p.address)}"></div>
     <div class="field"><label>Телефон</label><input id="p_phone" inputmode="numeric"></div>
     <div class="field"><label>Менеджер по продажам</label><select id="p_sales"><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${p.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
-    <div class="field"><label>Обработчик</label><select id="p_proc"><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${p.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>`,
+    <div class="field"><label>Обработчик</label><select id="p_proc"><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${p.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+    <div class="grid2">
+      <div class="field"><label>Тариф · почтовая (₸)</label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
+      <div class="field"><label>Тариф · курьерская (₸)</label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
+    </div>`,
     async()=>{const name=val('p_name').trim();if(!name){toast('Укажите наименование');return false;}
-      const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null};
+      const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null,
+        tariff_post:val('p_tpost')?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')?parseFloat(val('p_tcour')):null};
       if(id){const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(S.partners.find(x=>x.id===id),u);}
       else{const u=await dbInsert('partners',row);if(!u)return false;S.partners.push(u);}
       toast('Сохранено');renderSettings();return true;});
