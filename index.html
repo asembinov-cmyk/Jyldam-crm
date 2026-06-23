@@ -56,25 +56,31 @@
 
   /* APP */
   .app-shell{display:none}
-  header.topbar{border-bottom:1px solid var(--line);background:rgba(246,242,233,.85);
-    backdrop-filter:blur(8px);position:sticky;top:0;z-index:50}
-  .topbar-inner{max-width:1180px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  header.topbar{border-bottom:1px solid var(--line);background:rgba(246,242,233,.92);
+    backdrop-filter:blur(8px);position:sticky;top:0;z-index:60}
+  .topbar-inner{padding:12px 22px;display:flex;align-items:center;gap:16px}
+  .menu-toggle{display:none;font-size:22px;background:none;border:none;cursor:pointer;color:var(--ink);padding:2px 6px}
   .logo{font-family:'Fraunces',serif;font-weight:900;font-size:20px;display:flex;align-items:center;gap:10px}
   .logo .mark{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,var(--rust),var(--gold));
     display:grid;place-items:center;color:#fff;font-size:16px}
   .logo small{display:block;font-family:'Spline Sans',sans-serif;font-weight:500;font-size:11px;
     color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:-2px}
-  nav.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
-  nav.tabs button{font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid transparent;
-    background:transparent;color:var(--muted);padding:8px 14px;border-radius:9px;transition:.15s}
-  nav.tabs button:hover{color:var(--ink);background:rgba(20,17,13,.04)}
-  nav.tabs button.active{color:var(--rust-dk);background:var(--card);border-color:var(--line);box-shadow:var(--shadow)}
-  .user-box{display:flex;align-items:center;gap:12px;padding-left:14px;border-left:1px solid var(--line)}
+  .user-box{margin-left:auto;display:flex;align-items:center;gap:12px;padding-left:14px;border-left:1px solid var(--line)}
   .user-box .who{text-align:right;font-size:13px;line-height:1.2}
   .user-box .who b{display:block}
   .user-box .role{font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 
-  main.wrap{max-width:1180px;margin:0 auto;padding:24px 22px}
+  /* боковая панель + контент */
+  .app-body{display:flex;align-items:flex-start;min-height:calc(100vh - 57px)}
+  .sidebar{width:220px;flex:0 0 220px;border-right:1px solid var(--line);background:var(--card);
+    position:sticky;top:57px;align-self:stretch;min-height:calc(100vh - 57px);padding:16px 12px}
+  .side-nav{display:flex;flex-direction:column;gap:4px}
+  .side-nav button{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;
+    border:1px solid transparent;background:transparent;color:var(--muted);padding:11px 14px;border-radius:10px;transition:.15s;display:flex;align-items:center;gap:10px}
+  .side-nav button:hover{color:var(--ink);background:rgba(20,17,13,.04)}
+  .side-nav button.active{color:var(--rust-dk);background:var(--paper);border-color:var(--line)}
+  .content{flex:1;min-width:0;padding:24px 26px}
+
   .page-head{padding:8px 0 18px;display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
   .page-head h1{font-family:'Fraunces',serif;font-weight:900;font-size:30px;letter-spacing:-.03em;line-height:1}
   .page-head p{color:var(--muted);font-size:14px;margin-top:7px}
@@ -171,8 +177,16 @@
 
   @media (max-width:760px){
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
-    .page-head h1{font-size:24px}nav.tabs{order:3;width:100%;margin-left:0}
-    .user-box{margin-left:auto;border-left:none;padding-left:0}
+    .page-head h1{font-size:24px}
+    .user-box{padding-left:10px}
+    .content{padding:18px 16px}
+    /* боковая панель -> горизонтальные вкладки сверху */
+    .app-body{display:block}
+    .sidebar{position:static;width:auto;flex:none;min-height:0;border-right:none;border-bottom:1px solid var(--line);
+      padding:10px 14px;background:rgba(246,242,233,.92)}
+    .side-nav{flex-direction:row;flex-wrap:wrap;gap:6px}
+    .side-nav button{font-size:13px;padding:8px 13px;border-radius:30px;background:var(--card);border-color:var(--line)}
+    .side-nav button.active{background:var(--moss);color:#fff;border-color:var(--moss)}
     /* Адаптивная таблица заявок: строки -> карточки */
     .resp-table{border:0}
     .resp-table thead{display:none}
@@ -220,14 +234,17 @@
 <!-- APP -->
 <div class="app-shell" id="appShell">
   <header class="topbar"><div class="topbar-inner">
+    <button class="menu-toggle" id="menuToggle" aria-label="Меню">☰</button>
     <div class="logo"><span class="mark">⌖</span><span>Jyldam Logistics<small>забор посылок · CRM</small></span></div>
-    <nav class="tabs" id="navTabs"></nav>
     <div class="user-box">
       <div class="who"><b id="uName">—</b><span class="role" id="uRole">—</span></div>
       <button class="btn ghost sm" id="logoutBtn">Выйти</button>
     </div>
   </div></header>
-  <main class="wrap" id="main"></main>
+  <div class="app-body">
+    <aside class="sidebar" id="sidebar"><nav class="side-nav" id="navTabs"></nav></aside>
+    <main class="content" id="main"></main>
+  </div>
 </div>
 
 <script>
