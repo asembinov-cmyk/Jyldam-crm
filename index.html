@@ -564,7 +564,7 @@ function renderPickups(){
     </div>
     <div class="stats">
       <div class="stat"><div class="k">Всего заявок</div><div class="v">${list.length}</div></div>
-      <div class="stat"><div class="k">Заказов к забору</div><div class="v">${totalOrders}</div></div>
+      <div class="stat"><div class="k">Собрано заказов</div><div class="v">${totalOrders}</div></div>
       <div class="stat"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div>
       <div class="stat"><div class="k">Курьеров</div><div class="v">${new Set(list.map(p=>p.courier_id).filter(Boolean)).size}</div></div>
     </div>
