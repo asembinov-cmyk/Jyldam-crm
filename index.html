@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jyldam Logistics — CRM</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --ink:#14110d;--paper:#f6f2e9;--card:#fffdf7;--line:#d9d0bd;
+    --rust:#b6502b;--rust-dk:#8f3d20;--moss:#4a5d3a;--gold:#c08a2d;--muted:#7c7361;
+    --shadow:0 1px 0 rgba(20,17,13,.04),0 8px 24px -16px rgba(20,17,13,.35);
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Spline+Sans:wght@400;500;600;700&display=swap');
+  body{font-family:'Spline Sans',system-ui,sans-serif;color:var(--ink);
+    background:radial-gradient(circle at 12% 0%,rgba(182,80,43,.06),transparent 40%),var(--paper);
+    min-height:100vh;-webkit-font-smoothing:antialiased}
+
+  /* ВХОД */
+  .login-wrap{min-height:100vh;display:grid;place-items:center;padding:20px}
+  .login-card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--line);
+    border-radius:18px;box-shadow:var(--shadow);padding:34px 30px}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .brand .mark{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,var(--rust),var(--gold));
+    display:grid;place-items:center;color:#fff;font-size:20px}
+  .brand .name{font-family:'Fraunces',serif;font-weight:900;font-size:22px;letter-spacing:-.02em;line-height:1}
+  .brand .sub{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:2px}
+  .login-card h1{font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin:22px 0 4px}
+  .login-card p.hint{color:var(--muted);font-size:13px;margin-bottom:20px}
+
+  .field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+  .field.full{grid-column:1/-1}
+  .field label{font-size:12px;font-weight:600;color:var(--muted)}
+  .field input,.field select,.field textarea{font:inherit;font-size:14px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink)}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid rgba(182,80,43,.3);
+    border-color:var(--rust);background:var(--card)}
+  .field .hint{font-size:11px;color:var(--muted)}
+  .login-card .field input{font-size:15px;padding:11px 13px}
+
+  .btn{font:inherit;font-weight:600;font-size:14px;cursor:pointer;border-radius:10px;padding:10px 16px;
+    border:1px solid var(--line);background:var(--card);color:var(--ink);transition:.15s;display:inline-flex;
+    align-items:center;gap:8px}
+  .btn:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
+  .btn.primary{background:var(--rust);border-color:var(--rust-dk);color:#fff}
+  .btn.primary:hover{background:var(--rust-dk)}
+  .btn.ghost{background:transparent}
+  .btn.sm{padding:6px 11px;font-size:12.5px;border-radius:8px}
+  .btn.danger{color:var(--rust-dk);border-color:#e3c4b8}
+  .btn.danger:hover{background:var(--rust);color:#fff;border-color:var(--rust)}
+  .btn.block{width:100%;justify-content:center;font-size:15px;padding:12px}
+  .btn:disabled{opacity:.6;cursor:default;transform:none}
+  .err{color:var(--rust-dk);font-size:13px;margin-top:6px;min-height:18px}
+
+  /* APP */
+  .app-shell{display:none}
+  header.topbar{border-bottom:1px solid var(--line);background:rgba(246,242,233,.85);
+    backdrop-filter:blur(8px);position:sticky;top:0;z-index:50}
+  .topbar-inner{max-width:1180px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .logo{font-family:'Fraunces',serif;font-weight:900;font-size:20px;display:flex;align-items:center;gap:10px}
+  .logo .mark{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,var(--rust),var(--gold));
+    display:grid;place-items:center;color:#fff;font-size:16px}
+  .logo small{display:block;font-family:'Spline Sans',sans-serif;font-weight:500;font-size:11px;
+    color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:-2px}
+  nav.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+  nav.tabs button{font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid transparent;
+    background:transparent;color:var(--muted);padding:8px 14px;border-radius:9px;transition:.15s}
+  nav.tabs button:hover{color:var(--ink);background:rgba(20,17,13,.04)}
+  nav.tabs button.active{color:var(--rust-dk);background:var(--card);border-color:var(--line);box-shadow:var(--shadow)}
+  .user-box{display:flex;align-items:center;gap:12px;padding-left:14px;border-left:1px solid var(--line)}
+  .user-box .who{text-align:right;font-size:13px;line-height:1.2}
+  .user-box .who b{display:block}
+  .user-box .role{font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+
+  main.wrap{max-width:1180px;margin:0 auto;padding:24px 22px}
+  .page-head{padding:8px 0 18px;display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
+  .page-head h1{font-family:'Fraunces',serif;font-weight:900;font-size:30px;letter-spacing:-.03em;line-height:1}
+  .page-head p{color:var(--muted);font-size:14px;margin-top:7px}
+  .head-actions{margin-left:auto;display:flex;gap:10px}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);
+    overflow:hidden;margin-bottom:24px}
+  .panel-head{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  .panel-head h2{font-family:'Fraunces',serif;font-weight:600;font-size:18px}
+  .panel-head .count{font-size:12px;color:var(--muted);background:var(--paper);border:1px solid var(--line);
+    padding:2px 9px;border-radius:20px;font-weight:600}
+
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  thead th{text-align:left;font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted);padding:11px 16px;border-bottom:1px solid var(--line);white-space:nowrap;
+    background:linear-gradient(var(--paper),var(--card))}
+  tbody td{padding:12px 16px;border-bottom:1px solid #eee6d6;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:rgba(192,138,45,.05)}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+    border-radius:20px;background:var(--paper);border:1px solid var(--line)}
+  .pill.moss{color:var(--moss);background:#eef1e8;border-color:#cfd9bf}
+  .pill.gold{color:var(--gold);background:#f6eed8;border-color:#e6d4a0}
+  .qty{font-family:'Fraunces',serif;font-weight:900;font-size:16px;color:var(--rust-dk)}
+  .qty-edit{width:64px;font:inherit;font-family:'Fraunces',serif;font-weight:900;font-size:15px;color:var(--rust-dk);
+    text-align:center;padding:5px 6px;border:1.5px solid var(--line);border-radius:8px;background:var(--card)}
+  .qty-edit:focus{outline:2px solid rgba(182,80,43,.3);border-color:var(--rust)}
+  .row-actions{display:flex;gap:6px;justify-content:flex-end;white-space:nowrap}
+  .status-pick{font:inherit;font-size:12.5px;font-weight:600;padding:5px 8px;border:1.5px solid var(--line);
+    border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer}
+  .status-time{font-size:10.5px;color:var(--muted);margin-top:3px;white-space:nowrap}
+  .empty{padding:50px 20px;text-align:center;color:var(--muted)}
+  .empty .big{font-family:'Fraunces',serif;font-size:20px;color:var(--ink);margin-bottom:6px}
+  .link-btn{background:none;border:none;color:var(--rust-dk);font:inherit;font-size:11px;font-weight:600;
+    cursor:pointer;padding:2px 0;text-decoration:underline}
+
+  .filters{display:flex;gap:10px;padding:14px 20px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--paper)}
+  .filters input,.filters select{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
+    border-radius:9px;background:var(--card);color:var(--ink);min-width:140px}
+  .filters .search{flex:1;min-width:200px}
+
+  .subtabs{display:flex;gap:6px;margin-bottom:22px;flex-wrap:wrap}
+  .subtabs button{font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:9px 15px;border-radius:30px;
+    border:1px solid var(--line);background:var(--card);color:var(--muted);transition:.15s}
+  .subtabs button.active{background:var(--moss);color:#fff;border-color:var(--moss)}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
+  .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+  .stat .v{font-family:'Fraunces',serif;font-weight:900;font-size:30px;letter-spacing:-.02em;margin-top:4px;line-height:1}
+  .stat .v small{font-size:13px;font-family:'Spline Sans',sans-serif;color:var(--muted);font-weight:500}
+
+  /* MODAL */
+  .overlay{position:fixed;inset:0;background:rgba(20,17,13,.45);backdrop-filter:blur(2px);display:grid;
+    place-items:center;z-index:100;padding:20px}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:560px;
+    box-shadow:0 30px 80px -30px rgba(20,17,13,.6);max-height:90vh;overflow:auto}
+  .modal-head{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+  .modal-head h3{font-family:'Fraunces',serif;font-weight:600;font-size:20px}
+  .modal-head .x{margin-left:auto;cursor:pointer;border:none;background:transparent;font-size:22px;
+    color:var(--muted);line-height:1;padding:4px}
+  .modal-body{padding:22px 24px}
+  .modal-foot{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;background:var(--paper)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+  .phone-wrap{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:10px;background:var(--paper);overflow:hidden}
+  .phone-wrap:focus-within{outline:2px solid rgba(182,80,43,.3);border-color:var(--rust);background:var(--card)}
+  .phone-pre{display:flex;align-items:center;padding:0 10px;font-size:14px;font-weight:600;color:var(--muted);
+    background:rgba(20,17,13,.04);border-right:1px solid var(--line);user-select:none}
+  .phone-wrap input{border:none!important;outline:none!important;background:transparent!important;border-radius:0!important;flex:1}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);
+    padding:12px 20px;border-radius:12px;font-size:14px;font-weight:500;box-shadow:0 20px 50px -20px rgba(0,0,0,.6);z-index:200}
+  .loading{padding:60px;text-align:center;color:var(--muted);font-size:15px}
+  .hist{list-style:none}
+  .hist li{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #eee6d6;font-size:13px}
+  .hist li:last-child{border-bottom:none}
+  .hist .dot{width:10px;height:10px;border-radius:50%;margin-top:4px;flex:none}
+  .hist .when{color:var(--muted);font-size:12px}
+
+  @media (max-width:760px){
+    .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
+    .page-head h1{font-size:24px}nav.tabs{order:3;width:100%;margin-left:0}
+    .user-box{margin-left:auto;border-left:none;padding-left:0}
+  }
+</style>
+</head>
+<body>
+
+<!-- ВХОД -->
+<div class="login-wrap" id="loginScreen">
+  <div class="login-card">
+    <div class="brand"><span class="mark">⌖</span>
+      <div><div class="name">Jyldam Logistics</div><div class="sub">CRM · вход в систему</div></div></div>
+    <h1>Вход</h1>
+    <p class="hint">Введите номер телефона (или email админа) и пароль.</p>
+    <div class="field"><label>Телефон или email</label><input type="text" id="email" autocomplete="username" placeholder="+7 (___) ___-__-__ или email"></div>
+    <div class="field"><label>Пароль</label><input type="password" id="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <button class="btn primary block" id="loginBtn">Войти</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app-shell" id="appShell">
+  <header class="topbar"><div class="topbar-inner">
+    <div class="logo"><span class="mark">⌖</span><span>Jyldam Logistics<small>забор посылок · CRM</small></span></div>
+    <nav class="tabs" id="navTabs"></nav>
+    <div class="user-box">
+      <div class="who"><b id="uName">—</b><span class="role" id="uRole">—</span></div>
+      <button class="btn ghost sm" id="logoutBtn">Выйти</button>
+    </div>
+  </div></header>
+  <main class="wrap" id="main"></main>
+</div>
+
+<script>
+/* ================= SUPABASE ================= */
+const SUPABASE_URL='https://tdexhspesodslwgbxojw.supabase.co';
+const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkZXhoc3Blc29kc2x3Z2J4b2p3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMTcxOTMsImV4cCI6MjA5Nzc5MzE5M30.QojVMQAWzINufmqdI5nEL-gX_UsIZV8Nq48-3Fn6YoE';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
+
+const $=id=>document.getElementById(id);
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uidLocal=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
+
+const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',courier:'Курьер'};
+
+/* состояние сессии и данных */
+const S={
+  me:null,           // профиль текущего пользователя {id,email,full_name,role,courier_kind}
+  tab:'pickups',
+  dir:'partners',
+  // справочники-кэш
+  cities:[],districts:[],couriers:[],order_couriers:[],sales:[],processors:[],
+  partners:[],statuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],
+  pickups:[],orders:[],
+  myPerms:null, myBaseType:'staff',
+};
+
+/* ---------- DATA LAYER ---------- */
+async function dbList(table,opts={}){
+  let q=sb.from(table).select('*');
+  if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
+  const {data,error}=await q;
+  if(error){console.error(table,error);return [];}
+  return data||[];
+}
+async function dbInsert(table,row){
+  const {data,error}=await sb.from(table).insert(row).select().single();
+  if(error){console.error('insert',table,error);toast('Ошибка: '+error.message);return null;}
+  return data;
+}
+async function dbUpdate(table,id,row){
+  const {data,error}=await sb.from(table).update(row).eq('id',id).select().single();
+  if(error){console.error('update',table,error);toast('Ошибка: '+error.message);return null;}
+  return data;
+}
+async function dbDelete(table,id){
+  const {error}=await sb.from(table).delete().eq('id',id);
+  if(error){console.error('delete',table,error);toast('Ошибка: '+error.message);return false;}
+  return true;
+}
+// Вызов Edge Function для создания пользователя (с проверкой админа на сервере)
+async function callCreateUser(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/create-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
+
+/* ---------- AUTH ---------- */
+// дефолтные права на случай отсутствия роли — выводим из base_type
+function defaultPerms(base){
+  const full={view:true,create:true,edit:true,delete:true};
+  const ro={view:true,create:false,edit:false,delete:false};
+  const no={view:false,create:false,edit:false,delete:false};
+  if(base==='admin') return {pickups:full,orders:full,directories:full,users:full};
+  if(base==='courier') return {pickups:{view:true,create:false,edit:true,delete:false},orders:{view:true,create:false,edit:true,delete:false},directories:no,users:no};
+  return {pickups:full,orders:full,directories:ro,users:no}; // staff/manager
+}
+function computeMyPerms(){
+  // 1) пробуем по role_id из справочника
+  let roleRow=null;
+  if(S.me.role_id) roleRow=S.roles.find(r=>r.id===S.me.role_id);
+  if(roleRow){
+    S.myBaseType=roleRow.base_type||'staff';
+    const base=defaultPerms(S.myBaseType);
+    S.myPerms=Object.assign({},base,roleRow.perms||{});
+    // гарантируем все модули
+    ['pickups','orders','directories','users'].forEach(m=>{if(!S.myPerms[m])S.myPerms[m]=base[m];});
+    return;
+  }
+  // 2) fallback на старое текстовое поле role
+  const base=(S.me.role==='admin')?'admin':(S.me.role==='courier')?'courier':'staff';
+  S.myBaseType=base;
+  S.myPerms=defaultPerms(base);
+}
+
+async function loadMe(session){
+  const {data}=await sb.from('profiles').select('*').eq('id',session.user.id).single();
+  S.me=data||{id:session.user.id,email:session.user.email,role:'manager',full_name:session.user.email};
+  // справочник ролей нужен для вычисления прав
+  S.roles=await dbList('roles',{order:'created_at',asc:true});
+  computeMyPerms();
+}
+
+async function doLogin(){
+  let login=$('email').value.trim();const password=$('password').value,errEl=$('loginErr');
+  errEl.textContent='';
+  if(!login||!password){errEl.textContent='Введите логин и пароль.';return;}
+  // если введён телефон (не email) — превращаем в технический email
+  let email=login;
+  if(!login.includes('@')){
+    const digits=login.replace(/\D/g,'').replace(/^[78](?=\d{10}$)/,'').slice(-10);
+    if(digits.length===10) email=digits+'@jyldam.local';
+  }
+  const btn=$('loginBtn');btn.disabled=true;btn.textContent='Входим…';
+  const {data,error}=await sb.auth.signInWithPassword({email,password});
+  btn.disabled=false;btn.textContent='Войти';
+  if(error){
+    if(/invalid login/i.test(error.message))errEl.textContent='Неверный логин или пароль.';
+    else if(/not confirmed/i.test(error.message))errEl.textContent='Аккаунт не подтверждён в Supabase.';
+    else if(/disabled/i.test(error.message))errEl.textContent='Вход по email отключён в Supabase.';
+    else errEl.textContent='Ошибка: '+error.message;
+    return;
+  }
+  await loadMe(data.session);
+  await enterApp();
+}
+async function doLogout(){await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
+function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';}
+
+$('loginBtn').onclick=doLogin;
+$('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+$('email').addEventListener('keydown',e=>{if(e.key==='Enter')$('password').focus();});
+$('logoutBtn').onclick=doLogout;
+
+/* ---------- ENTER APP: load all reference data ---------- */
+async function loadAll(){
+  const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips,pickups,orders]=await Promise.all([
+    dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),dbList('couriers',{order:'fio'}),
+    dbList('order_couriers',{order:'fio'}),dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),
+    dbList('partners',{order:'name'}),dbList('statuses',{order:'created_at',asc:true}),dbList('delivery_types',{order:'created_at',asc:true}),
+    dbList('courier_cities',{order:'name'}),dbList('post_ips',{order:'name'}),
+    dbList('pickups',{order:'created_at',asc:false}),dbList('orders',{order:'created_at',asc:false}),
+  ]);
+  Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips,pickups,orders});
+  // профили и роли — если есть право на модуль "Пользователи"
+  if(can('users','view')){ S.profiles=await dbList('profiles',{order:'created_at',asc:true}); }
+}
+
+async function enterApp(){
+  $('loginScreen').style.display='none';
+  $('appShell').style.display='block';
+  $('uName').textContent=S.me.full_name||S.me.email;
+  const roleRow=S.me.role_id?S.roles.find(r=>r.id===S.me.role_id):null;
+  $('uRole').textContent=roleRow?roleRow.name:(ROLE_LABEL[S.me.role]||S.me.role||'—');
+  $('main').innerHTML='<div class="loading">Загружаем данные…</div>';
+  await loadAll();
+  buildNav();
+  render();
+}
+
+/* ---------- ХЕЛПЕРЫ ИМЁН ---------- */
+const cityName=id=>(S.cities.find(c=>c.id===id)||{}).name||'—';
+const districtName=id=>(S.districts.find(d=>d.id===id)||{}).name||'—';
+const courierName=id=>(S.couriers.find(c=>c.id===id)||{}).fio||'—';
+const orderCourierName=id=>(S.order_couriers.find(c=>c.id===id)||{}).fio||'—';
+const salesName=id=>(S.sales.find(s=>s.id===id)||{}).fio||'—';
+const processorName=id=>(S.processors.find(s=>s.id===id)||{}).fio||'—';
+const deliveryName=id=>(S.delivery.find(d=>d.id===id)||{}).name||'—';
+const postIpName=id=>(S.post_ips.find(d=>d.id===id)||{}).name||'—';
+const courierCityName=id=>(S.courier_cities.find(c=>c.id===id)||{}).name||'—';
+const partnerName=id=>(S.partners.find(p=>p.id===id)||{}).name||'—';
+const statusObj=id=>S.statuses.find(s=>s.id===id)||null;
+const isCourierDelivery=id=>{const d=S.delivery.find(x=>x.id===id);return d?/курьер/i.test(d.name):false;};
+function statusBadge(id){const s=statusObj(id);if(!s)return '<span style="color:var(--muted)">—</span>';
+  return `<span class="pill" style="color:${s.color};background:${s.color}1a;border-color:${s.color}55">${esc(s.name)}</span>`;}
+function fmtDate(d){if(!d)return '—';const p=String(d).slice(0,10).split('-');if(p.length<3)return d;return `${p[2]}.${p[1]}.${p[0]}`;}
+function fmtDateTime(ts){if(!ts)return '';const d=new Date(ts);const p=n=>String(n).padStart(2,'0');
+  return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;}
+
+/* ---------- ПРАВА ДОСТУПА ---------- */
+// can(module, action): module ∈ pickups|orders|directories|users; action ∈ view|create|edit|delete
+function can(mod,act){
+  if(!S.myPerms)return false;
+  const m=S.myPerms[mod];
+  return !!(m&&m[act]);
+}
+// базовый тип роли — для серверной логики и правила "вижу только своё"
+const isAdminBase=()=>S.myBaseType==='admin';
+const isCourierBase=()=>S.myBaseType==='courier';
+// совместимость со старым кодом:
+const isAdmin=()=>isAdminBase();
+const isCourier=()=>isCourierBase();
+const isStaff=()=>!isCourierBase();   // admin или staff — «персонал»
+const isManager=()=>S.myBaseType==='staff';
+// id записей курьера, привязанных к текущему пользователю
+const myPickupCourierIds=()=>S.couriers.filter(c=>c.account_id===S.me.id).map(c=>c.id);
+const myOrderCourierIds=()=>S.order_couriers.filter(c=>c.account_id===S.me.id).map(c=>c.id);
+
+/* ---------- PHONE ---------- */
+function phoneStored(v){let d=(v||'').replace(/\D/g,'');if(d.length===11&&(d[0]==='7'||d[0]==='8'))d=d.slice(1);return d.slice(0,10);}
+function fmt10(d){d=(d||'').slice(0,10);let o='';if(d.length>0)o+='('+d.slice(0,3);if(d.length>=3)o+=')';
+  if(d.length>3)o+=' '+d.slice(3,6);if(d.length>6)o+='-'+d.slice(6,8);if(d.length>8)o+='-'+d.slice(8,10);return o;}
+function phoneDisplay(v){const d=phoneStored(v);return d?'+7 '+fmt10(d):'';}
+function attachPhone(id,initial){
+  const el=$(id);if(!el)return;
+  if(!el.parentElement.classList.contains('phone-wrap')){
+    const w=document.createElement('div');w.className='phone-wrap';el.parentElement.insertBefore(w,el);
+    const pre=document.createElement('span');pre.className='phone-pre';pre.textContent='+7';w.appendChild(pre);w.appendChild(el);
+  }
+  el.dataset.phone=phoneStored(initial);el.value=el.dataset.phone?fmt10(el.dataset.phone):'';el.setAttribute('placeholder','(___) ___-__-__');
+  el.addEventListener('input',()=>{const d=el.value.replace(/\D/g,'').slice(0,10);el.dataset.phone=d;el.value=fmt10(d);
+    const end=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(end,end);}catch(e){}});});
+}
+function phoneVal(id){const el=$(id);return el?(el.dataset.phone||''):'';}
+function val(id){const el=$(id);return el?el.value:'';}
+
+/* ---------- NAV по правам ---------- */
+function buildNav(){
+  let tabs=[];
+  const courier=isCourierBase();
+  if(can('pickups','view')) tabs.push(['pickups',courier?'Мои заборы':'Заявки на забор']);
+  if(can('orders','view'))  tabs.push(['orders',courier?'Мои заказы':'Заказы']);
+  if(can('directories','view')) tabs.push(['settings','Справочники']);
+  if(can('users','view'))   tabs.push(['users','Пользователи']);
+  if(!tabs.length) tabs=[['none','—']];
+  if(!tabs.find(t=>t[0]===S.tab)) S.tab=tabs[0][0];
+  $('navTabs').innerHTML=tabs.map(([k,l])=>`<button data-tab="${k}" class="${S.tab===k?'active':''}">${l}</button>`).join('');
+  $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;buildNav();render();});
+}
+
+/* ---------- РОУТЕР ---------- */
+function render(){
+  if(S.tab==='pickups')renderPickups();
+  else if(S.tab==='orders')renderOrders();
+  else if(S.tab==='settings')renderSettings();
+  else if(S.tab==='users')renderUsers();
+}
+
+/* ---------- MODAL ENGINE ---------- */
+function showModal(title,bodyHtml,onSave,opts={}){
+  const ov=document.createElement('div');ov.className='overlay';
+  const foot=opts.readonly
+    ? `<div class="modal-foot"><button class="btn primary" data-close>Закрыть</button></div>`
+    : `<div class="modal-foot"><button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>Сохранить</button></div>`;
+  ov.innerHTML=`<div class="modal"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
+    <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  ov.querySelector('.x').onclick=close;
+  if(ov.querySelector('[data-cancel]'))ov.querySelector('[data-cancel]').onclick=close;
+  if(ov.querySelector('[data-close]'))ov.querySelector('[data-close]').onclick=close;
+  ov.onclick=e=>{if(e.target===ov)close();};
+  const sv=ov.querySelector('[data-save]');
+  if(sv)sv.onclick=async()=>{sv.disabled=true;const ok=await onSave();sv.disabled=false;if(ok!==false)close();};
+  document.addEventListener('keydown',function esc2(e){if(e.key==='Escape'){close();document.removeEventListener('keydown',esc2);}});
+  const first=ov.querySelector('input,select,textarea');if(first)setTimeout(()=>first.focus(),50);
+  return ov;
+}
+function showInfo(title,bodyHtml){showModal(title,bodyHtml,null,{readonly:true});}
+
+/* автологин */
+(async()=>{
+  const {data}=await sb.auth.getSession();
+  if(data&&data.session){await loadMe(data.session);await enterApp();}
+  else showLogin();
+})();
+/* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
+let pf={q:'',city:'',courier:'',sales:'',processor:'',status:''};
+
+function visiblePickups(){
+  if(isCourier()){const ids=myPickupCourierIds();return S.pickups.filter(p=>ids.includes(p.courier_id));}
+  return S.pickups;
+}
+function renderPickups(){
+  const list=visiblePickups();
+  const totalOrders=list.reduce((s,p)=>s+(+p.orders||0),0);
+  const today=new Date().toISOString().slice(0,10);
+  const head=isCourier()?'Мои заборы':'Заявки на забор';
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>${head}</h1><p>Карточки забора посылок из магазинов-партнёров</p></div>
+      ${can('pickups','create')?`<div class="head-actions"><button class="btn primary" id="newPickup">＋ Создать карточку забора</button></div>`:''}
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">Всего заявок</div><div class="v">${list.length}</div></div>
+      <div class="stat"><div class="k">Заказов к забору</div><div class="v">${totalOrders}</div></div>
+      <div class="stat"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div>
+      <div class="stat"><div class="k">Курьеров</div><div class="v">${new Set(list.map(p=>p.courier_id).filter(Boolean)).size}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Карточки забора</h2><span class="count">${list.length}</span></div>
+      <div class="filters">
+        <input class="search" id="pfq" placeholder="Поиск: наименование, адрес, номер…" value="${esc(pf.q)}">
+        <select id="pfcity"><option value="">Все города</option>${S.cities.map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        ${isStaff()?`<select id="pfcourier"><option value="">Все курьеры</option>${S.couriers.map(c=>`<option value="${c.id}" ${pf.courier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select>`:''}
+        <select id="pfstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+      </div>
+      <div id="pickupTable"></div>
+    </div>`;
+  if($('newPickup'))$('newPickup').onclick=()=>pickupModal();
+  $('pfq').oninput=e=>{pf.q=e.target.value;drawPickups();};
+  $('pfcity').onchange=e=>{pf.city=e.target.value;drawPickups();};
+  if($('pfcourier'))$('pfcourier').onchange=e=>{pf.courier=e.target.value;drawPickups();};
+  $('pfstatus').onchange=e=>{pf.status=e.target.value;drawPickups();};
+  drawPickups();
+}
+function filteredPickups(){
+  const q=pf.q.toLowerCase().trim();
+  return visiblePickups().filter(p=>{
+    if(pf.city&&p.city_id!==pf.city)return false;
+    if(pf.courier&&p.courier_id!==pf.courier)return false;
+    if(pf.status&&p.status_id!==pf.status)return false;
+    if(q){const hay=[p.name,phoneDisplay(p.phone),cityName(p.city_id),districtName(p.district_id),courierName(p.courier_id),p.address].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    return true;
+  }).sort((a,b)=>(b.pickup_date||'').localeCompare(a.pickup_date||''));
+}
+function drawPickups(){
+  const el=$('pickupTable');const rows=filteredPickups();
+  if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
+  const staff=isStaff();
+  el.innerHTML=`<div class="table-scroll"><table><thead><tr>
+    <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
+    ${staff?'<th>Курьер</th><th>Менеджер продаж</th><th>Обработчик</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
+    <tbody>${rows.map(p=>`<tr>
+      <td>${esc(fmtDate(p.pickup_date))}</td>
+      <td><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
+      <td><strong>${esc(p.name)}</strong></td>
+      <td>${esc(p.address)||'—'}</td>
+      <td>${esc(phoneDisplay(p.phone))||'—'}</td>
+      <td>${esc(districtName(p.district_id))}</td>
+      ${staff?`<td>${p.courier_id?`<span class="pill moss">${esc(courierName(p.courier_id))}</span>`:'<span style="color:var(--muted)">не назначен</span>'}</td>
+      <td>${p.sales_id?esc(salesName(p.sales_id)):'—'}</td>
+      <td>${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>`:''}
+      <td>${staff?`<input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}">`:`<span class="qty">${esc(p.orders||0)}</span>`}</td>
+      <td><select class="status-pick" data-pstatus="${p.id}" style="border-color:${(statusObj(p.status_id)||{}).color||'var(--line)'}">
+        <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <div class="status-time">${p.status_at?('изм.: '+fmtDateTime(p.status_at)):''} ${(p.status_history&&p.status_history.length)?`· <button class="link-btn" data-phist="${p.id}">история</button>`:''}</div></td>
+      <td><div class="row-actions">
+        ${can('pickups','edit')?`<button class="btn sm ghost" data-pedit="${p.id}">Изменить</button>`:`<button class="btn sm ghost" data-pview="${p.id}">Открыть</button>`}
+        ${can('pickups','delete')?`<button class="btn sm danger" data-pdel="${p.id}">Удалить</button>`:''}
+      </div></td></tr>`).join('')}</tbody></table></div>`;
+  el.querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pedit));
+  el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pview,true));
+  el.querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>delPickup(b.dataset.pdel));
+  el.querySelectorAll('[data-phist]').forEach(b=>b.onclick=()=>showPickupHistory(b.dataset.phist));
+  el.querySelectorAll('[data-pstatus]').forEach(sel=>sel.onchange=()=>setPickupStatus(sel.dataset.pstatus,sel.value));
+  el.querySelectorAll('[data-pqty]').forEach(inp=>{
+    const commit=async()=>{const p=S.pickups.find(x=>x.id===inp.dataset.pqty);if(!p)return;
+      const v=Math.max(0,parseInt(inp.value||'0',10)||0);if(p.orders===v)return;
+      await dbUpdate('pickups',p.id,{orders:v});p.orders=v;toast('Кол-во обновлено');};
+    inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
+  });
+}
+async function setPickupStatus(id,statusId){
+  const p=S.pickups.find(x=>x.id===id);if(!p||p.status_id===statusId)return;
+  const at=new Date().toISOString();
+  const hist=Array.isArray(p.status_history)?p.status_history.slice():[];
+  hist.push({statusId,at});
+  const upd=await dbUpdate('pickups',id,{status_id:statusId,status_at:at,status_history:hist});
+  if(upd){Object.assign(p,upd);toast('Статус обновлён');drawPickups();}
+}
+function showPickupHistory(id){
+  const p=S.pickups.find(x=>x.id===id);if(!p)return;
+  const hist=(p.status_history||[]).slice().reverse();
+  const body=hist.length?`<ul class="hist">${hist.map(h=>{const s=statusObj(h.statusId);const c=s?s.color:'var(--muted)';const n=s?esc(s.name):'Статус снят';
+    return `<li><span class="dot" style="background:${c}"></span><div><div style="font-weight:600">${n}</div><div class="when">${fmtDateTime(h.at)}</div></div></li>`;}).join('')}</ul>`
+    :`<div class="empty"><div class="big">История пуста</div></div>`;
+  showInfo(`История статусов · ${esc(p.name)}`,body);
+}
+async function delPickup(id){
+  const p=S.pickups.find(x=>x.id===id);
+  if(!confirm(`Удалить карточку «${p?.name||''}»?`))return;
+  if(await dbDelete('pickups',id)){S.pickups=S.pickups.filter(x=>x.id!==id);toast('Удалено');renderPickups();}
+}
+function pickupModal(id,readonly){
+  const p=id?S.pickups.find(x=>x.id===id):null;
+  const today=new Date().toISOString().slice(0,10);
+  const d=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',status_id:(S.statuses[0]?S.statuses[0].id:'')};
+  const ro=readonly||!can("pickups","edit");
+  const dOpts=cid=>S.districts.filter(x=>!cid||x.city_id===cid);
+  const cOpts=cid=>S.couriers.filter(x=>!cid||x.city_id===cid);
+  const dis=ro?'disabled':'';
+  showModal(id?(ro?'Карточка забора':'Карточка забора'):'Новая карточка забора',`
+    <div class="grid2">
+      <div class="field"><label>Дата</label><input type="date" id="m_date" value="${esc(d.pickup_date||'')}" ${dis}></div>
+      <div class="field"><label>Город</label><select id="m_city" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field full"><label>Наименование (партнёр)</label><input id="m_name" list="plist" value="${esc(d.name)}" ${dis} autocomplete="off"><datalist id="plist">${S.partners.map(pt=>`<option value="${esc(pt.name)}">`).join('')}</datalist></div>
+      <div class="field full"><label>Адрес</label><input id="m_address" value="${esc(d.address)}" ${dis}></div>
+      <div class="field"><label>Номер телефона</label><input id="m_phone" inputmode="numeric" ${dis}></div>
+      <div class="field"><label>Район</label><select id="m_district" ${dis}><option value="">—</option>${dOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.district_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Курьер</label><select id="m_courier" ${dis}><option value="">— не назначен —</option>${cOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.courier_id===x.id?'selected':''}>${esc(x.fio)}</option>`).join('')}</select></div>
+      <div class="field"><label>Кол-во заказов</label><input type="number" min="0" id="m_orders" value="${esc(d.orders)}" ${dis}></div>
+      <div class="field"><label>Менеджер по продажам</label><select id="m_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+      <div class="field"><label>Обработчик</label><select id="m_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+      <div class="field full"><label>Статус</label><select id="m_status" ${dis}><option value="">—</option>${S.statuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+    </div>`,
+    ro?null:async()=>{
+      const name=val('m_name').trim();if(!name){toast('Укажите наименование');return false;}
+      const prevStatus=p?(p.status_id||''):'';const newStatus=val('m_status');
+      const row={pickup_date:val('m_date')||null,city_id:val('m_city')||null,name,address:val('m_address').trim(),
+        phone:phoneVal('m_phone'),district_id:val('m_district')||null,courier_id:val('m_courier')||null,
+        orders:parseInt(val('m_orders')||'0',10)||0,sales_id:val('m_sales')||null,processor_id:val('m_proc')||null,
+        status_id:newStatus||null};
+      let hist=p&&Array.isArray(p.status_history)?p.status_history.slice():[];
+      if(newStatus&&newStatus!==prevStatus){row.status_at=new Date().toISOString();hist.push({statusId:newStatus,at:row.status_at});}
+      row.status_history=hist;
+      if(id){const u=await dbUpdate('pickups',id,row);if(!u)return false;Object.assign(p,u);}
+      else{const u=await dbInsert('pickups',row);if(!u)return false;S.pickups.unshift(u);}
+      toast(id?'Сохранено':'Карточка создана');renderPickups();return true;
+    },{readonly:ro});
+  attachPhone('m_phone',d.phone);
+  if(!ro){
+    const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
+      $('m_district').innerHTML='<option value="">—</option>'+dOpts(cid).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
+      $('m_courier').innerHTML='<option value="">— не назначен —</option>'+cOpts(cid).map(x=>`<option value="${x.id}">${esc(x.fio)}</option>`).join('');};
+    $('m_name').onchange=e=>{const pt=S.partners.find(x=>x.name===e.target.value);if(pt){
+      if(pt.address)$('m_address').value=pt.address;
+      if(pt.phone){const el=$('m_phone');el.dataset.phone=phoneStored(pt.phone);el.value=fmt10(phoneStored(pt.phone));}
+      if(pt.city_id){cs.value=pt.city_id;cs.onchange();}
+      if(pt.district_id)$('m_district').value=pt.district_id;
+      if(pt.sales_id)$('m_sales').value=pt.sales_id;
+      if(pt.processor_id)$('m_proc').value=pt.processor_id;}};
+  }
+}
+/* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:''};
+
+function visibleOrders(){
+  if(isCourier()){const ids=myOrderCourierIds();return S.orders.filter(o=>ids.includes(o.order_courier_id));}
+  return S.orders;
+}
+function genOrderCode(){
+  const ex=new Set(S.orders.map(o=>o.code));let c;
+  do{c=String(Math.floor(1000000+Math.random()*9000000));}while(ex.has(c));
+  return c;
+}
+function renderOrders(){
+  const list=visibleOrders();
+  const totalCost=list.reduce((s,o)=>s+(+o.cost||0),0);
+  const paid=list.filter(o=>o.pay_date).length;
+  const head=isCourier()?'Мои заказы':'Заказы';
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>${head}</h1><p>Отправления: курьерская и почтовая доставка</p></div>
+      ${can('orders','create')?`<div class="head-actions"><button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
+    <div class="stats">
+      <div class="stat"><div class="k">Всего заказов</div><div class="v">${list.length}</div></div>
+      <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
+      <div class="stat"><div class="k">Оплачено</div><div class="v">${paid}<small> / ${list.length}</small></div></div>
+      <div class="stat"><div class="k">Сумма доставки</div><div class="v">${totalCost.toLocaleString('ru-RU')}<small> ₸</small></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Список заказов</h2><span class="count">${list.length}</span></div>
+      <div class="filters">
+        <input class="search" id="ofq" placeholder="Поиск: ID, трек, клиент…" value="${esc(of.q)}">
+        <select id="ofstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>
+        ${isStaff()?`<select id="ofpartner"><option value="">Все партнёры</option>${S.partners.map(p=>`<option value="${p.id}" ${of.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}
+      </div>
+      <div id="orderTable"></div>
+    </div>`;
+  if($('newOrder'))$('newOrder').onclick=()=>orderModal();
+  $('ofq').oninput=e=>{of.q=e.target.value;drawOrders();};
+  $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrders();};
+  $('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
+  if($('ofpartner'))$('ofpartner').onchange=e=>{of.partner=e.target.value;drawOrders();};
+  drawOrders();
+}
+function filteredOrders(){
+  const q=of.q.toLowerCase().trim();
+  return visibleOrders().filter(o=>{
+    if(of.status&&o.status_id!==of.status)return false;
+    if(of.delivery&&o.delivery_id!==of.delivery)return false;
+    if(of.partner&&o.partner_id!==of.partner)return false;
+    if(q){const hay=[o.code,o.track,o.client,o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    return true;
+  }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+}
+function drawOrders(){
+  const el=$('orderTable');const rows=filteredOrders();
+  if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
+  const staff=isStaff();
+  el.innerHTML=`<div class="table-scroll"><table><thead><tr>
+    <th>ID</th><th>Дата забора</th>${staff?'<th>Партнёр</th>':''}<th>Отправитель</th><th>ФИО клиента</th><th>Вес</th>
+    <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
+    ${staff?'<th>Менеджер продаж</th><th>Обработчик</th><th>Стоимость</th><th>Оплата</th><th>ИП для Почты</th>':''}<th></th></tr></thead>
+    <tbody>${rows.map(o=>`<tr>
+      <td><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
+      <td>${esc(fmtDate(o.pickup_date))}</td>
+      ${staff?`<td>${o.partner_id?esc(partnerName(o.partner_id)):'—'}</td>`:''}
+      <td>${esc(o.sender)||'—'}</td><td>${esc(o.client)||'—'}</td>
+      <td>${o.weight?esc(o.weight)+' кг':'—'}</td>
+      <td>${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
+      <td>${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
+      <td>${esc(o.address)||'—'}</td><td>${esc(o.qty||0)}</td>
+      <td>${o.order_courier_id?`<span class="pill moss">${esc(orderCourierName(o.order_courier_id))}</span>`:'—'}</td>
+      <td><select class="status-pick" data-ostatus="${o.id}" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}">
+        <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></td>
+      <td>${esc(o.index)||'—'}</td><td>${esc(o.track)||'—'}</td>
+      ${staff?`<td>${o.sales_id?esc(salesName(o.sales_id)):'—'}</td><td>${o.processor_id?esc(processorName(o.processor_id)):'—'}</td>
+      <td>${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td>${esc(fmtDate(o.pay_date))}</td>
+      <td>${o.post_ip_id?esc(postIpName(o.post_ip_id)):'—'}</td>`:''}
+      <td><div class="row-actions">
+        <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
+        ${can('orders','edit')?`<button class="btn sm ghost" data-oedit="${o.id}">Изменить</button>`:`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`}
+        ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
+      </div></td></tr>`).join('')}</tbody></table></div>`;
+  el.querySelectorAll('[data-oedit]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oedit));
+  el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));
+  el.querySelectorAll('[data-odel]').forEach(b=>b.onclick=()=>delOrder(b.dataset.odel));
+  el.querySelectorAll('[data-obc]').forEach(b=>b.onclick=()=>showBarcode(b.dataset.obc));
+  el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
+    const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
+    const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});if(u){o.status_id=u.status_id;toast('Статус обновлён');}});
+}
+function renderBarcode(svgEl,code){if(!svgEl||!code)return;try{if(window.JsBarcode)JsBarcode(svgEl,code,{format:'CODE128',width:2,height:70,displayValue:true,fontSize:16,margin:6});}catch(e){console.error(e);}}
+function showBarcode(id){const o=S.orders.find(x=>x.id===id);if(!o)return;
+  showInfo(`Штрих-код · заказ ${esc(o.code)}`,`<div style="text-align:center;padding:10px 0"><svg id="bcView"></svg><div style="margin-top:10px;color:var(--muted);font-size:13px">${esc(o.client||'')} ${o.track?('· трек '+esc(o.track)):''}</div></div>`);
+  setTimeout(()=>renderBarcode($('bcView'),o.code),60);}
+async function delOrder(id){const o=S.orders.find(x=>x.id===id);if(!confirm(`Удалить заказ ${o?.code||''}?`))return;
+  if(await dbDelete('orders',id)){S.orders=S.orders.filter(x=>x.id!==id);toast('Заказ удалён');renderOrders();}}
+function orderModal(id,readonly){
+  const o=id?S.orders.find(x=>x.id===id):null;
+  const today=new Date().toISOString().slice(0,10);
+  const code=o?o.code:genOrderCode();
+  const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',courier_city_id:'',address:'',qty:'',status_id:(S.statuses[0]?S.statuses[0].id:''),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
+  const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
+  showModal(id?('Заказ '+code):('Новый заказ '+code),`
+    <div class="grid2">
+      <div class="field"><label>ID заказа</label><input value="${esc(code)}" readonly style="font-family:'Fraunces',serif;font-weight:900;letter-spacing:1px"></div>
+      <div class="field"><label>Дата забора</label><input type="date" id="o_pickup" value="${esc(d.pickup_date||'')}" ${dis}></div>
+      <div class="field"><label>Партнёр</label><select id="o_partner" ${dis}><option value="">—</option>${S.partners.map(p=>`<option value="${p.id}" ${d.partner_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Отправитель</label><input id="o_sender" value="${esc(d.sender)}" ${dis}></div>
+      <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
+      <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="o_weight" value="${esc(d.weight)}" ${dis}></div>
+      <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
+      <div class="field"><label>Кол-во товаров</label><input type="number" min="0" id="o_qty" value="${esc(d.qty)}" ${dis}></div>
+      <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
+      <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.statuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
+      <div class="field"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
+      <div class="field"><label>Менеджер по продажам</label><select id="o_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+      <div class="field"><label>Обработчик</label><select id="o_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+      <div class="field"><label>Стоимость доставки (₸)</label><input type="number" min="0" id="o_cost" value="${esc(d.cost)}" ${dis}></div>
+      <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
+      <div class="field full"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field full"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
+    </div>`,
+    ro?null:async()=>{
+      const row={code,partner_id:val('o_partner')||null,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
+        weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),
+        courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
+        qty:parseInt(val('o_qty')||'0',10)||0,status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
+        index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
+        cost:val('o_cost')?parseFloat(val('o_cost')):0,pay_date:val('o_pay')||null,post_ip_id:val('o_ip')||null,
+        order_courier_id:val('o_ocourier')||null};
+      if(id){const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);}
+      else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);}
+      toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
+    },{readonly:ro});
+  setTimeout(()=>renderBarcode($('o_barcode'),code),60);
+  if(!ro){
+    const ds=$('o_delivery');ds.onchange=()=>{const f=$('cityField');if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city'))$('o_city').value='';}};
+    const ps=$('o_partner');ps.onchange=()=>{const pt=S.partners.find(x=>x.id===ps.value);if(pt){
+      if(!$('o_sender').value.trim())$('o_sender').value=pt.name;
+      if(pt.sales_id)$('o_sales').value=pt.sales_id;if(pt.processor_id)$('o_proc').value=pt.processor_id;}};
+  }
+}
+/* ================= МОДУЛЬ: СПРАВОЧНИКИ ================= */
+const canEditDir=()=>can('directories','create')||can('directories','edit');
+
+function renderSettings(){
+  const dirs=[['partners','Партнёры'],['cities','Города'],['districts','Районы'],
+    ['couriers','Курьеры (заборщики)'],['order_couriers','Курьеры по заказам'],
+    ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
+    ['statuses','Статусы заявок'],['delivery','Тип доставки'],
+    ['courier_cities','Курьерские города'],['post_ips','ИП для Почты']];
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Справочники</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр справочников (редактирование — у администратора)'}</p></div></div>
+    <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
+    <div id="dirContent"></div>`;
+  $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;renderSettings();});
+  const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
+    order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,
+    delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp};
+  (map[S.dir]||dirPartners)();
+}
+function dirShell(title,count,onAdd,tableHtml){
+  $('dirContent').innerHTML=`<div class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span class="count">${count}</span>
+    ${can('directories','create')?`<button class="btn primary sm" id="dirAdd" style="margin-left:auto">＋ Добавить</button>`:''}</div>${tableHtml}</div>`;
+  if($('dirAdd'))$('dirAdd').onclick=onAdd;
+}
+function dirActions(id){
+  const e=can('directories','edit'),d=can('directories','delete');
+  if(!e&&!d)return '';
+  return `<div class="row-actions">${e?`<button class="btn sm ghost" data-e="${id}">Изм.</button>`:''}${d?`<button class="btn sm danger" data-d="${id}">✕</button>`:''}</div>`;
+}
+function bindDir(table,arrKey,modalFn,deps){
+  const wrap=$('dirContent');
+  wrap.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>modalFn(b.dataset.e));
+  wrap.querySelectorAll('[data-d]').forEach(b=>b.onclick=async()=>{
+    const arr=S[arrKey];const item=arr.find(x=>x.id===b.dataset.d);const label=item.name||item.fio||'запись';
+    if(!confirm(`Удалить «${label}»?`))return;
+    if(await dbDelete(table,b.dataset.d)){S[arrKey]=arr.filter(x=>x.id!==b.dataset.d);toast('Удалено');renderSettings();}
+  });
+}
+
+/* Партнёры */
+function dirPartners(){
+  const rows=[...S.partners].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>Наименование</th><th>Город</th><th>Район</th><th>Адрес</th><th>Телефон</th><th>Менеджер продаж</th><th>Обработчик</th><th></th></tr></thead><tbody>${rows.map(p=>`<tr>
+    <td><strong>${esc(p.name)}</strong></td><td><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
+    <td>${p.district_id?`<span class="pill moss">${esc(districtName(p.district_id))}</span>`:'—'}</td>
+    <td>${esc(p.address)||'—'}</td><td>${esc(phoneDisplay(p.phone))||'—'}</td>
+    <td>${p.sales_id?esc(salesName(p.sales_id)):'—'}</td><td>${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>
+    <td>${dirActions(p.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Список партнёров пуст</div></div>`;
+  dirShell('Справочник партнёров',S.partners.length,()=>partnerModal(),t);bindDir('partners','partners',partnerModal);
+}
+function partnerModal(id){
+  const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:''};
+  const dOpts=cid=>S.districts.filter(d=>!cid||d.city_id===cid);
+  showModal(id?'Партнёр':'Новый партнёр',`
+    <div class="field"><label>Наименование</label><input id="p_name" value="${esc(p.name)}"></div>
+    <div class="field"><label>Город</label><select id="p_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${p.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Район</label><select id="p_district"><option value="">—</option>${dOpts(p.city_id).map(d=>`<option value="${d.id}" ${p.district_id===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Адрес</label><input id="p_addr" value="${esc(p.address)}"></div>
+    <div class="field"><label>Телефон</label><input id="p_phone" inputmode="numeric"></div>
+    <div class="field"><label>Менеджер по продажам</label><select id="p_sales"><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${p.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+    <div class="field"><label>Обработчик</label><select id="p_proc"><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${p.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>`,
+    async()=>{const name=val('p_name').trim();if(!name){toast('Укажите наименование');return false;}
+      const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null};
+      if(id){const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(S.partners.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('partners',row);if(!u)return false;S.partners.push(u);}
+      toast('Сохранено');renderSettings();return true;});
+  attachPhone('p_phone',p.phone);
+  const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
+}
+/* Города */
+function dirCities(){
+  const rows=[...S.cities].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const t=rows.length?`<table><thead><tr><th>Город</th><th>Районов</th><th>Курьеров</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
+    <td><strong>${esc(c.name)}</strong></td><td>${S.districts.filter(d=>d.city_id===c.id).length}</td>
+    <td>${S.couriers.filter(k=>k.city_id===c.id).length}</td><td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет городов</div></div>`;
+  dirShell('Справочник городов',S.cities.length,()=>cityModal(),t);bindDir('cities','cities',cityModal);
+}
+function cityModal(id){const c=id?S.cities.find(x=>x.id===id):{name:''};
+  showModal(id?'Город':'Новый город',`<div class="field"><label>Название города</label><input id="c_name" value="${esc(c.name)}"></div>`,
+    async()=>{const name=val('c_name').trim();if(!name){toast('Укажите название');return false;}
+      if(id){const u=await dbUpdate('cities',id,{name});if(!u)return false;Object.assign(S.cities.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('cities',{name});if(!u)return false;S.cities.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+/* Районы */
+function dirDistricts(){
+  const rows=[...S.districts].sort((a,b)=>cityName(a.city_id).localeCompare(cityName(b.city_id))||(a.name||'').localeCompare(b.name||''));
+  const t=rows.length?`<table><thead><tr><th>Район</th><th>Город</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr>
+    <td><strong>${esc(d.name)}</strong></td><td><span class="pill gold">${esc(cityName(d.city_id))}</span></td><td>${dirActions(d.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет районов</div></div>`;
+  dirShell('Справочник районов',S.districts.length,()=>districtModal(),t);bindDir('districts','districts',districtModal);
+}
+function districtModal(id){const d=id?S.districts.find(x=>x.id===id):{name:'',city_id:''};
+  if(!S.cities.length){toast('Сначала добавьте город');return;}
+  showModal(id?'Район':'Новый район',`
+    <div class="field"><label>Название района</label><input id="d_name" value="${esc(d.name)}"></div>
+    <div class="field"><label>Город</label><select id="d_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>`,
+    async()=>{const name=val('d_name').trim();if(!name){toast('Укажите название');return false;}if(!val('d_city')){toast('Выберите город');return false;}
+      const row={name,city_id:val('d_city')};
+      if(id){const u=await dbUpdate('districts',id,row);if(!u)return false;Object.assign(S.districts.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('districts',row);if(!u)return false;S.districts.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+/* Курьеры-заборщики */
+function dirCouriers(){
+  const rows=[...S.couriers].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
+  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Город</th><th>Район</th><th>Номер</th><th>Уд. личности</th><th>Аккаунт</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
+    <td><strong>${esc(c.fio)}</strong></td><td><span class="pill gold">${esc(cityName(c.city_id))}</span></td>
+    <td>${c.district_id?`<span class="pill moss">${esc(districtName(c.district_id))}</span>`:'—'}</td>
+    <td>${esc(phoneDisplay(c.phone))||'—'}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
+    <td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Нет курьеров</div></div>`;
+  dirShell('Справочник курьеров (заборщики)',S.couriers.length,()=>courierModal(),t);bindDir('couriers','couriers',courierModal);
+}
+function courierModal(id){
+  const c=id?S.couriers.find(x=>x.id===id):{fio:'',city_id:'',district_id:'',phone:'',id_doc:'',account_id:''};
+  if(!S.cities.length){toast('Сначала добавьте город');return;}
+  const dOpts=cid=>S.districts.filter(d=>!cid||d.city_id===cid);
+  showModal(id?'Курьер':'Новый курьер',`
+    <div class="field"><label>ФИО</label><input id="k_fio" value="${esc(c.fio)}"></div>
+    <div class="field"><label>Город</label><select id="k_city"><option value="">—</option>${S.cities.map(ct=>`<option value="${ct.id}" ${c.city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Район</label><select id="k_district"><option value="">—</option>${dOpts(c.city_id).map(d=>`<option value="${d.id}" ${c.district_id===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Номер телефона</label><input id="k_phone" inputmode="numeric"></div>
+    <div class="field"><label>Данные уд. личности</label><textarea id="k_id" rows="2">${esc(c.id_doc)}</textarea></div>
+    ${courierAccountField('k_account',c.account_id)}`,
+    async()=>{const fio=val('k_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('k_city')){toast('Выберите город');return false;}
+      const row={fio,city_id:val('k_city'),district_id:val('k_district')||null,phone:phoneVal('k_phone'),id_doc:val('k_id').trim(),account_id:val('k_account')||null};
+      if(id){const u=await dbUpdate('couriers',id,row);if(!u)return false;Object.assign(S.couriers.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('couriers',row);if(!u)return false;S.couriers.push(u);}
+      toast('Сохранено');renderSettings();return true;});
+  attachPhone('k_phone',c.phone);
+  const cs=$('k_city');cs.onchange=()=>{$('k_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
+}
+/* Курьеры по заказам */
+function dirOrderCouriers(){
+  const rows=[...S.order_couriers].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
+  const t=rows.length?`<div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Город</th><th>Номер</th><th>Уд. личности</th><th>Аккаунт</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr>
+    <td><strong>${esc(c.fio)}</strong></td><td><span class="pill gold">${esc(cityName(c.city_id))}</span></td>
+    <td>${esc(phoneDisplay(c.phone))||'—'}</td><td>${esc(c.id_doc)||'—'}</td><td>${c.account_id?esc(accountEmail(c.account_id)):'—'}</td>
+    <td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="big">Нет курьеров по заказам</div></div>`;
+  dirShell('Справочник курьеров по заказам',S.order_couriers.length,()=>orderCourierModal(),t);bindDir('order_couriers','order_couriers',orderCourierModal);
+}
+function orderCourierModal(id){
+  const c=id?S.order_couriers.find(x=>x.id===id):{fio:'',city_id:'',phone:'',id_doc:'',account_id:''};
+  if(!S.cities.length){toast('Сначала добавьте город');return;}
+  showModal(id?'Курьер по заказам':'Новый курьер по заказам',`
+    <div class="field"><label>ФИО</label><input id="oc_fio" value="${esc(c.fio)}"></div>
+    <div class="field"><label>Город</label><select id="oc_city"><option value="">—</option>${S.cities.map(ct=>`<option value="${ct.id}" ${c.city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Номер телефона</label><input id="oc_phone" inputmode="numeric"></div>
+    <div class="field"><label>Данные уд. личности</label><textarea id="oc_id" rows="2">${esc(c.id_doc)}</textarea></div>
+    ${courierAccountField('oc_account',c.account_id)}`,
+    async()=>{const fio=val('oc_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('oc_city')){toast('Выберите город');return false;}
+      const row={fio,city_id:val('oc_city'),phone:phoneVal('oc_phone'),id_doc:val('oc_id').trim(),account_id:val('oc_account')||null};
+      if(id){const u=await dbUpdate('order_couriers',id,row);if(!u)return false;Object.assign(S.order_couriers.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('order_couriers',row);if(!u)return false;S.order_couriers.push(u);}
+      toast('Сохранено');renderSettings();return true;});
+  attachPhone('oc_phone',c.phone);
+}
+// поле привязки аккаунта (список профилей-курьеров), доступно только админу
+function accountEmail(accId){const p=S.profiles.find(x=>x.id===accId);return p?(p.email||p.full_name||'аккаунт'):'аккаунт';}
+function courierAccountField(fieldId,current){
+  if(!isAdmin())return '';
+  const couriersProfiles=S.profiles.filter(p=>p.role==='courier');
+  return `<div class="field"><label>Привязанный аккаунт (логин курьера)</label>
+    <select id="${fieldId}"><option value="">— не привязан —</option>${couriersProfiles.map(p=>`<option value="${p.id}" ${current===p.id?'selected':''}>${esc(p.email||p.full_name)}</option>`).join('')}</select>
+    <span class="hint">Создайте пользователя-курьера во вкладке «Пользователи», затем привяжите здесь.</span></div>`;
+}
+/* Менеджеры */
+function managersTable(key,emptyText,onAdd,modalFn){
+  const rows=[...S[key]].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
+  const t=rows.length?`<table><thead><tr><th>ФИО</th><th>Номер телефона</th><th></th></tr></thead><tbody>${rows.map(m=>`<tr>
+    <td><strong>${esc(m.fio)}</strong></td><td>${esc(phoneDisplay(m.phone))||'—'}</td><td>${dirActions(m.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Список пуст</div>${emptyText}</div>`;
+  return t;
+}
+function dirSales(){const t=managersTable('sales','Добавьте менеджеров по продажам.');
+  dirShell('Менеджеры по продажам',S.sales.length,()=>managerModal('sales','sales_managers'),t);bindDir('sales_managers','sales',id=>managerModal('sales','sales_managers',id));}
+function dirProcessors(){const t=managersTable('processors','Добавьте обработчиков.');
+  dirShell('Менеджеры-обработчики',S.processors.length,()=>managerModal('processors','processors'),t);bindDir('processors','processors',id=>managerModal('processors','processors',id));}
+function managerModal(arrKey,table,id){
+  const m=id?S[arrKey].find(x=>x.id===id):{fio:'',phone:''};
+  showModal(id?'Изменить':'Новая запись',`
+    <div class="field"><label>ФИО</label><input id="mg_fio" value="${esc(m.fio)}"></div>
+    <div class="field"><label>Номер телефона</label><input id="mg_phone" inputmode="numeric"></div>`,
+    async()=>{const fio=val('mg_fio').trim();if(!fio){toast('Укажите ФИО');return false;}
+      const row={fio,phone:phoneVal('mg_phone')};
+      if(id){const u=await dbUpdate(table,id,row);if(!u)return false;Object.assign(S[arrKey].find(x=>x.id===id),u);}
+      else{const u=await dbInsert(table,row);if(!u)return false;S[arrKey].push(u);}
+      toast('Сохранено');renderSettings();return true;});
+  attachPhone('mg_phone',m.phone);
+}
+/* Статусы */
+function dirStatuses(){
+  const rows=S.statuses;
+  const t=rows.length?`<table><thead><tr><th>Статус</th><th>Заявок</th><th>Заказов</th><th></th></tr></thead><tbody>${rows.map(s=>`<tr>
+    <td>${statusBadge(s.id)}</td><td>${S.pickups.filter(p=>p.status_id===s.id).length}</td><td>${S.orders.filter(o=>o.status_id===s.id).length}</td><td>${dirActions(s.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет статусов</div></div>`;
+  dirShell('Справочник статусов',S.statuses.length,()=>statusModal(),t);bindDir('statuses','statuses',statusModal);
+}
+function statusModal(id){const s=id?S.statuses.find(x=>x.id===id):{name:'',color:'#c08a2d'};
+  showModal(id?'Статус':'Новый статус',`
+    <div class="field"><label>Название статуса</label><input id="s_name" value="${esc(s.name)}"></div>
+    <div class="field"><label>Цвет метки</label><input type="color" id="s_color" value="${esc(s.color||'#c08a2d')}" style="height:44px;padding:4px;cursor:pointer"></div>`,
+    async()=>{const name=val('s_name').trim();if(!name){toast('Укажите название');return false;}
+      const row={name,color:val('s_color')||'#c08a2d'};
+      if(id){const u=await dbUpdate('statuses',id,row);if(!u)return false;Object.assign(S.statuses.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('statuses',row);if(!u)return false;S.statuses.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+/* Тип доставки */
+function dirDelivery(){
+  const rows=[...S.delivery].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const t=rows.length?`<table><thead><tr><th>Тип доставки</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr><td><strong>${esc(d.name)}</strong></td><td>${dirActions(d.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет типов</div></div>`;
+  dirShell('Типы доставки',S.delivery.length,()=>deliveryModal(),t);bindDir('delivery_types','delivery',deliveryModal);
+}
+function deliveryModal(id){const d=id?S.delivery.find(x=>x.id===id):{name:''};
+  showModal(id?'Тип доставки':'Новый тип',`<div class="field"><label>Наименование</label><input id="dl_name" value="${esc(d.name)}"></div>`,
+    async()=>{const name=val('dl_name').trim();if(!name){toast('Укажите наименование');return false;}
+      if(id){const u=await dbUpdate('delivery_types',id,{name});if(!u)return false;Object.assign(S.delivery.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('delivery_types',{name});if(!u)return false;S.delivery.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+/* Курьерские города */
+function dirCourierCities(){
+  const rows=[...S.courier_cities].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const t=rows.length?`<table><thead><tr><th>Город</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет городов</div></div>`;
+  dirShell('Курьерские города',S.courier_cities.length,()=>courierCityModal(),t);bindDir('courier_cities','courier_cities',courierCityModal);
+}
+function courierCityModal(id){const c=id?S.courier_cities.find(x=>x.id===id):{name:''};
+  showModal(id?'Курьерский город':'Новый город',`<div class="field"><label>Название города</label><input id="cc_name" value="${esc(c.name)}"></div>`,
+    async()=>{const name=val('cc_name').trim();if(!name){toast('Укажите название');return false;}
+      if(id){const u=await dbUpdate('courier_cities',id,{name});if(!u)return false;Object.assign(S.courier_cities.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('courier_cities',{name});if(!u)return false;S.courier_cities.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+/* ИП для Почты */
+function dirPostIp(){
+  const rows=[...S.post_ips].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const t=rows.length?`<table><thead><tr><th>ИП</th><th></th></tr></thead><tbody>${rows.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${dirActions(c.id)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty"><div class="big">Нет записей</div></div>`;
+  dirShell('ИП для Почты',S.post_ips.length,()=>postIpModal(),t);bindDir('post_ips','post_ips',postIpModal);
+}
+function postIpModal(id){const c=id?S.post_ips.find(x=>x.id===id):{name:''};
+  showModal(id?'ИП для Почты':'Новое ИП',`<div class="field"><label>Наименование</label><input id="ip_name" value="${esc(c.name)}"></div>`,
+    async()=>{const name=val('ip_name').trim();if(!name){toast('Укажите наименование');return false;}
+      if(id){const u=await dbUpdate('post_ips',id,{name});if(!u)return false;Object.assign(S.post_ips.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('post_ips',{name});if(!u)return false;S.post_ips.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+
+/* ================= МОДУЛЬ: ПОЛЬЗОВАТЕЛИ И РОЛИ ================= */
+const MODULES=[['pickups','Заявки'],['orders','Заказы'],['directories','Справочники'],['users','Пользователи']];
+const ACTIONS=[['view','Просмотр'],['create','Создание'],['edit','Редактирование'],['delete','Удаление']];
+let usersSub='staff'; // staff | roles
+
+function roleName(id){const r=S.roles.find(x=>x.id===id);return r?r.name:'—';}
+
+function renderUsers(){
+  if(!can('users','view')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div></div>';return;}
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Пользователи</h1><p>Сотрудники и роли с правами доступа</p></div></div>
+    <div class="subtabs">
+      <button data-us="staff" class="${usersSub==='staff'?'active':''}">Сотрудники</button>
+      <button data-us="roles" class="${usersSub==='roles'?'active':''}">Роли и права</button>
+    </div>
+    <div id="usersContent"></div>`;
+  $('main').querySelectorAll('[data-us]').forEach(b=>b.onclick=()=>{usersSub=b.dataset.us;renderUsers();});
+  if(usersSub==='roles') renderRoles(); else renderStaff();
+}
+
+/* ---- СОТРУДНИКИ ---- */
+function renderStaff(){
+  const rows=[...S.profiles].sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''));
+  $('usersContent').innerHTML=`<div class="panel">
+    <div class="panel-head"><h2>Сотрудники</h2><span class="count">${rows.length}</span>
+      ${can('users','create')?`<button class="btn primary sm" id="addStaff" style="margin-left:auto">＋ Добавить сотрудника</button>`:''}</div>
+    <div class="filters" style="background:var(--card);border-bottom:1px solid var(--line)">
+      <span style="font-size:13px;color:var(--muted)">«Добавить сотрудника» создаёт аккаунт с логином и паролем — сотрудник сразу сможет войти.</span>
+    </div>
+    <div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Логин (телефон)</th><th>Город</th><th>Должность</th><th>Роль</th><th></th></tr></thead>
+    <tbody>${rows.map(u=>`<tr>
+      <td><strong>${esc(u.full_name||'—')}</strong></td>
+      <td>${u.phone?esc(phoneDisplay(u.phone)):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
+      <td>${u.city_id?esc(cityName(u.city_id)):'—'}</td>
+      <td>${esc(u.position)||'—'}</td>
+      <td><span class="pill ${(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='admin'?'gold':'moss'}">${esc(u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'—'))}</span></td>
+      <td><div class="row-actions">
+        ${can('users','edit')?`<button class="btn sm ghost" data-uedit="${u.id}">Изменить</button>`:''}
+        ${can('users','delete')&&u.id!==S.me.id?`<button class="btn sm danger" data-udel="${u.id}">Удалить</button>`:''}
+      </div></td></tr>`).join('')}</tbody></table></div></div>`;
+  $('usersContent').querySelectorAll('[data-uedit]').forEach(b=>b.onclick=()=>staffModal(b.dataset.uedit));
+  $('usersContent').querySelectorAll('[data-udel]').forEach(b=>b.onclick=()=>delStaff(b.dataset.udel));
+  if($('addStaff'))$('addStaff').onclick=()=>createStaffModal();
+}
+function createStaffModal(){
+  showModal('Новый сотрудник',`
+    <div class="grid2">
+      <div class="field"><label>ФИО</label><input id="n_name" placeholder="Фамилия Имя"></div>
+      <div class="field"><label>Должность</label><input id="n_pos" placeholder="Напр. Оператор"></div>
+      <div class="field"><label>Телефон (логин)</label><input id="n_phone" inputmode="numeric"></div>
+      <div class="field"><label>Пароль</label><input id="n_pass" type="text" autocomplete="off" placeholder="мин. 6 символов"></div>
+      <div class="field"><label>Город</label><select id="n_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Роль</label><select id="n_role"><option value="">— не назначена —</option>${S.roles.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></div>
+      <div class="field full"><span class="hint">Сотрудник входит по номеру телефона и паролю. Пароль задаёте вы и передаёте ему.</span></div>
+    </div>`,
+    async()=>{
+      const phone=phoneVal('n_phone'),pass=val('n_pass'),name=val('n_name').trim();
+      if(phone.length!==10){toast('Телефон: ровно 10 цифр');return false;}
+      if(!pass||pass.length<6){toast('Пароль минимум 6 символов');return false;}
+      const roleId=val('n_role');
+      const baseType=(S.roles.find(r=>r.id===roleId)||{}).base_type||'';
+      const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
+      toast('Создаём сотрудника…');
+      const out=await callCreateUser({phone,password:pass,full_name:name,
+        city_id:val('n_city')||null,position:val('n_pos').trim(),role_id:roleId||null,role:legacy});
+      if(out.error){toast('Ошибка: '+out.error);return false;}
+      S.profiles=await dbList('profiles',{order:'created_at',asc:true});
+      toast('Сотрудник создан');renderUsers();return true;
+    });
+  attachPhone('n_phone','');
+}
+async function delStaff(id){
+  const u=S.profiles.find(x=>x.id===id);
+  if(!confirm(`Удалить карточку сотрудника «${u?.full_name||u?.email||''}»?\n\nВнимание: это удалит профиль, но сам аккаунт входа в Supabase останется. Полное удаление аккаунта делается в Supabase → Authentication.`))return;
+  if(await dbDelete('profiles',id)){S.profiles=S.profiles.filter(x=>x.id!==id);toast('Профиль удалён');renderUsers();}
+}
+function staffModal(id){
+  const u=S.profiles.find(x=>x.id===id);if(!u)return;
+  showModal('Карточка сотрудника',`
+    <div class="grid2">
+      <div class="field full"><label>Email (логин)</label><input value="${esc(u.email||'')}" readonly></div>
+      <div class="field"><label>ФИО</label><input id="u_name" value="${esc(u.full_name||'')}"></div>
+      <div class="field"><label>Телефон</label><input id="u_phone" inputmode="numeric"></div>
+      <div class="field"><label>Город</label><select id="u_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${u.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Должность</label><input id="u_pos" value="${esc(u.position||'')}"></div>
+      <div class="field full"><label>Роль</label><select id="u_role">
+        <option value="">— не назначена —</option>
+        ${S.roles.map(r=>`<option value="${r.id}" ${u.role_id===r.id?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
+        <span class="hint">Для курьеров: назначьте роль с базовым типом «Курьер», затем привяжите этот аккаунт в справочнике курьеров.</span></div>
+    </div>`,
+    async()=>{
+      const roleId=val('u_role');
+      const baseType=(S.roles.find(r=>r.id===roleId)||{}).base_type||'';
+      // синхронизируем старое текстовое поле role для серверного RLS (current_role_name)
+      const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
+      const row={full_name:val('u_name').trim(),phone:phoneVal('u_phone'),city_id:val('u_city')||null,
+        position:val('u_pos').trim(),role_id:roleId||null,role:legacy};
+      const u2=await dbUpdate('profiles',id,row);if(!u2)return false;Object.assign(u,u2);
+      if(id===S.me.id){await loadMe({user:{id:S.me.id,email:S.me.email}});buildNav();}
+      toast('Сохранено');renderUsers();return true;});
+  attachPhone('u_phone',u.phone);
+}
+
+/* ---- РОЛИ И ПРАВА ---- */
+function renderRoles(){
+  const rows=[...S.roles].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const baseLabel={admin:'Админ',staff:'Персонал',courier:'Курьер'};
+  $('usersContent').innerHTML=`<div class="panel">
+    <div class="panel-head"><h2>Роли</h2><span class="count">${rows.length}</span>
+      ${can('users','create')?`<button class="btn primary sm" id="addRole" style="margin-left:auto">＋ Добавить роль</button>`:''}</div>
+    <div class="table-scroll"><table><thead><tr><th>Роль</th><th>Базовый тип</th><th>Заявки</th><th>Заказы</th><th>Справочники</th><th>Пользователи</th><th></th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td><span class="pill ${r.base_type==='admin'?'gold':r.base_type==='courier'?'':'moss'}">${baseLabel[r.base_type]||r.base_type}</span></td>
+      ${MODULES.map(([m])=>`<td>${permSummary(r.perms&&r.perms[m])}</td>`).join('')}
+      <td><div class="row-actions">
+        ${can('users','edit')?`<button class="btn sm ghost" data-redit="${r.id}">Изменить</button>`:''}
+        ${can('users','delete')?`<button class="btn sm danger" data-rdel="${r.id}">Удалить</button>`:''}
+      </div></td></tr>`).join('')}</tbody></table></div></div>`;
+  if($('addRole'))$('addRole').onclick=()=>roleModal();
+  $('usersContent').querySelectorAll('[data-redit]').forEach(b=>b.onclick=()=>roleModal(b.dataset.redit));
+  $('usersContent').querySelectorAll('[data-rdel]').forEach(b=>b.onclick=()=>delRole(b.dataset.rdel));
+}
+function permSummary(p){
+  if(!p||!p.view)return '<span style="color:var(--muted)">нет</span>';
+  const parts=[];if(p.create)parts.push('С');if(p.edit)parts.push('Р');if(p.delete)parts.push('У');
+  return parts.length?`<span class="pill moss">просмотр +${parts.join('')}</span>`:'<span class="pill">просмотр</span>';
+}
+async function delRole(id){
+  const r=S.roles.find(x=>x.id===id);
+  const used=S.profiles.filter(p=>p.role_id===id).length;
+  if(used){toast(`Роль используется у ${used} польз. Сначала смените им роль.`);return;}
+  if(!confirm(`Удалить роль «${r?.name||''}»?`))return;
+  if(await dbDelete('roles',id)){S.roles=S.roles.filter(x=>x.id!==id);toast('Роль удалена');renderUsers();}
+}
+function roleModal(id){
+  const r=id?S.roles.find(x=>x.id===id):{name:'',base_type:'staff',perms:{}};
+  const p=r.perms||{};
+  const matrix=MODULES.map(([m,mlabel])=>{
+    const mp=p[m]||{};
+    return `<tr><td style="font-weight:600">${mlabel}</td>${ACTIONS.map(([a])=>`<td style="text-align:center"><input type="checkbox" data-perm="${m}.${a}" ${mp[a]?'checked':''}></td>`).join('')}</tr>`;
+  }).join('');
+  showModal(id?'Роль':'Новая роль',`
+    <div class="field"><label>Название роли</label><input id="r_name" value="${esc(r.name)}" placeholder="Напр. Оператор склада"></div>
+    <div class="field"><label>Базовый тип (для безопасности)</label>
+      <select id="r_base">
+        <option value="admin" ${r.base_type==='admin'?'selected':''}>Админ — полный доступ + управление</option>
+        <option value="staff" ${r.base_type==='staff'?'selected':''}>Персонал — видит все данные в разрешённых модулях</option>
+        <option value="courier" ${r.base_type==='courier'?'selected':''}>Курьер — видит только свои заявки/заказы</option>
+      </select>
+      <span class="hint">Базовый тип задаёт серверную защиту. «Курьер» автоматически ограничивает видимость только своими записями.</span></div>
+    <div class="field"><label>Права по модулям</label>
+      <table style="font-size:13px"><thead><tr><th></th>${ACTIONS.map(([,al])=>`<th style="text-align:center;font-size:11px;text-transform:uppercase;color:var(--muted)">${al}</th>`).join('')}</tr></thead>
+      <tbody>${matrix}</tbody></table></div>`,
+    async()=>{
+      const name=val('r_name').trim();if(!name){toast('Укажите название');return false;}
+      const perms={};
+      MODULES.forEach(([m])=>{perms[m]={};ACTIONS.forEach(([a])=>{const el=document.querySelector(`[data-perm="${m}.${a}"]`);perms[m][a]=!!(el&&el.checked);});});
+      const row={name,base_type:val('r_base'),perms};
+      if(id){const u=await dbUpdate('roles',id,row);if(!u)return false;Object.assign(S.roles.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('roles',row);if(!u)return false;S.roles.push(u);}
+      // если изменили свою роль — пересчитать права
+      if(id&&S.me.role_id===id)computeMyPerms();
+      toast('Сохранено');renderUsers();return true;});
+}
+</script>
+<!-- PART2 -->
+</body>
+</html>
