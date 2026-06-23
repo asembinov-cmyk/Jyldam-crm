@@ -93,6 +93,15 @@
     color:var(--muted);padding:11px 16px;border-bottom:1px solid var(--line);white-space:nowrap;
     background:linear-gradient(var(--paper),var(--card))}
   tbody td{padding:12px 16px;border-bottom:1px solid #eee6d6;vertical-align:middle}
+  /* Десктоп: читабельные колонки заявок/заказов */
+  @media (min-width:761px){
+    .resp-table td[data-label="Номер"]{white-space:nowrap}
+    .resp-table td[data-label="Адрес"]{min-width:200px;max-width:320px}
+    .resp-table td[data-label="Наименование"]{min-width:140px}
+    .resp-table td[data-label="Трек-код"]{white-space:nowrap}
+    .resp-table td[data-label="Дата"],.resp-table td[data-label="Дата забора"]{white-space:nowrap}
+    .resp-table td[data-label="Курьер"],.resp-table td[data-label="Менеджер продаж"],.resp-table td[data-label="Обработчик"]{white-space:nowrap}
+  }
   tbody tr:last-child td{border-bottom:none}
   tbody tr:hover{background:rgba(192,138,45,.05)}
   .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
