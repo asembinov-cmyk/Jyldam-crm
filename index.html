@@ -1157,7 +1157,7 @@ function courierModal(id){
     <div class="field"><label>Район</label><select id="k_district"><option value="">—</option>${dOpts(c.city_id).map(d=>`<option value="${d.id}" ${c.district_id===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Номер телефона</label><input id="k_phone" inputmode="numeric"></div>
     <div class="field"><label>Данные уд. личности</label><textarea id="k_id" rows="2">${esc(c.id_doc)}</textarea></div>
-    ${courierAccountField('k_account',c.account_id)}`,
+    ${courierAccountField('k_account',c.account_id,'забор')}`,
     async()=>{const fio=val('k_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('k_city')){toast('Выберите город');return false;}
       const row={fio,city_id:val('k_city'),district_id:val('k_district')||null,phone:phoneVal('k_phone'),id_doc:val('k_id').trim(),account_id:val('k_account')||null};
       if(id){const u=await dbUpdate('couriers',id,row);if(!u)return false;Object.assign(S.couriers.find(x=>x.id===id),u);}
@@ -1186,7 +1186,7 @@ function orderCourierModal(id){
     <div class="field"><label>Курьерский город</label><select id="oc_city"><option value="">—</option>${S.courier_cities.map(ct=>`<option value="${ct.id}" ${c.courier_city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Номер телефона</label><input id="oc_phone" inputmode="numeric"></div>
     <div class="field"><label>Данные уд. личности</label><textarea id="oc_id" rows="2">${esc(c.id_doc)}</textarea></div>
-    ${courierAccountField('oc_account',c.account_id)}`,
+    ${courierAccountField('oc_account',c.account_id,'заказ|доставщик|доставк')}`,
     async()=>{const fio=val('oc_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('oc_city')){toast('Выберите курьерский город');return false;}
       const row={fio,courier_city_id:val('oc_city'),phone:phoneVal('oc_phone'),id_doc:val('oc_id').trim(),account_id:val('oc_account')||null};
       if(id){const u=await dbUpdate('order_couriers',id,row);if(!u)return false;Object.assign(S.order_couriers.find(x=>x.id===id),u);}
@@ -1196,12 +1196,30 @@ function orderCourierModal(id){
 }
 // поле привязки аккаунта (список профилей-курьеров), доступно только админу
 function accountEmail(accId){const p=S.profiles.find(x=>x.id===accId);return p?(p.email||p.full_name||'аккаунт'):'аккаунт';}
-function courierAccountField(fieldId,current){
+// является ли профиль курьером (по старому полю role или по базовому типу роли)
+function isCourierProfile(p){
+  if(p.role==='courier')return true;
+  if(p.role_id){const r=S.roles.find(x=>x.id===p.role_id);if(r&&r.base_type==='courier')return true;}
+  return false;
+}
+// courierAccountField(fieldId,current,prefer): prefer — слово в должности, чьи профили показываем сверху (напр. 'забор')
+function courierAccountField(fieldId,current,prefer){
   if(!isAdmin())return '';
-  const couriersProfiles=S.profiles.filter(p=>p.role==='courier');
+  let list=S.profiles.filter(isCourierProfile);
+  if(prefer){
+    const rx=new RegExp(prefer,'i');
+    list=list.slice().sort((a,b)=>{
+      const am=rx.test(a.position||'')?0:1, bm=rx.test(b.position||'')?0:1;
+      if(am!==bm)return am-bm; // совпавшие по должности — выше
+      return (a.full_name||a.email||'').localeCompare(b.full_name||b.email||'');
+    });
+  }
+  const optLabel=p=>{const who=p.full_name||p.email||'аккаунт';const pos=p.position?` · ${p.position}`:'';return esc(who+pos);};
+  const hint=prefer?'Показаны все пользователи-курьеры; с подходящей должностью — сверху. Нужного нет? Создайте его во вкладке «Пользователи».'
+                   :'Создайте пользователя-курьера во вкладке «Пользователи», затем привяжите здесь.';
   return `<div class="field"><label>Привязанный аккаунт (логин курьера)</label>
-    <select id="${fieldId}"><option value="">— не привязан —</option>${couriersProfiles.map(p=>`<option value="${p.id}" ${current===p.id?'selected':''}>${esc(p.email||p.full_name)}</option>`).join('')}</select>
-    <span class="hint">Создайте пользователя-курьера во вкладке «Пользователи», затем привяжите здесь.</span></div>`;
+    <select id="${fieldId}"><option value="">— не привязан —</option>${list.map(p=>`<option value="${p.id}" ${current===p.id?'selected':''}>${optLabel(p)}</option>`).join('')}</select>
+    <span class="hint">${hint}</span></div>`;
 }
 /* Менеджеры */
 function managerCols(){return [
