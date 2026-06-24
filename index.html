@@ -949,7 +949,9 @@ function renderDashboard(){
 }
 
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
-let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:'',dateTo:''};
+// локальная сегодняшняя дата YYYY-MM-DD (с учётом часового пояса, без сдвига в UTC)
+function localToday(){const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
+let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:localToday(),dateTo:localToday()};
 
 function visiblePickups(){
   if(isCourier()){
