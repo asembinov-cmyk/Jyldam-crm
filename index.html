@@ -1359,7 +1359,6 @@ function orderModal(id,readonly){
     <div class="grid2">
       <div class="field"><label>ID заказа</label><input value="${esc(code)}" readonly style="font-family:'Fraunces',serif;font-weight:900;letter-spacing:1px"></div>
       <div class="field"><label>Дата забора</label><input type="date" id="o_pickup" value="${esc(d.pickup_date||'')}" ${dis}></div>
-      <div class="field"><label>Партнёр</label><select id="o_partner" ${dis}><option value="">—</option>${S.partners.map(p=>`<option value="${p.id}" ${d.partner_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Отправитель</label><input id="o_sender" value="${esc(d.sender)}" ${dis}></div>
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента</label><input id="o_phone" inputmode="numeric" ${dis}></div>
@@ -1367,24 +1366,23 @@ function orderModal(id,readonly){
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
-      <div class="field"><label>Кол-во товаров</label><input type="number" min="0" id="o_qty" value="${esc(d.qty)}" ${dis}></div>
       <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.statuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
-      <div class="field"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
+      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
+      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
       <div class="field"><label>Менеджер по продажам</label><select id="o_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="o_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Стоимость доставки (₸)</label><input type="number" min="0" id="o_cost" value="${esc(d.cost)}" ${dis}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span></div>
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
-      <div class="field full"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
       ${orderPhotoFieldHtml(o,!ro)}
     </div>`,
     ro?null:async()=>{
-      const row={code,partner_id:val('o_partner')||null,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
+      const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
         weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),phone:phoneVal('o_phone'),
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
-        qty:parseInt(val('o_qty')||'0',10)||0,status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
+        status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
         cost:val('o_cost')?parseFloat(val('o_cost')):0,pay_date:val('o_pay')||null,post_ip_id:val('o_ip')||null,
         order_courier_id:val('o_ocourier')||null};
@@ -1407,16 +1405,26 @@ function orderModal(id,readonly){
       if(opts.find(c=>c.id===cur))sel.value=cur; // сохранить выбор, если курьер из этого города
     };
     const applyTariff=()=>{
-      const pt=S.partners.find(x=>x.id===$('o_partner').value);if(!pt)return;
+      // партнёр определяется по имени отправителя
+      const pt=S.partners.find(x=>x.name===($('o_sender').value||'').trim());if(!pt)return;
       const courier=isCourierDelivery($('o_delivery').value);
       const t=courier?pt.tariff_courier:pt.tariff_post;
       if(t!=null&&t!==''){$('o_cost').value=t;}
     };
-    const ds=$('o_delivery');ds.onchange=()=>{const f=$('cityField');if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city')){$('o_city').value='';fillCouriers('');}}applyTariff();};
+    // показать/скрыть поля, относящиеся только к почтовой доставке
+    const toggleMailFields=()=>{
+      const courier=isCourierDelivery($('o_delivery').value);
+      document.querySelectorAll('.mail-only').forEach(el=>el.style.display=courier?'none':'');
+    };
+    const ds=$('o_delivery');ds.onchange=()=>{
+      const f=$('cityField');
+      if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city')){$('o_city').value='';fillCouriers('');}}
+      toggleMailFields();applyTariff();
+    };
     const cityEl=$('o_city');if(cityEl)cityEl.onchange=()=>fillCouriers(cityEl.value);
-    const ps=$('o_partner');ps.onchange=()=>{const pt=S.partners.find(x=>x.id===ps.value);if(pt){
-      if(!$('o_sender').value.trim())$('o_sender').value=pt.name;
-      if(pt.sales_id)$('o_sales').value=pt.sales_id;if(pt.processor_id)$('o_proc').value=pt.processor_id;}
+    // при изменении отправителя — подтянуть данные партнёра
+    const ss=$('o_sender');if(ss)ss.onchange=()=>{const pt=S.partners.find(x=>x.name===ss.value.trim());if(pt){
+      if(pt.sales_id&&$('o_sales'))$('o_sales').value=pt.sales_id;if(pt.processor_id&&$('o_proc'))$('o_proc').value=pt.processor_id;}
       applyTariff();};
   }
 }
