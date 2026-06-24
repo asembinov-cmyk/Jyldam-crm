@@ -398,9 +398,13 @@ function loadNav(){
 async function dbList(table,opts={}){
   let q=sb.from(table).select('*');
   if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
-  const {data,error}=await q;
-  if(error){console.error(table,error);return [];}
-  return data||[];
+  try{
+    // таймаут 12с: зависший запрос (RLS и т.п.) не блокирует вход
+    const res=await Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000))]);
+    const {data,error}=res;
+    if(error){console.error(table,error);return [];}
+    return data||[];
+  }catch(e){console.error('dbList',table,e&&e.message);return [];}
 }
 async function dbInsert(table,row){
   const {data,error}=await sb.from(table).insert(row).select().single();
@@ -568,10 +572,15 @@ async function enterApp(){
   const roleRow=S.me.role_id?S.roles.find(r=>r.id===S.me.role_id):null;
   $('uRole').textContent=roleRow?roleRow.name:(ROLE_LABEL[S.me.role]||S.me.role||'—');
   $('main').innerHTML='<div class="loading">Загружаем данные…</div>';
-  await loadAll();
-  loadNav();
-  buildNav();
-  render();
+  try{ await loadAll(); }catch(e){ console.error('loadAll',e); }
+  try{ loadNav(); }catch(e){ console.error('loadNav',e); }
+  try{ buildNav(); }catch(e){ console.error('buildNav',e); }
+  try{ render(); }catch(e){
+    console.error('render',e);
+    // если сохранённая вкладка битая — сбрасываем и пробуем заново
+    S.tab='dashboard';
+    try{ buildNav(); render(); }catch(_){ $('main').innerHTML='<div class="empty"><div class="big">Не удалось открыть раздел</div>Обновите страницу.</div>'; }
+  }
   hideSplash();
 }
 
