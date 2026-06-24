@@ -1472,6 +1472,19 @@ function dirGrid(cfg){
   const arr=S[cfg.arrKey]||[];
   if(!dirFilters[cfg.arrKey])dirFilters[cfg.arrKey]={};
   const f=dirFilters[cfg.arrKey];
+  // если выбранное значение select-фильтра больше не доступно с учётом других фильтров — сбрасываем
+  cfg.cols.forEach(c=>{
+    if(c.filter!=='select'||!f[c.key])return;
+    const base=arr.filter(row=>cfg.cols.every(oc=>{
+      if(oc.key===c.key)return true;
+      const ov=f[oc.key];if(!ov)return true;
+      const t=(oc.text?oc.text(row):'')+'';
+      if(oc.filter==='select')return t===ov;
+      return t.toLowerCase().includes(ov.toLowerCase());
+    }));
+    const vals=new Set(base.map(r=>c.text?c.text(r):'').filter(Boolean));
+    if(!vals.has(f[c.key]))f[c.key]='';
+  });
   // применяем фильтры
   const filtered=arr.filter(row=>cfg.cols.every(c=>{
     const fv=f[c.key];if(!fv)return true;
@@ -1483,7 +1496,18 @@ function dirGrid(cfg){
   // строка фильтров
   const filterRow=`<tr class="filter-row">${cfg.cols.map(c=>{
     if(c.filter==='select'){
-      const vals=[...new Set(arr.map(r=>c.text?c.text(r):'').filter(Boolean))].sort();
+      // опции строим из строк, прошедших фильтры ОСТАЛЬНЫХ колонок,
+      // чтобы, например, при выбранном городе показывались только его районы
+      const base=arr.filter(row=>cfg.cols.every(oc=>{
+        if(oc.key===c.key)return true; // свой фильтр не учитываем
+        const ov=f[oc.key];if(!ov)return true;
+        const t=(oc.text?oc.text(row):'')+'';
+        if(oc.filter==='select')return t===ov;
+        return t.toLowerCase().includes(ov.toLowerCase());
+      }));
+      const vals=[...new Set(base.map(r=>c.text?c.text(r):'').filter(Boolean))].sort();
+      // если выбранного значения больше нет среди доступных — сбрасываем
+      if(f[c.key]&&!vals.includes(f[c.key]))f[c.key]='';
       return `<th><select class="dir-filter" data-fk="${c.key}"><option value="">Все</option>${vals.map(v=>`<option value="${esc(v)}" ${f[c.key]===v?'selected':''}>${esc(v)}</option>`).join('')}</select></th>`;
     }
     if(c.filter==='none')return `<th></th>`;
