@@ -1390,8 +1390,6 @@ function renderOrders(mode){
       <div id="orderTable"></div>
     </div>`;
   if($('newOrder'))$('newOrder').onclick=()=>orderModal();
-  // чекбокс «выбрать все»
-  if($('ketChkAll'))$('ketChkAll').onchange=e=>{document.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);};
   // массовая отправка отмеченных заказов в KET
   if($('ketSendSel'))$('ketSendSel').onclick=async()=>{
     const ids=[...document.querySelectorAll('.ketChk:checked')].map(c=>c.dataset.ketchk);
@@ -1503,6 +1501,9 @@ function drawOrders(){
       const badge=sel.parentElement.querySelector('.status-badge');
       if(badge){badge.textContent=o.status_id?(so.name||'—'):'— нет —';badge.style.color=so.color||'var(--muted)';badge.style.background=so.color?(so.color+'1a'):'transparent';badge.style.borderColor=so.color||'var(--line)';}
       toast('Статус обновлён');}});
+  // чекбокс «выбрать все» (навешиваем здесь, т.к. таблица перерисовывается при фильтрах)
+  const chkAll=$('ketChkAll');
+  if(chkAll)chkAll.onchange=e=>{el.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);};
 }
 /* Компактные карточки заказов для курьера: свёрнуто — ID/ФИО/телефон/адрес/сумма/статус, по тапу разворачивается остальное */
 function drawCourierOrderCards(el,rows){
