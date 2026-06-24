@@ -182,6 +182,16 @@
     place-items:center;z-index:100;padding:20px}
   .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:560px;
     box-shadow:0 30px 80px -30px rgba(20,17,13,.6);max-height:90vh;overflow:auto}
+  .modal-wide{max-width:920px}
+  /* двухколоночный макет карточки заказа: фото слева, форма справа */
+  .order-split{display:grid;grid-template-columns:300px 1fr;gap:24px;align-items:start}
+  .order-split .ophoto-col{position:sticky;top:0}
+  .order-split .ophoto-col .field{margin:0}
+  .order-split .oform-col{min-width:0}
+  @media (max-width:760px){
+    .modal-wide{max-width:560px}
+    .order-split{grid-template-columns:1fr;gap:16px}
+  }
   .modal-head{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center}
   .modal-head h3{font-family:'Fraunces',serif;font-weight:600;font-size:20px}
   .modal-head .x{margin-left:auto;cursor:pointer;border:none;background:transparent;font-size:22px;
@@ -799,7 +809,7 @@ function showModal(title,bodyHtml,onSave,opts={}){
   const foot=opts.readonly
     ? `<div class="modal-foot"><button class="btn primary" data-close>Закрыть</button></div>`
     : `<div class="modal-foot"><button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>Сохранить</button></div>`;
-  ov.innerHTML=`<div class="modal"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
+  ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
   document.body.appendChild(ov);
   const close=()=>ov.remove();
@@ -1414,6 +1424,12 @@ function orderModal(id,readonly){
   const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',address:'',qty:'',status_id:defaultOrderStatusId(),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
   const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
+    <div class="order-split">
+      <div class="ophoto-col">
+        ${orderPhotoFieldHtml(o,!ro)}
+        <div class="field full" style="margin-top:14px"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
+      </div>
+      <div class="oform-col">
     <div class="grid2">
       <div class="field"><label>ID заказа</label><input value="${esc(code)}" readonly style="font-family:'Fraunces',serif;font-weight:900;letter-spacing:1px"></div>
       <div class="field"><label>Дата забора</label><input type="date" id="o_pickup" value="${esc(d.pickup_date||'')}" ${dis}></div>
@@ -1433,8 +1449,8 @@ function orderModal(id,readonly){
       <div class="field"><label>Стоимость доставки (₸)</label><input type="number" min="0" id="o_cost" value="${esc(d.cost)}" ${dis}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span></div>
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
-      <div class="field full"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
-      ${orderPhotoFieldHtml(o,!ro)}
+    </div>
+      </div>
     </div>`,
     ro?null:async()=>{
       const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
@@ -1447,7 +1463,7 @@ function orderModal(id,readonly){
       if(id){const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);}
       else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);}
       toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
-    },{readonly:ro});
+    },{readonly:ro,wide:true});
   attachPhone('o_phone',d.phone);
   setTimeout(()=>renderBarcode($('o_barcode'),code),60);
   if(o&&o.id){
