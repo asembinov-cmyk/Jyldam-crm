@@ -190,7 +190,9 @@
   .order-split .oform-col{min-width:0}
   /* крупное превью фото в карточке заказа */
   .obig-photo{width:100%;border-radius:12px;border:1px solid var(--line);background:var(--paper);
-    aspect-ratio:3/4;object-fit:cover;cursor:zoom-in;display:block}
+    aspect-ratio:3/4;object-fit:cover;cursor:zoom-in;display:block;transition:all .2s}
+  /* зум на месте: показываем фото целиком, крупнее */
+  .obig-photo.zoomed{aspect-ratio:auto;height:auto;max-height:80vh;object-fit:contain;cursor:zoom-out;background:#000}
   .obig-empty{width:100%;aspect-ratio:3/4;border:1px dashed var(--line);border-radius:12px;
     display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;background:var(--paper)}
   .obig-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -1519,9 +1521,9 @@ function orderModal(id,readonly){
         pc.querySelectorAll('[data-obigthumb]').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
       });
-      // крупное фото увеличивается поверх окна (зум)
+      // клик по фото увеличивает его прямо в окне (на месте), повторный — обратно
       const main=pc.querySelector('#obigMain');
-      if(main)main.onclick=e=>{e.stopPropagation();zoomPhoto(main.dataset.oviewphoto);};
+      if(main)main.onclick=e=>{e.stopPropagation();main.classList.toggle('zoomed');};
     };
     const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=orderBigPhotoInner(o,!ro);bindBig();};
     bindBig();
