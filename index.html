@@ -244,9 +244,51 @@
     .resp-table .status-time{text-align:right;width:100%}
     .filters .date-field input{min-width:0;width:100%}
   }
+
+  /* ── Загрузочный экран (сплэш) ── */
+  #splash{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:linear-gradient(160deg,#eef2f8 0%,#f7f9fc 55%,#eaeef6 100%);
+    font-family:'Spline Sans',system-ui,sans-serif;padding:24px;text-align:center;transition:opacity .45s ease;}
+  #splash.hide{opacity:0;pointer-events:none;}
+  .sp-logo{display:flex;align-items:center;gap:14px;margin-bottom:30px}
+  .sp-logo .mk{width:74px;height:74px;border-radius:18px;display:grid;place-items:center;
+    background:linear-gradient(135deg,#16407a,#1f5fb0 55%,#d9a531);box-shadow:0 14px 34px -14px rgba(22,64,122,.6)}
+  .sp-logo .mk svg{width:42px;height:42px}
+  .sp-name{font-family:'Fraunces',serif;font-weight:900;font-size:34px;letter-spacing:-.02em;line-height:1}
+  .sp-name .b{color:#16407a}.sp-name .g{color:#d9a531}
+  .sp-name small{display:block;font-family:'Spline Sans',sans-serif;font-weight:600;font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:#7d899c;margin-top:5px}
+  .sp-title{font-family:'Fraunces',serif;font-weight:600;font-size:22px;color:#1a2540;margin-bottom:6px}
+  .sp-sub{font-size:14px;color:#7d899c;margin-bottom:22px;max-width:420px}
+  .sp-bar{width:min(320px,80vw);height:10px;border-radius:20px;background:#dde4ee;overflow:hidden;position:relative}
+  .sp-bar i{position:absolute;top:0;left:0;height:100%;width:40%;border-radius:20px;
+    background:linear-gradient(90deg,#d9a531,#e7be57);animation:spbar 1.25s ease-in-out infinite}
+  @keyframes spbar{0%{left:-42%}100%{left:102%}}
+  .sp-wait{font-size:13px;color:#9aa4b4;margin-top:14px}
+  .sp-feats{display:flex;gap:26px;flex-wrap:wrap;justify-content:center;margin-top:40px}
+  .sp-feat{display:flex;align-items:center;gap:9px;font-size:13.5px;color:#41506b;font-weight:600}
+  .sp-feat svg{width:22px;height:22px;color:#16407a;flex:none}
+  @media (max-width:560px){.sp-name{font-size:27px}.sp-feats{gap:16px}.sp-feat{font-size:12.5px}}
 </style>
 </head>
 <body>
+
+<!-- ЗАГРУЗОЧНЫЙ ЭКРАН -->
+<div id="splash">
+  <div class="sp-logo">
+    <span class="mk"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 8h9l-2 4h2M3 12h7M4 16h6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7l6 5-6 5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <div class="sp-name"><span class="b">Jyldam</span> <span class="g">Logistics</span><small>Забор посылок · CRM</small></div>
+  </div>
+  <div class="sp-title">Сайт обновляется…</div>
+  <div class="sp-sub">Мы работаем над тем, чтобы сделать сервис ещё лучше для вас!</div>
+  <div class="sp-bar"><i></i></div>
+  <div class="sp-wait">Пожалуйста, подождите</div>
+  <div class="sp-feats">
+    <div class="sp-feat"><svg viewBox="0 0 24 24" fill="none"><path d="M1 7h11v8H1zM12 9h5l4 3v3h-9" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="6" cy="17" r="1.8" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="17" r="1.8" stroke="currentColor" stroke-width="1.7"/></svg>Быстрая доставка</div>
+    <div class="sp-feat"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.3 7-11a7 7 0 10-14 0c0 4.7 7 11 7 11z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="1.7"/></svg>Надёжность на каждом этапе</div>
+    <div class="sp-feat"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v5c0 4.4-3 8.3-7 10-4-1.7-7-5.6-7-10V6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>Безопасность ваших грузов</div>
+  </div>
+</div>
 
 <!-- ВХОД -->
 <div class="login-wrap" id="loginScreen">
@@ -413,7 +455,8 @@ async function doLogin(){
   await enterApp();
 }
 async function doLogout(){await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
-function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';}
+function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();}
+function hideSplash(){const s=$('splash');if(!s)return;s.classList.add('hide');setTimeout(()=>{if(s.parentNode)s.remove();},600);}
 
 $('loginBtn').onclick=doLogin;
 $('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
@@ -445,6 +488,7 @@ async function enterApp(){
   loadNav();
   buildNav();
   render();
+  hideSplash();
 }
 
 /* ---------- ХЕЛПЕРЫ ИМЁН ---------- */
@@ -551,9 +595,13 @@ function showInfo(title,bodyHtml){showModal(title,bodyHtml,null,{readonly:true})
 
 /* автологин */
 (async()=>{
-  const {data}=await sb.auth.getSession();
-  if(data&&data.session){await loadMe(data.session);await enterApp();}
-  else showLogin();
+  // страховка: если что-то пойдёт не так, сплэш всё равно уйдёт максимум через 12 сек
+  setTimeout(()=>{const s=$('splash');if(s&&!s.classList.contains('hide'))hideSplash();},12000);
+  try{
+    const {data}=await sb.auth.getSession();
+    if(data&&data.session){await loadMe(data.session);await enterApp();}
+    else showLogin();
+  }catch(e){console.error('init',e);showLogin();}
 })();
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
 let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:'',dateTo:''};
