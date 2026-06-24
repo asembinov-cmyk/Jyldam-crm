@@ -149,9 +149,11 @@
   .row-actions{display:flex;gap:6px;justify-content:flex-end;white-space:nowrap}
   .status-pick{font:inherit;font-size:12.5px;font-weight:600;padding:5px 8px;border:1.5px solid var(--line);
     border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer}
-  /* в таблице заказов статус — средней ширины, читаемый, но не растягивает колонку */
-  .resp-table td[data-label="Статус"] .status-pick{width:185px;max-width:185px;font-size:12px;padding:5px 8px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* в таблице заказов статус — двухстрочная плашка, под ней невидимый select для выбора */
+  .resp-table td[data-label="Статус"] .status-cell{position:relative;width:155px}
+  .status-badge{display:block;font-size:11.5px;font-weight:600;line-height:1.25;padding:5px 8px;border:1.5px solid var(--line);
+    border-radius:8px;background:var(--card);white-space:normal;word-break:break-word;cursor:pointer;min-height:20px}
+  .status-overlay{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
   .status-time{font-size:10.5px;color:var(--muted);margin-top:3px;white-space:nowrap}
   .empty{padding:50px 20px;text-align:center;color:var(--muted)}
   .empty .big{font-family:'Fraunces',serif;font-size:20px;color:var(--ink);margin-bottom:6px}
@@ -1389,8 +1391,10 @@ function drawOrders(){
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
-      <td data-label="Статус"><select class="status-pick" data-ostatus="${o.id}" onclick="event.stopPropagation()" style="border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">
-        <option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></td>
+      <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
+        <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
+        <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+      </div></td>
       <td data-label="Индекс">${esc(o.index)||'—'}</td><td data-label="Трек-код">${esc(o.track)||'—'}</td>
       ${staff?`<td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Оплата">${esc(fmtDate(o.pay_date))}</td>`:''}
       <td data-label="" class="cell-actions"><div class="row-actions">
@@ -1411,7 +1415,12 @@ function drawOrders(){
   });
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
-    const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});if(u){o.status_id=u.status_id;sel.style.borderColor=(orderStatusObj(o.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}});
+    const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});
+    if(u){o.status_id=u.status_id;
+      const so=orderStatusObj(o.status_id)||{};
+      const badge=sel.parentElement.querySelector('.status-badge');
+      if(badge){badge.textContent=o.status_id?(so.name||'—'):'— нет —';badge.style.color=so.color||'var(--muted)';badge.style.background=so.color?(so.color+'1a'):'transparent';badge.style.borderColor=so.color||'var(--line)';}
+      toast('Статус обновлён');}});
 }
 /* Компактные карточки заказов для курьера: свёрнуто — ID/ФИО/телефон/адрес/сумма/статус, по тапу разворачивается остальное */
 function drawCourierOrderCards(el,rows){
