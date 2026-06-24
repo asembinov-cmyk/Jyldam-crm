@@ -503,6 +503,8 @@ const postIpName=id=>(S.post_ips.find(d=>d.id===id)||{}).name||'—';
 const courierCityName=id=>(S.courier_cities.find(c=>c.id===id)||{}).name||'—';
 const partnerName=id=>(S.partners.find(p=>p.id===id)||{}).name||'—';
 const statusObj=id=>S.statuses.find(s=>s.id===id)||null;
+// статус означает «собрано/забрано»: по слову в названии
+function isCollectedStatus(id){const s=statusObj(id);if(!s)return false;return /забра|забро|собра|готов/i.test(s.name||'');}
 const isCourierDelivery=id=>{const d=S.delivery.find(x=>x.id===id);return d?/курьер/i.test(d.name):false;};
 function statusBadge(id){const s=statusObj(id);if(!s)return '<span style="color:var(--muted)">—</span>';
   return `<span class="pill" style="color:${s.color};background:${s.color}1a;border-color:${s.color}55">${esc(s.name)}</span>`;}
@@ -618,13 +620,15 @@ function renderPickups(){
   const list=visiblePickups();
   const totalOrders=list.reduce((s,p)=>s+(+p.orders||0),0);
   const today=new Date().toISOString().slice(0,10);
+  // «Собрано»: статус заявки содержит забран/собран/готов
+  const collectedCount=list.filter(p=>isCollectedStatus(p.status_id)).length;
   const head=isCourier()?'Мои заборы':'Заявки на забор';
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>Карточки забора посылок из магазинов-партнёров</p></div>
       ${can('pickups','create')?`<div class="head-actions"><button class="btn primary" id="newPickup">＋ Создать карточку забора</button></div>`:''}
     </div>
     <div class="stats">
-      <div class="stat"><div class="k">Всего заявок</div><div class="v">${list.length}</div></div>
+      <div class="stat"><div class="k">Собрано заявок</div><div class="v">${collectedCount}<small> / ${list.length}</small></div></div>
       <div class="stat"><div class="k">Собрано заказов</div><div class="v">${totalOrders}</div></div>
       <div class="stat"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div>
       <div class="stat"><div class="k">Курьеров</div><div class="v">${new Set(list.map(p=>p.courier_id).filter(Boolean)).size}</div></div>
@@ -755,7 +759,14 @@ async function setPickupStatus(id,statusId){
   const hist=Array.isArray(p.status_history)?p.status_history.slice():[];
   hist.push({statusId,at});
   const upd=await dbUpdate('pickups',id,{status_id:statusId,status_at:at,status_history:hist});
-  if(upd){Object.assign(p,upd);toast('Статус обновлён');drawPickups();}
+  if(upd){Object.assign(p,upd);toast('Статус обновлён');drawPickups();updateCollectedStat();}
+}
+// точечно обновляет число в плашке «Собрано заявок» без полной перерисовки
+function updateCollectedStat(){
+  const list=visiblePickups();
+  const collected=list.filter(p=>isCollectedStatus(p.status_id)).length;
+  const stats=document.querySelectorAll('.stats .stat');
+  if(stats[0]){const v=stats[0].querySelector('.v');if(v)v.innerHTML=`${collected}<small> / ${list.length}</small>`;}
 }
 function showPickupHistory(id){
   const p=S.pickups.find(x=>x.id===id);if(!p)return;
