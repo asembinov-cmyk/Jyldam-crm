@@ -1359,7 +1359,7 @@ function drawOrders(){
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Фото</th><th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
+    <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th><th>Оплата</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
@@ -1375,8 +1375,7 @@ function drawOrders(){
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
-      <td data-label="Адрес">${esc(o.address)||'—'}</td><td data-label="Кол-во">${esc(o.qty||0)}</td>
-      <td data-label="Курьер">${o.order_courier_id?`<span class="pill moss">${esc(orderCourierName(o.order_courier_id))}</span>`:'—'}</td>
+      <td data-label="Адрес">${esc(o.address)||'—'}</td>
       <td data-label="Статус"><select class="status-pick" data-ostatus="${o.id}" onclick="event.stopPropagation()" style="border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">
         <option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></td>
       <td data-label="Индекс">${esc(o.index)||'—'}</td><td data-label="Трек-код">${esc(o.track)||'—'}</td>
@@ -1478,6 +1477,7 @@ function orderModal(id,readonly){
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента</label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="o_weight" value="${esc(d.weight)}" ${dis}></div>
+      <div class="field"><label>Кол-во товаров</label><input type="number" min="0" id="o_qty" value="${esc(d.qty||1)}" ${dis}></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
@@ -1497,6 +1497,7 @@ function orderModal(id,readonly){
       const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
         weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),phone:phoneVal('o_phone'),
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
+        qty:parseInt(val('o_qty')||'1',10)||1,
         status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
         cost:val('o_cost')?parseFloat(val('o_cost')):0,pay_date:val('o_pay')||null,post_ip_id:val('o_ip')||null,
