@@ -243,6 +243,13 @@
   .photo-view-ov img{max-width:94vw;max-height:90vh;border-radius:10px;box-shadow:0 20px 60px -20px #000}
   .photo-view-ov .x{position:absolute;top:18px;right:22px;font-size:34px;color:#fff;cursor:pointer;line-height:1;background:none;border:none}
 
+  /* ── Окно «Заказы заявки» ── */
+  .pom-list{display:flex;flex-direction:column;gap:14px}
+  .pom-order{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--paper)}
+  .pom-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px}
+  .pom-head b{font-family:'Fraunces',serif;font-size:16px}
+  .pom-sub{font-size:13px;color:var(--muted);margin-bottom:10px}
+
   @media (max-width:760px){
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
     .page-head h1{font-size:24px}
@@ -908,13 +915,10 @@ function drawPickups(){
   el.querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pedit));
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pview,true));
   el.querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>delPickup(b.dataset.pdel));
-  el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=async()=>{
+  el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=()=>{
     const p=S.pickups.find(x=>x.id===b.dataset.pgen);if(!p)return;
-    const want=parseInt(p.orders||'0',10)||0;const have=ordersCountForPickup(p.id);
-    if(want<=0){toast('Сначала укажите количество заказов');return;}
-    if(have>=want){toast(`Уже создано ${have} заказ(ов) по этой заявке`);return;}
-    if(!confirm(`Создать ${want-have} заказ(ов) по магазину «${p.name}»?\nДанные подтянутся из карточки партнёра.`))return;
-    b.disabled=true;await createOrdersFromPickup(p.id);b.disabled=false;drawPickups();});
+    pickupOrdersModal(p.id);
+  });
   el.querySelectorAll('[data-phist]').forEach(b=>b.onclick=()=>showPickupHistory(b.dataset.phist));
   el.querySelectorAll('[data-pstatus]').forEach(sel=>sel.onchange=()=>setPickupStatus(sel.dataset.pstatus,sel.value));
   el.querySelectorAll('[data-pqty]').forEach(inp=>{
@@ -948,7 +952,7 @@ function drawCourierPickupCards(el,rows){
         <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}"></span></div>
         ${(p.status_history&&p.status_history.length)?`<div class="cc-row"><span class="lbl">Статус изменён</span><span class="vl">${p.status_at?esc(fmtDateTime(p.status_at)):'—'} · <button class="link-btn" data-phist="${p.id}">история</button></span></div>`:''}
         <div class="cc-actions">
-          <button class="btn sm primary" data-pgen="${p.id}">Создать заказы${ordersCountForPickup(p.id)?` (${ordersCountForPickup(p.id)}/${p.orders||0})`:''}</button>
+          <button class="btn sm primary" data-pgen="${p.id}">Заказы и фото${ordersCountForPickup(p.id)?` (${ordersCountForPickup(p.id)}/${p.orders||0})`:p.orders?` (0/${p.orders})`:''}</button>
           <button class="btn sm ghost" data-pview="${p.id}">Открыть</button>
         </div>
       </div>
@@ -958,13 +962,9 @@ function drawCourierPickupCards(el,rows){
     h.closest('.cour-card').classList.toggle('open');
   });
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=e=>{e.stopPropagation();pickupModal(b.dataset.pview,true);});
-  el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=async e=>{e.stopPropagation();
+  el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const p=S.pickups.find(x=>x.id===b.dataset.pgen);if(!p)return;
-    const want=parseInt(p.orders||'0',10)||0;const have=ordersCountForPickup(p.id);
-    if(want<=0){toast('Сначала укажите количество заказов');return;}
-    if(have>=want){toast(`Уже создано ${have} заказ(ов)`);return;}
-    if(!confirm(`Создать ${want-have} заказ(ов) по магазину «${p.name}»?`))return;
-    b.disabled=true;await createOrdersFromPickup(p.id);b.disabled=false;drawPickups();});
+    pickupOrdersModal(p.id);});
   el.querySelectorAll('[data-phist]').forEach(b=>b.onclick=e=>{e.stopPropagation();showPickupHistory(b.dataset.phist);});
   el.querySelectorAll('[data-pstatus]').forEach(sel=>{
     sel.onclick=e=>e.stopPropagation();
@@ -1162,6 +1162,42 @@ async function createOrdersFromPickup(pickupId,opts){
   }
   if(created)toast(`Создано заказов: ${created}`);
   return created;
+}
+// Окно: список заказов, созданных по заявке, с возможностью прикрепить фото к каждому
+function pickupOrdersModal(pickupId){
+  const p=S.pickups.find(x=>x.id===pickupId);if(!p)return;
+  const canEditPhoto=can('orders','edit')||isCourier();
+  const renderBody=()=>{
+    const list=S.orders.filter(o=>o.pickup_id===pickupId);
+    const want=parseInt(p.orders||'0',10)||0;
+    const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="color:var(--muted);font-size:14px">Создано ${list.length}${want?` из ${want}`:''} заказ(ов) по магазину «${esc(p.name)}»</div>
+      ${(want>list.length)?`<button class="btn sm primary" id="pom_create">Создать ещё ${want-list.length}</button>`:''}
+    </div>`;
+    if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>${want?'Нажмите «Создать», чтобы сформировать заказы.':'Сначала укажите количество заказов в заявке.'}</div>`;
+    const cards=list.map((o,i)=>`<div class="pom-order">
+      <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
+      <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
+      <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
+    </div>`).join('');
+    return head+`<div class="pom-list">${cards}</div>`;
+  };
+  showInfo(`Заказы заявки · ${esc(p.name)}`,renderBody());
+  // навешиваем обработчики (после вставки в DOM)
+  setTimeout(()=>{
+    const wrap=document.querySelector('.overlay:last-child');if(!wrap)return;
+    const bind=()=>{
+      wrap.querySelectorAll('[data-pomphotos]').forEach(box=>{
+        const o=S.orders.find(x=>x.id===box.dataset.pomphotos);if(!o)return;
+        const redraw=()=>{box.innerHTML=photoBlockHtml(o,canEditPhoto);bindPhotoBlock(box,o,redraw,'orders');};
+        bindPhotoBlock(box,o,redraw,'orders');
+      });
+      const cb=wrap.querySelector('#pom_create');
+      if(cb)cb.onclick=async()=>{cb.disabled=true;await createOrdersFromPickup(pickupId,{silent:true});
+        const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}drawPickups();};
+    };
+    bind();
+  },30);
 }
 let ordersMode=''; // ''=все, 'courier', 'mail', 'today'
 function renderOrders(mode){
