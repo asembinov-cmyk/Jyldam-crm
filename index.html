@@ -2253,7 +2253,7 @@ function changePassModal(id){
       if(!pass||pass.length<6){toast('Пароль минимум 6 символов');return false;}
       toast('Меняем пароль…');
       const out=await callSetPassword({user_id:u.id,password:pass});
-      if(out.error){toast('Ошибка: '+out.error);return false;}
+      if(out.error){alert('Не удалось сменить пароль:\n\n'+out.error);return false;}
       toast('Пароль изменён');return true;
     });
 }
