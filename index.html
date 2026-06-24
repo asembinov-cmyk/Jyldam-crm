@@ -1589,9 +1589,16 @@ function orderModal(id,readonly){
     };
     // сумма заказа тянется от тарифа партнёра (пока её не правили вручную)
     let sumTouched=!!(d.order_sum); // если сумма уже была — считаем заполненной вручную
+    const findPartner=()=>{
+      // 1) по partner_id заказа, если есть
+      if(d.partner_id){const p=S.partners.find(x=>x.id===d.partner_id);if(p)return p;}
+      // 2) по имени отправителя без учёта регистра и лишних пробелов
+      const name=($('o_sender').value||'').trim().toLowerCase().replace(/\s+/g,' ');
+      return S.partners.find(x=>(x.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name)||null;
+    };
     const applyTariff=()=>{
       if(sumTouched)return; // не перезаписываем введённую вручную сумму
-      const pt=S.partners.find(x=>x.name===($('o_sender').value||'').trim());if(!pt)return;
+      const pt=findPartner();if(!pt)return;
       const courier=isCourierDelivery($('o_delivery').value);
       const t=courier?pt.tariff_courier:pt.tariff_post;
       const sumEl=$('o_sum');
@@ -1610,8 +1617,10 @@ function orderModal(id,readonly){
     };
     const cityEl=$('o_city');if(cityEl)cityEl.onchange=()=>fillCouriers(cityEl.value);
     // при изменении отправителя — подтянуть данные партнёра
-    const ss=$('o_sender');if(ss)ss.onchange=()=>{const pt=S.partners.find(x=>x.name===ss.value.trim());if(pt){
-      if(pt.sales_id&&$('o_sales'))$('o_sales').value=pt.sales_id;if(pt.processor_id&&$('o_proc'))$('o_proc').value=pt.processor_id;}
+    const ss=$('o_sender');if(ss)ss.onchange=()=>{
+      const name=ss.value.trim().toLowerCase().replace(/\s+/g,' ');
+      const pt=S.partners.find(x=>(x.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name);
+      if(pt){if(pt.sales_id&&$('o_sales'))$('o_sales').value=pt.sales_id;if(pt.processor_id&&$('o_proc'))$('o_proc').value=pt.processor_id;}
       applyTariff();};
     setTimeout(applyTariff,0); // первичная подстановка суммы из тарифа при открытии
   }
