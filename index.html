@@ -153,6 +153,7 @@
   .resp-table td[data-label="Статус"] .status-cell{position:relative;width:155px}
   .status-badge{display:block;font-size:11.5px;font-weight:600;line-height:1.25;padding:5px 8px;border:1.5px solid var(--line);
     border-radius:8px;background:var(--card);white-space:normal;word-break:break-word;cursor:pointer;min-height:20px}
+  .ketChk,#ketChkAll{width:17px;height:17px;cursor:pointer;accent-color:var(--rust)}
   .status-overlay{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
   .status-time{font-size:10.5px;color:var(--muted);margin-top:3px;white-space:nowrap}
   .empty{padding:50px 20px;text-align:center;color:var(--muted)}
@@ -579,35 +580,6 @@ async function sendOrderToKet(o){
   }else{
     toast('KET отклонил: '+(result.message||'неизвестно'));return false;
   }
-}
-// обновить статусы из KET для заказов, у которых есть ket_id
-async function syncKetStatuses(){
-  const withKet=S.orders.filter(o=>o.ket_id);
-  if(!withKet.length){toast('Нет заказов, отправленных в KET');return;}
-  toast('Запрос статусов из KET…');
-  const ids=withKet.map(o=>o.ket_id);
-  const r=await callKet({action:'get',ids});
-  if(r.error){toast('Ошибка KET: '+r.error);return;}
-  // ответ KET — массив заказов
-  let arr=r.ket;
-  if(arr&&!Array.isArray(arr)&&Array.isArray(arr.data))arr=arr.data;
-  if(!Array.isArray(arr)){toast('KET вернул неожиданный ответ');return;}
-  let updated=0;
-  for(const k of arr){
-    const o=withKet.find(x=>String(x.ket_id)===String(k.id));
-    if(!o)continue;
-    const patch={
-      ket_status_kz:k.status_kz!=null?String(k.status_kz):o.ket_status_kz,
-      ket_send_status:k.send_status!=null?String(k.send_status):o.ket_send_status,
-      ket_status:k.status!=null?String(k.status):o.ket_status,
-      ket_synced_at:new Date().toISOString(),
-    };
-    if(k.kz_code)patch.ket_track=k.kz_code; // трек-код когда почтой
-    const u=await dbUpdate('orders',o.id,patch);
-    if(u){Object.assign(o,u);updated++;}
-  }
-  toast('Обновлено заказов: '+updated);
-  renderOrders();
 }
 // дефолтные права на случай отсутствия роли — выводим из base_type
 function defaultPerms(base){
@@ -1393,7 +1365,7 @@ function renderOrders(mode){
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':(subs[ordersMode]||'')}</p></div>
-      ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSync">⟳ Статусы из KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
+      ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
     <div class="stats">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
@@ -1418,7 +1390,33 @@ function renderOrders(mode){
       <div id="orderTable"></div>
     </div>`;
   if($('newOrder'))$('newOrder').onclick=()=>orderModal();
-  if($('ketSync'))$('ketSync').onclick=async()=>{const b=$('ketSync');b.disabled=true;await syncKetStatuses();b.disabled=false;};
+  // чекбокс «выбрать все»
+  if($('ketChkAll'))$('ketChkAll').onchange=e=>{document.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);};
+  // массовая отправка отмеченных заказов в KET
+  if($('ketSendSel'))$('ketSendSel').onclick=async()=>{
+    const ids=[...document.querySelectorAll('.ketChk:checked')].map(c=>c.dataset.ketchk);
+    if(!ids.length){toast('Отметьте галочками заказы для отправки');return;}
+    const list=ids.map(id=>S.orders.find(o=>o.id===id)).filter(Boolean);
+    const already=list.filter(o=>o.ket_id).length;
+    let msg=`Отправить в KET заказов: ${list.length}?`;
+    if(already)msg+=`\n(из них ${already} уже были отправлены — будут отправлены повторно)`;
+    if(!confirm(msg))return;
+    const b=$('ketSendSel');b.disabled=true;
+    let ok=0,fail=0;
+    for(const o of list){
+      if(!o.phone||o.phone.length<10){fail++;continue;} // без телефона не шлём
+      const r=await callKet({action:'send',order:orderToKet(o)});
+      const result=(r&&r.ket&&r.ket.result)||{};
+      if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
+        const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
+        if(u)Object.assign(o,u);
+        ok++;
+      }else{fail++;}
+    }
+    b.disabled=false;
+    toast(`Отправлено в KET: ${ok}${fail?(', с ошибкой: '+fail):''}`);
+    renderOrders();
+  };
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrders();};
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrders();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
@@ -1456,7 +1454,7 @@ function drawOrders(){
   if(isCourier()){drawCourierOrderCards(el,rows);return;}
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
-    <th>Фото</th><th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th><th>Оплата</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
@@ -1465,6 +1463,7 @@ function drawOrders(){
         ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
         : '<span style="color:var(--line)">—</span>';
       return `<tr data-orow="${o.id}" style="cursor:pointer">
+      ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
