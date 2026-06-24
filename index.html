@@ -205,6 +205,21 @@
   .cc-actions{display:flex;gap:8px;padding-top:12px}
   .cc-actions .btn{flex:1;justify-content:center}
 
+  /* ── Фото заявок ── */
+  .photo-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+  .photo-thumb{position:relative;width:84px;height:84px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--paper);flex:none}
+  .photo-thumb img{width:100%;height:100%;object-fit:cover;cursor:pointer;display:block}
+  .photo-thumb .del{position:absolute;top:3px;right:3px;width:20px;height:20px;border:none;border-radius:50%;
+    background:rgba(20,17,13,.62);color:#fff;font-size:13px;line-height:1;cursor:pointer;display:grid;place-items:center}
+  .photo-thumb .del:hover{background:var(--rust)}
+  .photo-add{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font:inherit;font-weight:600;font-size:13px;
+    color:var(--rust-dk);border:1.5px dashed var(--line);border-radius:10px;padding:9px 14px;background:var(--paper);transition:.15s}
+  .photo-add:hover{border-color:var(--rust);background:var(--card)}
+  .photo-empty{color:var(--muted);font-size:13px;padding:6px 0}
+  .photo-view-ov{position:fixed;inset:0;background:rgba(20,17,13,.88);z-index:300;display:grid;place-items:center;padding:20px}
+  .photo-view-ov img{max-width:94vw;max-height:90vh;border-radius:10px;box-shadow:0 20px 60px -20px #000}
+  .photo-view-ov .x{position:absolute;top:18px;right:22px;font-size:34px;color:#fff;cursor:pointer;line-height:1;background:none;border:none}
+
   @media (max-width:760px){
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
     .page-head h1{font-size:24px}
@@ -378,6 +393,25 @@ async function dbDelete(table,id){
   const {error}=await sb.from(table).delete().eq('id',id);
   if(error){console.error('delete',table,error);toast('Ошибка: '+error.message);return false;}
   return true;
+}
+
+/* ---------- ФОТО ЗАЯВОК (Supabase Storage) ---------- */
+const PHOTO_BUCKET='pickup-photos';
+// загружает файл, возвращает {path,url} или null
+async function uploadPickupPhoto(pickupId,file){
+  try{
+    const ext=(file.name&&file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'')||'jpg';
+    const path=`${pickupId}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.${ext}`;
+    const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,file,{contentType:file.type||'image/jpeg',upsert:false});
+    if(error){console.error('upload',error);toast('Ошибка загрузки: '+error.message);return null;}
+    const {data}=sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    return {path,url:data.publicUrl};
+  }catch(e){console.error(e);toast('Ошибка загрузки фото');return null;}
+}
+async function deletePickupPhoto(path){
+  try{const {error}=await sb.storage.from(PHOTO_BUCKET).remove([path]);
+    if(error){console.error('remove',error);toast('Не удалось удалить: '+error.message);return false;}return true;
+  }catch(e){console.error(e);return false;}
 }
 // Вызов Edge Function для создания пользователя (с проверкой админа на сервере)
 async function callCreateUser(payload){
@@ -631,7 +665,7 @@ function renderPickups(){
       <div class="stat"><div class="k">Собрано заявок</div><div class="v">${collectedCount}<small> / ${list.length}</small></div></div>
       <div class="stat"><div class="k">Собрано заказов</div><div class="v">${totalOrders}</div></div>
       <div class="stat"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div>
-      <div class="stat"><div class="k">Курьеров</div><div class="v">${new Set(list.map(p=>p.courier_id).filter(Boolean)).size}</div></div>
+      ${isStaff()?`<div class="stat"><div class="k">Курьеров</div><div class="v">${new Set(list.map(p=>p.courier_id).filter(Boolean)).size}</div></div>`:''}
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Карточки забора</h2><span class="count">${list.length}</span></div>
@@ -738,6 +772,7 @@ function drawCourierPickupCards(el,rows){
         <div class="cc-row"><span class="lbl">Район</span><span class="vl">${esc(districtName(p.district_id))}</span></div>
         <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}"></span></div>
         ${(p.status_history&&p.status_history.length)?`<div class="cc-row"><span class="lbl">Статус изменён</span><span class="vl">${p.status_at?esc(fmtDateTime(p.status_at)):'—'} · <button class="link-btn" data-phist="${p.id}">история</button></span></div>`:''}
+        <div class="cc-row" style="flex-direction:column;align-items:stretch"><span class="lbl" style="margin-bottom:6px">Фотографии забора</span>${photoBlockHtml(p,true)}</div>
         <div class="cc-actions">
           <button class="btn sm primary" data-pgen="${p.id}">Создать заказы${ordersCountForPickup(p.id)?` (${ordersCountForPickup(p.id)}/${p.orders||0})`:''}</button>
           <button class="btn sm ghost" data-pview="${p.id}">Открыть</button>
@@ -768,6 +803,10 @@ function drawCourierPickupCards(el,rows){
       await dbUpdate('pickups',p.id,{orders:v});p.orders=v;toast('Кол-во обновлено');};
     inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
   });
+  // фото: для каждой карточки своя заявка
+  el.querySelectorAll('.cour-card').forEach(card=>{
+    const p=S.pickups.find(x=>x.id===card.dataset.card);if(p)bindPhotoBlock(card,p,()=>drawPickups());
+  });
 }
 async function setPickupStatus(id,statusId){
   const p=S.pickups.find(x=>x.id===id);if(!p||p.status_id===statusId)return;
@@ -784,6 +823,49 @@ function updateCollectedStat(){
   const stats=document.querySelectorAll('.stats .stat');
   if(stats[0]){const v=stats[0].querySelector('.v');if(v)v.innerHTML=`${collected}<small> / ${list.length}</small>`;}
 }
+
+/* ---------- ФОТО ЗАЯВКИ: рендер блока и обработчики ---------- */
+const pickupPhotos=p=>Array.isArray(p.photos)?p.photos:[];
+// просмотр фото на весь экран
+function viewPhoto(url){
+  const ov=document.createElement('div');ov.className='photo-view-ov';
+  ov.innerHTML=`<button class="x">×</button><img src="${esc(url)}">`;
+  ov.onclick=e=>{if(e.target===ov||e.target.classList.contains('x'))ov.remove();};
+  document.body.appendChild(ov);
+}
+// HTML блока фото для заявки; canEdit — можно ли добавлять/удалять
+function photoBlockHtml(p,canEdit){
+  const ph=pickupPhotos(p);
+  const thumbs=ph.map((f,i)=>`<div class="photo-thumb">
+    <img src="${esc(f.url)}" data-pview-photo="${esc(f.url)}">
+    ${canEdit?`<button class="del" data-pdelphoto="${p.id}" data-idx="${i}" title="Удалить">×</button>`:''}
+  </div>`).join('');
+  const adder=canEdit?`<label class="photo-add">📷 Добавить фото
+    <input type="file" accept="image/*" capture="environment" multiple data-paddphoto="${p.id}" style="display:none">
+  </label>`:'';
+  const empty=(!ph.length&&!canEdit)?'<div class="photo-empty">Фотографий нет</div>':'';
+  return `<div class="photo-grid">${thumbs}${adder}</div>${empty}`;
+}
+// навешивает обработчики на блок фото внутри контейнера root (для заявки p)
+function bindPhotoBlock(root,p,redraw){
+  root.querySelectorAll('[data-pview-photo]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.pviewPhoto);});
+  root.querySelectorAll('[data-paddphoto]').forEach(inp=>inp.onchange=async e=>{
+    e.stopPropagation();const files=[...(inp.files||[])];if(!files.length)return;
+    toast('Загрузка фото…');
+    const arr=pickupPhotos(p).slice();
+    for(const f of files){const r=await uploadPickupPhoto(p.id,f);if(r)arr.push(r);}
+    const u=await dbUpdate('pickups',p.id,{photos:arr});
+    if(u){Object.assign(p,u);toast('Фото добавлены');if(redraw)redraw();}
+  });
+  root.querySelectorAll('[data-pdelphoto]').forEach(btn=>btn.onclick=async e=>{
+    e.stopPropagation();const idx=+btn.dataset.idx;const arr=pickupPhotos(p).slice();const item=arr[idx];if(!item)return;
+    if(!confirm('Удалить это фото?'))return;
+    await deletePickupPhoto(item.path);arr.splice(idx,1);
+    const u=await dbUpdate('pickups',p.id,{photos:arr});
+    if(u){Object.assign(p,u);toast('Фото удалено');if(redraw)redraw();}
+  });
+}
+
 function showPickupHistory(id){
   const p=S.pickups.find(x=>x.id===id);if(!p)return;
   const hist=(p.status_history||[]).slice().reverse();
@@ -818,6 +900,7 @@ function pickupModal(id,readonly){
       <div class="field"><label>Менеджер по продажам</label><select id="m_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="m_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field full"><label>Статус</label><select id="m_status" ${dis}><option value="">—</option>${S.statuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      ${id?`<div class="field full"><label>Фотографии забора</label><div id="m_photos">${photoBlockHtml(p,can('pickups','edit'))}</div></div>`:''}
     </div>`,
     ro?null:async()=>{
       const name=val('m_name').trim();if(!name){toast('Укажите наименование');return false;}
@@ -834,6 +917,10 @@ function pickupModal(id,readonly){
       toast(id?'Сохранено':'Карточка создана');renderPickups();return true;
     },{readonly:ro});
   attachPhone('m_phone',d.phone);
+  if(id&&p){
+    const redrawPhotos=()=>{const pc=$('m_photos');if(!pc)return;pc.innerHTML=photoBlockHtml(p,can('pickups','edit'));bindPhotoBlock(pc,p,redrawPhotos);};
+    const pc=$('m_photos');if(pc)bindPhotoBlock(pc,p,redrawPhotos);
+  }
   if(!ro){
     const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
       $('m_district').innerHTML='<option value="">—</option>'+dOpts(cid).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
