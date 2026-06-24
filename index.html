@@ -893,7 +893,7 @@ function drawPickups(){
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
     ${staff?'<th>Курьер</th><th>Менеджер продаж</th><th>Обработчик</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
-    <tbody>${rows.map(p=>`<tr>
+    <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer">
       <td data-label="Дата">${esc(fmtDate(p.pickup_date))}</td>
       <td data-label="Город"><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
       <td data-label="Наименование"><strong>${esc(p.name)}</strong></td>
@@ -914,6 +914,11 @@ function drawPickups(){
       </div></td></tr>`).join('')}</tbody></table></div>`;
   el.querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pedit));
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pview,true));
+  // двойной клик по строке открывает заявку (как «Изменить», либо просмотр)
+  el.querySelectorAll('[data-prow]').forEach(tr=>tr.ondblclick=e=>{
+    if(e.target.closest('button,select,input,a'))return;
+    pickupModal(tr.dataset.prow,!can('pickups','edit'));
+  });
   el.querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>delPickup(b.dataset.pdel));
   el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=()=>{
     const p=S.pickups.find(x=>x.id===b.dataset.pgen);if(!p)return;
@@ -1260,7 +1265,7 @@ function drawOrders(){
     <th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Менеджер продаж</th><th>Обработчик</th><th>Стоимость</th><th>Оплата</th><th>ИП для Почты</th>':''}<th></th></tr></thead>
-    <tbody>${rows.map(o=>`<tr>
+    <tbody>${rows.map(o=>`<tr data-orow="${o.id}" style="cursor:pointer">
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
@@ -1283,6 +1288,11 @@ function drawOrders(){
       </div></td></tr>`).join('')}</tbody></table></div>`;
   el.querySelectorAll('[data-oedit]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oedit));
   el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));
+  // двойной клик по строке открывает заказ (как «Изменить», либо просмотр)
+  el.querySelectorAll('[data-orow]').forEach(tr=>tr.ondblclick=e=>{
+    if(e.target.closest('button,select,input,a'))return; // не мешаем кнопкам/селектам
+    orderModal(tr.dataset.orow,!can('orders','edit'));
+  });
   el.querySelectorAll('[data-odel]').forEach(b=>b.onclick=()=>delOrder(b.dataset.odel));
   el.querySelectorAll('[data-obc]').forEach(b=>b.onclick=()=>showBarcode(b.dataset.obc));
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
