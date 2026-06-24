@@ -1047,7 +1047,7 @@ function drawPickups(){
       ${staff?`<td data-label="Курьер">${p.courier_id?`<span class="pill moss">${esc(courierName(p.courier_id))}</span>`:'<span style="color:var(--muted)">не назначен</span>'}</td>
       <td data-label="Менеджер продаж">${p.sales_id?esc(salesName(p.sales_id)):'—'}</td>
       <td data-label="Обработчик">${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>`:''}
-      <td data-label="Заказов">${(can('pickups','edit')||isCourierBase())?`<input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}">`:`<span class="qty">${esc(p.orders||0)}</span>`}</td>
+      <td data-label="Заказов">${(can('pickups','edit')||isCourierBase())?`<input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${p.orders?esc(p.orders):''}" placeholder="—">`:`<span class="qty">${esc(p.orders||0)}</span>`}</td>
       <td data-label="Статус"><select class="status-pick" data-pstatus="${p.id}" style="border-color:${(statusObj(p.status_id)||{}).color||'var(--line)'}">
         <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         <div class="status-time">${p.status_at?('изм.: '+fmtDateTime(p.status_at)):''} ${(p.status_history&&p.status_history.length)?`· <button class="link-btn" data-phist="${p.id}">история</button>`:''}</div></td>
@@ -1098,7 +1098,7 @@ function drawCourierPickupCards(el,rows){
         <div class="cc-row"><span class="lbl">Дата</span><span class="vl">${esc(fmtDate(p.pickup_date))}</span></div>
         <div class="cc-row"><span class="lbl">Город</span><span class="vl">${esc(cityName(p.city_id))}</span></div>
         <div class="cc-row"><span class="lbl">Район</span><span class="vl">${esc(districtName(p.district_id))}</span></div>
-        <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}"></span></div>
+        <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${p.orders?esc(p.orders):''}" placeholder="—"></span></div>
         ${(p.status_history&&p.status_history.length)?`<div class="cc-row"><span class="lbl">Статус изменён</span><span class="vl">${p.status_at?esc(fmtDateTime(p.status_at)):'—'} · <button class="link-btn" data-phist="${p.id}">история</button></span></div>`:''}
         <div class="cc-actions">
           <button class="btn sm primary" data-pgen="${p.id}">Заказы и фото${ordersCountForPickup(p.id)?` (${ordersCountForPickup(p.id)}/${p.orders||0})`:p.orders?` (0/${p.orders})`:''}</button>
