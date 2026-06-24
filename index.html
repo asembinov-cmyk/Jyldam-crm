@@ -526,6 +526,21 @@ async function callCreateUser(payload){
     return out;
   }catch(e){return {error:String(e&&e.message||e)};}
 }
+// смена пароля сотрудника через Edge Function set-password (только для админа)
+async function callSetPassword(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/set-password`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
 
 /* ================= ИНТЕГРАЦИЯ С KET ================= */
 // низкоуровневый вызов прокси ket-proxy
@@ -2122,16 +2137,48 @@ function renderUsers(){
 }
 
 /* ---- СОТРУДНИКИ ---- */
+let staffFilters={name:'',login:'',city:'',position:'',role:''};
 function renderStaff(){
-  const rows=[...S.profiles].sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''));
+  const f=staffFilters;
+  const all=[...S.profiles].sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''));
+  // текстовые представления граф для фильтрации
+  const rowText=u=>({
+    name:u.full_name||'',
+    login:u.phone?phoneDisplay(u.phone):((u.email&&!u.email.endsWith('@jyldam.local'))?u.email:''),
+    city:u.city_id?cityName(u.city_id):'',
+    position:u.position||'',
+    role:u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||''),
+  });
+  const rows=all.filter(u=>{
+    const t=rowText(u);
+    if(f.name&&!t.name.toLowerCase().includes(f.name.toLowerCase()))return false;
+    if(f.login&&!t.login.toLowerCase().includes(f.login.toLowerCase()))return false;
+    if(f.city&&t.city!==f.city)return false;
+    if(f.position&&!t.position.toLowerCase().includes(f.position.toLowerCase()))return false;
+    if(f.role&&t.role!==f.role)return false;
+    return true;
+  });
+  // опции для select-фильтров (город, роль) — из всех строк
+  const cityVals=[...new Set(all.map(u=>u.city_id?cityName(u.city_id):'').filter(Boolean))].sort();
+  const roleVals=[...new Set(all.map(u=>u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'')).filter(Boolean))].sort();
+  const anyF=f.name||f.login||f.city||f.position||f.role;
   $('usersContent').innerHTML=`<div class="panel">
-    <div class="panel-head"><h2>Сотрудники</h2><span class="count">${rows.length}</span>
+    <div class="panel-head"><h2>Сотрудники</h2><span class="count">${anyF?rows.length+' / '+all.length:all.length}</span>
       ${can('users','create')?`<button class="btn primary sm" id="addStaff" style="margin-left:auto">＋ Добавить сотрудника</button>`:''}</div>
     <div class="filters" style="background:var(--card);border-bottom:1px solid var(--line)">
       <span style="font-size:13px;color:var(--muted)">«Добавить сотрудника» создаёт аккаунт с логином и паролем — сотрудник сразу сможет войти.</span>
     </div>
-    <div class="table-scroll"><table><thead><tr><th>ФИО</th><th>Логин (телефон)</th><th>Город</th><th>Должность</th><th>Роль</th><th></th></tr></thead>
-    <tbody>${rows.map(u=>`<tr>
+    <div class="table-scroll"><table><thead>
+      <tr><th>ФИО</th><th>Логин (телефон)</th><th>Город</th><th>Должность</th><th>Роль</th><th></th></tr>
+      <tr class="filter-row">
+        <th><input class="staff-filter" data-sf="name" placeholder="фильтр…" value="${esc(f.name)}"></th>
+        <th><input class="staff-filter" data-sf="login" placeholder="фильтр…" value="${esc(f.login)}"></th>
+        <th><select class="staff-filter" data-sf="city"><option value="">Все</option>${cityVals.map(v=>`<option value="${esc(v)}" ${f.city===v?'selected':''}>${esc(v)}</option>`).join('')}</select></th>
+        <th><input class="staff-filter" data-sf="position" placeholder="фильтр…" value="${esc(f.position)}"></th>
+        <th><select class="staff-filter" data-sf="role"><option value="">Все</option>${roleVals.map(v=>`<option value="${esc(v)}" ${f.role===v?'selected':''}>${esc(v)}</option>`).join('')}</select></th>
+        <th></th></tr>
+    </thead>
+    <tbody>${rows.length?rows.map(u=>`<tr>
       <td><strong>${esc(u.full_name||'—')}</strong></td>
       <td>${u.phone?phoneLink(u.phone):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
       <td>${u.city_id?esc(cityName(u.city_id)):'—'}</td>
@@ -2139,11 +2186,22 @@ function renderStaff(){
       <td><span class="pill ${(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='admin'?'gold':'moss'}">${esc(u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'—'))}</span></td>
       <td><div class="row-actions">
         ${can('users','edit')?`<button class="btn sm ghost" data-uedit="${u.id}">Изменить</button>`:''}
+        ${can('users','edit')?`<button class="btn sm ghost" data-upass="${u.id}">Пароль</button>`:''}
         ${can('users','delete')&&u.id!==S.me.id?`<button class="btn sm danger" data-udel="${u.id}">Удалить</button>`:''}
-      </div></td></tr>`).join('')}</tbody></table></div></div>`;
+      </div></td></tr>`).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Ничего не найдено</td></tr>`}</tbody></table></div></div>`;
   $('usersContent').querySelectorAll('[data-uedit]').forEach(b=>b.onclick=()=>staffModal(b.dataset.uedit));
+  $('usersContent').querySelectorAll('[data-upass]').forEach(b=>b.onclick=()=>changePassModal(b.dataset.upass));
   $('usersContent').querySelectorAll('[data-udel]').forEach(b=>b.onclick=()=>delStaff(b.dataset.udel));
   if($('addStaff'))$('addStaff').onclick=()=>createStaffModal();
+  // фильтры
+  $('usersContent').querySelectorAll('.staff-filter').forEach(el=>{
+    const ev=el.tagName==='SELECT'?'onchange':'oninput';
+    el[ev]=()=>{staffFilters[el.dataset.sf]=el.value;
+      const act=document.activeElement;const sf=act&&act.dataset?act.dataset.sf:null;const pos=act&&act.selectionStart;
+      renderStaff();
+      if(sf){const e2=$('usersContent').querySelector(`.staff-filter[data-sf="${sf}"]`);if(e2){e2.focus();try{e2.setSelectionRange(pos,pos);}catch(e){}}}
+    };
+  });
 }
 function createStaffModal(){
   showModal('Новый сотрудник',`
@@ -2179,6 +2237,25 @@ function createStaffModal(){
   const nr=$('n_role');const toggleKind=()=>{const bt=(S.roles.find(r=>r.id===nr.value)||{}).base_type;
     $('n_kind_field').style.display=bt==='courier'?'':'none';};
   nr.onchange=toggleKind;toggleKind();
+}
+// модалка смены пароля сотрудника
+function changePassModal(id){
+  const u=S.profiles.find(x=>x.id===id);if(!u)return;
+  const login=u.phone?phoneDisplay(u.phone):((u.email&&!u.email.endsWith('@jyldam.local'))?u.email:'(нет)');
+  showModal(`Пароль · ${esc(u.full_name||login)}`,`
+    <div class="grid2">
+      <div class="field full"><label>Логин (телефон)</label><input value="${esc(login)}" readonly></div>
+      <div class="field full"><label>Новый пароль</label><input id="cp_pass" type="text" autocomplete="off" placeholder="мин. 6 символов"></div>
+      <div class="field full"><span class="hint">Пароль нельзя «посмотреть» — он хранится в зашифрованном виде. Здесь можно задать новый и передать его сотруднику. Старый перестанет действовать.</span></div>
+    </div>`,
+    async()=>{
+      const pass=val('cp_pass');
+      if(!pass||pass.length<6){toast('Пароль минимум 6 символов');return false;}
+      toast('Меняем пароль…');
+      const out=await callSetPassword({user_id:u.id,password:pass});
+      if(out.error){toast('Ошибка: '+out.error);return false;}
+      toast('Пароль изменён');return true;
+    });
 }
 async function delStaff(id){
   const u=S.profiles.find(x=>x.id===id);
