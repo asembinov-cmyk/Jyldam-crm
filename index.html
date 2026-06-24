@@ -1293,59 +1293,49 @@ function drawOrders(){
   const el=$('orderTable');const rows=filteredOrders();
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
   if(isCourier()){drawCourierOrderCards(el,rows);return;}
-  drawOrderRows(el,rows);
-}
-// Компактные строки заказов с раскрытием деталей и фото — без горизонтальной прокрутки
-function drawOrderRows(el,rows){
-  el.innerHTML=`<div class="ord-list">${rows.map(o=>{
-    const statusSel=`<select class="status-pick" data-ostatus="${o.id}" onclick="event.stopPropagation()" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}"><option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>`;
-    const ph=pickupPhotos(o);
-    const photoStrip=ph.length?`<div class="photo-grid" style="margin-top:6px">${ph.map(f=>`<div class="photo-thumb"><img src="${esc(f.url)}" data-oviewphoto="${esc(f.url)}"></div>`).join('')}</div>`:'<div class="photo-empty">Фото нет</div>';
-    const f=(k,v)=>`<div class="ord-f"><div class="k">${k}</div><div class="v">${v||'—'}</div></div>`;
-    return `<div class="ord-row" data-orow="${o.id}">
-      <div class="ord-main" data-otoggle="${o.id}">
-        <div class="ord-id">${esc(o.code)}</div>
-        <div class="ord-cell ord-c-client"><span class="lbl">Клиент</span>${esc(o.client)||'—'}</div>
-        <div class="ord-cell ord-c-phone"><span class="lbl">Телефон</span>${o.phone?esc(phoneDisplay(o.phone)):'—'}</div>
-        <div class="ord-cell ord-c-addr"><span class="lbl">Адрес</span>${esc(o.address)||'—'}</div>
-        <div class="ord-cell ord-c-cost"><span class="lbl">Сумма</span>${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</div>
-        ${statusSel}
-        <span class="ord-chev">▾</span>
-      </div>
-      <div class="ord-details">
-        <div class="ord-grid">
-          ${f('Дата забора',esc(fmtDate(o.pickup_date)))}
-          ${f('Отправитель',esc(o.sender))}
-          ${f('Тип доставки',o.delivery_id?esc(deliveryName(o.delivery_id)):'')}
-          ${f('Город',isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'')}
-          ${f('Вес',o.weight?esc(o.weight)+' кг':'')}
-          ${f('Курьер',o.order_courier_id?esc(orderCourierName(o.order_courier_id)):'')}
-          ${f('Индекс',esc(o.index))}
-          ${f('Трек-код',esc(o.track))}
-          ${f('Менеджер продаж',o.sales_id?esc(salesName(o.sales_id)):'')}
-          ${f('Обработчик',o.processor_id?esc(processorName(o.processor_id)):'')}
-          ${f('Дата оплаты',esc(fmtDate(o.pay_date)))}
-          ${f('ИП для Почты',o.post_ip_id?esc(postIpName(o.post_ip_id)):'')}
-        </div>
-        <div class="ord-f"><div class="k">Фотографии заказа</div>${photoStrip}</div>
-        <div class="ord-actions" style="margin-top:12px;flex-wrap:wrap">
-          <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
-          ${can('orders','edit')?`<button class="btn sm primary" data-oedit="${o.id}">Редактировать</button>`:`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`}
-          ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
-        </div>
-      </div>
-    </div>`;
-  }).join('')}</div>`;
-  // раскрытие/сворачивание
-  el.querySelectorAll('[data-otoggle]').forEach(m=>m.onclick=e=>{
-    if(e.target.closest('select,button,a'))return;
-    m.closest('.ord-row').classList.toggle('open');
-  });
+  const staff=isStaff();
+  el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
+    <th>Фото</th><th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
+    ${staff?'<th>Менеджер продаж</th><th>Обработчик</th><th>Стоимость</th><th>Оплата</th><th>ИП для Почты</th>':''}<th></th></tr></thead>
+    <tbody>${rows.map(o=>{
+      const ph=pickupPhotos(o);
+      const photoCell=ph.length
+        ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
+        : '<span style="color:var(--line)">—</span>';
+      return `<tr data-orow="${o.id}" style="cursor:pointer">
+      <td data-label="Фото">${photoCell}</td>
+      <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
+      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
+      <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
+      <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
+      <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
+      <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
+      <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
+      <td data-label="Адрес">${esc(o.address)||'—'}</td><td data-label="Кол-во">${esc(o.qty||0)}</td>
+      <td data-label="Курьер">${o.order_courier_id?`<span class="pill moss">${esc(orderCourierName(o.order_courier_id))}</span>`:'—'}</td>
+      <td data-label="Статус"><select class="status-pick" data-ostatus="${o.id}" onclick="event.stopPropagation()" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}">
+        <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></td>
+      <td data-label="Индекс">${esc(o.index)||'—'}</td><td data-label="Трек-код">${esc(o.track)||'—'}</td>
+      ${staff?`<td data-label="Менеджер продаж">${o.sales_id?esc(salesName(o.sales_id)):'—'}</td><td data-label="Обработчик">${o.processor_id?esc(processorName(o.processor_id)):'—'}</td>
+      <td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Оплата">${esc(fmtDate(o.pay_date))}</td>
+      <td data-label="ИП для Почты">${o.post_ip_id?esc(postIpName(o.post_ip_id)):'—'}</td>`:''}
+      <td data-label="" class="cell-actions"><div class="row-actions">
+        ${can('orders','edit')?`<button class="btn sm primary" data-oedit="${o.id}">Редактировать</button>`:`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`}
+        <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
+        ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
+      </div></td></tr>`;
+    }).join('')}</tbody></table></div>`;
   el.querySelectorAll('[data-oviewphoto]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.oviewphoto);});
   el.querySelectorAll('[data-oedit]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oedit));
   el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));
   el.querySelectorAll('[data-odel]').forEach(b=>b.onclick=()=>delOrder(b.dataset.odel));
   el.querySelectorAll('[data-obc]').forEach(b=>b.onclick=()=>showBarcode(b.dataset.obc));
+  // двойной клик по строке открывает заказ
+  el.querySelectorAll('[data-orow]').forEach(tr=>tr.ondblclick=e=>{
+    if(e.target.closest('button,select,input,a'))return;
+    orderModal(tr.dataset.orow,!can('orders','edit'));
+  });
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
     const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});if(u){o.status_id=u.status_id;sel.style.borderColor=(statusObj(o.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}});
