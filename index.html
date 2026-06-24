@@ -511,6 +511,33 @@ async function loadAll(){
   if(can('users','view')){ S.profiles=await dbList('profiles',{order:'created_at',asc:true}); }
 }
 
+// Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
+async function refreshForTab(tab){
+  try{
+    if(tab==='pickups'){
+      S.pickups=await dbList('pickups',{order:'created_at',asc:false});
+    }else if(tab==='orders'){
+      const [orders,pickups]=await Promise.all([
+        dbList('orders',{order:'created_at',asc:false}),
+        dbList('pickups',{order:'created_at',asc:false}),
+      ]);
+      S.orders=orders;S.pickups=pickups; // pickups нужны для связи заказ↔заявка
+    }else if(tab==='settings'){
+      // справочники: тянем всё, что показывается
+      const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips]=await Promise.all([
+        dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),dbList('couriers',{order:'fio'}),
+        dbList('order_couriers',{order:'fio'}),dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),
+        dbList('partners',{order:'name'}),dbList('statuses',{order:'created_at',asc:true}),dbList('delivery_types',{order:'created_at',asc:true}),
+        dbList('courier_cities',{order:'name'}),dbList('post_ips',{order:'name'}),
+      ]);
+      Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips});
+    }else if(tab==='users'){
+      if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
+      S.roles=await dbList('roles',{order:'created_at',asc:true});
+    }
+  }catch(e){console.error('refresh',e);}
+}
+
 async function enterApp(){
   $('loginScreen').style.display='none';
   $('appShell').style.display='block';
@@ -596,7 +623,12 @@ function buildNav(){
   if(!tabs.length) tabs=[['none','—']];
   if(!tabs.find(t=>t[0]===S.tab)) S.tab=tabs[0][0];
   $('navTabs').innerHTML=tabs.map(([k,l])=>`<button data-tab="${k}" class="${S.tab===k?'active':''}">${l}</button>`).join('');
-  $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;saveNav();buildNav();render();});
+  $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
+    S.tab=b.dataset.tab;saveNav();buildNav();
+    $('main').innerHTML='<div class="loading">Обновляем данные…</div>';
+    await refreshForTab(S.tab);
+    render();
+  });
 }
 
 /* ---------- РОУТЕР ---------- */
