@@ -526,7 +526,89 @@ async function callCreateUser(payload){
   }catch(e){return {error:String(e&&e.message||e)};}
 }
 
-/* ---------- AUTH ---------- */
+/* ================= ИНТЕГРАЦИЯ С KET ================= */
+// низкоуровневый вызов прокси ket-proxy
+async function callKet(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/ket-proxy`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
+// собрать данные заказа в формат KET
+function orderToKet(o){
+  const courier=isCourierDelivery(o.delivery_id);
+  // город: для курьерской — курьерский справочник, для почтовой — обычный
+  const cityNm=courier?courierCityName(o.courier_city_id):(o.city_id?cityName(o.city_id):'');
+  const data={
+    phone:'7'+(o.phone||''),                 // телефон в формате 7XXXXXXXXXX (* обязательное)
+    country:'kz',                            // код страны (* обязательное)
+    offer:'tovar',                           // тех. название товара (* обязательное)
+    order_id:o.code||o.id,                   // наш ID для синхронизации
+    name:o.client||'',                       // ФИО клиента
+    addr:o.address||'',                      // адрес
+    price:o.order_sum!=null?String(o.order_sum):'', // сумма заказа
+    saller_butique:o.sender||'',             // продавец/бутик
+  };
+  if(o.index)data.index=o.index;             // индекс (для почты)
+  // город указываем только если он есть и это не «—»
+  if(cityNm&&cityNm!=='—')data.city=cityNm;
+  else if(!courier)data.kz_delivery='32';    // почта, если город не задан
+  return data;
+}
+// отправить один заказ в KET
+async function sendOrderToKet(o){
+  if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
+  toast('Отправка в KET…');
+  const r=await callKet({action:'send',order:orderToKet(o)});
+  if(r.error){toast('Ошибка KET: '+r.error);return false;}
+  const result=(r.ket&&r.ket.result)||{};
+  if((result.success||'').toUpperCase()==='TRUE'){
+    const ketId=result.id||null;
+    const u=await dbUpdate('orders',o.id,{ket_id:ketId,ket_synced_at:new Date().toISOString()});
+    if(u)Object.assign(o,u);
+    toast('Заказ отправлен в KET (ID '+(ketId||'?')+')');
+    renderOrders();return true;
+  }else{
+    toast('KET отклонил: '+(result.message||'неизвестно'));return false;
+  }
+}
+// обновить статусы из KET для заказов, у которых есть ket_id
+async function syncKetStatuses(){
+  const withKet=S.orders.filter(o=>o.ket_id);
+  if(!withKet.length){toast('Нет заказов, отправленных в KET');return;}
+  toast('Запрос статусов из KET…');
+  const ids=withKet.map(o=>o.ket_id);
+  const r=await callKet({action:'get',ids});
+  if(r.error){toast('Ошибка KET: '+r.error);return;}
+  // ответ KET — массив заказов
+  let arr=r.ket;
+  if(arr&&!Array.isArray(arr)&&Array.isArray(arr.data))arr=arr.data;
+  if(!Array.isArray(arr)){toast('KET вернул неожиданный ответ');return;}
+  let updated=0;
+  for(const k of arr){
+    const o=withKet.find(x=>String(x.ket_id)===String(k.id));
+    if(!o)continue;
+    const patch={
+      ket_status_kz:k.status_kz!=null?String(k.status_kz):o.ket_status_kz,
+      ket_send_status:k.send_status!=null?String(k.send_status):o.ket_send_status,
+      ket_status:k.status!=null?String(k.status):o.ket_status,
+      ket_synced_at:new Date().toISOString(),
+    };
+    if(k.kz_code)patch.ket_track=k.kz_code; // трек-код когда почтой
+    const u=await dbUpdate('orders',o.id,patch);
+    if(u){Object.assign(o,u);updated++;}
+  }
+  toast('Обновлено заказов: '+updated);
+  renderOrders();
+}
 // дефолтные права на случай отсутствия роли — выводим из base_type
 function defaultPerms(base){
   const full={view:true,create:true,edit:true,delete:true};
@@ -1311,7 +1393,7 @@ function renderOrders(mode){
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':(subs[ordersMode]||'')}</p></div>
-      ${can('orders','create')?`<div class="head-actions"><button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
+      ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSync">⟳ Статусы из KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
     <div class="stats">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
@@ -1336,6 +1418,7 @@ function renderOrders(mode){
       <div id="orderTable"></div>
     </div>`;
   if($('newOrder'))$('newOrder').onclick=()=>orderModal();
+  if($('ketSync'))$('ketSync').onclick=async()=>{const b=$('ketSync');b.disabled=true;await syncKetStatuses();b.disabled=false;};
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrders();};
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrders();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
@@ -1490,6 +1573,11 @@ function orderModal(id,readonly){
       <div class="ophoto-col">
         ${orderBigPhotoHtml(o,!ro)}
         <div class="field full" style="margin-top:14px"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
+        ${(o&&o.id&&!ro)?`<div class="field full" style="margin-top:14px"><label>KET</label>
+          <div style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)">
+            ${o.ket_id?`<div style="font-size:13px;margin-bottom:8px">Отправлен в KET · ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}</div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}
+            <button type="button" class="btn sm ${o.ket_id?'ghost':''}" data-ketsend="${o.id}">${o.ket_id?'Отправить повторно':'Отправить в KET'}</button>
+          </div></div>`:''}
       </div>
       <div class="oform-col">
     <div class="grid2">
@@ -1534,6 +1622,8 @@ function orderModal(id,readonly){
     },{readonly:ro,wide:true});
   attachPhone('o_phone',d.phone);
   setTimeout(()=>renderBarcode($('o_barcode'),code),60);
+  // кнопка «Отправить в KET»
+  if(o&&o.id){const kb=document.querySelector(`[data-ketsend="${o.id}"]`);if(kb)kb.onclick=async()=>{kb.disabled=true;await sendOrderToKet(o);kb.disabled=false;};}
   if(o&&o.id){
     const bindBig=()=>{
       const pc=$('o_photos');if(!pc)return;
