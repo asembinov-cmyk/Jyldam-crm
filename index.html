@@ -1295,7 +1295,7 @@ function drawOrders(){
   if(isCourier()){drawCourierOrderCards(el,rows);return;}
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
-    <th>Фото</th><th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    ${isAdmin()?'<th></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Менеджер продаж</th><th>Обработчик</th><th>Стоимость</th><th>Оплата</th><th>ИП для Почты</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
@@ -1304,6 +1304,9 @@ function drawOrders(){
         ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
         : '<span style="color:var(--line)">—</span>';
       return `<tr data-orow="${o.id}" style="cursor:pointer">
+      ${isAdmin()?`<td data-label="" class="cell-actions"><div class="row-actions">
+        <button class="btn sm primary" data-oedit="${o.id}">Редактировать</button>
+      </div></td>`:''}
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
@@ -1321,9 +1324,9 @@ function drawOrders(){
       <td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Оплата">${esc(fmtDate(o.pay_date))}</td>
       <td data-label="ИП для Почты">${o.post_ip_id?esc(postIpName(o.post_ip_id)):'—'}</td>`:''}
       <td data-label="" class="cell-actions"><div class="row-actions">
-        ${can('orders','edit')?`<button class="btn sm primary" data-oedit="${o.id}">Редактировать</button>`:`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`}
         <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
-        ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
+        ${!isAdmin()?`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`:''}
+        ${isAdmin()?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
       </div></td></tr>`;
     }).join('')}</tbody></table></div>`;
   el.querySelectorAll('[data-oviewphoto]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.oviewphoto);});
@@ -1331,10 +1334,10 @@ function drawOrders(){
   el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));
   el.querySelectorAll('[data-odel]').forEach(b=>b.onclick=()=>delOrder(b.dataset.odel));
   el.querySelectorAll('[data-obc]').forEach(b=>b.onclick=()=>showBarcode(b.dataset.obc));
-  // двойной клик по строке открывает заказ
+  // двойной клик по строке открывает заказ (админ — на редактирование, остальные — просмотр)
   el.querySelectorAll('[data-orow]').forEach(tr=>tr.ondblclick=e=>{
     if(e.target.closest('button,select,input,a'))return;
-    orderModal(tr.dataset.orow,!can('orders','edit'));
+    orderModal(tr.dataset.orow,!isAdmin());
   });
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
