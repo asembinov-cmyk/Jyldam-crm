@@ -572,7 +572,7 @@ function renderPickups(){
       <div class="panel-head"><h2>Карточки забора</h2><span class="count">${list.length}</span></div>
       <div class="filters">
         <input class="search" id="pfq" placeholder="Поиск: наименование, адрес, номер…" value="${esc(pf.q)}">
-        <select id="pfcity"><option value="">Все города</option>${S.cities.map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        ${isStaff()?`<select id="pfcity"><option value="">Все города</option>${S.cities.map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:''}
         ${isStaff()?`<select id="pfcourier"><option value="">Все курьеры</option>${S.couriers.map(c=>`<option value="${c.id}" ${pf.courier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select>`:''}
         <select id="pfstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         <label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
@@ -583,7 +583,7 @@ function renderPickups(){
     </div>`;
   if($('newPickup'))$('newPickup').onclick=()=>pickupModal();
   $('pfq').oninput=e=>{pf.q=e.target.value;drawPickups();};
-  $('pfcity').onchange=e=>{pf.city=e.target.value;drawPickups();};
+  if($('pfcity'))$('pfcity').onchange=e=>{pf.city=e.target.value;drawPickups();};
   if($('pfcourier'))$('pfcourier').onchange=e=>{pf.courier=e.target.value;drawPickups();};
   $('pfstatus').onchange=e=>{pf.status=e.target.value;drawPickups();};
   $('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
