@@ -1043,7 +1043,7 @@ function drawPickups(){
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
-    ${staff?'<th>Курьер</th><th>Менеджер продаж</th><th>Обработчик</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
+    ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer">
       <td data-label="Дата">${esc(fmtDate(p.pickup_date))}</td>
       <td data-label="Город"><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
@@ -1051,9 +1051,7 @@ function drawPickups(){
       <td data-label="Адрес">${esc(p.address)||'—'}</td>
       <td data-label="Номер">${phoneLink(p.phone)}</td>
       <td data-label="Район">${esc(districtName(p.district_id))}</td>
-      ${staff?`<td data-label="Курьер">${p.courier_id?`<span class="pill moss">${esc(courierName(p.courier_id))}</span>`:'<span style="color:var(--muted)">не назначен</span>'}</td>
-      <td data-label="Менеджер продаж">${p.sales_id?esc(salesName(p.sales_id)):'—'}</td>
-      <td data-label="Обработчик">${p.processor_id?esc(processorName(p.processor_id)):'—'}</td>`:''}
+      ${staff?`<td data-label="Курьер">${p.courier_id?`<span class="pill moss">${esc(courierName(p.courier_id))}</span>`:'<span style="color:var(--muted)">не назначен</span>'}</td>`:''}
       <td data-label="Заказов">${(can('pickups','edit')||isCourierBase())?`<input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${p.orders?esc(p.orders):''}" placeholder="—">`:`<span class="qty">${esc(p.orders||0)}</span>`}</td>
       <td data-label="Статус"><select class="status-pick" data-pstatus="${p.id}" style="border-color:${(statusObj(p.status_id)||{}).color||'var(--line)'}">
         <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
