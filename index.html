@@ -1714,7 +1714,7 @@ function dirGrid(cfg){
     return `<th><input class="dir-filter" data-fk="${c.key}" placeholder="фильтр…" value="${esc(f[c.key]||'')}"></th>`;
   }).join('')}<th></th></tr>`;
   const head=`<tr>${cfg.cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}<th></th></tr>`;
-  const body=filtered.length?filtered.map(row=>`<tr>${cfg.cols.map(c=>`<td>${c.cell?c.cell(row):esc(c.text?c.text(row):'')||'—'}</td>`).join('')}<td>${dirActions(row.id)}</td></tr>`).join('')
+  const body=filtered.length?filtered.map(row=>`<tr data-dirrow="${row.id}" style="cursor:pointer">${cfg.cols.map(c=>`<td>${c.cell?c.cell(row):esc(c.text?c.text(row):'')||'—'}</td>`).join('')}<td>${dirActions(row.id)}</td></tr>`).join('')
     :`<tr><td colspan="${cfg.cols.length+1}" style="text-align:center;color:var(--muted);padding:30px">Ничего не найдено</td></tr>`;
   const table=arr.length?`<div class="table-scroll"><table><thead>${head}${filterRow}</thead><tbody>${body}</tbody></table></div>`
     :`<div class="empty"><div class="big">${esc(cfg.emptyText||'Список пуст')}</div></div>`;
@@ -1724,6 +1724,11 @@ function dirGrid(cfg){
   dirShell(cfg.title,countLabel,()=>cfg.modalFn(),table);
   // привязки
   bindDir(cfg.table,cfg.arrKey,cfg.modalFn);
+  // двойной клик по строке открывает карточку (кроме кликов по кнопкам действий)
+  $('dirContent').querySelectorAll('[data-dirrow]').forEach(tr=>tr.ondblclick=e=>{
+    if(e.target.closest('button,a,select,input'))return;
+    if(canEditDir())cfg.modalFn(tr.dataset.dirrow);
+  });
   $('dirContent').querySelectorAll('.dir-filter').forEach(el=>{
     const ev=el.tagName==='SELECT'?'onchange':'oninput';
     el[ev]=()=>{f[el.dataset.fk]=el.value;redrawDirGrid(cfg);};
