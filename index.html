@@ -182,7 +182,7 @@
     place-items:center;z-index:100;padding:20px}
   .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:560px;
     box-shadow:0 30px 80px -30px rgba(20,17,13,.6);max-height:90vh;overflow:auto}
-  .modal-wide{max-width:1040px}
+  .modal-wide{max-width:1240px}
   /* двухколоночный макет карточки заказа: фото слева (половина), форма справа */
   .order-split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
   .order-split .ophoto-col{position:sticky;top:0}
@@ -196,6 +196,10 @@
   .obig-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .obig-thumbs img{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:pointer}
   .obig-thumbs img.active{border-color:var(--rust);border-width:2px}
+  /* увеличение фото поверх всего */
+  .photo-zoom-ov{position:fixed;inset:0;background:rgba(20,17,13,.92);z-index:99999;display:grid;place-items:center;padding:24px;cursor:zoom-out}
+  .photo-zoom-ov img{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .photo-zoom-ov .pz-x{position:absolute;top:18px;right:24px;font-size:36px;color:#fff;background:none;border:none;cursor:pointer;line-height:1}
   @media (max-width:760px){
     .modal-wide{max-width:560px}
     .order-split{grid-template-columns:1fr;gap:16px}
@@ -1069,6 +1073,16 @@ function viewPhoto(url){
   // открываем фото в отдельной вкладке браузера
   window.open(url,'_blank','noopener,noreferrer');
 }
+// увеличение фото поверх текущего окна (без новой вкладки), закрытие по клику/Esc
+function zoomPhoto(url){
+  const ov=document.createElement('div');ov.className='photo-zoom-ov';
+  ov.innerHTML=`<button class="pz-x" aria-label="Закрыть">×</button><img src="${esc(url)}" alt="">`;
+  const close=()=>{ov.remove();document.removeEventListener('keydown',onKey);};
+  const onKey=e=>{if(e.key==='Escape'){e.preventDefault();close();}};
+  ov.addEventListener('click',e=>{e.stopPropagation();close();});
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(ov);
+}
 // HTML блока фото для заявки; canEdit — можно ли добавлять/удалять
 function photoBlockHtml(p,canEdit){
   const ph=pickupPhotos(p);
@@ -1505,9 +1519,9 @@ function orderModal(id,readonly){
         pc.querySelectorAll('[data-obigthumb]').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
       });
-      // крупное фото открывается в новой вкладке
+      // крупное фото увеличивается поверх окна (зум)
       const main=pc.querySelector('#obigMain');
-      if(main)main.onclick=e=>{e.stopPropagation();viewPhoto(main.dataset.oviewphoto);};
+      if(main)main.onclick=e=>{e.stopPropagation();zoomPhoto(main.dataset.oviewphoto);};
     };
     const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=orderBigPhotoInner(o,!ro);bindBig();};
     bindBig();
