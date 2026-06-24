@@ -548,6 +548,9 @@ function orderToKet(o){
   const courier=isCourierDelivery(o.delivery_id);
   // город: для курьерской — курьерский справочник, для почтовой — обычный
   const cityNm=courier?courierCityName(o.courier_city_id):(o.city_id?cityName(o.city_id):'');
+  // сумма: сначала order_sum, иначе cost (дубль). Идёт и в price, и в total_price
+  const sumVal=(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0);
+  const sumStr=String(sumVal||0);
   const data={
     phone:'7'+(o.phone||''),                 // телефон в формате 7XXXXXXXXXX (* обязательное)
     country:'kz',                            // код страны (* обязательное)
@@ -555,7 +558,8 @@ function orderToKet(o){
     order_id:o.code||o.id,                   // наш ID для синхронизации
     name:o.client||'',                       // ФИО клиента
     addr:o.address||'',                      // адрес
-    price:o.order_sum!=null?String(o.order_sum):'', // сумма заказа
+    price:sumStr,                            // стоимость
+    total_price:sumStr,                      // итоговая стоимость (KET требует оба)
     saller_butique:o.sender||'',             // продавец/бутик
   };
   if(o.index)data.index=o.index;             // индекс (для почты)
@@ -1400,19 +1404,25 @@ function renderOrders(mode){
     if(already)msg+=`\n(из них ${already} уже были отправлены — будут отправлены повторно)`;
     if(!confirm(msg))return;
     const b=$('ketSendSel');b.disabled=true;
-    let ok=0,fail=0;
+    let ok=0,fail=0;const errs=[];
     for(const o of list){
-      if(!o.phone||o.phone.length<10){fail++;continue;} // без телефона не шлём
+      if(!o.phone||o.phone.length<10){fail++;errs.push(`${o.code}: нет телефона`);continue;}
       const r=await callKet({action:'send',order:orderToKet(o)});
       const result=(r&&r.ket&&r.ket.result)||{};
       if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
         const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
         if(u)Object.assign(o,u);
         ok++;
-      }else{fail++;}
+      }else{
+        fail++;
+        // собираем причину: ошибка прокси, либо message от KET, либо сырой ответ
+        const reason=r.error||result.message||(r&&r.raw)||(r&&JSON.stringify(r.ket))||'неизвестно';
+        errs.push(`${o.code}: ${reason}`);
+      }
     }
     b.disabled=false;
     toast(`Отправлено в KET: ${ok}${fail?(', с ошибкой: '+fail):''}`);
+    if(errs.length)alert('Не отправлены:\n\n'+errs.join('\n'));
     renderOrders();
   };
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrders();};
