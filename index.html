@@ -1499,7 +1499,7 @@ function orderModal(id,readonly){
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
-      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${esc(d.order_sum||'')}" ${dis}></div>
+      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${esc(d.order_sum||'')}" ${dis}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
@@ -1509,7 +1509,6 @@ function orderModal(id,readonly){
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
       <div class="field"><label>Менеджер по продажам</label><select id="o_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="o_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
-      <div class="field"><label>Стоимость доставки (₸)</label><input type="number" min="0" id="o_cost" value="${esc(d.cost)}" ${dis}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span></div>
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
     </div>
@@ -1525,7 +1524,7 @@ function orderModal(id,readonly){
         order_sum:val('o_sum')?parseFloat(val('o_sum')):null,
         status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
-        cost:val('o_cost')?parseFloat(val('o_cost')):0,pay_date:val('o_pay')||null,post_ip_id:val('o_ip')||null,
+        cost:val('o_sum')?parseFloat(val('o_sum')):0,pay_date:val('o_pay')||null,post_ip_id:val('o_ip')||null,
         order_courier_id:val('o_ocourier')||null};
       if(id){const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);}
       else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);}
@@ -1586,23 +1585,17 @@ function orderModal(id,readonly){
       sel.innerHTML='<option value="">—</option>'+opts.map(c=>`<option value="${c.id}">${esc(c.fio)}</option>`).join('');
       if(opts.find(c=>c.id===cur))sel.value=cur; // сохранить выбор, если курьер из этого города
     };
+    // сумма заказа тянется от тарифа партнёра (пока её не правили вручную)
+    let sumTouched=!!(d.order_sum); // если сумма уже была — считаем заполненной вручную
     const applyTariff=()=>{
-      // партнёр определяется по имени отправителя
+      if(sumTouched)return; // не перезаписываем введённую вручную сумму
       const pt=S.partners.find(x=>x.name===($('o_sender').value||'').trim());if(!pt)return;
       const courier=isCourierDelivery($('o_delivery').value);
       const t=courier?pt.tariff_courier:pt.tariff_post;
-      if(t!=null&&t!==''){$('o_cost').value=t;syncSum();}
-    };
-    // сумма заказа тянется от стоимости доставки (пока её не правили вручную)
-    let sumTouched=!!(d.order_sum); // если сумма уже была — считаем заполненной вручную
-    const syncSum=()=>{
-      const sumEl=$('o_sum');if(!sumEl)return;
-      if(sumTouched)return; // не перезаписываем, если пользователь сам ввёл сумму
-      sumEl.value=$('o_cost').value||'';
+      const sumEl=$('o_sum');
+      if(sumEl&&t!=null&&t!==''){sumEl.value=t;}
     };
     const sumEl=$('o_sum');if(sumEl)sumEl.oninput=()=>{sumTouched=true;};
-    const costEl=$('o_cost');if(costEl)costEl.oninput=()=>syncSum();
-    setTimeout(syncSum,0); // первичная подстановка при открытии
     // показать/скрыть поля, относящиеся только к почтовой доставке
     const toggleMailFields=()=>{
       const courier=isCourierDelivery($('o_delivery').value);
@@ -1618,6 +1611,7 @@ function orderModal(id,readonly){
     const ss=$('o_sender');if(ss)ss.onchange=()=>{const pt=S.partners.find(x=>x.name===ss.value.trim());if(pt){
       if(pt.sales_id&&$('o_sales'))$('o_sales').value=pt.sales_id;if(pt.processor_id&&$('o_proc'))$('o_proc').value=pt.processor_id;}
       applyTariff();};
+    setTimeout(applyTariff,0); // первичная подстановка суммы из тарифа при открытии
   }
 }
 /* ================= МОДУЛЬ: СПРАВОЧНИКИ ================= */
