@@ -692,12 +692,20 @@ function drawPickups(){
         <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         <div class="status-time">${p.status_at?('изм.: '+fmtDateTime(p.status_at)):''} ${(p.status_history&&p.status_history.length)?`· <button class="link-btn" data-phist="${p.id}">история</button>`:''}</div></td>
       <td data-label="" class="cell-actions"><div class="row-actions">
+        ${can('orders','create')?`<button class="btn sm primary" data-pgen="${p.id}">Заказы${ordersCountForPickup(p.id)?` (${ordersCountForPickup(p.id)}/${p.orders||0})`:''}</button>`:''}
         ${can('pickups','edit')?`<button class="btn sm ghost" data-pedit="${p.id}">Изменить</button>`:`<button class="btn sm ghost" data-pview="${p.id}">Открыть</button>`}
         ${can('pickups','delete')?`<button class="btn sm danger" data-pdel="${p.id}">Удалить</button>`:''}
       </div></td></tr>`).join('')}</tbody></table></div>`;
   el.querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pedit));
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pview,true));
   el.querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>delPickup(b.dataset.pdel));
+  el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=async()=>{
+    const p=S.pickups.find(x=>x.id===b.dataset.pgen);if(!p)return;
+    const want=parseInt(p.orders||'0',10)||0;const have=ordersCountForPickup(p.id);
+    if(want<=0){toast('Сначала укажите количество заказов');return;}
+    if(have>=want){toast(`Уже создано ${have} заказ(ов) по этой заявке`);return;}
+    if(!confirm(`Создать ${want-have} заказ(ов) по магазину «${p.name}»?\nДанные подтянутся из карточки партнёра.`))return;
+    b.disabled=true;await createOrdersFromPickup(p.id);b.disabled=false;drawPickups();});
   el.querySelectorAll('[data-phist]').forEach(b=>b.onclick=()=>showPickupHistory(b.dataset.phist));
   el.querySelectorAll('[data-pstatus]').forEach(sel=>sel.onchange=()=>setPickupStatus(sel.dataset.pstatus,sel.value));
   el.querySelectorAll('[data-pqty]').forEach(inp=>{
@@ -731,6 +739,7 @@ function drawCourierPickupCards(el,rows){
         <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${esc(p.orders||0)}"></span></div>
         ${(p.status_history&&p.status_history.length)?`<div class="cc-row"><span class="lbl">Статус изменён</span><span class="vl">${p.status_at?esc(fmtDateTime(p.status_at)):'—'} · <button class="link-btn" data-phist="${p.id}">история</button></span></div>`:''}
         <div class="cc-actions">
+          <button class="btn sm primary" data-pgen="${p.id}">Создать заказы${ordersCountForPickup(p.id)?` (${ordersCountForPickup(p.id)}/${p.orders||0})`:''}</button>
           <button class="btn sm ghost" data-pview="${p.id}">Открыть</button>
         </div>
       </div>
@@ -740,6 +749,13 @@ function drawCourierPickupCards(el,rows){
     h.closest('.cour-card').classList.toggle('open');
   });
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=e=>{e.stopPropagation();pickupModal(b.dataset.pview,true);});
+  el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=async e=>{e.stopPropagation();
+    const p=S.pickups.find(x=>x.id===b.dataset.pgen);if(!p)return;
+    const want=parseInt(p.orders||'0',10)||0;const have=ordersCountForPickup(p.id);
+    if(want<=0){toast('Сначала укажите количество заказов');return;}
+    if(have>=want){toast(`Уже создано ${have} заказ(ов)`);return;}
+    if(!confirm(`Создать ${want-have} заказ(ов) по магазину «${p.name}»?`))return;
+    b.disabled=true;await createOrdersFromPickup(p.id);b.disabled=false;drawPickups();});
   el.querySelectorAll('[data-phist]').forEach(b=>b.onclick=e=>{e.stopPropagation();showPickupHistory(b.dataset.phist);});
   el.querySelectorAll('[data-pstatus]').forEach(sel=>{
     sel.onclick=e=>e.stopPropagation();
@@ -842,6 +858,47 @@ function genOrderCode(){
   const ex=new Set(S.orders.map(o=>o.code));let c;
   do{c=String(Math.floor(1000000+Math.random()*9000000));}while(ex.has(c));
   return c;
+}
+// сколько заказов уже создано по этой заявке
+function ordersCountForPickup(pickupId){return S.orders.filter(o=>o.pickup_id===pickupId).length;}
+// Создаёт недостающие заказы-заготовки по заявке, подтягивая данные магазина-партнёра
+async function createOrdersFromPickup(pickupId,opts){
+  opts=opts||{};
+  const p=S.pickups.find(x=>x.id===pickupId);if(!p)return;
+  const want=Math.max(0,parseInt(p.orders||'0',10)||0);
+  if(!want){toast('Укажите количество заказов');return;}
+  const have=ordersCountForPickup(pickupId);
+  const need=want-have;
+  if(need<=0){if(!opts.silent)toast(have?`Уже создано ${have} заказ(ов) по заявке`:'Нечего создавать');return;}
+  // ищем партнёра по имени из заявки, чтобы подтянуть его данные
+  const partner=S.partners.find(x=>x.name===p.name)||null;
+  // тип доставки по умолчанию — курьерский, если есть такой тип
+  const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
+  const baseStatus=S.statuses[0]?S.statuses[0].id:null;
+  let created=0;
+  for(let i=0;i<need;i++){
+    const row={
+      code:genOrderCode(),
+      pickup_id:pickupId,
+      partner_id:partner?partner.id:null,
+      sender:partner?partner.name:(p.name||''),
+      pickup_date:p.pickup_date||null,
+      phone:p.phone||(partner?partner.phone:'')||'',
+      address:partner?(partner.address||''):(p.address||''),
+      client:'',weight:null,qty:1,
+      delivery_id:courierDelivery?courierDelivery.id:null,
+      courier_city_id:null,
+      status_id:baseStatus,
+      sales_id:partner?partner.sales_id:(p.sales_id||null),
+      processor_id:partner?partner.processor_id:(p.processor_id||null),
+      cost:partner?(courierDelivery?partner.tariff_courier:partner.tariff_post)||0:0,
+      index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
+    };
+    const u=await dbInsert('orders',row);
+    if(u){S.orders.unshift(u);created++;}
+  }
+  if(created)toast(`Создано заказов: ${created}`);
+  return created;
 }
 function renderOrders(){
   const list=visibleOrders();
