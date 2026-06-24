@@ -417,7 +417,7 @@ const S={
   dir:'partners',
   // справочники-кэш
   cities:[],districts:[],couriers:[],order_couriers:[],sales:[],processors:[],
-  partners:[],statuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],
+  partners:[],statuses:[],orderStatuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],
   pickups:[],orders:[],
   myPerms:null, myBaseType:'staff',
 };
@@ -568,14 +568,14 @@ $('logoutBtn').onclick=doLogout;
 
 /* ---------- ENTER APP: load all reference data ---------- */
 async function loadAll(){
-  const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips,pickups,orders]=await Promise.all([
+  const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips,pickups,orders]=await Promise.all([
     dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),dbList('couriers',{order:'fio'}),
     dbList('order_couriers',{order:'fio'}),dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),
-    dbList('partners',{order:'name'}),dbList('statuses',{order:'created_at',asc:true}),dbList('delivery_types',{order:'created_at',asc:true}),
+    dbList('partners',{order:'name'}),dbList('statuses',{order:'created_at',asc:true}),dbList('order_statuses',{order:'created_at',asc:true}),dbList('delivery_types',{order:'created_at',asc:true}),
     dbList('courier_cities',{order:'name'}),dbList('post_ips',{order:'name'}),
     dbList('pickups',{order:'created_at',asc:false}),dbList('orders',{order:'created_at',asc:false}),
   ]);
-  Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips,pickups,orders});
+  Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips,pickups,orders});
   // профили и роли — если есть право на модуль "Пользователи"
   if(can('users','view')){ S.profiles=await dbList('profiles',{order:'created_at',asc:true}); }
 }
@@ -593,13 +593,13 @@ async function refreshForTab(tab){
       S.orders=orders;S.pickups=pickups;
     }else if(tab==='settings'){
       // справочники: тянем всё, что показывается
-      const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips]=await Promise.all([
+      const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips]=await Promise.all([
         dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),dbList('couriers',{order:'fio'}),
         dbList('order_couriers',{order:'fio'}),dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),
-        dbList('partners',{order:'name'}),dbList('statuses',{order:'created_at',asc:true}),dbList('delivery_types',{order:'created_at',asc:true}),
+        dbList('partners',{order:'name'}),dbList('statuses',{order:'created_at',asc:true}),dbList('order_statuses',{order:'created_at',asc:true}),dbList('delivery_types',{order:'created_at',asc:true}),
         dbList('courier_cities',{order:'name'}),dbList('post_ips',{order:'name'}),
       ]);
-      Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips});
+      Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips});
     }else if(tab==='users'){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
@@ -643,6 +643,15 @@ function isCollectedStatus(id){const s=statusObj(id);if(!s)return false;return /
 const isCourierDelivery=id=>{const d=S.delivery.find(x=>x.id===id);return d?/курьер/i.test(d.name):false;};
 function statusBadge(id){const s=statusObj(id);if(!s)return '<span style="color:var(--muted)">—</span>';
   return `<span class="pill" style="color:${s.color};background:${s.color}1a;border-color:${s.color}55">${esc(s.name)}</span>`;}
+// статусы ЗАКАЗА (отдельный справочник)
+const orderStatusObj=id=>S.orderStatuses.find(s=>s.id===id)||null;
+function orderStatusBadge(id){const s=orderStatusObj(id);if(!s)return '<span style="color:var(--muted)">—</span>';
+  return `<span class="pill" style="color:${s.color};background:${s.color}1a;border-color:${s.color}55">${esc(s.name)}</span>`;}
+// статус заказа по умолчанию — «Получено от отправителя» (первый в списке)
+function defaultOrderStatusId(){
+  const byName=S.orderStatuses.find(s=>/получено от отправител/i.test(s.name||''));
+  return byName?byName.id:(S.orderStatuses[0]?S.orderStatuses[0].id:null);
+}
 function fmtDate(d){if(!d)return '—';const p=String(d).slice(0,10).split('-');if(p.length<3)return d;return `${p[2]}.${p[1]}.${p[0]}`;}
 function fmtDateTime(ts){if(!ts)return '';const d=new Date(ts);const p=n=>String(n).padStart(2,'0');
   return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;}
@@ -817,10 +826,10 @@ function showInfo(title,bodyHtml){showModal(title,bodyHtml,null,{readonly:true})
 function renderDashboard(){
   const orders=S.orders||[];
   // классификация по названию статуса
-  const isNew=o=>{const s=statusObj(o.status_id);return !s||/нов|создан/i.test(s.name||'');};
-  const inWay=o=>{const s=statusObj(o.status_id);return s&&/пути|курьер|отправл|передан/i.test(s.name||'');};
-  const delivered=o=>{const s=statusObj(o.status_id);return s&&/доставлен|выдан|получен|заверш/i.test(s.name||'');};
-  const problem=o=>{const s=statusObj(o.status_id);return s&&/проблем|возврат|отмен|ошибк/i.test(s.name||'');};
+  const isNew=o=>{const s=orderStatusObj(o.status_id);return !s||/получено от отправ|нов|создан/i.test(s.name||'');};
+  const inWay=o=>{const s=orderStatusObj(o.status_id);return s&&/прибыл|выехал|пути|курьер|отправл|передан/i.test(s.name||'');};
+  const delivered=o=>{const s=orderStatusObj(o.status_id);return s&&/доставлен|выдан|заверш/i.test(s.name||'');};
+  const problem=o=>{const s=orderStatusObj(o.status_id);return s&&/проблем|возврат|отмен|ошибк/i.test(s.name||'');};
   const today=new Date().toISOString().slice(0,10);
   const cNew=orders.filter(isNew).length, cWay=orders.filter(inWay).length,
         cDel=orders.filter(delivered).length, cProb=orders.filter(problem).length;
@@ -1172,7 +1181,7 @@ async function createOrdersFromPickup(pickupId,opts){
   const partner=S.partners.find(x=>x.name===p.name)||null;
   // тип доставки по умолчанию — курьерский, если есть такой тип
   const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
-  const baseStatus=S.statuses[0]?S.statuses[0].id:null;
+  const baseStatus=defaultOrderStatusId();
   let created=0;
   for(let i=0;i<need;i++){
     const row={
@@ -1257,7 +1266,7 @@ function renderOrders(mode){
       <div class="panel-head"><h2>Список заказов</h2><span class="count">${list.length}</span></div>
       <div class="filters">
         <input class="search" id="ofq" placeholder="Поиск: ID, трек, клиент…" value="${esc(of.q)}">
-        <select id="ofstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<select id="ofpartner"><option value="">Все партнёры</option>${S.partners.map(p=>`<option value="${p.id}" ${of.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}
       </div>
@@ -1314,8 +1323,8 @@ function drawOrders(){
       <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):'—'}</td>
       <td data-label="Адрес">${esc(o.address)||'—'}</td><td data-label="Кол-во">${esc(o.qty||0)}</td>
       <td data-label="Курьер">${o.order_courier_id?`<span class="pill moss">${esc(orderCourierName(o.order_courier_id))}</span>`:'—'}</td>
-      <td data-label="Статус"><select class="status-pick" data-ostatus="${o.id}" onclick="event.stopPropagation()" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}">
-        <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></td>
+      <td data-label="Статус"><select class="status-pick" data-ostatus="${o.id}" onclick="event.stopPropagation()" style="border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">
+        <option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></td>
       <td data-label="Индекс">${esc(o.index)||'—'}</td><td data-label="Трек-код">${esc(o.track)||'—'}</td>
       ${staff?`<td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Оплата">${esc(fmtDate(o.pay_date))}</td>
       <td data-label="ИП для Почты">${o.post_ip_id?esc(postIpName(o.post_ip_id)):'—'}</td>`:''}
@@ -1337,7 +1346,7 @@ function drawOrders(){
   });
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
-    const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});if(u){o.status_id=u.status_id;sel.style.borderColor=(statusObj(o.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}});
+    const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});if(u){o.status_id=u.status_id;sel.style.borderColor=(orderStatusObj(o.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}});
 }
 /* Компактные карточки заказов для курьера: свёрнуто — ID/ФИО/телефон/адрес/сумма/статус, по тапу разворачивается остальное */
 function drawCourierOrderCards(el,rows){
@@ -1359,8 +1368,8 @@ function drawCourierOrderCards(el,rows){
         </div>
       </div>
       <div class="cc-statusrow">
-        <select class="status-pick" data-ostatus="${o.id}" style="border-color:${(statusObj(o.status_id)||{}).color||'var(--line)'}">
-          <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select class="status-pick" data-ostatus="${o.id}" style="border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">
+          <option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div>
       <div class="cc-body">
         <div class="cc-row"><span class="lbl">Дата забора</span><span class="vl">${esc(fmtDate(o.pickup_date))}</span></div>
@@ -1387,7 +1396,7 @@ function drawCourierOrderCards(el,rows){
     sel.onclick=e=>e.stopPropagation(); // выбор статуса не сворачивает карточку
     sel.onchange=async()=>{const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
       const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});
-      if(u){o.status_id=u.status_id;sel.style.borderColor=(statusObj(u.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}};
+      if(u){o.status_id=u.status_id;sel.style.borderColor=(orderStatusObj(u.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}};
   });
 }
 function renderBarcode(svgEl,code){if(!svgEl||!code)return;try{if(window.JsBarcode)JsBarcode(svgEl,code,{format:'CODE128',width:2,height:70,displayValue:true,fontSize:16,margin:6});}catch(e){console.error(e);}}
@@ -1400,7 +1409,7 @@ function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
   const code=o?o.code:genOrderCode();
-  const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',address:'',qty:'',status_id:(S.statuses[0]?S.statuses[0].id:''),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
+  const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',address:'',qty:'',status_id:defaultOrderStatusId(),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
   const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
     <div class="grid2">
@@ -1414,7 +1423,7 @@ function orderModal(id,readonly){
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
       <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
-      <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.statuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
       <div class="field"><label>Менеджер по продажам</label><select id="o_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
@@ -1482,7 +1491,7 @@ function renderSettings(){
   const dirs=[['partners','Партнёры'],['cities','Города'],['districts','Районы'],
     ['couriers','Курьеры (заборщики)'],['order_couriers','Курьеры по заказам'],
     ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
-    ['statuses','Статусы заявок'],['delivery','Тип доставки'],
+    ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
     ['courier_cities','Курьерские города'],['post_ips','ИП для Почты']];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Справочники</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр справочников (редактирование — у администратора)'}</p></div></div>
@@ -1490,7 +1499,7 @@ function renderSettings(){
     <div id="dirContent"></div>`;
   $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;saveNav();renderSettings();});
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
-    order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,
+    order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp};
   (map[S.dir]||dirPartners)();
 }
@@ -1770,21 +1779,37 @@ function managerModal(arrKey,table,id){
 }
 /* Статусы */
 function dirStatuses(){
-  dirGrid({title:'Справочник статусов',arrKey:'statuses',table:'statuses',modalFn:statusModal,emptyText:'Нет статусов',
+  dirGrid({title:'Статусы забора',arrKey:'statuses',table:'statuses',modalFn:statusModal,emptyText:'Нет статусов',
     cols:[
       {key:'name',label:'Статус',filter:'text',text:s=>s.name||'',cell:s=>statusBadge(s.id)},
       {key:'pk',label:'Заявок',filter:'none',text:s=>String(S.pickups.filter(p=>p.status_id===s.id).length)},
-      {key:'or',label:'Заказов',filter:'none',text:s=>String(S.orders.filter(o=>o.status_id===s.id).length)},
     ]});
 }
 function statusModal(id){const s=id?S.statuses.find(x=>x.id===id):{name:'',color:'#c08a2d'};
-  showModal(id?'Статус':'Новый статус',`
+  showModal(id?'Статус забора':'Новый статус забора',`
     <div class="field"><label>Название статуса</label><input id="s_name" value="${esc(s.name)}"></div>
     <div class="field"><label>Цвет метки</label><input type="color" id="s_color" value="${esc(s.color||'#c08a2d')}" style="height:44px;padding:4px;cursor:pointer"></div>`,
     async()=>{const name=val('s_name').trim();if(!name){toast('Укажите название');return false;}
       const row={name,color:val('s_color')||'#c08a2d'};
       if(id){const u=await dbUpdate('statuses',id,row);if(!u)return false;Object.assign(S.statuses.find(x=>x.id===id),u);}
       else{const u=await dbInsert('statuses',row);if(!u)return false;S.statuses.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+/* Статус заказа (отдельный справочник) */
+function dirOrderStatuses(){
+  dirGrid({title:'Статусы заказа',arrKey:'orderStatuses',table:'order_statuses',modalFn:orderStatusModal,emptyText:'Нет статусов заказа',
+    cols:[
+      {key:'name',label:'Статус',filter:'text',text:s=>s.name||'',cell:s=>orderStatusBadge(s.id)},
+      {key:'or',label:'Заказов',filter:'none',text:s=>String(S.orders.filter(o=>o.status_id===s.id).length)},
+    ]});
+}
+function orderStatusModal(id){const s=id?S.orderStatuses.find(x=>x.id===id):{name:'',color:'#3a7d44'};
+  showModal(id?'Статус заказа':'Новый статус заказа',`
+    <div class="field"><label>Название статуса</label><input id="os_name" value="${esc(s.name)}"></div>
+    <div class="field"><label>Цвет метки</label><input type="color" id="os_color" value="${esc(s.color||'#3a7d44')}" style="height:44px;padding:4px;cursor:pointer"></div>`,
+    async()=>{const name=val('os_name').trim();if(!name){toast('Укажите название');return false;}
+      const row={name,color:val('os_color')||'#3a7d44'};
+      if(id){const u=await dbUpdate('order_statuses',id,row);if(!u)return false;Object.assign(S.orderStatuses.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('order_statuses',row);if(!u)return false;S.orderStatuses.push(u);}
       toast('Сохранено');renderSettings();return true;});}
 /* Тип доставки */
 function dirDelivery(){
