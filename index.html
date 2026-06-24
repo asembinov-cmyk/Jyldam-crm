@@ -1327,7 +1327,7 @@ async function createOrdersFromPickup(pickupId,opts){
       sender:partner?partner.name:(p.name||''),
       pickup_date:p.pickup_date||null,
       phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
-      address:partner?(partner.address||''):(p.address||''),
+      address:'', // адрес доставки клиента заполняется вручную, не адрес магазина
       client:'',weight:null,qty:1,
       delivery_id:courierDelivery?courierDelivery.id:null,
       courier_city_id:null,
