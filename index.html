@@ -829,22 +829,18 @@ function buildNav(){
     // Дашборд (только staff/admin)
     const main=[];
     main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
+    if(can('pickups','view'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(can('orders','view'))main.push({k:'orders',label:'Заказы',icon:'orders'});
-    if(can('orders','view'))main.push({k:'today',label:'Заказы сегодня',icon:'today'});
     groups.push({title:'Основное',items:main});
 
     const delivery=[];
     if(can('orders','view'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
     if(can('orders','view'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
-    if(can('pickups','view'))delivery.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
 
     // неактивные разделы-заготовки (из референса)
     groups.push({title:'Партнёры',items:[
       {k:'partners',label:'Партнёры',icon:'partners',disabled:true},
-    ]});
-    groups.push({title:'Клиенты',items:[
-      {k:'clients',label:'Клиенты',icon:'clients',disabled:true},
     ]});
     groups.push({title:'История',items:[
       {k:'history',label:'История изменений',icon:'history',disabled:true},
