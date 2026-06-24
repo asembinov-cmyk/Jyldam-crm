@@ -1257,13 +1257,12 @@ function drawOrders(){
   if(isCourier()){drawCourierOrderCards(el,rows);return;}
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
-    <th>ID</th><th>Дата забора</th>${staff?'<th>Партнёр</th>':''}<th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    <th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Кол-во</th><th>Курьер</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Менеджер продаж</th><th>Обработчик</th><th>Стоимость</th><th>Оплата</th><th>ИП для Почты</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>`<tr>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
-      ${staff?`<td data-label="Партнёр">${o.partner_id?esc(partnerName(o.partner_id)):'—'}</td>`:''}
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
