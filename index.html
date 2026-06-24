@@ -1495,7 +1495,10 @@ function dirGrid(cfg){
     :`<tr><td colspan="${cfg.cols.length+1}" style="text-align:center;color:var(--muted);padding:30px">Ничего не найдено</td></tr>`;
   const table=arr.length?`<div class="table-scroll"><table><thead>${head}${filterRow}</thead><tbody>${body}</tbody></table></div>`
     :`<div class="empty"><div class="big">${esc(cfg.emptyText||'Список пуст')}</div></div>`;
-  dirShell(cfg.title,arr.length,()=>cfg.modalFn(),table);
+  // счётчик: при активном фильтре показываем «найдено / всего», иначе просто всего
+  const anyFilter=cfg.cols.some(c=>f[c.key]);
+  const countLabel=anyFilter?`${filtered.length} / ${arr.length}`:String(arr.length);
+  dirShell(cfg.title,countLabel,()=>cfg.modalFn(),table);
   // привязки
   bindDir(cfg.table,cfg.arrKey,cfg.modalFn);
   $('dirContent').querySelectorAll('.dir-filter').forEach(el=>{
