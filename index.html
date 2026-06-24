@@ -1209,7 +1209,7 @@ function pickupModal(id,readonly){
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:''};
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:''};
 
 function visibleOrders(){
   if(isCourier()){const ids=myOrderCourierIds();return S.orders.filter(o=>ids.includes(o.order_courier_id));}
@@ -1323,6 +1323,13 @@ function renderOrders(mode){
         <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<select id="ofpartner"><option value="">Все партнёры</option>${S.partners.map(p=>`<option value="${p.id}" ${of.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}
+        <select id="ofmissing" title="Показать заказы с незаполненным полем">
+          <option value="">Заполненность: все</option>
+          <option value="client" ${of.missing==='client'?'selected':''}>Нет ФИО клиента</option>
+          <option value="phone" ${of.missing==='phone'?'selected':''}>Нет телефона</option>
+          <option value="track" ${of.missing==='track'?'selected':''}>Нет трек-кода</option>
+          <option value="index" ${of.missing==='index'?'selected':''}>Нет индекса</option>
+        </select>
       </div>
       <div id="orderTable"></div>
     </div>`;
@@ -1331,6 +1338,7 @@ function renderOrders(mode){
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrders();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
   if($('ofpartner'))$('ofpartner').onchange=e=>{of.partner=e.target.value;drawOrders();};
+  if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrders();};
   drawOrders();
 }
 // список заказов с учётом режима вкладки (курьер/почта/сегодня)
@@ -1347,6 +1355,11 @@ function filteredOrders(){
     if(of.status&&o.status_id!==of.status)return false;
     if(!ordersMode&&of.delivery&&o.delivery_id!==of.delivery)return false;
     if(of.partner&&o.partner_id!==of.partner)return false;
+    // фильтр незаполненных полей: показать заказы, где выбранное поле пустое
+    if(of.missing){
+      const val=(o[of.missing]||'').toString().trim();
+      if(val!=='')return false;
+    }
     if(q){const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
