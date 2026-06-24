@@ -239,7 +239,7 @@
     color:var(--rust-dk);border:1.5px dashed var(--line);border-radius:10px;padding:9px 14px;background:var(--paper);transition:.15s}
   .photo-add:hover{border-color:var(--rust);background:var(--card)}
   .photo-empty{color:var(--muted);font-size:13px;padding:6px 0}
-  .photo-view-ov{position:fixed;inset:0;background:rgba(20,17,13,.88);z-index:300;display:grid;place-items:center;padding:20px}
+  .photo-view-ov{position:fixed;inset:0;background:rgba(20,17,13,.88);z-index:9999;display:grid;place-items:center;padding:20px;cursor:zoom-out}
   .photo-view-ov img{max-width:94vw;max-height:90vh;border-radius:10px;box-shadow:0 20px 60px -20px #000}
   .photo-view-ov .x{position:absolute;top:18px;right:22px;font-size:34px;color:#fff;cursor:pointer;line-height:1;background:none;border:none}
 
@@ -999,8 +999,15 @@ const pickupPhotos=p=>Array.isArray(p.photos)?p.photos:[];
 // просмотр фото на весь экран
 function viewPhoto(url){
   const ov=document.createElement('div');ov.className='photo-view-ov';
-  ov.innerHTML=`<button class="x">×</button><img src="${esc(url)}">`;
-  ov.onclick=e=>{if(e.target===ov||e.target.classList.contains('x'))ov.remove();};
+  ov.innerHTML=`<button class="x" aria-label="Закрыть">×</button><img src="${esc(url)}" alt="">`;
+  const close=()=>{
+    ov.remove();
+    document.removeEventListener('keydown',onKey);
+  };
+  const onKey=e=>{if(e.key==='Escape'){e.preventDefault();close();}};
+  // закрытие по клику в любом месте оверлея (фон, фото, крестик)
+  ov.addEventListener('click',e=>{e.stopPropagation();close();});
+  document.addEventListener('keydown',onKey);
   document.body.appendChild(ov);
 }
 // HTML блока фото для заявки; canEdit — можно ли добавлять/удалять
