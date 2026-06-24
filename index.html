@@ -182,15 +182,24 @@
     place-items:center;z-index:100;padding:20px}
   .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:560px;
     box-shadow:0 30px 80px -30px rgba(20,17,13,.6);max-height:90vh;overflow:auto}
-  .modal-wide{max-width:920px}
-  /* двухколоночный макет карточки заказа: фото слева, форма справа */
-  .order-split{display:grid;grid-template-columns:300px 1fr;gap:24px;align-items:start}
+  .modal-wide{max-width:1040px}
+  /* двухколоночный макет карточки заказа: фото слева (половина), форма справа */
+  .order-split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
   .order-split .ophoto-col{position:sticky;top:0}
   .order-split .ophoto-col .field{margin:0}
   .order-split .oform-col{min-width:0}
+  /* крупное превью фото в карточке заказа */
+  .obig-photo{width:100%;border-radius:12px;border:1px solid var(--line);background:var(--paper);
+    aspect-ratio:3/4;object-fit:cover;cursor:zoom-in;display:block}
+  .obig-empty{width:100%;aspect-ratio:3/4;border:1px dashed var(--line);border-radius:12px;
+    display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;background:var(--paper)}
+  .obig-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .obig-thumbs img{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:pointer}
+  .obig-thumbs img.active{border-color:var(--rust);border-width:2px}
   @media (max-width:760px){
     .modal-wide{max-width:560px}
     .order-split{grid-template-columns:1fr;gap:16px}
+    .obig-photo,.obig-empty{aspect-ratio:4/3}
   }
   .modal-head{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center}
   .modal-head h3{font-family:'Fraunces',serif;font-weight:600;font-size:20px}
@@ -1080,6 +1089,24 @@ function orderPhotoFieldHtml(o,canEdit){
   if(!o||!o.id)return ''; // фото только у уже созданного заказа
   return `<div class="field full"><label>Фотографии заказа</label><div id="o_photos">${photoBlockHtml(o,canEdit)}</div></div>`;
 }
+// крупное превью фото для карточки заказа: большое первое фото + миниатюры + кнопки
+function orderBigPhotoInner(o,canEdit){
+  const ph=pickupPhotos(o);
+  const big=ph.length
+    ? `<img class="obig-photo" id="obigMain" src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" alt="">`
+    : `<div class="obig-empty">Фото заказа нет</div>`;
+  const thumbs=ph.length>1?`<div class="obig-thumbs">${ph.map((f,i)=>`<img src="${esc(f.url)}" data-obigthumb="${esc(f.url)}" class="${i===0?'active':''}">`).join('')}</div>`:'';
+  const adder=canEdit?`<div class="photo-grid" style="margin-top:10px">
+    <label class="photo-add">📷 Снять фото<input type="file" accept="image/*" capture="environment" multiple data-paddphoto="${o.id}" style="display:none"></label>
+    <label class="photo-add">🖼️ Из галереи<input type="file" accept="image/*" multiple data-paddphoto="${o.id}" style="display:none"></label>
+  </div>`:'';
+  const delBtn=(ph.length&&canEdit)?`<button type="button" class="btn sm danger" data-pdelphoto data-idx="0" style="margin-top:8px">Удалить это фото</button>`:'';
+  return `<label>Фотографии заказа</label>${big}${thumbs}${delBtn}${adder}`;
+}
+function orderBigPhotoHtml(o,canEdit){
+  if(!o||!o.id)return '';
+  return `<div class="field full" id="o_photos">${orderBigPhotoInner(o,canEdit)}</div>`;
+}
 // универсальный блок фото для записи rec в таблице table (по умолчанию pickups)
 function bindPhotoBlock(root,rec,redraw,table){
   table=table||'pickups';
@@ -1426,7 +1453,7 @@ function orderModal(id,readonly){
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
     <div class="order-split">
       <div class="ophoto-col">
-        ${orderPhotoFieldHtml(o,!ro)}
+        ${orderBigPhotoHtml(o,!ro)}
         <div class="field full" style="margin-top:14px"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
       </div>
       <div class="oform-col">
@@ -1467,8 +1494,23 @@ function orderModal(id,readonly){
   attachPhone('o_phone',d.phone);
   setTimeout(()=>renderBarcode($('o_barcode'),code),60);
   if(o&&o.id){
-    const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=photoBlockHtml(o,!ro);bindPhotoBlock(pc,o,redrawOPhotos,'orders');};
-    const pc=$('o_photos');if(pc)bindPhotoBlock(pc,o,redrawOPhotos,'orders');
+    const bindBig=()=>{
+      const pc=$('o_photos');if(!pc)return;
+      bindPhotoBlock(pc,o,redrawOPhotos,'orders'); // добавление/удаление через стандартные data-атрибуты
+      // клик по миниатюре — меняем крупное фото
+      pc.querySelectorAll('[data-obigthumb]').forEach(t=>t.onclick=e=>{
+        e.stopPropagation();
+        const main=pc.querySelector('#obigMain');
+        if(main){main.src=t.dataset.obigthumb;main.dataset.oviewphoto=t.dataset.obigthumb;}
+        pc.querySelectorAll('[data-obigthumb]').forEach(x=>x.classList.remove('active'));
+        t.classList.add('active');
+      });
+      // крупное фото открывается в новой вкладке
+      const main=pc.querySelector('#obigMain');
+      if(main)main.onclick=e=>{e.stopPropagation();viewPhoto(main.dataset.oviewphoto);};
+    };
+    const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=orderBigPhotoInner(o,!ro);bindBig();};
+    bindBig();
   }
   if(!ro){
     const fillCouriers=cityId=>{
