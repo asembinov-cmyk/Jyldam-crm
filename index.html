@@ -840,8 +840,10 @@ function photoBlockHtml(p,canEdit){
     <img src="${esc(f.url)}" data-pview-photo="${esc(f.url)}">
     ${canEdit?`<button class="del" data-pdelphoto="${p.id}" data-idx="${i}" title="Удалить">×</button>`:''}
   </div>`).join('');
-  const adder=canEdit?`<label class="photo-add">📷 Добавить фото
+  const adder=canEdit?`<label class="photo-add">📷 Снять фото
     <input type="file" accept="image/*" capture="environment" multiple data-paddphoto="${p.id}" style="display:none">
+  </label><label class="photo-add">🖼️ Из галереи
+    <input type="file" accept="image/*" multiple data-paddphoto="${p.id}" style="display:none">
   </label>`:'';
   const empty=(!ph.length&&!canEdit)?'<div class="photo-empty">Фотографий нет</div>':'';
   return `<div class="photo-grid">${thumbs}${adder}</div>${empty}`;
@@ -851,11 +853,13 @@ function bindPhotoBlock(root,p,redraw){
   root.querySelectorAll('[data-pview-photo]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.pviewPhoto);});
   root.querySelectorAll('[data-paddphoto]').forEach(inp=>inp.onchange=async e=>{
     e.stopPropagation();const files=[...(inp.files||[])];if(!files.length)return;
-    toast('Загрузка фото…');
-    const arr=pickupPhotos(p).slice();
-    for(const f of files){const r=await uploadPickupPhoto(p.id,f);if(r)arr.push(r);}
+    toast(`Загрузка фото (${files.length})…`);
+    const arr=pickupPhotos(p).slice();let ok=0,fail=0;
+    for(const f of files){const r=await uploadPickupPhoto(p.id,f);if(r){arr.push(r);ok++;}else{fail++;}}
+    inp.value=''; // сброс, чтобы можно было выбрать те же файлы повторно
+    if(!ok){toast(fail?'Не удалось загрузить фото':'Файлы не выбраны');return;}
     const u=await dbUpdate('pickups',p.id,{photos:arr});
-    if(u){Object.assign(p,u);toast('Фото добавлены');if(redraw)redraw();}
+    if(u){Object.assign(p,u);toast(fail?`Загружено ${ok}, ошибок ${fail}`:`Добавлено фото: ${ok}`);if(redraw)redraw();}
   });
   root.querySelectorAll('[data-pdelphoto]').forEach(btn=>btn.onclick=async e=>{
     e.stopPropagation();const idx=+btn.dataset.idx;const arr=pickupPhotos(p).slice();const item=arr[idx];if(!item)return;
