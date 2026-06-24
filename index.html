@@ -278,6 +278,13 @@
   .pom-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px}
   .pom-head b{font-family:'Fraunces',serif;font-size:16px}
   .pom-sub{font-size:13px;color:var(--muted);margin-bottom:10px}
+  .pom-paid{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;font-weight:600;color:var(--ink);cursor:pointer}
+  .pom-paid input{width:18px;height:18px;accent-color:var(--rust);cursor:pointer}
+  .pom-sumrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+  .pom-sumrow span{font-size:13px;color:var(--muted);font-weight:600}
+  .pom-sum{width:130px;font:inherit;font-family:'Fraunces',serif;font-weight:900;font-size:15px;color:var(--rust-dk);
+    padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--card);text-align:right}
+  .pom-sum:focus{outline:2px solid rgba(182,80,43,.3);border-color:var(--rust)}
 
   /* ── Строчное редактирование заказа ── */
   .row-editing{background:var(--paper)}
@@ -1354,6 +1361,8 @@ function pickupOrdersModal(pickupId){
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
       <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
+      <label class="pom-paid"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем</label>
+      <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—"></div>
     </div>`).join('');
     return head+`<div class="pom-list">${cards}</div>`;
   };
@@ -1366,6 +1375,27 @@ function pickupOrdersModal(pickupId){
         const o=S.orders.find(x=>x.id===box.dataset.pomphotos);if(!o)return;
         const redraw=()=>{box.innerHTML=photoBlockHtml(o,canEditPhoto);bindPhotoBlock(box,o,redraw,'orders');};
         bindPhotoBlock(box,o,redraw,'orders');
+      });
+      // галочка «Оплачено отправителем»
+      wrap.querySelectorAll('[data-pompaid]').forEach(chk=>{
+        chk.onchange=async()=>{
+          const o=S.orders.find(x=>x.id===chk.dataset.pompaid);if(!o)return;
+          const v=chk.checked;
+          try{await dbUpdate('orders',o.id,{paid_by_sender:v});o.paid_by_sender=v;toast(v?'Отмечено: оплачено':'Снято: оплачено');}
+          catch(e){chk.checked=!v;toast('Не удалось сохранить');}
+        };
+      });
+      // поле суммы заказа
+      wrap.querySelectorAll('[data-pomsum]').forEach(inp=>{
+        const commit=async()=>{
+          const o=S.orders.find(x=>x.id===inp.dataset.pomsum);if(!o)return;
+          const raw=inp.value.trim();
+          const v=raw===''?null:Math.max(0,parseFloat(raw)||0);
+          if(o.order_sum===v)return;
+          try{await dbUpdate('orders',o.id,{order_sum:v,cost:v});o.order_sum=v;toast('Сумма сохранена');}
+          catch(e){toast('Не удалось сохранить сумму');}
+        };
+        inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
       });
       const cb=wrap.querySelector('#pom_create');
       if(cb)cb.onclick=async()=>{cb.disabled=true;await createOrdersFromPickup(pickupId,{silent:true});
