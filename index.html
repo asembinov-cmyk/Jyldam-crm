@@ -79,6 +79,29 @@
     border:1px solid transparent;background:transparent;color:var(--muted);padding:11px 14px;border-radius:10px;transition:.15s;display:flex;align-items:center;gap:10px}
   .side-nav button:hover{color:var(--ink);background:rgba(20,17,13,.04)}
   .side-nav button.active{color:var(--rust-dk);background:var(--paper);border-color:var(--line)}
+  .side-nav button svg{width:19px;height:19px;flex:none}
+  .side-nav button.disabled{opacity:.45;cursor:default}
+  .side-nav button.disabled:hover{background:transparent;color:var(--muted)}
+  .side-nav .nav-group{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    padding:14px 14px 4px;opacity:.7}
+  .side-nav .nav-badge{margin-left:auto;font-size:11px;font-weight:700;background:var(--rust);color:#fff;
+    min-width:18px;height:18px;border-radius:9px;display:inline-grid;place-items:center;padding:0 5px}
+
+  /* ── Дашборд ── */
+  .dash-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+  .dash-card{display:flex;align-items:center;gap:14px;padding:18px 20px;border-radius:16px;border:1px solid var(--line);
+    box-shadow:var(--shadow);background:var(--card)}
+  .dash-card .dc-ic{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:20px;flex:none;color:#fff}
+  .dash-card .dc-v{font-family:'Fraunces',serif;font-weight:900;font-size:30px;line-height:1}
+  .dash-card .dc-k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-top:3px}
+  .dash-card.c-new{background:linear-gradient(135deg,#eef3fb,var(--card))}.dash-card.c-new .dc-ic{background:#3b6fb0}
+  .dash-card.c-way{background:linear-gradient(135deg,#f7eed8,var(--card))}.dash-card.c-way .dc-ic{background:var(--gold)}
+  .dash-card.c-del{background:linear-gradient(135deg,#eef1e8,var(--card))}.dash-card.c-del .dc-ic{background:var(--moss)}
+  .dash-card.c-prob{background:linear-gradient(135deg,#f7e7e0,var(--card))}.dash-card.c-prob .dc-ic{background:var(--rust)}
+  .dash-mini{display:flex;gap:26px;flex-wrap:wrap;padding:14px 20px;margin-bottom:22px;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);font-size:14px;color:var(--muted)}
+  .dash-mini b{font-family:'Fraunces',serif;font-weight:900;font-size:18px;color:var(--ink);margin-right:5px}
+  @media (max-width:760px){.dash-cards{grid-template-columns:1fr 1fr}.dash-mini{gap:14px}}
   .content{flex:1;min-width:0;padding:24px 26px}
 
   .page-head{padding:8px 0 18px;display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
@@ -516,12 +539,12 @@ async function refreshForTab(tab){
   try{
     if(tab==='pickups'){
       S.pickups=await dbList('pickups',{order:'created_at',asc:false});
-    }else if(tab==='orders'){
+    }else if(tab==='orders'||tab==='courier'||tab==='mail'||tab==='today'||tab==='dashboard'){
       const [orders,pickups]=await Promise.all([
         dbList('orders',{order:'created_at',asc:false}),
         dbList('pickups',{order:'created_at',asc:false}),
       ]);
-      S.orders=orders;S.pickups=pickups; // pickups нужны для связи заказ↔заявка
+      S.orders=orders;S.pickups=pickups;
     }else if(tab==='settings'){
       // справочники: тянем всё, что показывается
       const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,delivery,courier_cities,post_ips]=await Promise.all([
@@ -613,17 +636,81 @@ function phoneVal(id){const el=$(id);return el?(el.dataset.phone||''):'';}
 function val(id){const el=$(id);return el?el.value:'';}
 
 /* ---------- NAV по правам ---------- */
+// SVG-иконки для меню
+const ICONS={
+  dashboard:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
+  pickups:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 7h11l-2 5h2M5 12h8M6 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 8l4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  orders:'<svg viewBox="0 0 24 24" fill="none"><path d="M6 2l1.5 2h9L18 2M4 6h16l-1.5 14a1 1 0 01-1 .9H6.5a1 1 0 01-1-.9L4 6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 10v6M15 10v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  today:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="15" r="2" fill="currentColor"/></svg>',
+  mail:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M4 7l8 6 8-6" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  courier:'<svg viewBox="0 0 24 24" fill="none"><path d="M1 7h11v8H1zM12 9h5l4 3v3h-9" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="6" cy="17" r="1.8" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="17" r="1.8" stroke="currentColor" stroke-width="1.7"/></svg>',
+  partners:'<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 5a3 3 0 010 6M18 20c0-2-1-3.8-2.5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  clients:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.7"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  history:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.3M3 4v3.5h3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  bell:'<svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 21a2 2 0 004 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.7"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  settings:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  tariffs:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 7l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+};
+
 function buildNav(){
-  let tabs=[];
   const courier=isCourierBase();
-  if(can('pickups','view')) tabs.push(['pickups',courier?'Мои заборы':'Заявки на забор']);
-  if(can('orders','view'))  tabs.push(['orders',courier?'Мои заказы':'Заказы']);
-  if(can('directories','view')) tabs.push(['settings','Справочники']);
-  if(can('users','view'))   tabs.push(['users','Пользователи']);
-  if(!tabs.length) tabs=[['none','—']];
-  if(!tabs.find(t=>t[0]===S.tab)) S.tab=tabs[0][0];
-  $('navTabs').innerHTML=tabs.map(([k,l])=>`<button data-tab="${k}" class="${S.tab===k?'active':''}">${l}</button>`).join('');
+  // структура: группы и пункты. active:false — нарисован, но неактивен
+  const groups=[];
+  if(!courier){
+    // Дашборд (только staff/admin)
+    const main=[];
+    main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
+    if(can('orders','view'))main.push({k:'orders',label:'Заказы',icon:'orders'});
+    if(can('orders','view'))main.push({k:'today',label:'Заказы сегодня',icon:'today'});
+    groups.push({title:'Основное',items:main});
+
+    const delivery=[];
+    if(can('orders','view'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
+    if(can('orders','view'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
+    if(can('pickups','view'))delivery.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
+    if(delivery.length)groups.push({title:'Доставка',items:delivery});
+
+    // неактивные разделы-заготовки (из референса)
+    groups.push({title:'Партнёры',items:[
+      {k:'partners',label:'Партнёры',icon:'partners',disabled:true},
+    ]});
+    groups.push({title:'Клиенты',items:[
+      {k:'clients',label:'Клиенты',icon:'clients',disabled:true},
+    ]});
+    groups.push({title:'История',items:[
+      {k:'history',label:'История изменений',icon:'history',disabled:true},
+      {k:'notify',label:'Уведомления',icon:'bell',disabled:true},
+    ]});
+
+    const team=[];
+    if(can('users','view'))team.push({k:'users',label:'Сотрудники',icon:'users'});
+    if(can('directories','view'))team.push({k:'settings',label:'Справочники',icon:'settings'});
+    team.push({k:'tariffs',label:'Тарифы',icon:'tariffs',disabled:true});
+    groups.push({title:'Команда и настройки',items:team});
+  }else{
+    // курьер: только свои разделы, без групп
+    const items=[];
+    if(can('pickups','view'))items.push({k:'pickups',label:'Мои заборы',icon:'pickups'});
+    if(can('orders','view'))items.push({k:'orders',label:'Мои заказы',icon:'orders'});
+    groups.push({title:'',items});
+  }
+  // собрать список активных ключей для проверки текущей вкладки
+  const activeKeys=[];groups.forEach(g=>g.items.forEach(it=>{if(!it.disabled)activeKeys.push(it.k);}));
+  if(!activeKeys.length)activeKeys.push('none');
+  if(!activeKeys.includes(S.tab))S.tab=activeKeys[0];
+
+  let html='';
+  groups.forEach(g=>{
+    if(g.title)html+=`<div class="nav-group">${esc(g.title)}</div>`;
+    g.items.forEach(it=>{
+      const cls=[it.disabled?'disabled':'',S.tab===it.k?'active':''].filter(Boolean).join(' ');
+      html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''}>${ICONS[it.icon]||''}<span>${esc(it.label)}</span></button>`;
+    });
+  });
+  $('navTabs').innerHTML=html;
   $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
+    if(b.dataset.disabled){toast('Раздел в разработке');return;}
     S.tab=b.dataset.tab;saveNav();buildNav();
     $('main').innerHTML='<div class="loading">Обновляем данные…</div>';
     await refreshForTab(S.tab);
@@ -633,8 +720,12 @@ function buildNav(){
 
 /* ---------- РОУТЕР ---------- */
 function render(){
-  if(S.tab==='pickups')renderPickups();
+  if(S.tab==='dashboard')renderDashboard();
+  else if(S.tab==='pickups')renderPickups();
   else if(S.tab==='orders')renderOrders();
+  else if(S.tab==='courier')renderOrders('courier');
+  else if(S.tab==='mail')renderOrders('mail');
+  else if(S.tab==='today')renderOrders('today');
   else if(S.tab==='settings')renderSettings();
   else if(S.tab==='users')renderUsers();
 }
@@ -671,6 +762,46 @@ function showInfo(title,bodyHtml){showModal(title,bodyHtml,null,{readonly:true})
     else showLogin();
   }catch(e){console.error('init',e);showLogin();}
 })();
+/* ================= МОДУЛЬ: ДАШБОРД ================= */
+function renderDashboard(){
+  const orders=S.orders||[];
+  // классификация по названию статуса
+  const isNew=o=>{const s=statusObj(o.status_id);return !s||/нов|создан/i.test(s.name||'');};
+  const inWay=o=>{const s=statusObj(o.status_id);return s&&/пути|курьер|отправл|передан/i.test(s.name||'');};
+  const delivered=o=>{const s=statusObj(o.status_id);return s&&/доставлен|выдан|получен|заверш/i.test(s.name||'');};
+  const problem=o=>{const s=statusObj(o.status_id);return s&&/проблем|возврат|отмен|ошибк/i.test(s.name||'');};
+  const today=new Date().toISOString().slice(0,10);
+  const cNew=orders.filter(isNew).length, cWay=orders.filter(inWay).length,
+        cDel=orders.filter(delivered).length, cProb=orders.filter(problem).length;
+  const todayCount=orders.filter(o=>(o.created_at||'').slice(0,10)===today||(o.pickup_date||'').slice(0,10)===today).length;
+  const couriersOn=new Set(orders.filter(o=>o.order_courier_id).map(o=>o.order_courier_id)).size;
+  const last=[...orders].sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||'')).slice(0,8);
+  const d=new Date();const days=['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+  const months=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const dateStr=`${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}, ${days[d.getDay()]}`;
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div></div>
+    <div class="dash-cards">
+      <div class="dash-card c-new"><div class="dc-ic">＋</div><div><div class="dc-v">${cNew}</div><div class="dc-k">Новые</div></div></div>
+      <div class="dash-card c-way"><div class="dc-ic">🚚</div><div><div class="dc-v">${cWay}</div><div class="dc-k">В пути</div></div></div>
+      <div class="dash-card c-del"><div class="dc-ic">✓</div><div><div class="dc-v">${cDel}</div><div class="dc-k">Доставлены</div></div></div>
+      <div class="dash-card c-prob"><div class="dc-ic">!</div><div><div class="dc-v">${cProb}</div><div class="dc-k">Проблемные</div></div></div>
+    </div>
+    <div class="dash-mini"><span><b>${orders.length}</b> Всего заказов</span><span><b>${todayCount}</b> Сегодня</span><span><b>${couriersOn}</b> Курьеров задействовано</span></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Последние заказы</h2><span class="count">${last.length}</span></div>
+      <div class="table-scroll"><table><thead><tr><th>ID</th><th>Получатель</th><th>Телефон</th><th>Статус</th><th>Курьер</th><th>Дата</th></tr></thead>
+      <tbody>${last.length?last.map(o=>`<tr>
+        <td><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
+        <td>${esc(o.client)||'—'}</td>
+        <td>${o.phone?phoneLink(o.phone):'—'}</td>
+        <td>${statusBadge(o.status_id)}</td>
+        <td>${o.order_courier_id?esc(orderCourierName(o.order_courier_id)):'—'}</td>
+        <td style="white-space:nowrap">${esc(fmtDateTime(o.created_at))}</td>
+      </tr>`).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">Пока нет заказов</td></tr>`}</tbody></table></div>
+    </div>`;
+}
+
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
 let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:'',dateTo:''};
 
@@ -1032,16 +1163,21 @@ async function createOrdersFromPickup(pickupId,opts){
   if(created)toast(`Создано заказов: ${created}`);
   return created;
 }
-function renderOrders(){
-  const list=visibleOrders();
+let ordersMode=''; // ''=все, 'courier', 'mail', 'today'
+function renderOrders(mode){
+  ordersMode=mode||'';
+  const list=ordersScopedList();
   const totalCost=list.reduce((s,o)=>s+(+o.cost||0),0);
   const paid=list.filter(o=>o.pay_date).length;
-  const head=isCourier()?'Мои заказы':'Заказы';
+  const titles={'':'Заказы',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня'};
+  const subs={'':'Отправления: курьерская и почтовая доставка',courier:'Заказы с курьерской доставкой',
+    mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня'};
+  const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>${head}</h1><p>Отправления: курьерская и почтовая доставка</p></div>
+    <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':(subs[ordersMode]||'')}</p></div>
       ${can('orders','create')?`<div class="head-actions"><button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
     <div class="stats">
-      <div class="stat"><div class="k">Всего заказов</div><div class="v">${list.length}</div></div>
+      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Оплачено</div><div class="v">${paid}<small> / ${list.length}</small></div></div>
       <div class="stat"><div class="k">Сумма доставки</div><div class="v">${totalCost.toLocaleString('ru-RU')}<small> ₸</small></div></div>
@@ -1051,7 +1187,7 @@ function renderOrders(){
       <div class="filters">
         <input class="search" id="ofq" placeholder="Поиск: ID, трек, клиент…" value="${esc(of.q)}">
         <select id="ofstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
-        <select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>
+        ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<select id="ofpartner"><option value="">Все партнёры</option>${S.partners.map(p=>`<option value="${p.id}" ${of.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}
       </div>
       <div id="orderTable"></div>
@@ -1059,15 +1195,23 @@ function renderOrders(){
   if($('newOrder'))$('newOrder').onclick=()=>orderModal();
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrders();};
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrders();};
-  $('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
+  if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
   if($('ofpartner'))$('ofpartner').onchange=e=>{of.partner=e.target.value;drawOrders();};
   drawOrders();
 }
+// список заказов с учётом режима вкладки (курьер/почта/сегодня)
+function ordersScopedList(){
+  let list=visibleOrders();
+  if(ordersMode==='courier')list=list.filter(o=>isCourierDelivery(o.delivery_id));
+  else if(ordersMode==='mail')list=list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id));
+  else if(ordersMode==='today'){const t=new Date().toISOString().slice(0,10);list=list.filter(o=>(o.created_at||'').slice(0,10)===t||(o.pickup_date||'').slice(0,10)===t);}
+  return list;
+}
 function filteredOrders(){
   const q=of.q.toLowerCase().trim();
-  return visibleOrders().filter(o=>{
+  return ordersScopedList().filter(o=>{
     if(of.status&&o.status_id!==of.status)return false;
-    if(of.delivery&&o.delivery_id!==of.delivery)return false;
+    if(!ordersMode&&of.delivery&&o.delivery_id!==of.delivery)return false;
     if(of.partner&&o.partner_id!==of.partner)return false;
     if(q){const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
