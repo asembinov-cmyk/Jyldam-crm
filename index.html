@@ -303,6 +303,17 @@ const S={
   myPerms:null, myBaseType:'staff',
 };
 
+/* ---------- ЗАПОМИНАНИЕ ВКЛАДКИ (чтобы при обновлении остаться на месте) ---------- */
+const NAV_KEY='jyldam_nav';
+function saveNav(){
+  try{localStorage.setItem(NAV_KEY,JSON.stringify({tab:S.tab,dir:S.dir,users:(typeof usersSub!=='undefined'?usersSub:'staff')}));}catch(e){}
+}
+function loadNav(){
+  try{const raw=localStorage.getItem(NAV_KEY);if(!raw)return;const n=JSON.parse(raw);
+    if(n.tab)S.tab=n.tab;if(n.dir)S.dir=n.dir;if(n.users&&typeof usersSub!=='undefined')usersSub=n.users;
+  }catch(e){}
+}
+
 /* ---------- DATA LAYER ---------- */
 async function dbList(table,opts={}){
   let q=sb.from(table).select('*');
@@ -431,6 +442,7 @@ async function enterApp(){
   $('uRole').textContent=roleRow?roleRow.name:(ROLE_LABEL[S.me.role]||S.me.role||'—');
   $('main').innerHTML='<div class="loading">Загружаем данные…</div>';
   await loadAll();
+  loadNav();
   buildNav();
   render();
 }
@@ -504,7 +516,7 @@ function buildNav(){
   if(!tabs.length) tabs=[['none','—']];
   if(!tabs.find(t=>t[0]===S.tab)) S.tab=tabs[0][0];
   $('navTabs').innerHTML=tabs.map(([k,l])=>`<button data-tab="${k}" class="${S.tab===k?'active':''}">${l}</button>`).join('');
-  $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;buildNav();render();});
+  $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;saveNav();buildNav();render();});
 }
 
 /* ---------- РОУТЕР ---------- */
@@ -988,7 +1000,7 @@ function renderSettings(){
     <div class="page-head"><div><h1>Справочники</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр справочников (редактирование — у администратора)'}</p></div></div>
     <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
     <div id="dirContent"></div>`;
-  $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;renderSettings();});
+  $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;saveNav();renderSettings();});
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp};
@@ -1312,7 +1324,7 @@ function renderUsers(){
       <button data-us="roles" class="${usersSub==='roles'?'active':''}">Роли и права</button>
     </div>
     <div id="usersContent"></div>`;
-  $('main').querySelectorAll('[data-us]').forEach(b=>b.onclick=()=>{usersSub=b.dataset.us;renderUsers();});
+  $('main').querySelectorAll('[data-us]').forEach(b=>b.onclick=()=>{usersSub=b.dataset.us;saveNav();renderUsers();});
   if(usersSub==='roles') renderRoles(); else renderStaff();
 }
 
