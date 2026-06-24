@@ -189,10 +189,8 @@
   .order-split .ophoto-col .field{margin:0}
   .order-split .oform-col{min-width:0}
   /* крупное превью фото в карточке заказа */
-  .obig-photo{width:100%;border-radius:12px;border:1px solid var(--line);background:var(--paper);
-    aspect-ratio:3/4;object-fit:cover;cursor:zoom-in;display:block;transition:all .2s}
-  /* зум на месте: показываем фото целиком, крупнее */
-  .obig-photo.zoomed{aspect-ratio:auto;height:auto;max-height:80vh;object-fit:contain;cursor:zoom-out;background:#000}
+  .obig-wrap{width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--paper)}
+  .obig-photo{width:100%;aspect-ratio:3/4;object-fit:cover;cursor:zoom-in;display:block;transition:transform .15s;transform-origin:center}
   .obig-empty{width:100%;aspect-ratio:3/4;border:1px dashed var(--line);border-radius:12px;
     display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;background:var(--paper)}
   .obig-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -1109,7 +1107,7 @@ function orderPhotoFieldHtml(o,canEdit){
 function orderBigPhotoInner(o,canEdit){
   const ph=pickupPhotos(o);
   const big=ph.length
-    ? `<img class="obig-photo" id="obigMain" src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" alt="">`
+    ? `<div class="obig-wrap"><img class="obig-photo" id="obigMain" src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" alt=""></div>`
     : `<div class="obig-empty">Фото заказа нет</div>`;
   const thumbs=ph.length>1?`<div class="obig-thumbs">${ph.map((f,i)=>`<img src="${esc(f.url)}" data-obigthumb="${esc(f.url)}" class="${i===0?'active':''}">`).join('')}</div>`:'';
   const adder=canEdit?`<div class="photo-grid" style="margin-top:10px">
@@ -1521,9 +1519,35 @@ function orderModal(id,readonly){
         pc.querySelectorAll('[data-obigthumb]').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
       });
-      // клик по фото увеличивает его прямо в окне (на месте), повторный — обратно
+      // зум фото прямо в окне: клик циклически увеличивает (1x → 2x → 3.5x → 1x), можно перетаскивать
       const main=pc.querySelector('#obigMain');
-      if(main)main.onclick=e=>{e.stopPropagation();main.classList.toggle('zoomed');};
+      if(main){
+        let zoom=1, panX=0, panY=0, dragging=false, moved=false, sx=0, sy=0, spx=0, spy=0;
+        const apply=()=>{
+          main.style.transform=`scale(${zoom}) translate(${panX}px,${panY}px)`;
+          main.style.cursor=zoom>1?'grab':'zoom-in';
+        };
+        main.onclick=e=>{
+          e.stopPropagation();
+          if(moved){moved=false;return;} // если двигали — не менять зум
+          zoom = zoom>=3.5 ? 1 : (zoom>=2 ? 3.5 : 2);
+          if(zoom===1){panX=0;panY=0;}
+          apply();
+        };
+        main.onmousedown=e=>{
+          if(zoom<=1)return;
+          dragging=true;moved=false;sx=e.clientX;sy=e.clientY;spx=panX;spy=panY;
+          main.style.cursor='grabbing';e.preventDefault();
+        };
+        main.onmousemove=e=>{
+          if(!dragging)return;
+          panX=spx+(e.clientX-sx)/zoom;panY=spy+(e.clientY-sy)/zoom;
+          if(Math.abs(e.clientX-sx)>3||Math.abs(e.clientY-sy)>3)moved=true;
+          apply();
+        };
+        main.onmouseup=()=>{if(dragging){dragging=false;main.style.cursor='grab';}};
+        main.onmouseleave=()=>{if(dragging){dragging=false;main.style.cursor='grab';}};
+      }
     };
     const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=orderBigPhotoInner(o,!ro);bindBig();};
     bindBig();
