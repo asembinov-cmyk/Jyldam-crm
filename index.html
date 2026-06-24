@@ -1157,7 +1157,7 @@ function courierModal(id){
     <div class="field"><label>Район</label><select id="k_district"><option value="">—</option>${dOpts(c.city_id).map(d=>`<option value="${d.id}" ${c.district_id===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Номер телефона</label><input id="k_phone" inputmode="numeric"></div>
     <div class="field"><label>Данные уд. личности</label><textarea id="k_id" rows="2">${esc(c.id_doc)}</textarea></div>
-    ${courierAccountField('k_account',c.account_id,'забор')}`,
+    ${courierAccountField('k_account',c.account_id,'pickup')}`,
     async()=>{const fio=val('k_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('k_city')){toast('Выберите город');return false;}
       const row={fio,city_id:val('k_city'),district_id:val('k_district')||null,phone:phoneVal('k_phone'),id_doc:val('k_id').trim(),account_id:val('k_account')||null};
       if(id){const u=await dbUpdate('couriers',id,row);if(!u)return false;Object.assign(S.couriers.find(x=>x.id===id),u);}
@@ -1186,7 +1186,7 @@ function orderCourierModal(id){
     <div class="field"><label>Курьерский город</label><select id="oc_city"><option value="">—</option>${S.courier_cities.map(ct=>`<option value="${ct.id}" ${c.courier_city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Номер телефона</label><input id="oc_phone" inputmode="numeric"></div>
     <div class="field"><label>Данные уд. личности</label><textarea id="oc_id" rows="2">${esc(c.id_doc)}</textarea></div>
-    ${courierAccountField('oc_account',c.account_id,'заказ|доставщик|доставк')}`,
+    ${courierAccountField('oc_account',c.account_id,'order')}`,
     async()=>{const fio=val('oc_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('oc_city')){toast('Выберите курьерский город');return false;}
       const row={fio,courier_city_id:val('oc_city'),phone:phoneVal('oc_phone'),id_doc:val('oc_id').trim(),account_id:val('oc_account')||null};
       if(id){const u=await dbUpdate('order_couriers',id,row);if(!u)return false;Object.assign(S.order_couriers.find(x=>x.id===id),u);}
@@ -1202,24 +1202,24 @@ function isCourierProfile(p){
   if(p.role_id){const r=S.roles.find(x=>x.id===p.role_id);if(r&&r.base_type==='courier')return true;}
   return false;
 }
-// courierAccountField(fieldId,current,prefer): prefer — слово в должности, чьи профили показываем сверху (напр. 'забор')
-function courierAccountField(fieldId,current,prefer){
+// courierAccountField(fieldId,current,kind): kind — 'pickup' (заборщик) | 'order' (по заказам)
+function courierAccountField(fieldId,current,kind){
   if(!isAdmin())return '';
-  let list=S.profiles.filter(isCourierProfile);
-  if(prefer){
-    const rx=new RegExp(prefer,'i');
-    list=list.slice().sort((a,b)=>{
-      const am=rx.test(a.position||'')?0:1, bm=rx.test(b.position||'')?0:1;
-      if(am!==bm)return am-bm; // совпавшие по должности — выше
-      return (a.full_name||a.email||'').localeCompare(b.full_name||b.email||'');
-    });
-  }
-  const optLabel=p=>{const who=p.full_name||p.email||'аккаунт';const pos=p.position?` · ${p.position}`:'';return esc(who+pos);};
-  const hint=prefer?'Показаны все пользователи-курьеры; с подходящей должностью — сверху. Нужного нет? Создайте его во вкладке «Пользователи».'
-                   :'Создайте пользователя-курьера во вкладке «Пользователи», затем привяжите здесь.';
+  let all=S.profiles.filter(isCourierProfile);
+  // профили нужного типа курьера; те, у кого тип не задан (старые) — показываем во второй группе
+  const match=all.filter(p=>p.courier_kind===kind);
+  const unset=all.filter(p=>!p.courier_kind);
+  // если привязан профиль другого типа — всё равно включим его, чтобы выбор не потерялся
+  const cur=current?all.find(p=>p.id===current):null;
+  let list=[...match,...unset];
+  if(cur&&!list.find(p=>p.id===cur.id))list.unshift(cur);
+  const kindLabel=p=>p.courier_kind==='pickup'?'заборщик':p.courier_kind==='order'?'по заказам':(p.position||'тип не задан');
+  const optLabel=p=>esc((p.full_name||p.email||'аккаунт')+' · '+kindLabel(p));
+  const noteEmpty=kind==='pickup'?'Нет нужного? Создайте пользователя с ролью «Курьер» и типом «Курьер заборщик» во вкладке «Пользователи».'
+                                  :'Нет нужного? Создайте пользователя с ролью «Курьер» и типом «Курьер по заказам» во вкладке «Пользователи».';
   return `<div class="field"><label>Привязанный аккаунт (логин курьера)</label>
     <select id="${fieldId}"><option value="">— не привязан —</option>${list.map(p=>`<option value="${p.id}" ${current===p.id?'selected':''}>${optLabel(p)}</option>`).join('')}</select>
-    <span class="hint">${hint}</span></div>`;
+    <span class="hint">${noteEmpty}</span></div>`;
 }
 /* Менеджеры */
 function managerCols(){return [
@@ -1347,6 +1347,10 @@ function createStaffModal(){
       <div class="field"><label>Телефон (логин)</label><input id="n_phone" inputmode="numeric"></div>
       <div class="field"><label>Пароль</label><input id="n_pass" type="text" autocomplete="off" placeholder="мин. 6 символов"></div>
       <div class="field"><label>Роль</label><select id="n_role"><option value="">— не назначена —</option>${S.roles.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></div>
+      <div class="field" id="n_kind_field" style="display:none"><label>Тип курьера</label><select id="n_kind">
+        <option value="pickup">Курьер заборщик</option>
+        <option value="order">Курьер по заказам</option></select>
+        <span class="hint">Определяет, в каком справочнике курьеров появится этот аккаунт для привязки.</span></div>
       <div class="field full"><span class="hint">Сотрудник входит по номеру телефона и паролю. Пароль задаёте вы и передаёте ему.</span></div>
     </div>`,
     async()=>{
@@ -1356,14 +1360,19 @@ function createStaffModal(){
       const roleId=val('n_role');
       const baseType=(S.roles.find(r=>r.id===roleId)||{}).base_type||'';
       const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
+      const courier_kind=baseType==='courier'?val('n_kind'):null;
       toast('Создаём сотрудника…');
       const out=await callCreateUser({phone,password:pass,full_name:name,
-        position:val('n_pos').trim(),role_id:roleId||null,role:legacy});
+        position:val('n_pos').trim(),role_id:roleId||null,role:legacy,courier_kind});
       if(out.error){toast('Ошибка: '+out.error);return false;}
       S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       toast('Сотрудник создан');renderUsers();return true;
     });
   attachPhone('n_phone','');
+  // показываем «Тип курьера» только когда выбрана роль с базовым типом «Курьер»
+  const nr=$('n_role');const toggleKind=()=>{const bt=(S.roles.find(r=>r.id===nr.value)||{}).base_type;
+    $('n_kind_field').style.display=bt==='courier'?'':'none';};
+  nr.onchange=toggleKind;toggleKind();
 }
 async function delStaff(id){
   const u=S.profiles.find(x=>x.id===id);
@@ -1383,18 +1392,26 @@ function staffModal(id){
         <option value="">— не назначена —</option>
         ${S.roles.map(r=>`<option value="${r.id}" ${u.role_id===r.id?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
         <span class="hint">Для курьеров: назначьте роль с базовым типом «Курьер», затем привяжите этот аккаунт в справочнике курьеров.</span></div>
+      <div class="field full" id="u_kind_field" style="display:none"><label>Тип курьера</label><select id="u_kind">
+        <option value="pickup" ${u.courier_kind==='pickup'?'selected':''}>Курьер заборщик</option>
+        <option value="order" ${u.courier_kind==='order'||!u.courier_kind?'selected':''}>Курьер по заказам</option></select>
+        <span class="hint">Определяет, в каком справочнике курьеров появится этот аккаунт для привязки.</span></div>
     </div>`,
     async()=>{
       const roleId=val('u_role');
       const baseType=(S.roles.find(r=>r.id===roleId)||{}).base_type||'';
       // синхронизируем старое текстовое поле role для серверного RLS (current_role_name)
       const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
+      const courier_kind=baseType==='courier'?val('u_kind'):null;
       const row={full_name:val('u_name').trim(),phone:phoneVal('u_phone'),city_id:val('u_city')||null,
-        position:val('u_pos').trim(),role_id:roleId||null,role:legacy};
+        position:val('u_pos').trim(),role_id:roleId||null,role:legacy,courier_kind};
       const u2=await dbUpdate('profiles',id,row);if(!u2)return false;Object.assign(u,u2);
       if(id===S.me.id){await loadMe({user:{id:S.me.id,email:S.me.email}});buildNav();}
       toast('Сохранено');renderUsers();return true;});
   attachPhone('u_phone',u.phone);
+  const ur=$('u_role');const toggleUKind=()=>{const bt=(S.roles.find(r=>r.id===ur.value)||{}).base_type;
+    $('u_kind_field').style.display=bt==='courier'?'':'none';};
+  ur.onchange=toggleUKind;toggleUKind();
 }
 
 /* ---- РОЛИ И ПРАВА ---- */
