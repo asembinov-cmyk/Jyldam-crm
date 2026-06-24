@@ -998,17 +998,8 @@ function updateCollectedStat(){
 const pickupPhotos=p=>Array.isArray(p.photos)?p.photos:[];
 // просмотр фото на весь экран
 function viewPhoto(url){
-  const ov=document.createElement('div');ov.className='photo-view-ov';
-  ov.innerHTML=`<button class="x" aria-label="Закрыть">×</button><img src="${esc(url)}" alt="">`;
-  const close=()=>{
-    ov.remove();
-    document.removeEventListener('keydown',onKey);
-  };
-  const onKey=e=>{if(e.key==='Escape'){e.preventDefault();close();}};
-  // закрытие по клику в любом месте оверлея (фон, фото, крестик)
-  ov.addEventListener('click',e=>{e.stopPropagation();close();});
-  document.addEventListener('keydown',onKey);
-  document.body.appendChild(ov);
+  // открываем фото в отдельной вкладке браузера
+  window.open(url,'_blank','noopener,noreferrer');
 }
 // HTML блока фото для заявки; canEdit — можно ли добавлять/удалять
 function photoBlockHtml(p,canEdit){
@@ -1153,7 +1144,7 @@ async function createOrdersFromPickup(pickupId,opts){
       partner_id:partner?partner.id:null,
       sender:partner?partner.name:(p.name||''),
       pickup_date:p.pickup_date||null,
-      phone:p.phone||(partner?partner.phone:'')||'',
+      phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
       address:partner?(partner.address||''):(p.address||''),
       client:'',weight:null,qty:1,
       delivery_id:courierDelivery?courierDelivery.id:null,
