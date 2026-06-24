@@ -880,6 +880,15 @@ function photoBlockHtml(p,canEdit){
   const empty=(!ph.length&&!canEdit)?'<div class="photo-empty">Фотографий нет</div>':'';
   return `<div class="photo-grid">${thumbs}${adder}</div>${empty}`;
 }
+// блок фото заявки внутри заказа (только просмотр); ищет заявку по o.pickup_id
+function orderPhotoFieldHtml(o){
+  if(!o||!o.pickup_id)return '';
+  const p=S.pickups.find(x=>x.id===o.pickup_id);
+  const ph=p?pickupPhotos(p):[];
+  if(!ph.length)return '';
+  const thumbs=ph.map(f=>`<div class="photo-thumb"><img src="${esc(f.url)}" data-oview-photo="${esc(f.url)}"></div>`).join('');
+  return `<div class="field full"><label>Фотографии забора (из заявки)</label><div id="o_photos"><div class="photo-grid">${thumbs}</div></div></div>`;
+}
 // навешивает обработчики на блок фото внутри контейнера root (для заявки p)
 function bindPhotoBlock(root,p,redraw){
   root.querySelectorAll('[data-pview-photo]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.pviewPhoto);});
@@ -1189,6 +1198,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field full"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
+      ${orderPhotoFieldHtml(o)}
     </div>`,
     ro?null:async()=>{
       const row={code,partner_id:val('o_partner')||null,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
@@ -1204,6 +1214,7 @@ function orderModal(id,readonly){
     },{readonly:ro});
   attachPhone('o_phone',d.phone);
   setTimeout(()=>renderBarcode($('o_barcode'),code),60);
+  document.querySelectorAll('[data-oview-photo]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.oviewPhoto);});
   if(!ro){
     const fillCouriers=cityId=>{
       const sel=$('o_ocourier');if(!sel)return;
