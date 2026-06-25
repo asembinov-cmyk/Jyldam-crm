@@ -182,6 +182,7 @@
 
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
   .stats.stats-5{grid-template-columns:repeat(5,1fr)}
+  .stats.stats-1{grid-template-columns:1fr;max-width:280px}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
   .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
   .stat .v{font-family:'Fraunces',serif;font-weight:900;font-size:30px;letter-spacing:-.02em;margin-top:4px;line-height:1}
@@ -1668,7 +1669,7 @@ function drawPickups(){
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
     ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer">
-      <td data-label="Дата">${esc(fmtDate(p.pickup_date))}</td>
+      <td data-label="Дата">${esc(fmtDate(p.pickup_date))}${p.created_at?`<small class="cell-time">создана ${esc(fmtDateTime(p.created_at))}</small>`:''}</td>
       <td data-label="Город"><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
       <td data-label="Наименование"><strong>${esc(p.name)}</strong></td>
       <td data-label="Адрес">${esc(p.address)||'—'}</td>
@@ -1723,7 +1724,7 @@ function drawCourierPickupCards(el,rows){
           <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div>
       <div class="cc-body">
-        <div class="cc-row"><span class="lbl">Дата</span><span class="vl">${esc(fmtDate(p.pickup_date))}</span></div>
+        <div class="cc-row"><span class="lbl">Дата</span><span class="vl">${esc(fmtDate(p.pickup_date))}${p.created_at?` · создана ${esc(fmtDateTime(p.created_at))}`:''}</span></div>
         <div class="cc-row"><span class="lbl">Город</span><span class="vl">${esc(cityName(p.city_id))}</span></div>
         <div class="cc-row"><span class="lbl">Район</span><span class="vl">${esc(districtName(p.district_id))}</span></div>
         <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${p.orders?esc(p.orders):''}" placeholder="—"></span></div>
@@ -2044,13 +2045,17 @@ function renderOrders(mode){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':(subs[ordersMode]||'')}</p></div>
       ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
+    ${(ordersMode==='courier'||ordersMode==='mail')?`
+    <div class="stats stats-1">
+      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
+    </div>`:`
     <div class="stats stats-5">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Почтовых</div><div class="v">${list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Оплачено</div><div class="v">${paid}<small> / ${list.length}</small></div></div>
       <div class="stat"><div class="k">Сумма доставки</div><div class="v">${totalCost.toLocaleString('ru-RU')}<small> ₸</small></div></div>
-    </div>
+    </div>`}
     <div class="panel">
       <div class="panel-head"><h2>Список заказов</h2><span class="count">${list.length}</span></div>
       <div class="filters">
