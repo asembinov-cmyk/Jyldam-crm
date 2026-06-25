@@ -163,6 +163,8 @@
 
   .filters{display:flex;gap:10px;padding:14px 20px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--paper)}
   .filters-dates{align-items:center}
+  .ket-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:20px;font-size:10.5px;font-weight:700;
+    color:#fff;background:var(--moss);letter-spacing:.03em;vertical-align:middle;white-space:nowrap}
   .fdate-lbl{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
   .filters input,.filters select{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
     border-radius:9px;background:var(--card);color:var(--ink);min-width:140px}
@@ -589,6 +591,7 @@ function orderToKet(o){
     saller_butique:o.sender||'',             // продавец/бутик
   };
   if(o.index)data.index=o.index;             // индекс (для почты)
+  if(o.deliver_date)data.delivery_date=o.deliver_date; // дата доставки (YYYY-MM-DD)
   // город указываем только если он есть и это не «—»
   if(cityNm&&cityNm!=='—')data.city=cityNm;
   else if(!courier)data.kz_delivery='32';    // почта, если город не задан
@@ -1548,7 +1551,7 @@ function drawOrders(){
       return `<tr data-orow="${o.id}" style="cursor:pointer">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       <td data-label="Фото">${photoCell}</td>
-      <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
+      <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
       <td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
@@ -1661,7 +1664,7 @@ function orderModal(id,readonly){
         <div class="field full" style="margin-top:14px"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
         ${(o&&o.id&&!ro)?`<div class="field full" style="margin-top:14px"><label>KET</label>
           <div style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)">
-            ${o.ket_id?`<div style="font-size:13px;margin-bottom:8px">Отправлен в KET · ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}</div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}
+            ${o.ket_id?`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}
             <button type="button" class="btn sm ${o.ket_id?'ghost':''}" data-ketsend="${o.id}">${o.ket_id?'Отправить повторно':'Отправить в KET'}</button>
           </div></div>`:''}
       </div>
@@ -1710,7 +1713,13 @@ function orderModal(id,readonly){
   attachPhone('o_phone',d.phone);
   setTimeout(()=>renderBarcode($('o_barcode'),code),60);
   // кнопка «Отправить в KET»
-  if(o&&o.id){const kb=document.querySelector(`[data-ketsend="${o.id}"]`);if(kb)kb.onclick=async()=>{kb.disabled=true;await sendOrderToKet(o);kb.disabled=false;};}
+  if(o&&o.id){const kb=document.querySelector(`[data-ketsend="${o.id}"]`);if(kb)kb.onclick=async()=>{
+    kb.disabled=true;
+    const ok=await sendOrderToKet(o);
+    kb.disabled=false;
+    // обновляем пометку прямо в открытой карточке
+    if(ok){const box=kb.parentElement;if(box){box.querySelector('div').outerHTML=`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id||'')}</strong>${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`;kb.textContent='Отправить повторно';kb.classList.add('ghost');}}
+  };}
   if(o&&o.id){
     const bindBig=()=>{
       const pc=$('o_photos');if(!pc)return;
