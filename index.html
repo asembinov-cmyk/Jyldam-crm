@@ -162,6 +162,8 @@
     cursor:pointer;padding:2px 0;text-decoration:underline}
 
   .filters{display:flex;gap:10px;padding:14px 20px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--paper)}
+  .filters-dates{align-items:center}
+  .fdate-lbl{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
   .filters input,.filters select{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
     border-radius:9px;background:var(--card);color:var(--ink);min-width:140px}
   .filters .search{flex:1;min-width:200px}
@@ -1290,7 +1292,7 @@ function pickupModal(id,readonly){
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:''};
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:''};
 
 function visibleOrders(){
   if(isCourier()){const ids=myOrderCourierIds();return S.orders.filter(o=>ids.includes(o.order_courier_id));}
@@ -1426,7 +1428,7 @@ function renderOrders(mode){
         <input class="search" id="ofq" placeholder="Поиск: ID, трек, клиент…" value="${esc(of.q)}">
         <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
-        ${isStaff()?`<select id="ofpartner"><option value="">Все партнёры</option>${S.partners.map(p=>`<option value="${p.id}" ${of.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}
+        ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partner?partnerName(of.partner):'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
         <select id="ofmissing" title="Показать заказы с незаполненным полем">
           <option value="">Заполненность: все</option>
           <option value="client" ${of.missing==='client'?'selected':''}>Нет ФИО клиента</option>
@@ -1434,6 +1436,15 @@ function renderOrders(mode){
           <option value="track" ${of.missing==='track'?'selected':''}>Нет трек-кода</option>
           <option value="index" ${of.missing==='index'?'selected':''}>Нет индекса</option>
         </select>
+      </div>
+      <div class="filters filters-dates">
+        <span class="fdate-lbl">Забор:</span>
+        <input type="date" id="ofpickfrom" value="${esc(of.pickFrom)}" title="Дата забора с">
+        <input type="date" id="ofpickto" value="${esc(of.pickTo)}" title="Дата забора по">
+        <span class="fdate-lbl">Доставка:</span>
+        <input type="date" id="ofdelfrom" value="${esc(of.delFrom)}" title="Дата доставки с">
+        <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">
+        <button class="btn sm" id="ofdateclear">Сбросить даты</button>
       </div>
       <div id="orderTable"></div>
     </div>`;
@@ -1472,8 +1483,19 @@ function renderOrders(mode){
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrders();};
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrders();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
-  if($('ofpartner'))$('ofpartner').onchange=e=>{of.partner=e.target.value;drawOrders();};
+  if($('ofpartner'))$('ofpartner').oninput=e=>{
+    const name=e.target.value.trim().toLowerCase();
+    if(!name){of.partner='';drawOrders();return;}
+    const p=S.partners.find(x=>(x.name||'').trim().toLowerCase()===name);
+    of.partner=p?p.id:'__none__'; // если ввели текст, но партнёр не найден — показываем пусто
+    drawOrders();
+  };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrders();};
+  if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrders();};
+  if($('ofpickto'))$('ofpickto').onchange=e=>{of.pickTo=e.target.value;drawOrders();};
+  if($('ofdelfrom'))$('ofdelfrom').onchange=e=>{of.delFrom=e.target.value;drawOrders();};
+  if($('ofdelto'))$('ofdelto').onchange=e=>{of.delTo=e.target.value;drawOrders();};
+  if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';renderOrders();};
   drawOrders();
 }
 // список заказов с учётом режима вкладки (курьер/почта/сегодня)
@@ -1489,7 +1511,16 @@ function filteredOrders(){
   return ordersScopedList().filter(o=>{
     if(of.status&&o.status_id!==of.status)return false;
     if(!ordersMode&&of.delivery&&o.delivery_id!==of.delivery)return false;
-    if(of.partner&&o.partner_id!==of.partner)return false;
+    if(of.partner==='__none__')return false; // введён партнёр, которого нет
+    if(of.partner&&of.partner!=='__none__'&&o.partner_id!==of.partner)return false;
+    // диапазон даты забора
+    const pd=(o.pickup_date||'').slice(0,10);
+    if(of.pickFrom&&(!pd||pd<of.pickFrom))return false;
+    if(of.pickTo&&(!pd||pd>of.pickTo))return false;
+    // диапазон даты доставки
+    const dd=(o.deliver_date||'').slice(0,10);
+    if(of.delFrom&&(!dd||dd<of.delFrom))return false;
+    if(of.delTo&&(!dd||dd>of.delTo))return false;
     // фильтр незаполненных полей: показать заказы, где выбранное поле пустое
     if(of.missing){
       const val=(o[of.missing]||'').toString().trim();
@@ -1506,7 +1537,7 @@ function drawOrders(){
   if(isCourier()){drawCourierOrderCards(el,rows);return;}
   const staff=isStaff();
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th><th>Оплата</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
@@ -1519,6 +1550,7 @@ function drawOrders(){
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
+      <td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
