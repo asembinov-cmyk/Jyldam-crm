@@ -1367,17 +1367,33 @@ async function partnerCallCourier(partner){
   const btn=$('pcabCall');if(btn){btn.disabled=true;btn.textContent='Создаём…';}
   try{
     const today=new Date().toISOString().slice(0,10);
-    // 1) ОДНА заявка на забор с данными партнёра и количеством заказов
-    const pickupRow={
-      partner_id:partner.id,name:partner.name,
-      city_id:partner.city_id||null,district_id:partner.district_id||null,
-      address:partner.address||'',phone:partner.phone||'',
-      sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
-      orders:cnt,pickup_date:today,created_at:new Date().toISOString(),
-    };
-    const {data:pickup,error:pErr}=await sb.from('pickups').insert(pickupRow).select().single();
-    if(pErr)throw pErr;
-    // 2) N заказов, привязанных к этой заявке
+    // 1) ищем СЕГОДНЯШНЮЮ заявку этого партнёра — чтобы не плодить дубли
+    let pickup=null;
+    const {data:exist}=await sb.from('pickups').select('*')
+      .eq('partner_id',partner.id).eq('pickup_date',today)
+      .order('created_at',{ascending:true}).limit(1);
+    if(exist&&exist.length)pickup=exist[0];
+
+    if(pickup){
+      // заявка на сегодня уже есть — увеличиваем счётчик заказов
+      const haveOrders=parseInt(pickup.orders||'0',10)||0;
+      const {data:upd}=await sb.from('pickups').update({orders:haveOrders+cnt}).eq('id',pickup.id).select().single();
+      if(upd)pickup=upd;
+    }else{
+      // заявки на сегодня нет — создаём одну с данными партнёра
+      const pickupRow={
+        partner_id:partner.id,name:partner.name,
+        city_id:partner.city_id||null,district_id:partner.district_id||null,
+        address:partner.address||'',phone:partner.phone||'',
+        sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
+        orders:cnt,pickup_date:today,created_at:new Date().toISOString(),
+      };
+      const {data:created,error:pErr}=await sb.from('pickups').insert(pickupRow).select().single();
+      if(pErr)throw pErr;
+      pickup=created;
+    }
+
+    // 2) создаём N новых заказов, привязанных к этой (одной) заявке
     const orderRows=[];
     for(let i=0;i<cnt;i++){
       orderRows.push({
@@ -1392,12 +1408,24 @@ async function partnerCallCourier(partner){
     }
     const {data:orders,error:oErr}=await sb.from('orders').insert(orderRows).select();
     if(oErr)throw oErr;
+
+    // 3) выравниваем счётчик заявки по фактическому числу заказов под ней
+    await syncPickupOrdersCount(pickup.id);
+
     if(btn){btn.disabled=false;btn.textContent='📦 Вызвать курьера';}
     partnerFillOrders(partner,orders);
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent='📦 Вызвать курьера';}
     alert('Не удалось создать: '+(e&&e.message||e));
   }
+}
+// синхронизирует поле orders заявки с реальным числом заказов под ней
+async function syncPickupOrdersCount(pickupId){
+  try{
+    const {data}=await sb.from('orders').select('id').eq('pickup_id',pickupId);
+    const real=(data||[]).length;
+    await sb.from('pickups').update({orders:real}).eq('id',pickupId);
+  }catch(e){console.error('syncPickupOrdersCount',e);}
 }
 
 // общий HTML полей одного заказа (используется и при создании, и при редактировании)
