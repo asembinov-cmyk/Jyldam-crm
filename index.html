@@ -428,6 +428,24 @@
   .sp-feat{display:flex;align-items:center;gap:9px;font-size:13.5px;color:#41506b;font-weight:600}
   .sp-feat svg{width:22px;height:22px;color:#16407a;flex:none}
   @media (max-width:560px){.sp-name{font-size:27px}.sp-feats{gap:16px}.sp-feat{font-size:12.5px}}
+
+  /* ── История изменений ── */
+  .log-act{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;text-transform:uppercase;letter-spacing:.03em}
+  .log-act.create{color:#2f6d36;background:#e7f1e6;border:1px solid #bcd9bb}
+  .log-act.update{color:#8a5a12;background:#f6eed6;border:1px solid #e3cf9c}
+  .log-act.delete{color:#8f3d20;background:#f4e0d8;border:1px solid #e0b3a3}
+  .log-act.status{color:#2b5c8a;background:#e2edf6;border:1px solid #aecbe6}
+  .log-act.ket{color:#fff;background:var(--moss);border:1px solid var(--moss)}
+  .log-act.login,.log-act.logout{color:#5a4a8a;background:#ece8f6;border:1px solid #cabfe6}
+  .log-when{white-space:nowrap;font-size:12.5px;color:var(--muted)}
+  .log-when b{display:block;color:var(--ink);font-weight:600;font-size:13px}
+  .log-changes{display:flex;flex-direction:column;gap:3px;margin-top:2px}
+  .log-chg{font-size:12px;line-height:1.35}
+  .log-chg .f{color:var(--muted);font-weight:600}
+  .log-chg .old{color:#8f3d20;text-decoration:line-through;opacity:.8}
+  .log-chg .arr{color:var(--muted);margin:0 4px}
+  .log-chg .new{color:#2f6d36;font-weight:600}
+  .log-user{font-weight:600;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -500,7 +518,7 @@ const S={
   // справочники-кэш
   cities:[],districts:[],couriers:[],order_couriers:[],sales:[],processors:[],
   partners:[],statuses:[],orderStatuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],
-  pickups:[],orders:[],
+  pickups:[],orders:[],activityLog:[],
   myPerms:null, myBaseType:'staff',
 };
 
@@ -527,21 +545,108 @@ async function dbList(table,opts={}){
     return data||[];
   }catch(e){console.error('dbList',table,e&&e.message);return [];}
 }
+// таблицы, логируемые автоматически в обёртках (orders/pickups логируются отдельно с подробностями)
+const AUTO_LOG_TABLES=new Set(['partners','cities','districts','couriers','order_couriers','sales_managers','processors','statuses','order_statuses','delivery_types','courier_cities','post_ips','profiles','roles']);
+// карта таблица→ключ кэша в S (для поиска "до" и подписи)
+const TABLE_ARRKEY={partners:'partners',cities:'cities',districts:'districts',couriers:'couriers',order_couriers:'order_couriers',sales_managers:'sales',processors:'processors',statuses:'statuses',order_statuses:'orderStatuses',delivery_types:'delivery',courier_cities:'courier_cities',post_ips:'post_ips',profiles:'profiles',roles:'roles'};
+function recLabel(rec){return rec?(rec.name||rec.fio||rec.full_name||rec.code||rec.email||('#'+rec.id)):'';}
+function findCached(table,id){const k=TABLE_ARRKEY[table];const arr=k&&S[k];return Array.isArray(arr)?arr.find(x=>x&&x.id===id):null;}
 async function dbInsert(table,row){
   const {data,error}=await sb.from(table).insert(row).select().single();
   if(error){console.error('insert',table,error);toast('Ошибка: '+error.message);return null;}
+  if(AUTO_LOG_TABLES.has(table))logAction('create',table,{entity_id:data.id,entity_label:recLabel(data)});
   return data;
 }
 async function dbUpdate(table,id,row){
+  const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
+  const beforeCopy=before?Object.assign({},before):null;
   const {data,error}=await sb.from(table).update(row).eq('id',id).select().single();
   if(error){console.error('update',table,error);toast('Ошибка: '+error.message);return null;}
+  if(AUTO_LOG_TABLES.has(table)){const ch=buildChanges(beforeCopy,data);if(ch.length)logAction('update',table,{entity_id:id,entity_label:recLabel(data),changes:ch});}
   return data;
 }
 async function dbDelete(table,id){
+  const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
+  const lbl=before?recLabel(before):String(id);
   const {error}=await sb.from(table).delete().eq('id',id);
   if(error){console.error('delete',table,error);toast('Ошибка: '+error.message);return false;}
+  if(AUTO_LOG_TABLES.has(table))logAction('delete',table,{entity_id:id,entity_label:lbl});
   return true;
 }
+
+/* ---------- ЖУРНАЛ ДЕЙСТВИЙ (История изменений) ---------- */
+// человекочитаемые названия сущностей
+const ENTITY_LABEL={
+  orders:'Заказ',pickups:'Заявка на забор',partners:'Партнёр',cities:'Город',districts:'Район',
+  couriers:'Курьер (заборщик)',order_couriers:'Курьер по заказам',sales_managers:'Менеджер по продажам',
+  processors:'Обработчик',statuses:'Статус забора',order_statuses:'Статус заказа',delivery_types:'Тип доставки',
+  courier_cities:'Курьерский город',post_ips:'ИП для Почты',profiles:'Сотрудник',roles:'Роль',auth:'Система'
+};
+// человекочитаемые подписи полей (для детальных правок)
+const FIELD_LABEL={
+  code:'Код',client:'ФИО клиента',phone:'Телефон',address:'Адрес',sender:'Отправитель',
+  delivery_id:'Тип доставки',courier_city_id:'Город (курьер.)',city_id:'Город',status_id:'Статус',
+  order_status_id:'Статус',weight:'Вес',qty:'Кол-во',index:'Индекс',track:'Трек-код',order_sum:'Сумма заказа',
+  cost:'Стоимость доставки',pay_date:'Дата оплаты',deliver_date:'Дата доставки',pickup_date:'Дата забора',
+  post_ip_id:'ИП для Почты',order_courier_id:'Курьер по заказам',courier_id:'Курьер',sales_id:'Менеджер продаж',
+  processor_id:'Обработчик',district_id:'Район',name:'Наименование',fio:'ФИО',orders:'Кол-во заказов',
+  full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
+  tariff_courier:'Тариф курьер',qr_code:'QR-код',id_doc:'Уд. личности',paid_by_sender:'Оплачено отправителем',
+  region:'Область',city_text:'Нас. пункт',base_type:'Базовый тип',perms:'Права'
+};
+// поля, которые не показываем в истории (служебные)
+const LOG_SKIP_FIELDS=new Set(['id','created_at','status_at','status_history','photos','ket_id','ket_track','ket_synced_at','perms']);
+// форматирование значения поля для отображения старое→новое
+function logFieldValue(field,v){
+  if(v==null||v==='')return '—';
+  try{
+    if(field==='status_id'||field==='order_status_id'){const s=orderStatusObj(v)||statusObj(v);return s?s.name:String(v);}
+    if(field==='delivery_id')return deliveryName(v);
+    if(field==='city_id')return cityName(v);
+    if(field==='courier_city_id')return courierCityName(v);
+    if(field==='district_id')return districtName(v);
+    if(field==='courier_id')return courierName(v);
+    if(field==='order_courier_id')return orderCourierName(v);
+    if(field==='sales_id')return salesName(v);
+    if(field==='processor_id')return processorName(v);
+    if(field==='post_ip_id')return postIpName(v);
+    if(field==='partner_id')return partnerName(v);
+    if(field==='role_id')return roleName(v);
+    if(field==='phone')return phoneDisplay(v)||String(v);
+    if(field==='paid_by_sender')return v?'да':'нет';
+  }catch(e){}
+  return String(v);
+}
+// собрать дифф полей между старой и новой записью
+function buildChanges(before,after){
+  const out=[];const keys=new Set([...Object.keys(before||{}),...Object.keys(after||{})]);
+  keys.forEach(k=>{
+    if(LOG_SKIP_FIELDS.has(k))return;
+    const a=before?before[k]:undefined, b=after?after[k]:undefined;
+    const na=(a==null?'':String(a)), nb=(b==null?'':String(b));
+    if(na===nb)return;
+    out.push({field:k,label:FIELD_LABEL[k]||k,old:logFieldValue(k,a),new:logFieldValue(k,b)});
+  });
+  return out;
+}
+// записать действие в журнал (не блокирует основную операцию при ошибке)
+async function logAction(action,entity,opts={}){
+  try{
+    const row={
+      user_id:(S.me&&S.me.id)||null,
+      user_name:(S.me&&(S.me.full_name||S.me.email))||'—',
+      action,entity,
+      entity_id:opts.entity_id!=null?String(opts.entity_id):null,
+      entity_label:opts.entity_label||null,
+      changes:opts.changes&&opts.changes.length?opts.changes:null,
+      meta:opts.meta||null,
+    };
+    await sb.from('activity_log').insert(row);
+  }catch(e){console.error('logAction',e);}
+}
+// удобные подписи объектов
+function orderLabel(o){return o?('#'+(o.code||o.id)):'';}
+function pickupLabel(p){return p?(p.name||('заявка '+p.id)):'';}
 
 /* ---------- ФОТО (Supabase Storage) ---------- */
 const PHOTO_BUCKET='pickup-photos';
@@ -648,6 +753,7 @@ async function sendOrderToKet(o){
     const ketId=result.id||null;
     const u=await dbUpdate('orders',o.id,{ket_id:ketId,ket_synced_at:new Date().toISOString()});
     if(u)Object.assign(o,u);
+    logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:ketId}});
     toast('Заказ отправлен в KET (ID '+(ketId||'?')+')');
     renderOrders();return true;
   }else{
@@ -710,9 +816,10 @@ async function doLogin(){
     return;
   }
   await loadMe(data.session);
+  await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
-async function doLogout(){await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
+async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
 function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();}
 function hideSplash(){const s=$('splash');if(!s)return;s.classList.add('hide');setTimeout(()=>{if(s.parentNode)s.remove();},600);}
 
@@ -758,6 +865,8 @@ async function refreshForTab(tab){
     }else if(tab==='users'){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
+    }else if(tab==='history'){
+      await loadActivityLog();
     }
   }catch(e){console.error('refresh',e);}
 }
@@ -889,10 +998,10 @@ function buildNav(){
     groups.push({title:'Партнёры',items:[
       {k:'partners',label:'Партнёры',icon:'partners',disabled:true},
     ]});
-    groups.push({title:'История',items:[
-      {k:'history',label:'История изменений',icon:'history',disabled:true},
-      {k:'notify',label:'Уведомления',icon:'bell',disabled:true},
-    ]});
+    const histItems=[];
+    if(isAdmin())histItems.push({k:'history',label:'История изменений',icon:'history'});
+    histItems.push({k:'notify',label:'Уведомления',icon:'bell',disabled:true});
+    groups.push({title:'История',items:histItems});
 
     const team=[];
     if(can('users','view'))team.push({k:'users',label:'Сотрудники',icon:'users'});
@@ -929,6 +1038,97 @@ function buildNav(){
   });
 }
 
+/* ================= МОДУЛЬ: ИСТОРИЯ ИЗМЕНЕНИЙ ================= */
+let hf={q:'',action:'',entity:'',user:'',from:'',to:''};
+const ACTION_LABEL={create:'Создание',update:'Изменение',delete:'Удаление',status:'Смена статуса',ket:'Отправка в KET',login:'Вход',logout:'Выход'};
+
+async function loadActivityLog(){
+  try{
+    const {data,error}=await sb.from('activity_log').select('*').order('created_at',{ascending:false}).limit(1000);
+    if(error){console.error('activity_log',error);S.activityLog=[];return;}
+    S.activityLog=data||[];
+  }catch(e){console.error(e);S.activityLog=[];}
+}
+function logActorName(r){return r.user_name||'—';}
+function fmtLogTime(ts){if(!ts)return '';const d=new Date(ts);const p=n=>String(n).padStart(2,'0');
+  return {date:`${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}`,time:`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`};}
+
+function renderHistory(){
+  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div></div>';return;}
+  const all=S.activityLog||[];
+  const users=[...new Set(all.map(r=>r.user_name).filter(Boolean))].sort();
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>История изменений</h1><p>Журнал всех действий пользователей в системе</p></div>
+      <div class="head-actions"><button class="btn ghost" id="histReload">↻ Обновить</button></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Журнал действий</h2><span class="count" id="histCount">0</span></div>
+      <div class="filters">
+        <input class="search" id="hfq" placeholder="Поиск: объект, пользователь, поле…" value="${esc(hf.q)}">
+        <select id="hfaction"><option value="">Все действия</option>${Object.entries(ACTION_LABEL).map(([k,l])=>`<option value="${k}" ${hf.action===k?'selected':''}>${l}</option>`).join('')}</select>
+        <select id="hfentity"><option value="">Все объекты</option>${Object.entries(ENTITY_LABEL).map(([k,l])=>`<option value="${k}" ${hf.entity===k?'selected':''}>${l}</option>`).join('')}</select>
+        <select id="hfuser"><option value="">Все пользователи</option>${users.map(u=>`<option value="${esc(u)}" ${hf.user===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
+      </div>
+      <div class="filters filters-dates">
+        <span class="fdate-lbl">Период:</span>
+        <input type="date" id="hffrom" value="${esc(hf.from)}" title="С даты">
+        <input type="date" id="hfto" value="${esc(hf.to)}" title="По дату">
+        <button class="btn sm" id="hfclear">Сбросить</button>
+      </div>
+      <div id="histTable"></div>
+    </div>`;
+  $('histReload').onclick=async()=>{$('histTable').innerHTML='<div class="loading">Обновляем…</div>';await loadActivityLog();renderHistory();};
+  $('hfq').oninput=e=>{hf.q=e.target.value;drawHistory();};
+  $('hfaction').onchange=e=>{hf.action=e.target.value;drawHistory();};
+  $('hfentity').onchange=e=>{hf.entity=e.target.value;drawHistory();};
+  $('hfuser').onchange=e=>{hf.user=e.target.value;drawHistory();};
+  $('hffrom').onchange=e=>{hf.from=e.target.value;drawHistory();};
+  $('hfto').onchange=e=>{hf.to=e.target.value;drawHistory();};
+  $('hfclear').onclick=()=>{hf={q:'',action:'',entity:'',user:'',from:'',to:''};renderHistory();};
+  drawHistory();
+}
+function filteredHistory(){
+  const q=hf.q.toLowerCase().trim();
+  return (S.activityLog||[]).filter(r=>{
+    if(hf.action&&r.action!==hf.action)return false;
+    if(hf.entity&&r.entity!==hf.entity)return false;
+    if(hf.user&&r.user_name!==hf.user)return false;
+    const d=(r.created_at||'').slice(0,10);
+    if(hf.from&&(!d||d<hf.from))return false;
+    if(hf.to&&(!d||d>hf.to))return false;
+    if(q){
+      const chg=(r.changes||[]).map(c=>`${c.label} ${c.old} ${c.new}`).join(' ');
+      const hay=[r.user_name,ENTITY_LABEL[r.entity]||r.entity,r.entity_label,ACTION_LABEL[r.action]||r.action,chg].join(' ').toLowerCase();
+      if(!hay.includes(q))return false;
+    }
+    return true;
+  });
+}
+function changesHtml(r){
+  if(r.action==='ket')return '<span style="color:var(--muted);font-size:12px">Отправлен в KET'+(r.meta&&r.meta.ket_id?(' · ID '+esc(r.meta.ket_id)):'')+'</span>';
+  if(!r.changes||!r.changes.length)return '<span style="color:var(--muted)">—</span>';
+  return `<div class="log-changes">${r.changes.map(c=>`<div class="log-chg"><span class="f">${esc(c.label)}:</span> <span class="old">${esc(c.old)}</span><span class="arr">→</span><span class="new">${esc(c.new)}</span></div>`).join('')}</div>`;
+}
+function drawHistory(){
+  const el=$('histTable');const rows=filteredHistory();
+  const cnt=$('histCount');if(cnt)cnt.textContent=rows.length;
+  if(!rows.length){el.innerHTML='<div class="empty"><div class="big">Записей нет</div>Измените фильтры или подождите новых действий.</div>';return;}
+  el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
+    <th>Дата и время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Что изменилось</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const t=fmtLogTime(r.created_at);
+      const ent=ENTITY_LABEL[r.entity]||r.entity;
+      const lbl=r.entity_label?(' '+r.entity_label):'';
+      return `<tr>
+        <td data-label="Дата и время"><div class="log-when"><b>${t.date}</b>${t.time}</div></td>
+        <td data-label="Пользователь"><span class="log-user">${esc(logActorName(r))}</span></td>
+        <td data-label="Действие"><span class="log-act ${esc(r.action)}">${esc(ACTION_LABEL[r.action]||r.action)}</span></td>
+        <td data-label="Объект">${esc(ent)}${lbl?`<strong>${esc(lbl)}</strong>`:''}</td>
+        <td data-label="Что изменилось">${changesHtml(r)}</td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
 /* ---------- РОУТЕР ---------- */
 function render(){
   if(S.tab==='dashboard')renderDashboard();
@@ -939,6 +1139,7 @@ function render(){
   else if(S.tab==='today')renderOrders('today');
   else if(S.tab==='settings')renderSettings();
   else if(S.tab==='users')renderUsers();
+  else if(S.tab==='history')renderHistory();
 }
 
 /* ---------- MODAL ENGINE ---------- */
@@ -1353,8 +1554,11 @@ async function setPickupStatus(id,statusId){
   const at=new Date().toISOString();
   const hist=Array.isArray(p.status_history)?p.status_history.slice():[];
   hist.push({statusId,at});
+  const oldS=p.status_id;
   const upd=await dbUpdate('pickups',id,{status_id:statusId,status_at:at,status_history:hist});
-  if(upd){Object.assign(p,upd);toast('Статус обновлён');drawPickups();updateCollectedStat();}
+  if(upd){Object.assign(p,upd);
+    logAction('status','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:[{field:'status_id',label:'Статус',old:logFieldValue('status_id',oldS),new:logFieldValue('status_id',statusId)}]});
+    toast('Статус обновлён');drawPickups();updateCollectedStat();}
 }
 // точечно обновляет число в плашке «Собрано заявок» без полной перерисовки
 function updateCollectedStat(){
@@ -1455,7 +1659,7 @@ function showPickupHistory(id){
 async function delPickup(id){
   const p=S.pickups.find(x=>x.id===id);
   if(!confirm(`Удалить карточку «${p?.name||''}»?`))return;
-  if(await dbDelete('pickups',id)){S.pickups=S.pickups.filter(x=>x.id!==id);toast('Удалено');renderPickups();}
+  if(await dbDelete('pickups',id)){await logAction('delete','pickups',{entity_id:id,entity_label:pickupLabel(p)});S.pickups=S.pickups.filter(x=>x.id!==id);toast('Удалено');renderPickups();}
 }
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
@@ -1489,8 +1693,10 @@ function pickupModal(id,readonly){
       let hist=p&&Array.isArray(p.status_history)?p.status_history.slice():[];
       if(newStatus&&newStatus!==prevStatus){row.status_at=new Date().toISOString();hist.push({statusId:newStatus,at:row.status_at});}
       row.status_history=hist;
-      if(id){const u=await dbUpdate('pickups',id,row);if(!u)return false;Object.assign(p,u);}
-      else{const u=await dbInsert('pickups',row);if(!u)return false;S.pickups.unshift(u);}
+      if(id){const before=Object.assign({},p);const u=await dbUpdate('pickups',id,row);if(!u)return false;Object.assign(p,u);
+        await logAction('update','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:buildChanges(before,p)});}
+      else{const u=await dbInsert('pickups',row);if(!u)return false;S.pickups.unshift(u);
+        await logAction('create','pickups',{entity_id:u.id,entity_label:pickupLabel(u)});}
       toast(id?'Сохранено':'Карточка создана');renderPickups();return true;
     },{readonly:ro});
   attachPhone('m_phone',d.phone);
@@ -1684,6 +1890,7 @@ function renderOrders(mode){
       if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
         const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
         if(u)Object.assign(o,u);
+        logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:result.id||null}});
         ok++;
       }else{
         fail++;
@@ -1798,8 +2005,10 @@ function drawOrders(){
   });
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
+    const oldS=o.status_id;
     const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});
     if(u){o.status_id=u.status_id;
+      logAction('status','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[{field:'status_id',label:'Статус',old:logFieldValue('status_id',oldS),new:logFieldValue('status_id',o.status_id)}]});
       const so=orderStatusObj(o.status_id)||{};
       const badge=sel.parentElement.querySelector('.status-badge');
       if(badge){badge.textContent=o.status_id?(so.name||'—'):'— нет —';badge.style.color=so.color||'var(--muted)';badge.style.background=so.color?(so.color+'1a'):'transparent';badge.style.borderColor=so.color||'var(--line)';}
@@ -1855,8 +2064,11 @@ function drawCourierOrderCards(el,rows){
   el.querySelectorAll('[data-ostatus]').forEach(sel=>{
     sel.onclick=e=>e.stopPropagation(); // выбор статуса не сворачивает карточку
     sel.onchange=async()=>{const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
+      const oldS=o.status_id;
       const u=await dbUpdate('orders',o.id,{status_id:sel.value||null});
-      if(u){o.status_id=u.status_id;sel.style.borderColor=(orderStatusObj(u.status_id)||{}).color||'var(--line)';toast('Статус обновлён');}};
+      if(u){o.status_id=u.status_id;sel.style.borderColor=(orderStatusObj(u.status_id)||{}).color||'var(--line)';
+        logAction('status','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[{field:'status_id',label:'Статус',old:logFieldValue('status_id',oldS),new:logFieldValue('status_id',o.status_id)}]});
+        toast('Статус обновлён');}};
   });
 }
 function renderBarcode(svgEl,code){if(!svgEl||!code)return;try{if(window.JsBarcode)JsBarcode(svgEl,code,{format:'CODE128',width:2,height:70,displayValue:true,fontSize:16,margin:6});}catch(e){console.error(e);}}
@@ -1864,7 +2076,7 @@ function showBarcode(id){const o=S.orders.find(x=>x.id===id);if(!o)return;
   showInfo(`Штрих-код · заказ ${esc(o.code)}`,`<div style="text-align:center;padding:10px 0"><svg id="bcView"></svg><div style="margin-top:10px;color:var(--muted);font-size:13px">${esc(o.client||'')} ${o.track?('· трек '+esc(o.track)):''}</div></div>`);
   setTimeout(()=>renderBarcode($('bcView'),o.code),60);}
 async function delOrder(id){const o=S.orders.find(x=>x.id===id);if(!confirm(`Удалить заказ ${o?.code||''}?`))return;
-  if(await dbDelete('orders',id)){S.orders=S.orders.filter(x=>x.id!==id);toast('Заказ удалён');renderOrders();}}
+  if(await dbDelete('orders',id)){await logAction('delete','orders',{entity_id:id,entity_label:orderLabel(o)});S.orders=S.orders.filter(x=>x.id!==id);toast('Заказ удалён');renderOrders();}}
 function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
@@ -1920,8 +2132,10 @@ function orderModal(id,readonly){
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
         cost:val('o_sum')?parseFloat(val('o_sum')):0,pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,
         order_courier_id:val('o_ocourier')||null};
-      if(id){const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);}
-      else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);}
+      if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
+        await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:buildChanges(before,o)});}
+      else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);
+        await logAction('create','orders',{entity_id:u.id,entity_label:orderLabel(u)});}
       toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
     },{readonly:ro,wide:true});
   attachPhone('o_phone',d.phone);
@@ -2517,6 +2731,7 @@ function createStaffModal(){
       const out=await callCreateUser({phone,password:pass,full_name:name,
         position:val('n_pos').trim(),role_id:roleId||null,role:legacy,courier_kind});
       if(out.error){toast('Ошибка: '+out.error);return false;}
+      await logAction('create','profiles',{entity_label:name||phone,meta:{phone}});
       S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       toast('Сотрудник создан');renderUsers();return true;
     });
@@ -2542,6 +2757,7 @@ function changePassModal(id){
       toast('Меняем пароль…');
       const out=await callSetPassword({user_id:u.id,password:pass});
       if(out.error){alert('Не удалось сменить пароль:\n\n'+out.error);return false;}
+      await logAction('update','profiles',{entity_id:u.id,entity_label:u.full_name||login,changes:[{field:'password',label:'Пароль',old:'•••',new:'изменён'}]});
       toast('Пароль изменён');return true;
     });
 }
