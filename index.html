@@ -313,6 +313,32 @@
   .pfill-card input:focus{outline:2px solid rgba(182,80,43,.25);border-color:var(--rust)}
   .pfill-track{display:flex;gap:8px}
   .pfill-track input{flex:1}
+  .pfill-select{font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%}
+  .pfill-select:focus{outline:2px solid rgba(182,80,43,.25);border-color:var(--rust)}
+  .pfill-card input:disabled,.pfill-select:disabled{opacity:.6;background:var(--paper)}
+  /* фильтры в кабинете */
+  .pcab-filters{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+  .pcab-search{font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%}
+  .pcab-search:focus{outline:2px solid rgba(182,80,43,.25);border-color:var(--rust)}
+  .pcab-dates{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+  .pcab-dates label{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:600;color:var(--muted);flex:1;min-width:120px}
+  .pcab-dates input{font:inherit;font-size:14px;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink)}
+  .pcab-clear{padding:9px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-weight:600;cursor:pointer;font-size:14px}
+  /* карточка заказа в кабинете */
+  .pcab-ord{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;cursor:pointer;transition:border-color .15s,transform .05s}
+  .pcab-ord:active{transform:scale(.99)}
+  .pcab-ord:hover{border-color:var(--rust)}
+  .pcab-ord.locked{opacity:.75;cursor:default}
+  .pcab-ord.locked:hover{border-color:var(--line)}
+  .pcab-ord-h{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .pcab-ord-h b{font-family:'Fraunces',serif;font-size:16px}
+  .pcab-ord-date{font-size:12px;color:var(--muted)}
+  .pcab-ord-sub{font-size:14px;color:var(--ink);margin-top:4px}
+  .pcab-ord-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .pcab-tag{font-size:11.5px;font-weight:600;color:var(--muted);background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:3px 9px}
+  .pcab-tag.lock{color:#8f3d20;border-color:#e0b3a3;background:#f4e0d8}
+  .pcab-lockmsg{background:#f4e0d8;border:1px solid #e0b3a3;color:#8f3d20;border-radius:12px;padding:12px 14px;font-size:14px;font-weight:600}
+  .pcab-ghost{background:var(--card)!important;color:var(--ink)!important;box-shadow:none!important;border:1px solid var(--line)!important}
   .pfill-scan{padding:0 14px;border:none;border-radius:10px;background:var(--moss);color:#fff;font-weight:600;cursor:pointer;white-space:nowrap;font-size:14px}
   .scan-ov{position:fixed;inset:0;background:rgba(20,17,13,.95);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px}
   .scan-box{width:100%;max-width:420px}
@@ -1190,10 +1216,24 @@ async function openPartnerCabinet(code){
     document.body.innerHTML=`<div class="pcab-err">Кабинет не найден.<br><small>Проверьте ссылку или QR-код.</small></div>`;
     return;
   }
+  // подгружаем справочники, нужные кабинету (тип доставки, статусы, города)
+  try{
+    const [dt,st,ost,cc,ct]=await Promise.all([
+      sb.from('delivery_types').select('*'),
+      sb.from('statuses').select('*'),
+      sb.from('order_statuses').select('*'),
+      sb.from('courier_cities').select('*'),
+      sb.from('cities').select('*'),
+    ]);
+    S.delivery=dt.data||[];S.statuses=st.data||[];S.orderStatuses=ost.data||[];
+    S.courier_cities=cc.data||[];S.cities=ct.data||[];
+  }catch(e){console.error('pcab dirs',e);}
   renderPartnerCabinet(partner);
 }
 
 function renderPartnerCabinet(partner){
+  S.__partner=partner;
+  if(!partner.__pf)partner.__pf={from:'',to:''};
   document.body.innerHTML=`
   <div class="pcab">
     <div class="pcab-top">
@@ -1208,49 +1248,114 @@ function renderPartnerCabinet(partner){
       <div class="pcab-row"><span>Телефон</span><b>${partner.phone?esc(phoneDisplay(partner.phone)):'—'}</b></div>
     </div>
     <div class="pcab-hist">
-      <div class="pcab-hist-h">Мои заявки на забор</div>
+      <div class="pcab-hist-h">Мои заказы</div>
+      <div class="pcab-filters">
+        <input class="pcab-search" id="pcabq" placeholder="Поиск: №, клиент, трек…">
+        <div class="pcab-dates">
+          <label>С даты<input type="date" id="pcabFrom" value="${esc(partner.__pf.from)}"></label>
+          <label>По дату<input type="date" id="pcabTo" value="${esc(partner.__pf.to)}"></label>
+          <button class="pcab-clear" id="pcabClear">Сброс</button>
+        </div>
+      </div>
       <div id="pcabList" class="pcab-list"><div class="pcab-empty">Загрузка…</div></div>
     </div>
   </div>`;
   $('pcabCall').onclick=()=>partnerCallCourier(partner);
-  loadPartnerPickups(partner);
+  const reload=()=>loadPartnerOrders(partner);
+  $('pcabq').oninput=reload;
+  $('pcabFrom').onchange=e=>{partner.__pf.from=e.target.value;reload();};
+  $('pcabTo').onchange=e=>{partner.__pf.to=e.target.value;reload();};
+  $('pcabClear').onclick=()=>{partner.__pf={from:'',to:''};renderPartnerCabinet(partner);};
+  loadPartnerOrders(partner);
 }
 
-// показать заявки партнёра
-async function loadPartnerPickups(partner){
+// загрузка и отрисовка заказов партнёра с фильтром по дате создания и дате забора
+async function loadPartnerOrders(partner){
   const box=$('pcabList');if(!box)return;
-  const {data:rows}=await sb.from('pickups').select('*').eq('partner_id',partner.id).order('created_at',{ascending:false}).limit(30);
-  if(!rows||!rows.length){box.innerHTML='<div class="pcab-empty">Заявок пока нет</div>';return;}
-  box.innerHTML=rows.map(p=>`<div class="pcab-item">
-    <div class="pcab-item-h"><b>${esc((p.created_at||'').slice(0,10))}</b><span>${p.orders?('заказов: '+p.orders):'новая'}</span></div>
-    <div class="pcab-item-s">${esc(p.address||partner.address||'')}</div>
-  </div>`).join('');
+  let rows=[];
+  try{
+    const {data}=await sb.from('orders').select('*').eq('partner_id',partner.id).order('created_at',{ascending:false}).limit(300);
+    rows=data||[];
+  }catch(e){console.error(e);}
+  partner.__orders=rows;
+  drawPartnerOrders(partner);
+}
+function drawPartnerOrders(partner){
+  const box=$('pcabList');if(!box)return;
+  const pf=partner.__pf||{from:'',to:''};
+  const q=(($('pcabq')&&$('pcabq').value)||'').toLowerCase().trim();
+  let rows=(partner.__orders||[]).filter(o=>{
+    const cd=(o.created_at||'').slice(0,10);
+    const pd=(o.pickup_date||'').slice(0,10);
+    // фильтр по дате: показываем, если ХОТЬ ОДНА из дат (создания или забора) попадает в диапазон
+    if(pf.from){ if(!((cd&&cd>=pf.from)||(pd&&pd>=pf.from)))return false; }
+    if(pf.to){ if(!((cd&&cd<=pf.to)||(pd&&pd<=pf.to)))return false; }
+    if(q){
+      const hay=[o.code,o.client,o.track,o.address,o.city_text,phoneDisplay(o.phone)].join(' ').toLowerCase();
+      if(!hay.includes(q))return false;
+    }
+    return true;
+  });
+  if(!rows.length){box.innerHTML='<div class="pcab-empty">Заказов нет</div>';return;}
+  box.innerHTML=rows.map(o=>{
+    const collected=partnerOrderCollected(o);
+    const dtype=o.delivery_id?deliveryName(o.delivery_id):'не выбран';
+    const st=o.status_id?(orderStatusObj(o.status_id)||{}).name:'';
+    return `<div class="pcab-ord ${collected?'locked':''}" data-ord="${o.id}">
+      <div class="pcab-ord-h">
+        <b>#${esc(o.code)}</b>
+        <span class="pcab-ord-date">${esc(fmtDate(o.created_at))}</span>
+      </div>
+      <div class="pcab-ord-sub">${esc(o.client||'без клиента')}${o.phone?(' · '+esc(phoneDisplay(o.phone))):''}</div>
+      <div class="pcab-ord-meta">
+        <span class="pcab-tag">${esc(dtype)}</span>
+        ${o.track?`<span class="pcab-tag">трек: ${esc(o.track)}</span>`:''}
+        ${st?`<span class="pcab-tag">${esc(st)}</span>`:''}
+        ${collected?'<span class="pcab-tag lock">🔒 забран</span>':''}
+      </div>
+    </div>`;
+  }).join('');
+  // двойной тап / одиночный тап — открыть заказ
+  box.querySelectorAll('[data-ord]').forEach(card=>{
+    const open=()=>partnerEditOrder(partner,card.dataset.ord);
+    card.ondblclick=open;
+    let lastTap=0;
+    card.onclick=()=>{const now=Date.now();if(now-lastTap<400){open();}lastTap=now;};
+  });
 }
 
-// вызвать курьера: спросить количество, создать заявку + N заказов, открыть их заполнение
+// считаем заказ «забранным» (нельзя редактировать), если его статус или статус заявки завершающий
+function partnerOrderCollected(o){
+  if(o.status_id&&isCollectedOrderStatus(o.status_id))return true;
+  return false;
+}
+function isCollectedOrderStatus(id){const s=orderStatusObj(id);if(!s)return false;return /забра|забро|собра|вруч|доставлен|выдан/i.test(s.name||'');}
+
+// вызвать курьера: спросить количество, создать ОДНУ заявку + N заказов, открыть заполнение
 async function partnerCallCourier(partner){
   const n=prompt('Сколько заказов нужно забрать?','1');
   if(n===null)return;
   const cnt=Math.max(1,parseInt(n,10)||1);
   const btn=$('pcabCall');if(btn){btn.disabled=true;btn.textContent='Создаём…';}
   try{
-    // 1) создаём заявку на забор
+    const today=new Date().toISOString().slice(0,10);
+    // 1) ОДНА заявка на забор с данными партнёра и количеством заказов
     const pickupRow={
       partner_id:partner.id,name:partner.name,
       city_id:partner.city_id||null,district_id:partner.district_id||null,
       address:partner.address||'',phone:partner.phone||'',
       sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
-      orders:cnt,created_at:new Date().toISOString(),
+      orders:cnt,pickup_date:today,created_at:new Date().toISOString(),
     };
     const {data:pickup,error:pErr}=await sb.from('pickups').insert(pickupRow).select().single();
     if(pErr)throw pErr;
-    // 2) создаём N заказов, привязанных к заявке
+    // 2) N заказов, привязанных к этой заявке
     const orderRows=[];
     for(let i=0;i<cnt;i++){
       orderRows.push({
         code:String(Math.floor(1000000+Math.random()*9000000)),
         pickup_id:pickup.id,partner_id:partner.id,
-        sender:partner.name,pickup_date:new Date().toISOString().slice(0,10),
+        sender:partner.name,pickup_date:today,
         sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
         order_sum:partner.tariff_courier||null,cost:partner.tariff_courier||0,
         created_at:new Date().toISOString(),
@@ -1259,7 +1364,6 @@ async function partnerCallCourier(partner){
     const {data:orders,error:oErr}=await sb.from('orders').insert(orderRows).select();
     if(oErr)throw oErr;
     if(btn){btn.disabled=false;btn.textContent='📦 Вызвать курьера';}
-    // 3) открываем экран заполнения заказов
     partnerFillOrders(partner,orders);
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent='📦 Вызвать курьера';}
@@ -1267,32 +1371,26 @@ async function partnerCallCourier(partner){
   }
 }
 
-// экран заполнения заказов партнёром: трек (скан) + получатель
-function partnerFillOrders(partner,orders){
-  const cities=window.__pcabCities||[];
-  document.body.innerHTML=`
-  <div class="pcab">
-    <div class="pcab-top"><div class="pcab-brand">
-      <div class="pcab-logo">JL</div>
-      <div><div class="pcab-store">${esc(partner.name)}</div><div class="pcab-sub">Заполните ${orders.length} заказ(ов)</div></div>
-    </div></div>
-    <div id="pfill" class="pcab-list"></div>
-    <button class="pcab-call" id="pfillDone">Готово</button>
-    <button class="pcab-call" id="pfillBack" style="background:var(--card);color:var(--ink);box-shadow:none;border:1px solid var(--line)">← В кабинет</button>
-  </div>
-  <div id="scanOverlay" class="scan-ov" style="display:none">
-    <div class="scan-box"><div id="scanReader"></div>
-      <button class="pcab-call" id="scanCancel" style="background:var(--card);color:var(--ink);box-shadow:none;border:1px solid var(--line);margin-top:12px">Отмена</button>
-    </div>
-  </div>`;
-  const wrap=$('pfill');
-  wrap.innerHTML=orders.map((o,i)=>`<div class="pfill-card" data-ord="${o.id}">
-    <div class="pfill-h">Заказ ${i+1} · #${esc(o.code)}</div>
+// общий HTML полей одного заказа (используется и при создании, и при редактировании)
+function partnerOrderFieldsHtml(o,i){
+  const courierTypes=S.delivery.filter(d=>/курьер/i.test(d.name||''));
+  const mailTypes=S.delivery.filter(d=>!/курьер/i.test(d.name||''));
+  const optBlock=(arr,sel)=>arr.map(d=>`<option value="${d.id}" ${sel===d.id?'selected':''}>${esc(d.name)}</option>`).join('');
+  return `<div class="pfill-card" data-ord="${o.id}">
+    <div class="pfill-h">${i!=null?('Заказ '+(i+1)+' · '):''}#${esc(o.code)}</div>
+    <label class="pfill-l">Тип доставки</label>
+    <select id="dlv_${o.id}" class="pfill-select">
+      <option value="">— выберите —</option>
+      ${courierTypes.length?`<optgroup label="Курьерская">${optBlock(courierTypes,o.delivery_id)}</optgroup>`:''}
+      ${mailTypes.length?`<optgroup label="Почтовая">${optBlock(mailTypes,o.delivery_id)}</optgroup>`:''}
+    </select>
     <label class="pfill-l">Трек-номер (штрих-код с пакета)</label>
     <div class="pfill-track">
       <input id="trk_${o.id}" value="${esc(o.track||'')}" placeholder="Отсканируйте или введите">
       <button type="button" class="pfill-scan" data-scan="${o.id}">📷 Скан</button>
     </div>
+    <label class="pfill-l">ФИО получателя</label>
+    <input id="cli_${o.id}" placeholder="Имя клиента" value="${esc(o.client||'')}">
     <label class="pfill-l">Область</label>
     <input id="reg_${o.id}" placeholder="Область / регион" value="${esc(o.region||'')}">
     <label class="pfill-l">Населённый пункт</label>
@@ -1301,8 +1399,42 @@ function partnerFillOrders(partner,orders){
     <input id="adr_${o.id}" placeholder="Улица, дом, кв" value="${esc(o.address||'')}">
     <label class="pfill-l">Телефон получателя</label>
     <input id="ph_${o.id}" inputmode="numeric" placeholder="+7 (___) ___-__-__" value="${o.phone?esc(phoneDisplay(o.phone)):''}">
-  </div>`).join('');
-  // кнопки сканера
+  </div>`;
+}
+// собрать значения полей одного заказа в объект для сохранения
+function partnerCollectFields(o){
+  const phRaw=(($('ph_'+o.id)||{}).value||'').replace(/\D/g,'');
+  const ph=phRaw.length>=10?phRaw.slice(-10):'';
+  return {
+    delivery_id:(($('dlv_'+o.id)||{}).value)||null,
+    track:(($('trk_'+o.id)||{}).value||'').trim(),
+    client:(($('cli_'+o.id)||{}).value||'').trim(),
+    region:(($('reg_'+o.id)||{}).value||'').trim(),
+    city_text:(($('city_'+o.id)||{}).value||'').trim(),
+    address:(($('adr_'+o.id)||{}).value||'').trim(),
+    phone:ph,
+  };
+}
+
+// экран заполнения сразу нескольких новых заказов
+function partnerFillOrders(partner,orders){
+  document.body.innerHTML=`
+  <div class="pcab">
+    <div class="pcab-top"><div class="pcab-brand">
+      <div class="pcab-logo">JL</div>
+      <div><div class="pcab-store">${esc(partner.name)}</div><div class="pcab-sub">Заполните ${orders.length} заказ(ов)</div></div>
+    </div></div>
+    <div id="pfill" class="pcab-list"></div>
+    <button class="pcab-call" id="pfillDone">Готово</button>
+    <button class="pcab-call pcab-ghost" id="pfillBack">← В кабинет</button>
+  </div>
+  <div id="scanOverlay" class="scan-ov" style="display:none">
+    <div class="scan-box"><div id="scanReader"></div>
+      <button class="pcab-call pcab-ghost" id="scanCancel" style="margin-top:12px">Отмена</button>
+    </div>
+  </div>`;
+  const wrap=$('pfill');
+  wrap.innerHTML=orders.map((o,i)=>partnerOrderFieldsHtml(o,i)).join('');
   wrap.querySelectorAll('[data-scan]').forEach(b=>{
     b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
   });
@@ -1312,15 +1444,7 @@ function partnerFillOrders(partner,orders){
     const btn=$('pfillDone');btn.disabled=true;btn.textContent='Сохраняем…';
     try{
       for(const o of orders){
-        const phRaw=($('ph_'+o.id).value||'').replace(/\D/g,'');
-        const ph=phRaw.length>=10?phRaw.slice(-10):'';
-        await sb.from('orders').update({
-          track:($('trk_'+o.id).value||'').trim(),
-          region:($('reg_'+o.id).value||'').trim(),
-          city_text:($('city_'+o.id).value||'').trim(),
-          address:($('adr_'+o.id).value||'').trim(),
-          phone:ph,
-        }).eq('id',o.id);
+        await sb.from('orders').update(partnerCollectFields(o)).eq('id',o.id);
       }
       alert('Заказы сохранены! Курьер заберёт посылки.');
       renderPartnerCabinet(partner);
@@ -1330,6 +1454,54 @@ function partnerFillOrders(partner,orders){
     }
   };
 }
+
+// экран редактирования ОДНОГО существующего заказа (по тапу из списка)
+function partnerEditOrder(partner,orderId){
+  const o=(partner.__orders||[]).find(x=>x.id===orderId);
+  if(!o)return;
+  const collected=partnerOrderCollected(o);
+  document.body.innerHTML=`
+  <div class="pcab">
+    <div class="pcab-top"><div class="pcab-brand">
+      <div class="pcab-logo">JL</div>
+      <div><div class="pcab-store">${esc(partner.name)}</div><div class="pcab-sub">${collected?'Просмотр заказа':'Редактирование заказа'} #${esc(o.code)}</div></div>
+    </div></div>
+    ${collected?'<div class="pcab-lockmsg">🔒 Курьер уже забрал этот заказ — редактирование недоступно.</div>':''}
+    <div id="pfill" class="pcab-list"></div>
+    ${collected?'':'<button class="pcab-call" id="peditSave">Сохранить</button>'}
+    <button class="pcab-call pcab-ghost" id="peditBack">← К списку</button>
+  </div>
+  <div id="scanOverlay" class="scan-ov" style="display:none">
+    <div class="scan-box"><div id="scanReader"></div>
+      <button class="pcab-call pcab-ghost" id="scanCancel" style="margin-top:12px">Отмена</button>
+    </div>
+  </div>`;
+  $('pfill').innerHTML=partnerOrderFieldsHtml(o,null);
+  // если забран — блокируем все поля
+  if(collected){
+    $('pfill').querySelectorAll('input,select,button.pfill-scan').forEach(el=>el.disabled=true);
+  }else{
+    $('pfill').querySelectorAll('[data-scan]').forEach(b=>{
+      b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
+    });
+  }
+  if($('scanCancel'))$('scanCancel').onclick=stopScan;
+  $('peditBack').onclick=()=>renderPartnerCabinet(partner);
+  if($('peditSave'))$('peditSave').onclick=async()=>{
+    const btn=$('peditSave');btn.disabled=true;btn.textContent='Сохраняем…';
+    try{
+      const upd=partnerCollectFields(o);
+      const {data}=await sb.from('orders').update(upd).eq('id',o.id).select().single();
+      if(data)Object.assign(o,data);
+      alert('Заказ сохранён.');
+      renderPartnerCabinet(partner);
+    }catch(e){
+      btn.disabled=false;btn.textContent='Сохранить';
+      alert('Ошибка сохранения: '+(e&&e.message||e));
+    }
+  };
+}
+
 
 let _scanner=null;
 function startScan(onResult){
