@@ -340,6 +340,10 @@
   .pcab-lockmsg{background:#f4e0d8;border:1px solid #e0b3a3;color:#8f3d20;border-radius:12px;padding:12px 14px;font-size:14px;font-weight:600}
   .pcab-ghost{background:var(--card)!important;color:var(--ink)!important;box-shadow:none!important;border:1px solid var(--line)!important}
   .pfill-scan{padding:0 14px;border:none;border-radius:10px;background:var(--moss);color:#fff;font-weight:600;cursor:pointer;white-space:nowrap;font-size:14px}
+  .pfill-area{font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%;resize:vertical;min-height:48px}
+  .pfill-area:focus{outline:2px solid rgba(182,80,43,.25);border-color:var(--rust)}
+  .pfill-area:disabled{opacity:.6}
+  .pfill-dyn{display:flex;flex-direction:column;gap:4px}
   .scan-ov{position:fixed;inset:0;background:rgba(20,17,13,.95);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px}
   .scan-box{width:100%;max-width:420px}
   #scanReader{width:100%;border-radius:14px;overflow:hidden;background:#000}
@@ -618,7 +622,7 @@ const FIELD_LABEL={
   processor_id:'Обработчик',district_id:'Район',name:'Наименование',fio:'ФИО',orders:'Кол-во заказов',
   full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
   tariff_courier:'Тариф курьер',qr_code:'QR-код',id_doc:'Уд. личности',paid_by_sender:'Оплачено отправителем',
-  region:'Область',city_text:'Нас. пункт',base_type:'Базовый тип',perms:'Права'
+  region:'Область',city_text:'Нас. пункт',comment:'Комментарий',base_type:'Базовый тип',perms:'Права'
 };
 // поля, которые не показываем в истории (служебные)
 const LOG_SKIP_FIELDS=new Set(['id','created_at','status_at','status_history','photos','ket_id','ket_track','ket_synced_at','perms']);
@@ -1376,44 +1380,82 @@ function partnerOrderFieldsHtml(o,i){
   const courierTypes=S.delivery.filter(d=>/курьер/i.test(d.name||''));
   const mailTypes=S.delivery.filter(d=>!/курьер/i.test(d.name||''));
   const optBlock=(arr,sel)=>arr.map(d=>`<option value="${d.id}" ${sel===d.id?'selected':''}>${esc(d.name)}</option>`).join('');
+  const isCour=o.delivery_id?isCourierDelivery(o.delivery_id):false;
+  const hasType=!!o.delivery_id;
+  // город: для курьерской — из courier_cities, для почтовой — из cities
+  const courierCityOpts=(S.courier_cities||[]).map(c=>`<option value="${c.id}" ${o.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
+  const cityOpts=(S.cities||[]).map(c=>`<option value="${c.id}" ${o.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
   return `<div class="pfill-card" data-ord="${o.id}">
     <div class="pfill-h">${i!=null?('Заказ '+(i+1)+' · '):''}#${esc(o.code)}</div>
     <label class="pfill-l">Тип доставки</label>
-    <select id="dlv_${o.id}" class="pfill-select">
+    <select id="dlv_${o.id}" class="pfill-select" data-dlv="${o.id}">
       <option value="">— выберите —</option>
       ${courierTypes.length?`<optgroup label="Курьерская">${optBlock(courierTypes,o.delivery_id)}</optgroup>`:''}
       ${mailTypes.length?`<optgroup label="Почтовая">${optBlock(mailTypes,o.delivery_id)}</optgroup>`:''}
     </select>
-    <label class="pfill-l">Трек-номер (штрих-код с пакета)</label>
-    <div class="pfill-track">
-      <input id="trk_${o.id}" value="${esc(o.track||'')}" placeholder="Отсканируйте или введите">
-      <button type="button" class="pfill-scan" data-scan="${o.id}">📷 Скан</button>
+    <div id="flds_${o.id}" class="pfill-dyn" style="${hasType?'':'display:none'}">
+      <label class="pfill-l">ФИО получателя</label>
+      <input id="cli_${o.id}" placeholder="Имя клиента" value="${esc(o.client||'')}">
+      <label class="pfill-l">Город</label>
+      <select id="ccity_${o.id}" class="pfill-select cour-fld" style="${isCour?'':'display:none'}"><option value="">— выберите город —</option>${courierCityOpts}</select>
+      <select id="mcity_${o.id}" class="pfill-select mail-fld" style="${isCour?'display:none':''}"><option value="">— выберите город —</option>${cityOpts}</select>
+      <label class="pfill-l">Адрес</label>
+      <input id="adr_${o.id}" placeholder="Улица, дом, кв" value="${esc(o.address||'')}">
+      <label class="pfill-l">Телефон получателя</label>
+      <input id="ph_${o.id}" inputmode="numeric" placeholder="+7 (___) ___-__-__" value="${o.phone?esc(phoneDisplay(o.phone)):''}">
+      <div class="mail-fld" style="${isCour?'display:none':''}">
+        <label class="pfill-l">Трек-номер (штрих-код с пакета)</label>
+        <div class="pfill-track">
+          <input id="trk_${o.id}" value="${esc(o.track||'')}" placeholder="Отсканируйте или введите">
+          <button type="button" class="pfill-scan" data-scan="${o.id}">📷 Скан</button>
+        </div>
+        <label class="pfill-l">Индекс</label>
+        <input id="idx_${o.id}" placeholder="Почтовый индекс" value="${esc(o.index||'')}">
+      </div>
+      <label class="pfill-l">Комментарий</label>
+      <textarea id="cmt_${o.id}" class="pfill-area" placeholder="Комментарий к заказу" rows="2">${esc(o.comment||'')}</textarea>
     </div>
-    <label class="pfill-l">ФИО получателя</label>
-    <input id="cli_${o.id}" placeholder="Имя клиента" value="${esc(o.client||'')}">
-    <label class="pfill-l">Область</label>
-    <input id="reg_${o.id}" placeholder="Область / регион" value="${esc(o.region||'')}">
-    <label class="pfill-l">Населённый пункт</label>
-    <input id="city_${o.id}" placeholder="Город / село" value="${esc(o.city_text||'')}">
-    <label class="pfill-l">Адрес</label>
-    <input id="adr_${o.id}" placeholder="Улица, дом, кв" value="${esc(o.address||'')}">
-    <label class="pfill-l">Телефон получателя</label>
-    <input id="ph_${o.id}" inputmode="numeric" placeholder="+7 (___) ___-__-__" value="${o.phone?esc(phoneDisplay(o.phone)):''}">
   </div>`;
 }
-// собрать значения полей одного заказа в объект для сохранения
+// переключение видимости полей при смене типа доставки
+function partnerToggleDelivery(oid){
+  const sel=$('dlv_'+oid);if(!sel)return;
+  const v=sel.value;
+  const dyn=$('flds_'+oid);
+  const card=sel.closest('.pfill-card');
+  if(dyn)dyn.style.display=v?'':'none';
+  if(!v)return;
+  const cour=isCourierDelivery(v);
+  if(card){
+    card.querySelectorAll('.cour-fld').forEach(el=>el.style.display=cour?'':'none');
+    card.querySelectorAll('.mail-fld').forEach(el=>el.style.display=cour?'none':'');
+  }
+}
+// собрать значения полей одного заказа в объект для сохранения (с учётом типа доставки)
 function partnerCollectFields(o){
   const phRaw=(($('ph_'+o.id)||{}).value||'').replace(/\D/g,'');
   const ph=phRaw.length>=10?phRaw.slice(-10):'';
-  return {
-    delivery_id:(($('dlv_'+o.id)||{}).value)||null,
-    track:(($('trk_'+o.id)||{}).value||'').trim(),
+  const dlv=(($('dlv_'+o.id)||{}).value)||null;
+  const cour=dlv?isCourierDelivery(dlv):false;
+  const row={
+    delivery_id:dlv,
     client:(($('cli_'+o.id)||{}).value||'').trim(),
-    region:(($('reg_'+o.id)||{}).value||'').trim(),
-    city_text:(($('city_'+o.id)||{}).value||'').trim(),
     address:(($('adr_'+o.id)||{}).value||'').trim(),
     phone:ph,
+    comment:(($('cmt_'+o.id)||{}).value||'').trim(),
   };
+  if(cour){
+    // курьерская: город из courier_cities, чистим почтовые поля
+    row.courier_city_id=(($('ccity_'+o.id)||{}).value)||null;
+    row.city_id=null;row.track='';row.index='';
+  }else{
+    // почтовая: город из cities + трек + индекс
+    row.city_id=(($('mcity_'+o.id)||{}).value)||null;
+    row.courier_city_id=null;
+    row.track=(($('trk_'+o.id)||{}).value||'').trim();
+    row.index=(($('idx_'+o.id)||{}).value||'').trim();
+  }
+  return row;
 }
 
 // экран заполнения сразу нескольких новых заказов
@@ -1435,6 +1477,7 @@ function partnerFillOrders(partner,orders){
   </div>`;
   const wrap=$('pfill');
   wrap.innerHTML=orders.map((o,i)=>partnerOrderFieldsHtml(o,i)).join('');
+  wrap.querySelectorAll('[data-dlv]').forEach(s=>s.onchange=()=>partnerToggleDelivery(s.dataset.dlv));
   wrap.querySelectorAll('[data-scan]').forEach(b=>{
     b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
   });
@@ -1481,6 +1524,7 @@ function partnerEditOrder(partner,orderId){
   if(collected){
     $('pfill').querySelectorAll('input,select,button.pfill-scan').forEach(el=>el.disabled=true);
   }else{
+    $('pfill').querySelectorAll('[data-dlv]').forEach(s=>s.onchange=()=>partnerToggleDelivery(s.dataset.dlv));
     $('pfill').querySelectorAll('[data-scan]').forEach(b=>{
       b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
     });
@@ -2288,6 +2332,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field"><label>Дата доставки</label><input type="date" id="o_deliver" value="${esc(d.deliver_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field full"><label>Комментарий</label><textarea id="o_comment" rows="2" style="font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%;resize:vertical" ${dis}>${esc(d.comment||'')}</textarea></div>
     </div>
       </div>
     </div>`,
@@ -2302,7 +2347,7 @@ function orderModal(id,readonly){
         order_sum:val('o_sum')?parseFloat(val('o_sum')):null,
         status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
-        cost:val('o_sum')?parseFloat(val('o_sum')):0,pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,
+        cost:val('o_sum')?parseFloat(val('o_sum')):0,pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,comment:val('o_comment').trim(),
         order_courier_id:val('o_ocourier')||null};
       if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
         await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:buildChanges(before,o)});}
