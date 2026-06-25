@@ -1221,6 +1221,11 @@ async function openPartnerCabinet(code){
     return;
   }
   // подгружаем справочники, нужные кабинету (тип доставки, статусы, города)
+  await loadPartnerDirs();
+  renderPartnerCabinet(partner);
+}
+
+async function loadPartnerDirs(){
   try{
     const [dt,st,ost,cc,ct]=await Promise.all([
       sb.from('delivery_types').select('*'),
@@ -1229,12 +1234,12 @@ async function openPartnerCabinet(code){
       sb.from('courier_cities').select('*'),
       sb.from('cities').select('*'),
     ]);
+    if(dt.error)console.error('delivery_types:',dt.error.message);
     S.delivery=dt.data||[];S.statuses=st.data||[];S.orderStatuses=ost.data||[];
     S.courier_cities=cc.data||[];S.cities=ct.data||[];
   }catch(e){console.error('pcab dirs',e);}
-  renderPartnerCabinet(partner);
+  return (S.delivery||[]).length>0;
 }
-
 function renderPartnerCabinet(partner){
   S.__partner=partner;
   if(!partner.__pf)partner.__pf={from:'',to:''};
@@ -1476,11 +1481,17 @@ function partnerFillOrders(partner,orders){
     </div>
   </div>`;
   const wrap=$('pfill');
-  wrap.innerHTML=orders.map((o,i)=>partnerOrderFieldsHtml(o,i)).join('');
-  wrap.querySelectorAll('[data-dlv]').forEach(s=>s.onchange=()=>partnerToggleDelivery(s.dataset.dlv));
-  wrap.querySelectorAll('[data-scan]').forEach(b=>{
-    b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
-  });
+  const renderCards=()=>{
+    const warn=(S.delivery||[]).length?'':`<div class="pcab-lockmsg" style="background:#fdf3d6;border-color:#e3cf9c;color:#8a5a12">Типы доставки не загрузились. <button type="button" id="reloadDirs" style="margin-left:6px;border:none;background:var(--rust);color:#fff;border-radius:8px;padding:4px 10px;font-weight:600">Загрузить ещё раз</button></div>`;
+    wrap.innerHTML=warn+orders.map((o,i)=>partnerOrderFieldsHtml(o,i)).join('');
+    wrap.querySelectorAll('[data-dlv]').forEach(s=>s.onchange=()=>partnerToggleDelivery(s.dataset.dlv));
+    wrap.querySelectorAll('[data-scan]').forEach(b=>{
+      b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
+    });
+    const rb=$('reloadDirs');
+    if(rb)rb.onclick=async()=>{rb.textContent='Загрузка…';rb.disabled=true;await loadPartnerDirs();renderCards();};
+  };
+  renderCards();
   $('scanCancel').onclick=stopScan;
   $('pfillBack').onclick=()=>renderPartnerCabinet(partner);
   $('pfillDone').onclick=async()=>{
