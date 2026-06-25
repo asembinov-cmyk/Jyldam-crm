@@ -135,6 +135,7 @@
     .resp-table td[data-label="Наименование"]{min-width:140px}
     .resp-table td[data-label="Трек-код"]{white-space:nowrap}
     .resp-table td[data-label="Дата"],.resp-table td[data-label="Дата забора"]{white-space:nowrap}
+  .cell-time{display:block;font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap}
     .resp-table td[data-label="Курьер"],.resp-table td[data-label="Менеджер продаж"],.resp-table td[data-label="Обработчик"]{white-space:nowrap}
   }
   tbody tr:last-child td{border-bottom:none}
@@ -2151,7 +2152,7 @@ function drawOrders(){
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
-      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}</td>
+      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?`<small class="cell-time">создан ${esc(fmtDateTime(o.created_at))}</small>`:''}</td>
       <td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
@@ -2294,7 +2295,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field"><label>Дата доставки</label><input type="date" id="o_deliver" value="${esc(d.deliver_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
-      <div class="field full"><label>Комментарий</label><textarea id="o_comment" rows="2" style="font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%;resize:vertical" ${dis}>${esc(d.comment||'')}</textarea></div>
+      <div class="field full"><label>Комментарий</label><textarea id="o_comment" rows="7" style="font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%;resize:vertical" ${dis}>${esc(d.comment||'')}</textarea></div>
     </div>
       </div>
     </div>`,
