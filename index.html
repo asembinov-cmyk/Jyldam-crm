@@ -180,6 +180,7 @@
   .subtabs button.active{background:var(--moss);color:#fff;border-color:var(--moss)}
 
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+  .stats.stats-5{grid-template-columns:repeat(5,1fr)}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
   .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
   .stat .v{font-family:'Fraunces',serif;font-weight:900;font-size:30px;letter-spacing:-.02em;margin-top:4px;line-height:1}
@@ -1631,9 +1632,10 @@ function renderOrders(mode){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':(subs[ordersMode]||'')}</p></div>
       ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
-    <div class="stats">
+    <div class="stats stats-5">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
+      <div class="stat"><div class="k">Почтовых</div><div class="v">${list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Оплачено</div><div class="v">${paid}<small> / ${list.length}</small></div></div>
       <div class="stat"><div class="k">Сумма доставки</div><div class="v">${totalCost.toLocaleString('ru-RU')}<small> ₸</small></div></div>
     </div>
