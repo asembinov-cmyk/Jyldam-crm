@@ -805,8 +805,13 @@ function ketOriginCode(cityName){
 // отправить один заказ в KET
 async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
+  const payload=orderToKet(o);
+  // ВРЕМЕННАЯ ДИАГНОСТИКА: показываем, что именно уходит в KET
+  if(!confirm('В KET уйдёт:\n\n'+JSON.stringify(payload,null,2)+'\n\nОтправить?'))return false;
   toast('Отправка в KET…');
-  const r=await callKet({action:'send',order:orderToKet(o)});
+  const r=await callKet({action:'send',order:payload});
+  // ВРЕМЕННАЯ ДИАГНОСТИКА: показываем сырой ответ KET
+  alert('Ответ KET:\n\n'+JSON.stringify(r,null,2));
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
   const result=(r.ket&&r.ket.result)||{};
   if((result.success||'').toUpperCase()==='TRUE'){
