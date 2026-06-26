@@ -2254,7 +2254,7 @@ function drawOrders(){
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
-    ${staff?'<th>Стоимость</th><th>Оплата</th>':''}<th></th></tr></thead>
+    ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
       const photoCell=ph.length
@@ -2277,10 +2277,9 @@ function drawOrders(){
         <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div></td>
       <td data-label="Индекс">${esc(o.index)||'—'}</td><td data-label="Трек-код">${esc(o.track)||'—'}</td>
-      ${staff?`<td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Оплата">${esc(fmtDate(o.pay_date))}</td>`:''}
+      ${staff?`<td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
       <td data-label="" class="cell-actions"><div class="row-actions">
         <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
-        ${can('orders','edit')?`<button class="btn sm ghost" data-oedit="${o.id}">Открыть</button>`:`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`}
         ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
       </div></td></tr>`;
     }).join('')}</tbody></table></div>`;
