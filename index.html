@@ -284,7 +284,7 @@
   .cc-addr{font-size:13.5px;color:var(--ink);line-height:1.35;word-break:break-word}
   .cc-addr-row{margin-top:5px;line-height:1.4}
   .cc-addr-row .addr-link{display:inline-flex;align-items:flex-start;gap:4px;font-size:14px;color:var(--rust-dk);
-    text-decoration:none;font-weight:600;word-break:break-word;padding:4px 0;border-bottom:1px dashed var(--rust);max-width:100%}
+    text-decoration:none;font-weight:600;word-break:break-word;padding:4px 0;border-bottom:1px dashed var(--rust);max-width:100%;cursor:pointer}
   .cc-addr-row .addr-link:active{opacity:.6}
   .cc-phone-row{margin-top:8px}
   .cc-phone-row a{display:inline-flex;align-items:center;gap:5px;font-size:14.5px;font-weight:600;color:var(--moss);
@@ -1158,10 +1158,10 @@ function address2gis(addr,cityNm){
   const a=(addr||'').trim();
   if(!a)return '<span style="color:var(--muted)">адрес не указан</span>';
   const q=(cityNm&&cityNm!=='—'?cityNm+', ':'')+a;
-  // href ведёт на сайт только как запасной для десктопа; на мобильном клик перехватывается open2gis()
-  return `<a class="addr-link" href="https://2gis.kz/search/${encodeURIComponent(q)}" target="_blank" rel="noopener" data-gis="${esc(q)}">📍 ${esc(a)}</a>`;
+  // без href/target — открытие делает только open2gis() по клику, чтобы сайт не открывался параллельно
+  return `<a class="addr-link" role="button" tabindex="0" data-gis="${esc(q)}">📍 ${esc(a)}</a>`;
 }
-// открыть адрес в приложении 2ГИС (deep link). На мобильном — ТОЛЬКО приложение, сайт не открываем
+// открыть адрес в приложении 2ГИС (deep link). Сайт НЕ открываем
 function open2gis(query){
   const q=encodeURIComponent(query);
   const isMobile=/android|iphone|ipad|ipod/i.test(navigator.userAgent||'');
@@ -1170,7 +1170,7 @@ function open2gis(query){
     window.open('https://2gis.kz/search/'+q,'_blank','noopener');
     return;
   }
-  // на телефоне — только схема приложения; кабинет остаётся открытым, сайт не вызываем
+  // на телефоне — только схема приложения; сайт не вызываем, кабинет остаётся открытым
   window.location.href='dgis://2gis.ru/search/'+q;
 }
 function attachPhone(id,initial){
