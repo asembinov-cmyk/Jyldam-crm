@@ -766,6 +766,9 @@ function orderToKet(o){
   const courier=isCourierDelivery(o.delivery_id);
   // город: для курьерской — курьерский справочник, для почтовой — обычный
   const cityNm=courier?courierCityName(o.courier_city_id):(o.city_id?cityName(o.city_id):'');
+  // город ОТПРАВЛЕНИЯ («отправная точка») — берём из карточки партнёра-отправителя
+  const partner=S.partners.find(p=>p.id===o.partner_id)||{};
+  const fromCity=partner.city_id?cityName(partner.city_id):'';
   // сумма: сначала order_sum, иначе cost (дубль). Идёт и в price, и в total_price
   const sumVal=(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0);
   const sumStr=String(sumVal||0);
@@ -782,9 +785,16 @@ function orderToKet(o){
   };
   if(o.index)data.index=o.index;             // индекс (для почты)
   if(o.deliver_date)data.date_delivery=o.deliver_date; // дата доставки (YYYY-MM-DD), имя поля по требованию KET
-  // город указываем только если он есть и это не «—»
+  // город НАЗНАЧЕНИЯ указываем только если он есть и это не «—»
   if(cityNm&&cityNm!=='—')data.city=cityNm;
   else if(!courier)data.kz_delivery='32';    // почта, если город не задан
+  // город ОТПРАВЛЕНИЯ (отправная точка) — дублируем в несколько вероятных полей KET
+  if(fromCity&&fromCity!=='—'){
+    data.city_from=fromCity;
+    data.from_city=fromCity;
+    data.sender_city=fromCity;
+    data.city_sender=fromCity;
+  }
   return data;
 }
 // отправить один заказ в KET
