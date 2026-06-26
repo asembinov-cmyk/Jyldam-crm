@@ -563,7 +563,7 @@ const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',
 const S={
   me:null,           // профиль текущего пользователя {id,email,full_name,role,courier_kind}
   tab:'pickups',
-  dir:'partners',
+  dir:'cities',
   // справочники-кэш
   cities:[],districts:[],couriers:[],order_couriers:[],sales:[],processors:[],
   partners:[],statuses:[],orderStatuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],
@@ -578,7 +578,7 @@ function saveNav(){
 }
 function loadNav(){
   try{const raw=localStorage.getItem(NAV_KEY);if(!raw)return;const n=JSON.parse(raw);
-    if(n.tab)S.tab=n.tab;if(n.dir)S.dir=n.dir;if(n.users&&typeof usersSub!=='undefined')usersSub=n.users;
+    if(n.tab)S.tab=n.tab;if(n.dir)S.dir=(n.dir==='partners'?'cities':n.dir);if(n.users&&typeof usersSub!=='undefined')usersSub=n.users;
   }catch(e){}
 }
 
@@ -913,6 +913,12 @@ async function refreshForTab(tab){
         dbList('pickups',{order:'created_at',asc:false}),
       ]);
       S.orders=orders;S.pickups=pickups;
+    }else if(tab==='partners'){
+      const [partners,cities,districts,sales,processors]=await Promise.all([
+        dbList('partners',{order:'name'}),dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),
+        dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),
+      ]);
+      Object.assign(S,{partners,cities,districts,sales,processors});
     }else if(tab==='settings'){
       // справочники: тянем всё, что показывается
       const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips]=await Promise.all([
@@ -1063,9 +1069,9 @@ function buildNav(){
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
 
     // неактивные разделы-заготовки (из референса)
-    groups.push({title:'Партнёры',items:[
-      {k:'partners',label:'Партнёры',icon:'partners',disabled:true},
-    ]});
+    const partnerItems=[];
+    if(can('directories','view'))partnerItems.push({k:'partners',label:'Партнёры',icon:'partners'});
+    if(partnerItems.length)groups.push({title:'Партнёры',items:partnerItems});
     const histItems=[];
     if(isAdmin())histItems.push({k:'history',label:'История изменений',icon:'history'});
     histItems.push({k:'notify',label:'Уведомления',icon:'bell',disabled:true});
@@ -1205,6 +1211,7 @@ function render(){
   else if(S.tab==='courier')renderOrders('courier');
   else if(S.tab==='mail')renderOrders('mail');
   else if(S.tab==='today')renderOrders('today');
+  else if(S.tab==='partners')renderPartnersPage();
   else if(S.tab==='settings')renderSettings();
   else if(S.tab==='users')renderUsers();
   else if(S.tab==='history')renderHistory();
@@ -1679,7 +1686,7 @@ function renderPickups(){
       <div class="panel-head"><h2>Карточки забора</h2><span class="count">${list.length}</span></div>
       <div class="filters">
         <input class="search" id="pfq" placeholder="Поиск: наименование, адрес, номер…" value="${esc(pf.q)}">
-        ${isStaff()?`<select id="pfcity"><option value="">Все города</option>${S.cities.map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:''}
+        ${isStaff()?`<select id="pfcity"><option value="">Все города</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:''}
         ${isStaff()?`<select id="pfcourier"><option value="">Все курьеры</option>${S.couriers.map(c=>`<option value="${c.id}" ${pf.courier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select>`:''}
         <select id="pfstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         <label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
@@ -2537,7 +2544,7 @@ function orderModal(id,readonly){
 const canEditDir=()=>can('directories','create')||can('directories','edit');
 
 function renderSettings(){
-  const dirs=[['partners','Партнёры'],['cities','Города'],['districts','Районы'],
+  const dirs=[['cities','Города'],['districts','Районы'],
     ['couriers','Курьеры (заборщики)'],['order_couriers','Курьеры по заказам'],
     ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
     ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
@@ -2550,7 +2557,14 @@ function renderSettings(){
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp};
-  (map[S.dir]||dirPartners)();
+  (map[S.dir]||dirCities)();
+}
+// отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
+function renderPartnersPage(){
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Партнёры</h1><p>Магазины-партнёры: данные, тарифы и доступ в кабинет</p></div></div>
+    <div id="dirContent"></div>`;
+  dirPartners();
 }
 function dirShell(title,count,onAdd,tableHtml){
   $('dirContent').innerHTML=`<div class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span class="count">${count}</span>
