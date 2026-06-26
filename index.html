@@ -2288,8 +2288,14 @@ function filteredOrders(){
     if(of.delTo&&(!dd||dd>of.delTo))return false;
     // фильтр незаполненных полей: показать заказы, где выбранное поле пустое
     if(of.missing){
-      const val=(o[of.missing]||'').toString().trim();
-      if(val!=='')return false;
+      // «Нет индекса» относится только к почтовым заказам (у курьерских индекса нет)
+      if(of.missing==='index'){
+        if(isCourierDelivery(o.delivery_id))return false; // курьерские не показываем
+        if((o.index||'').toString().trim()!=='')return false;
+      }else{
+        const val=(o[of.missing]||'').toString().trim();
+        if(val!=='')return false;
+      }
     }
     // фильтр по городу забора
     if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
@@ -2314,7 +2320,7 @@ function drawOrders(){
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
+    <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
@@ -2337,7 +2343,7 @@ function drawOrders(){
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
         <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div></td>
-      <td data-label="Индекс">${esc(o.index)||'—'}</td><td data-label="Трек-код">${esc(o.track)||'—'}</td>
+      <td data-label="Трек-код">${esc(o.track)||'—'}</td>
       ${staff?`<td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
       <td data-label="" class="cell-actions"><div class="row-actions">
         <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
