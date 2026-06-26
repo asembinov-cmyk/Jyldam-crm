@@ -215,6 +215,8 @@
   .obig-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .obig-thumbs img{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:pointer}
   .obig-thumbs img.active{border-color:var(--rust);border-width:2px}
+  .obig-by{font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.4;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:7px 11px}
+  .obig-by b{color:var(--ink);font-weight:600}
   /* увеличение фото поверх всего */
   .photo-zoom-ov{position:fixed;inset:0;background:rgba(20,17,13,.92);z-index:99999;display:grid;place-items:center;padding:24px;cursor:zoom-out}
   .photo-zoom-ov img{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -735,7 +737,8 @@ async function uploadPhoto(prefix,file){
     const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,file,{contentType:file.type||'image/jpeg',upsert:false});
     if(error){console.error('upload',error);toast('Ошибка загрузки: '+error.message);return null;}
     const {data}=sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-    return {path,url:data.publicUrl};
+    // сохраняем, кто и когда загрузил фото (для новых фото)
+    return {path,url:data.publicUrl,by:(S.me&&(S.me.full_name||S.me.email))||'',at:new Date().toISOString()};
   }catch(e){console.error(e);toast('Ошибка загрузки фото');return null;}
 }
 // совместимость со старым кодом заявок
@@ -1967,14 +1970,22 @@ function orderBigPhotoInner(o,canEdit){
   const big=ph.length
     ? `<div class="obig-wrap"><img class="obig-photo" id="obigMain" src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" alt=""></div>`
     : `<div class="obig-empty">Фото заказа нет</div>`;
+  // подпись: кто загрузил текущее (первое) фото
+  const byLine=ph.length?`<div class="obig-by" id="obigBy">${photoByLabel(ph[0])}</div>`:'';
   const rotBtns=ph.length?`<div class="obig-rotate"><button type="button" class="btn sm" id="orotL">↺ Влево</button><button type="button" class="btn sm" id="orotR">↻ Вправо</button></div>`:'';
-  const thumbs=ph.length>1?`<div class="obig-thumbs">${ph.map((f,i)=>`<img src="${esc(f.url)}" data-obigthumb="${esc(f.url)}" class="${i===0?'active':''}">`).join('')}</div>`:'';
+  const thumbs=ph.length>1?`<div class="obig-thumbs">${ph.map((f,i)=>`<img src="${esc(f.url)}" data-obigthumb="${esc(f.url)}" data-obigby="${esc(photoByLabel(f))}" class="${i===0?'active':''}">`).join('')}</div>`:'';
   const adder=canEdit?`<div class="photo-grid" style="margin-top:10px">
     <label class="photo-add">📷 Снять фото<input type="file" accept="image/*" capture="environment" multiple data-paddphoto="${o.id}" style="display:none"></label>
     <label class="photo-add">🖼️ Из галереи<input type="file" accept="image/*" multiple data-paddphoto="${o.id}" style="display:none"></label>
   </div>`:'';
   const delBtn=(ph.length&&canEdit)?`<button type="button" class="btn sm danger" data-pdelphoto data-idx="0" style="margin-top:8px">Удалить это фото</button>`:'';
-  return `<label>Фотографии заказа</label>${big}${rotBtns}${thumbs}${delBtn}${adder}`;
+  return `<label>Фотографии заказа</label>${big}${byLine}${rotBtns}${thumbs}${delBtn}${adder}`;
+}
+// подпись «загрузил: имя · дата» для фото (только если есть автор)
+function photoByLabel(f){
+  if(!f||!f.by)return '<span style="color:var(--muted)">автор не указан</span>';
+  const when=f.at?(' · '+fmtDate(f.at)):'';
+  return `📷 Загрузил: <b>${esc(f.by)}</b>${esc(when)}`;
 }
 function orderBigPhotoHtml(o,canEdit){
   if(!o||!o.id)return '';
@@ -2653,6 +2664,8 @@ function orderModal(id,readonly){
         e.stopPropagation();
         const main=pc.querySelector('#obigMain');
         if(main){main.src=t.dataset.obigthumb;main.dataset.oviewphoto=t.dataset.obigthumb;}
+        const byEl=pc.querySelector('#obigBy');
+        if(byEl)byEl.innerHTML=t.dataset.obigby||'';
         pc.querySelectorAll('[data-obigthumb]').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
       });
