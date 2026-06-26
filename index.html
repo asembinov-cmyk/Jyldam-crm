@@ -194,6 +194,7 @@
   .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:560px;
     box-shadow:0 30px 80px -30px rgba(20,17,13,.6);max-height:90vh;overflow:auto}
   .modal-wide{max-width:1240px}
+  .modal-mid{max-width:720px}
   /* двухколоночный макет карточки заказа: фото слева (половина), форма справа */
   .order-split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
   .order-split .ophoto-col{position:sticky;top:0}
@@ -215,6 +216,7 @@
   .photo-zoom-ov .pz-x{position:absolute;top:18px;right:24px;font-size:36px;color:#fff;background:none;border:none;cursor:pointer;line-height:1}
   @media (max-width:760px){
     .modal-wide{max-width:560px}
+    .modal-mid{max-width:560px}
     .order-split{grid-template-columns:1fr;gap:16px}
     .obig-empty{aspect-ratio:4/3}
     .obig-photo{max-height:60vh}
@@ -1203,7 +1205,7 @@ function showModal(title,bodyHtml,onSave,opts={}){
   const foot=opts.readonly
     ? `<div class="modal-foot"><button class="btn primary" data-close>Закрыть</button></div>`
     : `<div class="modal-foot"><button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>Сохранить</button></div>`;
-  ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
+  ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}${opts.mid?' modal-mid':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
   document.body.appendChild(ov);
   const close=()=>ov.remove();
@@ -3122,7 +3124,7 @@ function roleModal(id){
       </select>
       <span class="hint">Базовый тип задаёт серверную защиту. «Курьер» автоматически ограничивает видимость только своими записями.</span></div>
     <div class="field"><label>Права по модулям</label>
-      <table style="font-size:13px"><thead><tr><th></th>${ACTIONS.map(([,al])=>`<th style="text-align:center;font-size:11px;text-transform:uppercase;color:var(--muted)">${al}</th>`).join('')}</tr></thead>
+      <table style="font-size:13px;width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left"></th>${ACTIONS.map(([,al])=>`<th style="text-align:center;font-size:11px;text-transform:uppercase;color:var(--muted);padding:6px 4px">${al}</th>`).join('')}</tr></thead>
       <tbody>${matrix}</tbody></table></div>`,
     async()=>{
       const name=val('r_name').trim();if(!name){toast('Укажите название');return false;}
@@ -3133,7 +3135,7 @@ function roleModal(id){
       else{const u=await dbInsert('roles',row);if(!u)return false;S.roles.push(u);}
       // если изменили свою роль — пересчитать права
       if(id&&S.me.role_id===id)computeMyPerms();
-      toast('Сохранено');renderUsers();return true;});
+      toast('Сохранено');renderUsers();return true;},{mid:true});
 }
 </script>
 <!-- PART2 -->
