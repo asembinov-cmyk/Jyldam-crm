@@ -1102,7 +1102,7 @@ function buildNav(){
     if(can('directories','view'))partnerItems.push({k:'partners',label:'Партнёры',icon:'partners'});
     if(partnerItems.length)groups.push({title:'Партнёры',items:partnerItems});
     const histItems=[];
-    if(isAdmin())histItems.push({k:'history',label:'История изменений',icon:'history'});
+    if(isStaff())histItems.push({k:'history',label:'История изменений',icon:'history'}); // менеджеры и админ
     histItems.push({k:'notify',label:'Уведомления',icon:'bell',disabled:true});
     groups.push({title:'История',items:histItems});
 
@@ -1157,7 +1157,7 @@ function fmtLogTime(ts){if(!ts)return '';const d=new Date(ts);const p=n=>String(
   return {date:`${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}`,time:`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`};}
 
 function renderHistory(){
-  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div></div>';return;}
+  if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div></div>';return;}
   const all=S.activityLog||[];
   const users=[...new Set(all.map(r=>r.user_name).filter(Boolean))].sort();
   $('main').innerHTML=`
@@ -2208,17 +2208,17 @@ function renderOrders(mode){
       ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
-      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
+      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} с тел.</small></div></div>
     </div>`:`
     <div class="stats stats-5">
-      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
+      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} с тел.</small></div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Почтовых</div><div class="v">${list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Оплачено</div><div class="v">${paid}<small> / ${list.length}</small></div></div>
       <div class="stat"><div class="k">Сумма доставки</div><div class="v">${totalCost.toLocaleString('ru-RU')}<small> ₸</small></div></div>
     </div>`}
     <div class="panel">
-      <div class="panel-head"><h2>Список заказов</h2><span class="count">${list.length}</span></div>
+      <div class="panel-head"><h2>Список заказов</h2><span class="count" id="ordersCount">${list.length}</span></div>
       <div class="filters">
         <input class="search" id="ofq" placeholder="Поиск: ID, трек, клиент…" value="${esc(of.q)}">
         <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
@@ -2314,6 +2314,8 @@ function renderOrders(mode){
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   drawOrders();
 }
+// число заказов с заполненным телефоном клиента
+function ordersWithPhone(list){return list.filter(o=>(o.phone||'').toString().replace(/\D/g,'').length>=10).length;}
 // список заказов с учётом режима вкладки (курьер/почта/сегодня)
 function ordersScopedList(){
   let list=visibleOrders();
@@ -2366,6 +2368,8 @@ function filteredOrders(){
 let editingOrderId=null; // id заказа в режиме строчного редактирования
 function drawOrders(){
   const el=$('orderTable');const allRows=filteredOrders();
+  // счётчик у «Список заказов» = число с учётом ВСЕХ фильтров (вкл. тип доставки, поиск)
+  const cntEl=$('ordersCount');if(cntEl)cntEl.textContent=allRows.length;
   removeOrdersPager(); // убрать старую плавающую панель, если была
   if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
   if(isCourier()){drawCourierOrderCards(el,allRows);return;}
