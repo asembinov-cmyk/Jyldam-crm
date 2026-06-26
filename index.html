@@ -2250,8 +2250,8 @@ function drawOrders(){
       ${staff?`<td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Оплата">${esc(fmtDate(o.pay_date))}</td>`:''}
       <td data-label="" class="cell-actions"><div class="row-actions">
         <button class="btn sm ghost" data-obc="${o.id}">Штрих-код</button>
-        ${!isAdmin()?`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`:''}
-        ${isAdmin()?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
+        ${can('orders','edit')?`<button class="btn sm ghost" data-oedit="${o.id}">Открыть</button>`:`<button class="btn sm ghost" data-oview="${o.id}">Открыть</button>`}
+        ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
       </div></td></tr>`;
     }).join('')}</tbody></table></div>`;
   el.querySelectorAll('[data-oviewphoto]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.oviewphoto);});
@@ -2259,10 +2259,10 @@ function drawOrders(){
   el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));
   el.querySelectorAll('[data-odel]').forEach(b=>b.onclick=()=>delOrder(b.dataset.odel));
   el.querySelectorAll('[data-obc]').forEach(b=>b.onclick=()=>showBarcode(b.dataset.obc));
-  // двойной клик по строке открывает заказ (админ — на редактирование, остальные — просмотр)
+  // двойной клик по строке открывает заказ: на редактирование, если есть право, иначе просмотр
   el.querySelectorAll('[data-orow]').forEach(tr=>tr.ondblclick=e=>{
     if(e.target.closest('button,select,input,a'))return;
-    orderModal(tr.dataset.orow,!isAdmin());
+    orderModal(tr.dataset.orow,!can('orders','edit'));
   });
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
