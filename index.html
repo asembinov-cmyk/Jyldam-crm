@@ -2191,11 +2191,21 @@ function renderOrders(mode){
   if($('newOrder'))$('newOrder').onclick=()=>orderModal();
   // массовая отправка отмеченных заказов в KET
   if($('ketSendSel'))$('ketSendSel').onclick=async()=>{
-    const ids=[...ketSelected];
-    if(!ids.length){toast('Отметьте галочками заказы для отправки');return;}
-    const list=ids.map(id=>S.orders.find(o=>o.id===id)).filter(Boolean);
+    let list, source;
+    if(ketSelected.size){
+      // 1) приоритет — отмеченные галочками заказы
+      list=[...ketSelected].map(id=>S.orders.find(o=>o.id===id)).filter(Boolean);
+      source='отмеченные';
+    }else if(of.pickupCity){
+      // 2) ничего не отмечено, но включён фильтр «Город забора» — шлём все заказы по фильтру
+      list=filteredOrders();
+      source='по фильтру «Город забора: '+cityName(of.pickupCity)+'»';
+    }else{
+      toast('Отметьте галочками заказы или выберите фильтр «Город забора»');return;
+    }
+    if(!list.length){toast('Нет заказов для отправки');return;}
     const already=list.filter(o=>o.ket_id).length;
-    let msg=`Отправить в KET заказов: ${list.length}?`;
+    let msg=`Отправить в KET заказов: ${list.length} (${source})?`;
     if(already)msg+=`\n(из них ${already} уже были отправлены — будут отправлены повторно)`;
     if(!confirm(msg))return;
     const b=$('ketSendSel');b.disabled=true;
