@@ -282,6 +282,15 @@
   .cc-id{font-family:'Fraunces',serif;font-weight:900;font-size:17px;color:var(--rust-dk);letter-spacing:.5px}
   .cc-client{font-weight:600;font-size:15px;line-height:1.25;margin-bottom:2px;word-break:break-word}
   .cc-addr{font-size:13.5px;color:var(--ink);line-height:1.35;word-break:break-word}
+  .cc-addr-row{margin-top:5px;line-height:1.4}
+  .cc-addr-row .addr-link{display:inline-flex;align-items:flex-start;gap:4px;font-size:14px;color:var(--rust-dk);
+    text-decoration:none;font-weight:600;word-break:break-word;padding:4px 0;border-bottom:1px dashed var(--rust);max-width:100%}
+  .cc-addr-row .addr-link:active{opacity:.6}
+  .cc-phone-row{margin-top:8px}
+  .cc-phone-row a{display:inline-flex;align-items:center;gap:5px;font-size:14.5px;font-weight:600;color:var(--moss);
+    text-decoration:none;padding:5px 10px;background:#eef1e8;border:1px solid #cfd9bf;border-radius:8px}
+  .cc-phone-row a::before{content:"📞";font-size:13px}
+  .cc-phone-row a:active{opacity:.6}
   .cc-phone{display:inline-block;margin-top:4px;font-size:13.5px}
   .cc-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none;text-align:right}
   .cc-sum{font-family:'Fraunces',serif;font-weight:900;font-size:18px;color:var(--moss);line-height:1;white-space:nowrap}
@@ -1144,6 +1153,13 @@ function fmt10(d){d=(d||'').slice(0,10);let o='';if(d.length>0)o+='('+d.slice(0,
 function phoneDisplay(v){const d=phoneStored(v);return d?'+7 '+fmt10(d):'';}
 // кликабельный телефон для звонка с мобильного
 function phoneLink(v){const d=phoneStored(v);if(!d)return '—';return `<a href="tel:+7${d}" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)">${esc('+7 '+fmt10(d))}</a>`;}
+// ссылка на адрес в 2ГИС (открывает поиск адреса в приложении/сайте)
+function address2gis(addr,cityNm){
+  const a=(addr||'').trim();
+  if(!a)return '<span style="color:var(--muted)">адрес не указан</span>';
+  const q=encodeURIComponent((cityNm?cityNm+', ':'')+a);
+  return `<a class="addr-link" href="https://2gis.kz/search/${q}" target="_blank" rel="noopener">📍 ${esc(a)}</a>`;
+}
 function attachPhone(id,initial){
   const el=$(id);if(!el)return;
   if(!el.parentElement.classList.contains('phone-wrap')){
@@ -1819,9 +1835,9 @@ function renderPickups(){
         ${isStaff()?`<select id="pfcity"><option value="">Все города</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:''}
         ${isStaff()?`<select id="pfcourier"><option value="">Все курьеры</option>${S.couriers.map(c=>`<option value="${c.id}" ${pf.courier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select>`:''}
         <select id="pfstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
-        <label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
+        ${isStaff()?`<label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
         <label class="date-field"><span>Дата по</span><input type="date" id="pfdateto" value="${esc(pf.dateTo)}"></label>
-        ${(pf.dateFrom||pf.dateTo)?`<button class="btn ghost sm" id="pfdateclear" style="align-self:flex-end">Сбросить даты</button>`:''}
+        ${(pf.dateFrom||pf.dateTo)?`<button class="btn ghost sm" id="pfdateclear" style="align-self:flex-end">Сбросить даты</button>`:''}`:''}
       </div>
       <div id="pickupTable"></div>
     </div>`;
@@ -1830,8 +1846,8 @@ function renderPickups(){
   if($('pfcity'))$('pfcity').onchange=e=>{pf.city=e.target.value;drawPickupsReset();};
   if($('pfcourier'))$('pfcourier').onchange=e=>{pf.courier=e.target.value;drawPickupsReset();};
   $('pfstatus').onchange=e=>{pf.status=e.target.value;drawPickupsReset();};
-  $('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
-  $('pfdateto').onchange=e=>{pf.dateTo=e.target.value;renderPickups();};
+  if($('pfdatefrom'))$('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
+  if($('pfdateto'))$('pfdateto').onchange=e=>{pf.dateTo=e.target.value;renderPickups();};
   if($('pfdateclear'))$('pfdateclear').onclick=()=>{pf.dateFrom='';pf.dateTo='';renderPickups();};
   drawPickups();
 }
@@ -1958,8 +1974,8 @@ function drawCourierPickupCards(el,rows){
       <div class="cc-head" data-toggle="${p.id}">
         <div class="cc-main">
           <div class="cc-client">${esc(p.name)||'Без названия'}</div>
-          <div class="cc-addr">${esc(p.address)||'адрес не указан'}</div>
-          ${ph?`<div class="cc-phone">${phoneLink(p.phone)}</div>`:''}
+          <div class="cc-addr-row">${address2gis(p.address,cityName(p.city_id))}</div>
+          ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}</div>`:''}
         </div>
         <div class="cc-right"><span class="cc-chev">▾</span></div>
       </div>
