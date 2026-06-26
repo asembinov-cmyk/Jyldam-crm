@@ -1157,8 +1157,27 @@ function phoneLink(v){const d=phoneStored(v);if(!d)return '—';return `<a href=
 function address2gis(addr,cityNm){
   const a=(addr||'').trim();
   if(!a)return '<span style="color:var(--muted)">адрес не указан</span>';
-  const q=encodeURIComponent((cityNm?cityNm+', ':'')+a);
-  return `<a class="addr-link" href="https://2gis.kz/search/${q}" target="_blank" rel="noopener">📍 ${esc(a)}</a>`;
+  const q=(cityNm&&cityNm!=='—'?cityNm+', ':'')+a;
+  // data-gis хранит адрес; клик обрабатывается open2gis() — пробует приложение, иначе сайт
+  return `<a class="addr-link" href="https://2gis.kz/search/${encodeURIComponent(q)}" target="_blank" rel="noopener" data-gis="${esc(q)}">📍 ${esc(a)}</a>`;
+}
+// открыть адрес сразу в приложении 2ГИС (deep link), при неудаче — сайт
+function open2gis(query){
+  const q=encodeURIComponent(query);
+  const web='https://2gis.kz/search/'+q;
+  // мобильные: пробуем deep link приложения
+  const isMobile=/android|iphone|ipad|ipod/i.test(navigator.userAgent||'');
+  if(!isMobile){window.open(web,'_blank','noopener');return;}
+  let returned=false;
+  const onHide=()=>{returned=true;};
+  document.addEventListener('visibilitychange',onHide,{once:true});
+  // схема приложения 2ГИС
+  window.location.href='dgis://2gis.ru/search/'+q;
+  // если за 1.2с приложение не открылось (страница осталась видимой) — уводим на сайт
+  setTimeout(()=>{
+    document.removeEventListener('visibilitychange',onHide);
+    if(!returned&&document.visibilityState==='visible'){window.location.href=web;}
+  },1200);
 }
 function attachPhone(id,initial){
   const el=$(id);if(!el)return;
@@ -1999,6 +2018,7 @@ function drawCourierPickupCards(el,rows){
     if(e.target.closest('a'))return;
     h.closest('.cour-card').classList.toggle('open');
   });
+  el.querySelectorAll('[data-gis]').forEach(a=>a.onclick=e=>{e.preventDefault();e.stopPropagation();open2gis(a.dataset.gis);});
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=e=>{e.stopPropagation();pickupModal(b.dataset.pview,true);});
   el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const p=S.pickups.find(x=>x.id===b.dataset.pgen);if(!p)return;
