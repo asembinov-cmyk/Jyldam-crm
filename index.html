@@ -1235,6 +1235,7 @@ function drawHistory(){
 /* ---------- РОУТЕР ---------- */
 function render(){
   if(typeof removeOrdersPager==='function')removeOrdersPager(); // снять плавающую панель пагинации
+  if(typeof removePickupsPager==='function')removePickupsPager();
   if(S.tab==='dashboard')renderDashboard();
   else if(S.tab==='pickups')renderPickups();
   else if(S.tab==='orders')renderOrders();
@@ -1687,6 +1688,8 @@ function renderDashboard(){
 // локальная сегодняшняя дата YYYY-MM-DD (с учётом часового пояса, без сдвига в UTC)
 function localToday(){const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
 let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:localToday(),dateTo:localToday()};
+let pickupsPage=1; // текущая страница пагинации заявок
+let pickupsPerPage=50; // заявок на страницу
 
 function visiblePickups(){
   if(isCourier()){
@@ -1697,6 +1700,7 @@ function visiblePickups(){
   return S.pickups;
 }
 function renderPickups(){
+  pickupsPage=1; // при полной перерисовке начинаем с первой страницы
   const list=filteredPickups();
   const totalOrders=list.reduce((s,p)=>s+(+p.orders||0),0);
   const today=new Date().toISOString().slice(0,10);
@@ -1727,10 +1731,10 @@ function renderPickups(){
       <div id="pickupTable"></div>
     </div>`;
   if($('newPickup'))$('newPickup').onclick=()=>pickupModal();
-  $('pfq').oninput=e=>{pf.q=e.target.value;drawPickups();};
-  if($('pfcity'))$('pfcity').onchange=e=>{pf.city=e.target.value;drawPickups();};
-  if($('pfcourier'))$('pfcourier').onchange=e=>{pf.courier=e.target.value;drawPickups();};
-  $('pfstatus').onchange=e=>{pf.status=e.target.value;drawPickups();};
+  $('pfq').oninput=e=>{pf.q=e.target.value;drawPickupsReset();};
+  if($('pfcity'))$('pfcity').onchange=e=>{pf.city=e.target.value;drawPickupsReset();};
+  if($('pfcourier'))$('pfcourier').onchange=e=>{pf.courier=e.target.value;drawPickupsReset();};
+  $('pfstatus').onchange=e=>{pf.status=e.target.value;drawPickupsReset();};
   $('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
   $('pfdateto').onchange=e=>{pf.dateTo=e.target.value;renderPickups();};
   if($('pfdateclear'))$('pfdateclear').onclick=()=>{pf.dateFrom='';pf.dateTo='';renderPickups();};
@@ -1750,10 +1754,17 @@ function filteredPickups(){
   }).sort((a,b)=>(b.pickup_date||'').localeCompare(a.pickup_date||''));
 }
 function drawPickups(){
-  const el=$('pickupTable');const rows=filteredPickups();
-  if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
-  if(isCourier()){drawCourierPickupCards(el,rows);return;}
+  const el=$('pickupTable');const allRows=filteredPickups();
+  removePickupsPager();
+  if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
+  if(isCourier()){drawCourierPickupCards(el,allRows);return;}
   const staff=isStaff();
+  // ── ПАГИНАЦИЯ: по pickupsPerPage заявок на странице ──
+  const totalPages=Math.max(1,Math.ceil(allRows.length/pickupsPerPage));
+  if(pickupsPage>totalPages)pickupsPage=totalPages;
+  if(pickupsPage<1)pickupsPage=1;
+  const startIdx=(pickupsPage-1)*pickupsPerPage;
+  const rows=allRows.slice(startIdx,startIdx+pickupsPerPage);
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
     ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
@@ -1793,6 +1804,55 @@ function drawPickups(){
       const v=Math.max(0,parseInt(inp.value||'0',10)||0);if(p.orders===v)return;
       await dbUpdate('pickups',p.id,{orders:v});p.orders=v;toast('Кол-во обновлено');};
     inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
+  });
+  renderPickupsPager(allRows.length,totalPages,startIdx,rows.length);
+}
+// сброс пагинации заявок на первую страницу (при смене фильтров)
+function drawPickupsReset(){pickupsPage=1;drawPickups();}
+// плавающая панель пагинации заявок
+function removePickupsPager(){const ex=$('pickupsPager');if(ex)ex.remove();}
+function renderPickupsPager(total,totalPages,startIdx,shownCount){
+  removePickupsPager();
+  if(!total)return;
+  const from=startIdx+1, to=startIdx+shownCount;
+  const bar=document.createElement('div');
+  bar.id='pickupsPager';bar.className='orders-pager';
+  bar.innerHTML=`
+    <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
+    <div class="op-perpage">
+      <span>На странице:</span>
+      <div class="op-pp-wrap">
+        <button class="op-btn op-pp-btn" id="ppPerPageBtn">${pickupsPerPage} ▾</button>
+        <div class="op-pp-menu" id="ppPerPageMenu" style="display:none">
+          ${ORDERS_PAGE_SIZES.map(s=>`<button class="op-pp-item ${s===pickupsPerPage?'active':''}" data-ppp="${s}">${s}</button>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="op-nav">
+      <button class="op-btn" data-ppage="first" ${pickupsPage<=1?'disabled':''} title="В начало">«</button>
+      <button class="op-btn" data-ppage="prev" ${pickupsPage<=1?'disabled':''}>‹ Назад</button>
+      <span class="op-page">Стр. ${pickupsPage} / ${totalPages}</span>
+      <button class="op-btn" data-ppage="next" ${pickupsPage>=totalPages?'disabled':''}>Вперёд ›</button>
+      <button class="op-btn" data-ppage="last" ${pickupsPage>=totalPages?'disabled':''} title="В конец">»</button>
+    </div>`;
+  document.body.appendChild(bar);
+  const ppBtn=bar.querySelector('#ppPerPageBtn'), ppMenu=bar.querySelector('#ppPerPageMenu');
+  if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
+  bar.querySelectorAll('[data-ppp]').forEach(b=>b.onclick=()=>{
+    pickupsPerPage=parseInt(b.dataset.ppp,10)||50;pickupsPage=1;drawPickups();
+    const t=$('pickupTable');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+  document.addEventListener('click',function closePPP(ev){
+    if(ppMenu&&!ppMenu.contains(ev.target)&&ev.target!==ppBtn){ppMenu.style.display='none';}
+  },{once:true});
+  bar.querySelectorAll('[data-ppage]').forEach(b=>b.onclick=()=>{
+    const a=b.dataset.ppage;
+    if(a==='first')pickupsPage=1;
+    else if(a==='prev')pickupsPage=Math.max(1,pickupsPage-1);
+    else if(a==='next')pickupsPage=Math.min(totalPages,pickupsPage+1);
+    else if(a==='last')pickupsPage=totalPages;
+    drawPickups();
+    const t=$('pickupTable');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
   });
 }
 /* Компактные карточки заявок на забор для курьера-заборщика: свёрнуто — наименование/адрес/телефон/статус */
@@ -2812,7 +2872,7 @@ function dirPartners(){
     sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
     cols:[
       {key:'name',label:'Наименование',filter:'text',text:p=>p.name||'',cell:p=>`<strong>${esc(p.name)}</strong>`},
-      {key:'city',label:'Город',filter:'select',text:p=>cityName(p.city_id),cell:p=>`<span class="pill gold">${esc(cityName(p.city_id))}</span>`},
+      {key:'city',label:'Город',filter:'select',text:p=>cityName(p.city_id),cell:p=>cityPill(p.city_id)},
       {key:'district',label:'Район',filter:'select',text:p=>p.district_id?districtName(p.district_id):'',cell:p=>p.district_id?`<span class="pill moss">${esc(districtName(p.district_id))}</span>`:'—'},
       {key:'address',label:'Адрес',filter:'text',text:p=>p.address||''},
       {key:'phone',label:'Телефон',filter:'text',text:p=>phoneDisplay(p.phone),cell:p=>phoneLink(p.phone)},
