@@ -1382,7 +1382,7 @@ function render(){
 function showModal(title,bodyHtml,onSave,opts={}){
   const ov=document.createElement('div');ov.className='overlay';
   const foot=opts.readonly
-    ? `<div class="modal-foot"><button class="btn primary" data-close>Закрыть</button></div>`
+    ? `<div class="modal-foot"><button class="btn primary" data-close>${esc(opts.closeLabel||'Закрыть')}</button></div>`
     : `<div class="modal-foot"><button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>Сохранить</button></div>`;
   ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}${opts.mid?' modal-mid':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
@@ -1398,7 +1398,7 @@ function showModal(title,bodyHtml,onSave,opts={}){
   const first=ov.querySelector('input,select,textarea');if(first)setTimeout(()=>first.focus(),50);
   return ov;
 }
-function showInfo(title,bodyHtml){showModal(title,bodyHtml,null,{readonly:true});}
+function showInfo(title,bodyHtml,opts){return showModal(title,bodyHtml,null,Object.assign({readonly:true},opts||{}));}
 
 /* автологин / спец-кабинеты по ссылке */
 (async()=>{
@@ -2269,17 +2269,21 @@ async function createOrdersFromPickup(pickupId,opts){
   return created;
 }
 // Окно: список заказов, созданных по заявке, с возможностью прикрепить фото к каждому
-function pickupOrdersModal(pickupId){
+async function pickupOrdersModal(pickupId){
   const p=S.pickups.find(x=>x.id===pickupId);if(!p)return;
   const canEditPhoto=can('orders','edit')||isCourier();
+  // АВТОСОЗДАНИЕ: при открытии формируем недостающие заказы по количеству из заявки
+  const want=parseInt(p.orders||'0',10)||0;
+  const have=ordersCountForPickup(pickupId);
+  if(want>have){await createOrdersFromPickup(pickupId,{silent:true});}
   const renderBody=()=>{
     const list=S.orders.filter(o=>o.pickup_id===pickupId);
-    const want=parseInt(p.orders||'0',10)||0;
+    const wantNow=parseInt(p.orders||'0',10)||0;
     const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-      <div style="color:var(--muted);font-size:14px">Создано ${list.length}${want?` из ${want}`:''} заказ(ов) по магазину «${esc(p.name)}»</div>
-      ${(want>list.length)?`<button class="btn sm primary" id="pom_create">Создать ещё ${want-list.length}</button>`:''}
+      <div style="color:var(--muted);font-size:14px">Создано <b>${list.length}</b>${wantNow?` из ${wantNow}`:''} заказ(ов) по магазину «${esc(p.name)}»</div>
+      <button class="btn sm primary" id="pom_create">＋ Создать ещё заказ</button>
     </div>`;
-    if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>${want?'Нажмите «Создать», чтобы сформировать заказы.':'Сначала укажите количество заказов в заявке.'}</div>`;
+    if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Создать ещё заказ».</div>`;
     const cards=list.map((o,i)=>`<div class="pom-order">
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
       <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
@@ -2289,7 +2293,8 @@ function pickupOrdersModal(pickupId){
     </div>`).join('');
     return head+`<div class="pom-list">${cards}</div>`;
   };
-  showInfo(`Заказы заявки · ${esc(p.name)}`,renderBody());
+  showInfo(`Заказы заявки · ${esc(p.name)}`,renderBody(),{closeLabel:'Сохранить'});
+  drawPickups(); // обновляем счётчик в карточке заявки сразу после автосоздания
   // навешиваем обработчики (после вставки в DOM)
   setTimeout(()=>{
     const wrap=document.querySelector('.overlay:last-child');if(!wrap)return;
@@ -2320,9 +2325,18 @@ function pickupOrdersModal(pickupId){
         };
         inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
       });
+      // «Создать ещё заказ» — добавляет ОДИН новый заказ, увеличивает счётчик заявки
       const cb=wrap.querySelector('#pom_create');
-      if(cb)cb.onclick=async()=>{cb.disabled=true;await createOrdersFromPickup(pickupId,{silent:true});
-        const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}drawPickups();};
+      if(cb)cb.onclick=async()=>{
+        cb.disabled=true;cb.textContent='Создаём…';
+        // увеличиваем плановое количество в заявке на 1, затем досоздаём недостающее
+        const newWant=(parseInt(p.orders||'0',10)||0)+1;
+        const u=await dbUpdate('pickups',pickupId,{orders:newWant});
+        if(u)Object.assign(p,u);
+        await createOrdersFromPickup(pickupId,{silent:true});
+        const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
+        drawPickups(); // счётчик в карточке заявки обновляется автоматом
+      };
     };
     bind();
   },30);
