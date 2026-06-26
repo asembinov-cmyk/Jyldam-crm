@@ -1949,7 +1949,8 @@ function pickupModal(id,readonly){
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:''};
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:''};
+let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 
 function visibleOrders(){
   if(isCourier()){const ids=myOrderCourierIds();return S.orders.filter(o=>ids.includes(o.order_courier_id));}
@@ -2063,15 +2064,20 @@ function pickupOrdersModal(pickupId){
 let ordersMode=''; // ''=все, 'courier', 'mail', 'today'
 function renderOrders(mode){
   ordersMode=mode||'';
-  const list=ordersScopedList();
+  // по умолчанию показываем заказы, созданные СЕГОДНЯ (до первой ручной правки дат)
+  if(!ordersDateInit){const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;ordersDateInit=true;}
+  const list=ordersDateScopedList();
   const totalCost=list.reduce((s,o)=>s+(+o.cost||0),0);
   const paid=list.filter(o=>o.pay_date).length;
   const titles={'':'Заказы',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня'};
   const subs={'':'Отправления: курьерская и почтовая доставка',courier:'Заказы с курьерской доставкой',
     mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня'};
+  let dayNote='';
+  if(of.createFrom&&of.createFrom===of.createTo){const t=new Date().toISOString().slice(0,10);dayNote=of.createFrom===t?'за сегодня':('за '+fmtDate(of.createFrom));}
+  else if(of.createFrom||of.createTo){dayNote='за период';}
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':(subs[ordersMode]||'')}</p></div>
+    <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
       ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
@@ -2100,13 +2106,17 @@ function renderOrders(mode){
         </select>
       </div>
       <div class="filters filters-dates">
+        <span class="fdate-lbl">Создан:</span>
+        <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
+        <input type="date" id="ofcreateto" value="${esc(of.createTo)}" title="Дата создания по">
         <span class="fdate-lbl">Забор:</span>
         <input type="date" id="ofpickfrom" value="${esc(of.pickFrom)}" title="Дата забора с">
         <input type="date" id="ofpickto" value="${esc(of.pickTo)}" title="Дата забора по">
         <span class="fdate-lbl">Доставка:</span>
         <input type="date" id="ofdelfrom" value="${esc(of.delFrom)}" title="Дата доставки с">
         <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">
-        <button class="btn sm" id="ofdateclear">Сбросить даты</button>
+        <button class="btn sm" id="oftoday">Сегодня</button>
+        <button class="btn sm" id="ofdateclear">Все даты</button>
       </div>
       <div id="orderTable"></div>
     </div>`;
@@ -2154,11 +2164,14 @@ function renderOrders(mode){
     drawOrders();
   };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrders();};
+  if($('ofcreatefrom'))$('ofcreatefrom').onchange=e=>{of.createFrom=e.target.value;renderOrders(ordersMode);};
+  if($('ofcreateto'))$('ofcreateto').onchange=e=>{of.createTo=e.target.value;renderOrders(ordersMode);};
   if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrders();};
   if($('ofpickto'))$('ofpickto').onchange=e=>{of.pickTo=e.target.value;drawOrders();};
   if($('ofdelfrom'))$('ofdelfrom').onchange=e=>{of.delFrom=e.target.value;drawOrders();};
   if($('ofdelto'))$('ofdelto').onchange=e=>{of.delTo=e.target.value;drawOrders();};
-  if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';renderOrders();};
+  if($('oftoday'))$('oftoday').onclick=()=>{const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
+  if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   drawOrders();
 }
 // список заказов с учётом режима вкладки (курьер/почта/сегодня)
@@ -2169,9 +2182,18 @@ function ordersScopedList(){
   else if(ordersMode==='today'){const t=new Date().toISOString().slice(0,10);list=list.filter(o=>(o.created_at||'').slice(0,10)===t||(o.pickup_date||'').slice(0,10)===t);}
   return list;
 }
+// список с учётом режима вкладки И фильтра по дате создания (для статистики вверху)
+function ordersDateScopedList(){
+  return ordersScopedList().filter(o=>{
+    const cd=(o.created_at||'').slice(0,10);
+    if(of.createFrom&&(!cd||cd<of.createFrom))return false;
+    if(of.createTo&&(!cd||cd>of.createTo))return false;
+    return true;
+  });
+}
 function filteredOrders(){
   const q=of.q.toLowerCase().trim();
-  return ordersScopedList().filter(o=>{
+  return ordersDateScopedList().filter(o=>{
     if(of.status&&o.status_id!==of.status)return false;
     if(!ordersMode&&of.delivery&&o.delivery_id!==of.delivery)return false;
     if(of.partner==='__none__')return false; // введён партнёр, которого нет
