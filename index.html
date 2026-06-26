@@ -144,6 +144,8 @@
     border-radius:20px;background:var(--paper);border:1px solid var(--line)}
   .pill.moss{color:var(--moss);background:#eef1e8;border-color:#cfd9bf}
   .pill.gold{color:var(--gold);background:#f6eed8;border-color:#e6d4a0}
+  .pill.city-almaty{color:#3d6478;background:#e6eef2;border-color:#bcd2dc}
+  .pill.city-astana{color:#6d5a3d;background:#f1ebe0;border-color:#dccfb6}
   .qty{font-family:'Fraunces',serif;font-weight:900;font-size:16px;color:var(--rust-dk)}
   .qty-edit{width:64px;font:inherit;font-family:'Fraunces',serif;font-weight:900;font-size:15px;color:var(--rust-dk);
     text-align:center;padding:5px 6px;border:1.5px solid var(--line);border-radius:8px;background:var(--card)}
@@ -958,6 +960,14 @@ const deliveryName=id=>(S.delivery.find(d=>d.id===id)||{}).name||'—';
 const postIpName=id=>(S.post_ips.find(d=>d.id===id)||{}).name||'—';
 const courierCityName=id=>(S.courier_cities.find(c=>c.id===id)||{}).name||'—';
 const partnerName=id=>(S.partners.find(p=>p.id===id)||{}).name||'—';
+// плашка города с нейтральным цветом для Алматы/Астаны
+function cityPill(cityId){
+  const nm=cityName(cityId);
+  let cls='gold';
+  if(/алмат/i.test(nm))cls='city-almaty';
+  else if(/астан|нур-?султан|нур\s*султан/i.test(nm))cls='city-astana';
+  return `<span class="pill ${cls}">${esc(nm)}</span>`;
+}
 const statusObj=id=>S.statuses.find(s=>s.id===id)||null;
 // статус означает «собрано/забрано»: по слову в названии
 function isCollectedStatus(id){const s=statusObj(id);if(!s)return false;return /забра|забро|собра|готов/i.test(s.name||'');}
@@ -1648,7 +1658,7 @@ function visiblePickups(){
   return S.pickups;
 }
 function renderPickups(){
-  const list=visiblePickups();
+  const list=filteredPickups();
   const totalOrders=list.reduce((s,p)=>s+(+p.orders||0),0);
   const today=new Date().toISOString().slice(0,10);
   // «Собрано»: статус заявки содержит забран/собран/готов
@@ -1710,7 +1720,7 @@ function drawPickups(){
     ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer">
       <td data-label="Дата">${esc(fmtDate(p.pickup_date))}${p.created_at?`<small class="cell-time">создана ${esc(fmtDateTime(p.created_at))}</small>`:''}</td>
-      <td data-label="Город"><span class="pill gold">${esc(cityName(p.city_id))}</span></td>
+      <td data-label="Город">${cityPill(p.city_id)}</td>
       <td data-label="Наименование"><strong>${esc(p.name)}</strong></td>
       <td data-label="Адрес">${esc(p.address)||'—'}</td>
       <td data-label="Номер">${phoneLink(p.phone)}</td>
@@ -1809,7 +1819,7 @@ async function setPickupStatus(id,statusId){
 }
 // точечно обновляет число в плашке «Собрано заявок» без полной перерисовки
 function updateCollectedStat(){
-  const list=visiblePickups();
+  const list=filteredPickups();
   const collected=list.filter(p=>isCollectedStatus(p.status_id)).length;
   const stats=document.querySelectorAll('.stats .stat');
   if(stats[0]){const v=stats[0].querySelector('.v');if(v)v.innerHTML=`${collected}<small> / ${list.length}</small>`;}
