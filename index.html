@@ -510,8 +510,17 @@
   .orders-pager .op-btn:hover:not(:disabled){background:var(--rust);color:#fff;border-color:var(--rust)}
   .orders-pager .op-btn:disabled{opacity:.4;cursor:default}
   .orders-pager .op-page{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap;padding:0 4px}
+  .orders-pager .op-perpage{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);white-space:nowrap}
+  .op-pp-wrap{position:relative}
+  .op-pp-btn{font-weight:700!important}
+  .op-pp-menu{position:absolute;bottom:calc(100% + 8px);left:0;background:var(--card);border:1px solid var(--line);
+    border-radius:12px;box-shadow:0 10px 30px -8px rgba(20,17,13,.45);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:90px;max-height:260px;overflow:auto;z-index:8100}
+  .op-pp-item{font:inherit;font-size:14px;font-weight:600;cursor:pointer;border:none;background:transparent;color:var(--ink);
+    border-radius:8px;padding:8px 14px;text-align:left;transition:.12s}
+  .op-pp-item:hover{background:var(--paper)}
+  .op-pp-item.active{background:var(--rust);color:#fff}
   @media (max-width:760px){
-    .orders-pager{flex-direction:column;gap:8px;bottom:10px;padding:8px 14px;width:calc(100% - 24px);max-width:420px}
+    .orders-pager{flex-direction:column;gap:8px;bottom:10px;padding:8px 14px;width:calc(100% - 24px);max-width:440px}
     .orders-pager .op-btn{padding:7px 10px}
   }
 </style>
@@ -2001,7 +2010,10 @@ function pickupModal(id,readonly){
 let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
-const ORDERS_PER_PAGE=50; // заказов на страницу
+let ordersPerPage=50; // заказов на страницу (можно менять снизу)
+const ORDERS_PAGE_SIZES=[50,100,200,500,1000,1500,2000,2500];
+const ketSelected=new Set(); // id выбранных заказов (живёт между страницами)
+let ketSelectAll=false; // отмечены ли «все на всех страницах"
 
 function visibleOrders(){
   if(isCourier()){const ids=myOrderCourierIds();return S.orders.filter(o=>ids.includes(o.order_courier_id));}
@@ -2174,7 +2186,7 @@ function renderOrders(mode){
   if($('newOrder'))$('newOrder').onclick=()=>orderModal();
   // массовая отправка отмеченных заказов в KET
   if($('ketSendSel'))$('ketSendSel').onclick=async()=>{
-    const ids=[...document.querySelectorAll('.ketChk:checked')].map(c=>c.dataset.ketchk);
+    const ids=[...ketSelected];
     if(!ids.length){toast('Отметьте галочками заказы для отправки');return;}
     const list=ids.map(id=>S.orders.find(o=>o.id===id)).filter(Boolean);
     const already=list.filter(o=>o.ket_id).length;
@@ -2202,6 +2214,7 @@ function renderOrders(mode){
     b.disabled=false;
     toast(`Отправлено в KET: ${ok}${fail?(', с ошибкой: '+fail):''}`);
     if(errs.length)alert('Не отправлены:\n\n'+errs.join('\n'));
+    ketSelected.clear();ketSelectAll=false;
     renderOrders();
   };
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrdersReset();};
@@ -2274,11 +2287,13 @@ function drawOrders(){
   if(isCourier()){drawCourierOrderCards(el,allRows);return;}
   const staff=isStaff();
   // ── ПАГИНАЦИЯ: показываем по ORDERS_PER_PAGE заказов на странице ──
-  const totalPages=Math.max(1,Math.ceil(allRows.length/ORDERS_PER_PAGE));
+  const totalPages=Math.max(1,Math.ceil(allRows.length/ordersPerPage));
   if(ordersPage>totalPages)ordersPage=totalPages;
   if(ordersPage<1)ordersPage=1;
-  const startIdx=(ordersPage-1)*ORDERS_PER_PAGE;
-  const rows=allRows.slice(startIdx,startIdx+ORDERS_PER_PAGE);
+  const startIdx=(ordersPage-1)*ordersPerPage;
+  const rows=allRows.slice(startIdx,startIdx+ordersPerPage);
+  // если включён режим «выбраны все» — добавляем id текущей страницы в выбор
+  if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
@@ -2289,7 +2304,7 @@ function drawOrders(){
         ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
         : '<span style="color:var(--line)">—</span>';
       return `<tr data-orow="${o.id}" style="cursor:pointer">
-      ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
+      ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?`<small class="cell-time">создан ${esc(fmtDateTime(o.created_at))}</small>`:''}</td>
@@ -2331,14 +2346,33 @@ function drawOrders(){
       const badge=sel.parentElement.querySelector('.status-badge');
       if(badge){badge.textContent=o.status_id?(so.name||'—'):'— нет —';badge.style.color=so.color||'var(--muted)';badge.style.background=so.color?(so.color+'1a'):'transparent';badge.style.borderColor=so.color||'var(--line)';}
       toast('Статус обновлён');}});
-  // чекбокс «выбрать все» (навешиваем здесь, т.к. таблица перерисовывается при фильтрах)
+  // отдельные чекбоксы строк — обновляют множество выбранных
+  el.querySelectorAll('.ketChk').forEach(c=>c.onchange=()=>{
+    const id=c.dataset.ketchk;
+    if(c.checked)ketSelected.add(id);else{ketSelected.delete(id);ketSelectAll=false;}
+    updateKetAllChk(allRows);
+  });
+  // чекбокс «выбрать все» — отмечает ВСЕ заказы во всех страницах (по текущему фильтру)
   const chkAll=$('ketChkAll');
-  if(chkAll)chkAll.onchange=e=>{el.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);};
+  if(chkAll)chkAll.onchange=e=>{
+    if(e.target.checked){ketSelectAll=true;allRows.forEach(o=>ketSelected.add(o.id));}
+    else{ketSelectAll=false;allRows.forEach(o=>ketSelected.delete(o.id));}
+    el.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);
+  };
+  updateKetAllChk(allRows);
   // плавающая панель пагинации (показываем всегда, чтобы видеть «N из M»)
   renderOrdersPager(allRows.length,totalPages,startIdx,rows.length);
 }
 // сброс пагинации на первую страницу (при смене фильтров/поиска)
-function drawOrdersReset(){ordersPage=1;drawOrders();}
+function drawOrdersReset(){ordersPage=1;ketSelected.clear();ketSelectAll=false;drawOrders();}
+// синхронизирует чекбокс «выбрать все»: отмечен, если выбраны все заказы текущего фильтра
+function updateKetAllChk(allRows){
+  const chk=$('ketChkAll');if(!chk)return;
+  const total=allRows.length;
+  const selected=allRows.filter(o=>ketSelected.has(o.id)).length;
+  chk.checked=total>0&&selected===total;
+  chk.indeterminate=selected>0&&selected<total;
+}
 // плавающая (закреплённая снизу) панель навигации по страницам заказов
 function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();}
 function renderOrdersPager(total,totalPages,startIdx,shownCount){
@@ -2349,6 +2383,15 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
   bar.id='ordersPager';bar.className='orders-pager';
   bar.innerHTML=`
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
+    <div class="op-perpage">
+      <span>На странице:</span>
+      <div class="op-pp-wrap">
+        <button class="op-btn op-pp-btn" id="opPerPageBtn">${ordersPerPage} ▾</button>
+        <div class="op-pp-menu" id="opPerPageMenu" style="display:none">
+          ${ORDERS_PAGE_SIZES.map(s=>`<button class="op-pp-item ${s===ordersPerPage?'active':''}" data-pp="${s}">${s}</button>`).join('')}
+        </div>
+      </div>
+    </div>
     <div class="op-nav">
       <button class="op-btn" data-opage="first" ${ordersPage<=1?'disabled':''} title="В начало">«</button>
       <button class="op-btn" data-opage="prev" ${ordersPage<=1?'disabled':''}>‹ Назад</button>
@@ -2357,6 +2400,17 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-opage="last" ${ordersPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
   document.body.appendChild(bar);
+  // выбор количества на странице
+  const ppBtn=bar.querySelector('#opPerPageBtn'), ppMenu=bar.querySelector('#opPerPageMenu');
+  if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
+  bar.querySelectorAll('[data-pp]').forEach(b=>b.onclick=()=>{
+    ordersPerPage=parseInt(b.dataset.pp,10)||50;ordersPage=1;drawOrders();
+    const t=$('orderTable');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+  // закрытие меню при клике вне
+  document.addEventListener('click',function closePP(ev){
+    if(ppMenu&&!ppMenu.contains(ev.target)&&ev.target!==ppBtn){ppMenu.style.display='none';}
+  },{once:true});
   bar.querySelectorAll('[data-opage]').forEach(b=>b.onclick=()=>{
     const a=b.dataset.opage;
     if(a==='first')ordersPage=1;
