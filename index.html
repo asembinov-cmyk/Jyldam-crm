@@ -495,6 +495,22 @@
   .log-chg .arr{color:var(--muted);margin:0 4px}
   .log-chg .new{color:#2f6d36;font-weight:600}
   .log-user{font-weight:600;white-space:nowrap}
+  /* ── Плавающая панель пагинации заказов ── */
+  .orders-pager{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:8000;
+    display:flex;align-items:center;gap:18px;background:var(--card);border:1px solid var(--line);
+    border-radius:30px;box-shadow:0 8px 28px -8px rgba(20,17,13,.4);padding:9px 18px}
+  .orders-pager .op-info{font-size:13px;color:var(--muted);white-space:nowrap}
+  .orders-pager .op-info b{color:var(--ink);font-weight:700}
+  .orders-pager .op-nav{display:flex;align-items:center;gap:6px}
+  .orders-pager .op-btn{font:inherit;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--line);
+    background:var(--paper);color:var(--ink);border-radius:8px;padding:6px 11px;transition:.15s}
+  .orders-pager .op-btn:hover:not(:disabled){background:var(--rust);color:#fff;border-color:var(--rust)}
+  .orders-pager .op-btn:disabled{opacity:.4;cursor:default}
+  .orders-pager .op-page{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap;padding:0 4px}
+  @media (max-width:760px){
+    .orders-pager{flex-direction:column;gap:8px;bottom:10px;padding:8px 14px;width:calc(100% - 24px);max-width:420px}
+    .orders-pager .op-btn{padding:7px 10px}
+  }
 </style>
 </head>
 <body>
@@ -805,13 +821,8 @@ function ketOriginCode(cityName){
 // отправить один заказ в KET
 async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
-  const payload=orderToKet(o);
-  // ВРЕМЕННАЯ ДИАГНОСТИКА: показываем, что именно уходит в KET
-  if(!confirm('В KET уйдёт:\n\n'+JSON.stringify(payload,null,2)+'\n\nОтправить?'))return false;
   toast('Отправка в KET…');
-  const r=await callKet({action:'send',order:payload});
-  // ВРЕМЕННАЯ ДИАГНОСТИКА: показываем сырой ответ KET
-  alert('Ответ KET:\n\n'+JSON.stringify(r,null,2));
+  const r=await callKet({action:'send',order:orderToKet(o)});
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
   const result=(r.ket&&r.ket.result)||{};
   if((result.success||'').toUpperCase()==='TRUE'){
@@ -1210,6 +1221,7 @@ function drawHistory(){
 
 /* ---------- РОУТЕР ---------- */
 function render(){
+  if(typeof removeOrdersPager==='function')removeOrdersPager(); // снять плавающую панель пагинации
   if(S.tab==='dashboard')renderDashboard();
   else if(S.tab==='pickups')renderPickups();
   else if(S.tab==='orders')renderOrders();
@@ -1986,6 +1998,8 @@ function pickupModal(id,readonly){
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
 let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
+let ordersPage=1; // текущая страница пагинации
+const ORDERS_PER_PAGE=50; // заказов на страницу
 
 function visibleOrders(){
   if(isCourier()){const ids=myOrderCourierIds();return S.orders.filter(o=>ids.includes(o.order_courier_id));}
@@ -2188,23 +2202,23 @@ function renderOrders(mode){
     if(errs.length)alert('Не отправлены:\n\n'+errs.join('\n'));
     renderOrders();
   };
-  $('ofq').oninput=e=>{of.q=e.target.value;drawOrders();};
-  $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrders();};
-  if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrders();};
+  $('ofq').oninput=e=>{of.q=e.target.value;drawOrdersReset();};
+  $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrdersReset();};
+  if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrdersReset();};
   if($('ofpartner'))$('ofpartner').oninput=e=>{
     const name=e.target.value.trim().toLowerCase();
-    if(!name){of.partner='';drawOrders();return;}
+    if(!name){of.partner='';drawOrdersReset();return;}
     const p=S.partners.find(x=>(x.name||'').trim().toLowerCase()===name);
     of.partner=p?p.id:'__none__'; // если ввели текст, но партнёр не найден — показываем пусто
-    drawOrders();
+    drawOrdersReset();
   };
-  if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrders();};
+  if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
   if($('ofcreatefrom'))$('ofcreatefrom').onchange=e=>{of.createFrom=e.target.value;renderOrders(ordersMode);};
   if($('ofcreateto'))$('ofcreateto').onchange=e=>{of.createTo=e.target.value;renderOrders(ordersMode);};
-  if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrders();};
-  if($('ofpickto'))$('ofpickto').onchange=e=>{of.pickTo=e.target.value;drawOrders();};
-  if($('ofdelfrom'))$('ofdelfrom').onchange=e=>{of.delFrom=e.target.value;drawOrders();};
-  if($('ofdelto'))$('ofdelto').onchange=e=>{of.delTo=e.target.value;drawOrders();};
+  if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrdersReset();};
+  if($('ofpickto'))$('ofpickto').onchange=e=>{of.pickTo=e.target.value;drawOrdersReset();};
+  if($('ofdelfrom'))$('ofdelfrom').onchange=e=>{of.delFrom=e.target.value;drawOrdersReset();};
+  if($('ofdelto'))$('ofdelto').onchange=e=>{of.delTo=e.target.value;drawOrdersReset();};
   if($('oftoday'))$('oftoday').onclick=()=>{const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   drawOrders();
@@ -2252,10 +2266,17 @@ function filteredOrders(){
 }
 let editingOrderId=null; // id заказа в режиме строчного редактирования
 function drawOrders(){
-  const el=$('orderTable');const rows=filteredOrders();
-  if(!rows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
-  if(isCourier()){drawCourierOrderCards(el,rows);return;}
+  const el=$('orderTable');const allRows=filteredOrders();
+  removeOrdersPager(); // убрать старую плавающую панель, если была
+  if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
+  if(isCourier()){drawCourierOrderCards(el,allRows);return;}
   const staff=isStaff();
+  // ── ПАГИНАЦИЯ: показываем по ORDERS_PER_PAGE заказов на странице ──
+  const totalPages=Math.max(1,Math.ceil(allRows.length/ORDERS_PER_PAGE));
+  if(ordersPage>totalPages)ordersPage=totalPages;
+  if(ordersPage<1)ordersPage=1;
+  const startIdx=(ordersPage-1)*ORDERS_PER_PAGE;
+  const rows=allRows.slice(startIdx,startIdx+ORDERS_PER_PAGE);
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Индекс</th><th>Трек-код</th>
@@ -2311,6 +2332,39 @@ function drawOrders(){
   // чекбокс «выбрать все» (навешиваем здесь, т.к. таблица перерисовывается при фильтрах)
   const chkAll=$('ketChkAll');
   if(chkAll)chkAll.onchange=e=>{el.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);};
+  // плавающая панель пагинации (показываем всегда, чтобы видеть «N из M»)
+  renderOrdersPager(allRows.length,totalPages,startIdx,rows.length);
+}
+// сброс пагинации на первую страницу (при смене фильтров/поиска)
+function drawOrdersReset(){ordersPage=1;drawOrders();}
+// плавающая (закреплённая снизу) панель навигации по страницам заказов
+function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();}
+function renderOrdersPager(total,totalPages,startIdx,shownCount){
+  removeOrdersPager();
+  if(!total)return;
+  const from=startIdx+1, to=startIdx+shownCount;
+  const bar=document.createElement('div');
+  bar.id='ordersPager';bar.className='orders-pager';
+  bar.innerHTML=`
+    <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
+    <div class="op-nav">
+      <button class="op-btn" data-opage="first" ${ordersPage<=1?'disabled':''} title="В начало">«</button>
+      <button class="op-btn" data-opage="prev" ${ordersPage<=1?'disabled':''}>‹ Назад</button>
+      <span class="op-page">Стр. ${ordersPage} / ${totalPages}</span>
+      <button class="op-btn" data-opage="next" ${ordersPage>=totalPages?'disabled':''}>Вперёд ›</button>
+      <button class="op-btn" data-opage="last" ${ordersPage>=totalPages?'disabled':''} title="В конец">»</button>
+    </div>`;
+  document.body.appendChild(bar);
+  bar.querySelectorAll('[data-opage]').forEach(b=>b.onclick=()=>{
+    const a=b.dataset.opage;
+    if(a==='first')ordersPage=1;
+    else if(a==='prev')ordersPage=Math.max(1,ordersPage-1);
+    else if(a==='next')ordersPage=Math.min(totalPages,ordersPage+1);
+    else if(a==='last')ordersPage=totalPages;
+    drawOrders();
+    // прокрутка к началу таблицы при смене страницы
+    const t=$('orderTable');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+  });
 }
 /* Компактные карточки заказов для курьера: свёрнуто — ID/ФИО/телефон/адрес/сумма/статус, по тапу разворачивается остальное */
 function drawCourierOrderCards(el,rows){
