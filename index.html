@@ -661,7 +661,7 @@ const ENTITY_LABEL={
 // человекочитаемые подписи полей (для детальных правок)
 const FIELD_LABEL={
   code:'Код',client:'ФИО клиента',phone:'Телефон',address:'Адрес',sender:'Отправитель',
-  delivery_id:'Тип доставки',courier_city_id:'Город (курьер.)',city_id:'Город',status_id:'Статус',
+  delivery_id:'Тип доставки',courier_city_id:'Город (курьер.)',city_id:'Город',pickup_city_id:'Город забора',status_id:'Статус',
   order_status_id:'Статус',weight:'Вес',qty:'Кол-во',index:'Индекс',track:'Трек-код',order_sum:'Сумма заказа',
   cost:'Стоимость доставки',pay_date:'Дата оплаты',deliver_date:'Дата доставки',pickup_date:'Дата забора',
   post_ip_id:'ИП для Почты',order_courier_id:'Курьер по заказам',courier_id:'Курьер',sales_id:'Менеджер продаж',
@@ -679,6 +679,7 @@ function logFieldValue(field,v){
     if(field==='status_id'||field==='order_status_id'){const s=orderStatusObj(v)||statusObj(v);return s?s.name:String(v);}
     if(field==='delivery_id')return deliveryName(v);
     if(field==='city_id')return cityName(v);
+    if(field==='pickup_city_id')return cityName(v);
     if(field==='courier_city_id')return courierCityName(v);
     if(field==='district_id')return districtName(v);
     if(field==='courier_id')return courierName(v);
@@ -795,10 +796,11 @@ async function callKet(payload){
 // собрать данные заказа в формат KET
 function orderToKet(o){
   const courier=isCourierDelivery(o.delivery_id);
-  // город: для курьерской — курьерский справочник, для почтовой — обычный
+  // город НАЗНАЧЕНИЯ: для курьерской — курьерский справочник, для почтовой — обычный
   const cityNm=courier?courierCityName(o.courier_city_id):(o.city_id?cityName(o.city_id):'');
-  // «отправная точка» для KET — КОД по городу заказа: Астана→ASTANA-KURER, Алматы→ALMATA
-  const originCode=ketOriginCode(cityNm);
+  // «отправная точка» для KET — КОД по ГОРОДУ ЗАБОРА (откуда забрали): Астана→ASTANA-KURER, Алматы→ALMATA
+  const pickupCityNm=o.pickup_city_id?cityName(o.pickup_city_id):'';
+  const originCode=ketOriginCode(pickupCityNm);
   // сумма: сначала order_sum, иначе cost (дубль). Идёт и в price, и в total_price
   const sumVal=(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0);
   const sumStr=String(sumVal||0);
@@ -1459,6 +1461,7 @@ async function partnerCallCourier(partner){
         pickup_id:pickup.id,partner_id:partner.id,
         sender:partner.name,pickup_date:today,
         delivery_id:defaultCourierDeliveryId(),
+        pickup_city_id:partner.city_id||null,
         sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
         order_sum:partner.tariff_courier||null,cost:partner.tariff_courier||0,
         created_at:new Date().toISOString(),
@@ -2007,7 +2010,7 @@ function pickupModal(id,readonly){
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:''};
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -2053,6 +2056,7 @@ async function createOrdersFromPickup(pickupId,opts){
       client:'',weight:null,qty:1,
       delivery_id:courierDelivery?courierDelivery.id:null,
       courier_city_id:null,
+      pickup_city_id:partner?partner.city_id||null:(p.city_id||null), // город забора из партнёра/заявки
       status_id:baseStatus,
       sales_id:partner?partner.sales_id:(p.sales_id||null),
       processor_id:partner?partner.processor_id:(p.processor_id||null),
@@ -2160,6 +2164,7 @@ function renderOrders(mode){
         <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partner?partnerName(of.partner):'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
+        <select id="ofpickupcity" title="Город, откуда забрали заказ"><option value="">Город забора: все</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${of.pickupCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
         <select id="ofmissing" title="Показать заказы с незаполненным полем">
           <option value="">Заполненность: все</option>
           <option value="client" ${of.missing==='client'?'selected':''}>Нет ФИО клиента</option>
@@ -2228,6 +2233,7 @@ function renderOrders(mode){
     drawOrdersReset();
   };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
+  if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
   if($('ofcreatefrom'))$('ofcreatefrom').onchange=e=>{of.createFrom=e.target.value;renderOrders(ordersMode);};
   if($('ofcreateto'))$('ofcreateto').onchange=e=>{of.createTo=e.target.value;renderOrders(ordersMode);};
   if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrdersReset();};
@@ -2275,6 +2281,8 @@ function filteredOrders(){
       const val=(o[of.missing]||'').toString().trim();
       if(val!=='')return false;
     }
+    // фильтр по городу забора
+    if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
     if(q){const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
@@ -2486,7 +2494,7 @@ function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
   const code=o?o.code:genOrderCode();
-  const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',address:'',qty:'',status_id:defaultOrderStatusId(),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
+  const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',pickup_city_id:'',address:'',qty:'',status_id:defaultOrderStatusId(),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
   const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
     <div class="order-split">
@@ -2504,6 +2512,7 @@ function orderModal(id,readonly){
       <div class="field"><label>ID заказа</label><input value="${esc(code)}" readonly style="font-family:'Fraunces',serif;font-weight:900;letter-spacing:1px"></div>
       <div class="field"><label>Дата забора</label><input type="date" id="o_pickup" value="${esc(d.pickup_date||'')}" ${dis}></div>
       <div class="field"><label>Отправитель</label><input id="o_sender" list="partnersList" autocomplete="off" value="${esc(d.sender)}" ${dis}><datalist id="partnersList">${S.partners.map(p=>`<option value="${esc(p.name)}"></option>`).join('')}</datalist></div>
+      <div class="field"><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
@@ -2532,6 +2541,7 @@ function orderModal(id,readonly){
       const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
         weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),phone:phoneDigits,
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
+        pickup_city_id:val('o_pickupcity')||null,
         city_id:!isCourierDelivery(val('o_delivery'))?(val('o_postcity')||null):null,
         order_sum:val('o_sum')?parseFloat(val('o_sum')):null,
         status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
@@ -2645,7 +2655,9 @@ function orderModal(id,readonly){
       const pullPartner=()=>{
         const name=ss.value.trim().toLowerCase().replace(/\s+/g,' ');
         const pt=S.partners.find(x=>(x.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name);
-        if(pt){if(pt.sales_id&&$('o_sales'))$('o_sales').value=pt.sales_id;if(pt.processor_id&&$('o_proc'))$('o_proc').value=pt.processor_id;}
+        if(pt){if(pt.sales_id&&$('o_sales'))$('o_sales').value=pt.sales_id;if(pt.processor_id&&$('o_proc'))$('o_proc').value=pt.processor_id;
+          // город забора подставляем из города партнёра (если поле ещё пустое)
+          if(pt.city_id&&$('o_pickupcity')&&!$('o_pickupcity').value)$('o_pickupcity').value=pt.city_id;}
         applyTariff();
       };
       ss.onchange=pullPartner;
