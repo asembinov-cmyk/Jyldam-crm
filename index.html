@@ -1158,26 +1158,20 @@ function address2gis(addr,cityNm){
   const a=(addr||'').trim();
   if(!a)return '<span style="color:var(--muted)">адрес не указан</span>';
   const q=(cityNm&&cityNm!=='—'?cityNm+', ':'')+a;
-  // data-gis хранит адрес; клик обрабатывается open2gis() — пробует приложение, иначе сайт
+  // href ведёт на сайт только как запасной для десктопа; на мобильном клик перехватывается open2gis()
   return `<a class="addr-link" href="https://2gis.kz/search/${encodeURIComponent(q)}" target="_blank" rel="noopener" data-gis="${esc(q)}">📍 ${esc(a)}</a>`;
 }
-// открыть адрес сразу в приложении 2ГИС (deep link), при неудаче — сайт
+// открыть адрес в приложении 2ГИС (deep link). На мобильном — ТОЛЬКО приложение, сайт не открываем
 function open2gis(query){
   const q=encodeURIComponent(query);
-  const web='https://2gis.kz/search/'+q;
-  // мобильные: пробуем deep link приложения
   const isMobile=/android|iphone|ipad|ipod/i.test(navigator.userAgent||'');
-  if(!isMobile){window.open(web,'_blank','noopener');return;}
-  let returned=false;
-  const onHide=()=>{returned=true;};
-  document.addEventListener('visibilitychange',onHide,{once:true});
-  // схема приложения 2ГИС
+  if(!isMobile){
+    // на компьютере приложения нет — открываем сайт в новой вкладке
+    window.open('https://2gis.kz/search/'+q,'_blank','noopener');
+    return;
+  }
+  // на телефоне — только схема приложения; кабинет остаётся открытым, сайт не вызываем
   window.location.href='dgis://2gis.ru/search/'+q;
-  // если за 1.2с приложение не открылось (страница осталась видимой) — уводим на сайт
-  setTimeout(()=>{
-    document.removeEventListener('visibilitychange',onHide);
-    if(!returned&&document.visibilityState==='visible'){window.location.href=web;}
-  },1200);
 }
 function attachPhone(id,initial){
   const el=$(id);if(!el)return;
