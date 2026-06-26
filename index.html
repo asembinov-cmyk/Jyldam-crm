@@ -770,9 +770,8 @@ function orderToKet(o){
   const courier=isCourierDelivery(o.delivery_id);
   // город: для курьерской — курьерский справочник, для почтовой — обычный
   const cityNm=courier?courierCityName(o.courier_city_id):(o.city_id?cityName(o.city_id):'');
-  // город ОТПРАВЛЕНИЯ («отправная точка») — берём из карточки партнёра-отправителя
-  const partner=S.partners.find(p=>p.id===o.partner_id)||{};
-  const fromCity=partner.city_id?cityName(partner.city_id):'';
+  // «отправная точка» для KET — КОД по городу заказа: Астана→ASTANA-KURER, Алматы→ALMATA
+  const originCode=ketOriginCode(cityNm);
   // сумма: сначала order_sum, иначе cost (дубль). Идёт и в price, и в total_price
   const sumVal=(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0);
   const sumStr=String(sumVal||0);
@@ -792,14 +791,16 @@ function orderToKet(o){
   // город НАЗНАЧЕНИЯ указываем только если он есть и это не «—»
   if(cityNm&&cityNm!=='—')data.city=cityNm;
   else if(!courier)data.kz_delivery='32';    // почта, если город не задан
-  // город ОТПРАВЛЕНИЯ (отправная точка) — дублируем в несколько вероятных полей KET
-  if(fromCity&&fromCity!=='—'){
-    data.city_from=fromCity;
-    data.from_city=fromCity;
-    data.sender_city=fromCity;
-    data.city_sender=fromCity;
-  }
+  // «отправная точка» — КОД города отправления (KET-параметр city_from)
+  if(originCode)data.city_from=originCode;
   return data;
+}
+// сопоставление города заказа с кодом отправной точки KET
+function ketOriginCode(cityName){
+  const nm=(cityName||'').toLowerCase();
+  if(/алмат/.test(nm))return 'ALMATA';
+  if(/астан|нур-?султан|нур\s*султан/.test(nm))return 'ASTANA-KURER';
+  return '';
 }
 // отправить один заказ в KET
 async function sendOrderToKet(o){
