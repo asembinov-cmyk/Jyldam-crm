@@ -1007,9 +1007,17 @@ function orderToKet(o){
   };
   if(o.index)data.index=o.index;             // индекс (для почты)
   if(o.deliver_date)data.date_delivery=o.deliver_date; // дата доставки (YYYY-MM-DD), имя поля по требованию KET
-  // город НАЗНАЧЕНИЯ указываем только если он есть и это не «—»
-  if(cityNm&&cityNm!=='—')data.city=cityNm;
-  else if(!courier)data.kz_delivery='32';    // почта, если город не задан
+  if(courier){
+    // КУРЬЕРСКАЯ доставка: KET ждёт kz_delivery = числовой код города назначения
+    const code=ketDeliveryCode(cityNm);
+    if(code!=null)data.kz_delivery=String(code);
+    // дублируем название города (не мешает, помогает KET сопоставить)
+    if(cityNm&&cityNm!=='—')data.city=cityNm;
+  }else{
+    // ПОЧТОВАЯ доставка
+    if(cityNm&&cityNm!=='—')data.city=cityNm;
+    else data.kz_delivery='32';              // почта, если город не задан
+  }
   // «отправная точка» — КОД города отправления (KET-параметр city_from)
   if(originCode)data.city_from=originCode;
   return data;
@@ -1020,6 +1028,24 @@ function ketOriginCode(cityName){
   if(/алмат/.test(nm))return 'ALMATA';
   if(/астан|нур-?султан|нур\s*султан/.test(nm))return 'ASTANA-KURER';
   return '';
+}
+// КОД типа доставки KET по городу НАЗНАЧЕНИЯ (поле kz_delivery) для курьерской доставки.
+// Сопоставление по ключевым словам в названии города (рус/каз/лат варианты).
+const KET_DELIVERY_CODES=[
+  [/актау|aktau/i,2],[/актобе|aktobe/i,3],[/алмат|almat/i,4],
+  [/астан|нур-?султан|astana/i,5],[/атырау|atyrau/i,6],
+  [/караганд|karagand/i,10],[/кокшетау|kokshetau/i,11],[/костанай|kostanai/i,12],
+  [/кызылорд|kyzylord/i,14],[/павлодар|pavlodar/i,15],[/петропавл|petropavl/i,16],
+  [/сарыагаш|saryagash/i,19],[/семей|semei/i,21],[/шымкент|шимкент|shimkent|chimkent/i,22],
+  [/талдыкорган|taldykorgan/i,23],[/тараз|taraz/i,24],[/туркестан|turkestan/i,26],
+  [/уральск|uralsk/i,27],[/усть-?каменогорск|ust-?kamenogorsk/i,28],
+  [/жетысай|zhetysai/i,30],[/жезказган|zhezkazgan/i,31],[/кентау|kentau/i,93],
+];
+function ketDeliveryCode(cityName){
+  const nm=(cityName||'').trim();
+  if(!nm)return null;
+  for(const [re,code] of KET_DELIVERY_CODES){if(re.test(nm))return code;}
+  return null; // город не в списке курьерских — код не найден
 }
 // выбор аккаунта KET по ГОРОДУ ЗАБОРА заказа: Алматы → отдельный аккаунт, иначе (Астана и пр.) → основной
 function ketAccountForOrder(o){
@@ -2713,8 +2739,6 @@ async function pickupOrdersModal(pickupId){
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${isStaff()?`
       <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.paid_by_sender?'disabled':''}></div>
-      `:''}
-      ${(isStaff()||isCourier())?`
       <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем <span class="pom-paidhint">(сумма станет 0)</span></label>
       `:''}
     </div>`).join('');
