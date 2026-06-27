@@ -1162,7 +1162,11 @@ async function loadAll(){
 async function refreshForTab(tab){
   try{
     if(tab==='pickups'){
-      S.pickups=await dbList('pickups',{order:'created_at',asc:false});
+      const [pickups,orders]=await Promise.all([
+        dbList('pickups',{order:'created_at',asc:false}),
+        dbList('orders',{order:'created_at',asc:false}),
+      ]);
+      S.pickups=pickups;S.orders=orders;
     }else if(tab==='orders'||tab==='courier'||tab==='mail'||tab==='today'||tab==='dashboard'){
       const [orders,pickups]=await Promise.all([
         dbList('orders',{order:'created_at',asc:false}),
