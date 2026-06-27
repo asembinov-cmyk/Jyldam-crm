@@ -139,7 +139,8 @@
   .dash-stat td.d-date{white-space:nowrap}
   .dash-stat th.c-alm,.dash-stat td.c-alm{background:rgba(61,100,120,.06);color:#3d6478}
   .dash-stat th.c-ast,.dash-stat td.c-ast{background:rgba(109,90,61,.06);color:#6d5a3d}
-  .dash-stat th.cour-col,.dash-stat td.cour-col{font-size:12px;min-width:54px}
+  .dash-stat th.cour-col,.dash-stat td.cour-col{font-size:12px;min-width:60px}
+  .dash-stat th.cour-col .cour-city{display:block;font-size:10px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;margin-top:2px}
   .dash-stat tfoot .dash-total td{background:var(--paper);border-top:2px solid var(--line);font-weight:700;
     position:sticky;bottom:0}
   .dash-stat tfoot .dash-total td:first-child{font-family:'Fraunces',serif;font-size:14px}
@@ -1835,8 +1836,12 @@ function renderDashboard(){
     const pkCollected=collectedPickups.length;  // из них собрано (забрал посылки)
     const pkAlmaty=collectedPickups.filter(p=>isAlmaty(p.city_id)).length;
     const pkAstana=collectedPickups.filter(p=>isAstana(p.city_id)).length;
-    // по курьерам-заборщикам: сколько СОБРАЛ каждый в этот день
-    const byCourier=courierList.map(c=>collectedPickups.filter(p=>p.courier_id===c.id).length);
+    // по курьерам-заборщикам: {собрал, всего назначено} в этот день
+    const byCourier=courierList.map(c=>{
+      const assigned=dayPickups.filter(p=>p.courier_id===c.id).length;       // всего назначено курьеру
+      const got=collectedPickups.filter(p=>p.courier_id===c.id).length;       // из них собрано
+      return {got,assigned};
+    });
     // курьерская / почтовая доставка (по типу доставки заказа)
     const courierDel=dayOrders.filter(o=>isCourierDelivery(o.delivery_id)).length;
     const mailDel=dayOrders.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length;
@@ -1865,14 +1870,14 @@ function renderDashboard(){
         <tr>
           <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
           <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
-          ${courierList.map(c=>`<th class="cour-col" title="${esc(c.fio)}">${esc((c.fio||'').split(' ')[0])}</th>`).join('')}
+          ${courierList.map(c=>`<th class="cour-col" title="${esc(c.fio)}">${esc((c.fio||'').split(' ')[0])}<small class="cour-city">${esc(c.city_id?cityName(c.city_id):'—')}</small></th>`).join('')}
           <th>Курьерская</th><th>Почтовая</th>
         </tr></thead>
         <tbody>${statRows.length?statRows.map(r=>`<tr>
           <td class="d-date"><b>${esc(fmtDate(r.dt))}</b></td>
           <td class="num"><b>${r.ordTotal}</b></td><td class="num c-alm">${r.ordAlmaty||'—'}</td><td class="num c-ast">${r.ordAstana||'—'}</td>
           <td class="num"><b>${r.pkCollected}</b><small style="color:var(--muted)"> / ${r.pkTotal}</small></td><td class="num c-alm">${r.pkAlmaty||'—'}</td><td class="num c-ast">${r.pkAstana||'—'}</td>
-          ${r.byCourier.map(n=>`<td class="num cour-col">${n||'—'}</td>`).join('')}
+          ${r.byCourier.map(c=>`<td class="num cour-col">${c.assigned?`<b>${c.got}</b><small style="color:var(--muted)"> / ${c.assigned}</small>`:'—'}</td>`).join('')}
           <td class="num">${r.courierDel||'—'}</td><td class="num">${r.mailDel||'—'}</td>
         </tr>`).join(''):`<tr><td colspan="${8+courierList.length}" style="text-align:center;color:var(--muted);padding:30px">Пока нет данных</td></tr>`}</tbody>
         ${statRows.length?`<tfoot><tr class="dash-total">
@@ -1883,7 +1888,7 @@ function renderDashboard(){
           <td class="num"><b>${statRows.reduce((s,r)=>s+r.pkCollected,0)}</b><small style="color:var(--muted)"> / ${statRows.reduce((s,r)=>s+r.pkTotal,0)}</small></td>
           <td class="num c-alm">${statRows.reduce((s,r)=>s+r.pkAlmaty,0)}</td>
           <td class="num c-ast">${statRows.reduce((s,r)=>s+r.pkAstana,0)}</td>
-          ${courierList.map((c,i)=>`<td class="num cour-col">${statRows.reduce((s,r)=>s+r.byCourier[i],0)||'—'}</td>`).join('')}
+          ${courierList.map((c,i)=>{const got=statRows.reduce((s,r)=>s+r.byCourier[i].got,0);const asg=statRows.reduce((s,r)=>s+r.byCourier[i].assigned,0);return `<td class="num cour-col">${asg?`<b>${got}</b><small style="color:var(--muted)"> / ${asg}</small>`:'—'}</td>`;}).join('')}
           <td class="num">${statRows.reduce((s,r)=>s+r.courierDel,0)}</td>
           <td class="num">${statRows.reduce((s,r)=>s+r.mailDel,0)}</td>
         </tr></tfoot>`:''}
@@ -2459,10 +2464,10 @@ function renderOrders(mode){
       ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
-      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} с тел.</small></div></div>
+      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
     </div>`:`
     <div class="stats stats-5">
-      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} с тел.</small></div></div>
+      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Почтовых</div><div class="v">${list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Оплачено</div><div class="v">${paid}<small> / ${list.length}</small></div></div>
