@@ -485,6 +485,8 @@
   .pom-paid{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;font-weight:600;color:var(--ink);cursor:pointer}
   .pom-paid input{width:18px;height:18px;accent-color:var(--rust);cursor:pointer}
   .pom-paidorder{color:var(--moss)}
+  .o-paidorder{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:14px;font-weight:600;color:var(--moss);cursor:pointer;user-select:none}
+  .o-paidorder input{width:18px;height:18px;accent-color:var(--moss);cursor:pointer}
   .pom-paidhint{font-weight:400;color:var(--muted);font-size:12px}
   .pom-sumrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
   .pom-sumrow span{font-size:13px;color:var(--muted);font-weight:600}
@@ -3161,7 +3163,7 @@ function orderModal(id,readonly){
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
-      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${esc(d.order_sum||'')}" ${dis}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span></div>
+      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.order_paid?'disabled':''}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.order_paid?'checked':''} ${dis}> Оплачен заказ <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" id="postCityField" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Город (почтовая)</label><select id="o_postcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -3188,11 +3190,25 @@ function orderModal(id,readonly){
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
         pickup_city_id:val('o_pickupcity')||null,
         city_id:!isCourierDelivery(val('o_delivery'))?(val('o_postcity')||null):null,
-        order_sum:val('o_sum')?parseFloat(val('o_sum')):null,
+        order_sum:(val('o_sum')!==''?parseFloat(val('o_sum')):null),
         status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
-        cost:val('o_sum')?parseFloat(val('o_sum')):0,pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,comment:val('o_comment').trim(),
+        cost:(val('o_sum')!==''?parseFloat(val('o_sum')):0),pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,comment:val('o_comment').trim(),
         order_courier_id:val('o_ocourier')||null};
+      // галочка «Оплачен заказ»: сумма→0 (исходная запоминается), снятие — возврат
+      if($('o_paidorder')){
+        const paidNow=$('o_paidorder').checked;
+        if(paidNow){
+          if(!o||!o.order_paid){row.order_sum_orig=(row.order_sum!=null?row.order_sum:0);} // запоминаем при первом включении
+          else{row.order_sum_orig=(o.order_sum_orig!=null?o.order_sum_orig:0);}
+          row.order_paid=true;row.order_sum=0;row.cost=0;
+        }else{
+          // если сняли галочку, а сумму вручную не меняли — вернём исходную
+          if(o&&o.order_paid){const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
+            if(val('o_sum')===''||parseFloat(val('o_sum'))===0){row.order_sum=back;row.cost=back;}}
+          row.order_paid=false;row.order_sum_orig=null;
+        }
+      }
       if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
         await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:buildChanges(before,o)});}
       else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);
@@ -3269,7 +3285,7 @@ function orderModal(id,readonly){
       if(opts.find(c=>c.id===cur))sel.value=cur; // сохранить выбор, если курьер из этого города
     };
     // сумма заказа тянется от тарифа партнёра (пока её не правили вручную)
-    let sumTouched=!!(d.order_sum); // если сумма уже была — считаем заполненной вручную
+    let sumTouched=(d.order_sum!=null&&d.order_sum!==''); // если сумма уже была (включая 0) — заполнена вручную
     const findPartner=()=>{
       // 1) по partner_id заказа, если есть
       if(d.partner_id){const p=S.partners.find(x=>x.id===d.partner_id);if(p)return p;}
@@ -3286,6 +3302,16 @@ function orderModal(id,readonly){
       if(sumEl&&t!=null&&t!==''){sumEl.value=t;}
     };
     const sumEl=$('o_sum');if(sumEl)sumEl.oninput=()=>{sumTouched=true;};
+    // галочка «Оплачен заказ»: обнуляет поле суммы и блокирует его (исходная вернётся при снятии)
+    const paidChk=$('o_paidorder');
+    if(paidChk){
+      paidChk.dataset.prevsum=(d.order_sum!=null&&d.order_sum!=='')?String(d.order_sum):''; // помним сумму до обнуления
+      paidChk.onchange=()=>{
+        const se=$('o_sum');if(!se)return;
+        if(paidChk.checked){paidChk.dataset.prevsum=se.value;se.value='0';se.disabled=true;sumTouched=true;}
+        else{se.disabled=false;se.value=paidChk.dataset.prevsum||'';sumTouched=(se.value!=='');}
+      };
+    }
     // показать/скрыть поля, относящиеся только к почтовой доставке
     const toggleMailFields=()=>{
       const courier=isCourierDelivery($('o_delivery').value);
