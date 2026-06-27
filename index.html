@@ -553,9 +553,15 @@
   .op-pp-item:hover{background:var(--paper)}
   .op-pp-item.active{background:var(--rust);color:#fff}
   @media (max-width:760px){
-    .orders-pager{flex-direction:column;gap:8px;bottom:10px;padding:8px 14px;width:calc(100% - 24px);max-width:440px}
-    .orders-pager .op-btn{padding:7px 10px}
+    .orders-pager{flex-direction:column;gap:7px;bottom:8px;padding:8px 12px;width:calc(100% - 20px);max-width:440px}
+    .orders-pager .op-info{font-size:12px}
+    .orders-pager .op-btn{padding:6px 9px;font-size:12px}
+    .orders-pager .op-perpage{font-size:12px}
+    /* контент с пагинацией: освобождаем место снизу, чтобы карточки не прятались под панелью */
+    .content.has-pager{padding-bottom:150px}
   }
+  /* десктоп: тоже небольшой запас снизу при пагинации */
+  .content.has-pager{padding-bottom:96px}
 </style>
 </head>
 <body>
@@ -1934,13 +1940,14 @@ function drawPickups(){
 // сброс пагинации заявок на первую страницу (при смене фильтров)
 function drawPickupsReset(){pickupsPage=1;drawPickups();}
 // плавающая панель пагинации заявок
-function removePickupsPager(){const ex=$('pickupsPager');if(ex)ex.remove();}
+function removePickupsPager(){const ex=$('pickupsPager');if(ex)ex.remove();const m=$('main');if(m&&!$('ordersPager'))m.classList.remove('has-pager');}
 function renderPickupsPager(total,totalPages,startIdx,shownCount){
   removePickupsPager();
   if(!total)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='pickupsPager';bar.className='orders-pager';
+  {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
     <div class="op-perpage">
@@ -2609,13 +2616,14 @@ function updateKetAllChk(allRows){
   chk.indeterminate=selected>0&&selected<total;
 }
 // плавающая (закреплённая снизу) панель навигации по страницам заказов
-function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();}
+function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();const m=$('main');if(m&&!$('pickupsPager'))m.classList.remove('has-pager');}
 function renderOrdersPager(total,totalPages,startIdx,shownCount){
   removeOrdersPager();
   if(!total)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='ordersPager';bar.className='orders-pager';
+  {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
     <div class="op-perpage">
