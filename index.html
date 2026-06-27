@@ -1541,7 +1541,7 @@ function renderPTabHome(partner){
       </div>
     </div>
     <div class="pcab-hello"><div class="ph-greet">${esc(greet)}, ${esc(firstName)} 👋</div><div class="ph-sub" id="phStats">Загрузка…</div></div>
-    <button class="pcab-call" id="pcabCall">📦 Вызвать курьера<small>Среднее время приезда · 25–40 минут</small></button>
+    <button class="pcab-call" id="pcabCall">📦 Вызвать курьера</button>
     <div class="pcab-info">
       <div class="pcab-row"><span>📍 Адрес</span><b>${esc(partner.address||'—')}</b></div>
       <div class="pcab-row"><span>📞 Телефон</span><b>${partner.phone?esc(phoneDisplay(partner.phone)):'—'}</b></div>
@@ -1589,7 +1589,7 @@ function renderPTabPickups(partner){
   v.innerHTML=`
     <div class="pcab-hist">
       <div class="pcab-hist-h">Мои заборы</div>
-      <button class="pcab-call sm" id="pcabCall2">📦 Вызвать курьера<small>Среднее время приезда · 25–40 минут</small></button>
+      <button class="pcab-call sm" id="pcabCall2">📦 Вызвать курьера</button>
       <div id="pcabPickList" class="pcab-list"><div class="pcab-empty">Загрузка…</div></div>
     </div>`;
   $('pcabCall2').onclick=()=>partnerCallCourier(partner);
