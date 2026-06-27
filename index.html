@@ -1251,10 +1251,12 @@ function phoneDisplay(v){const d=phoneStored(v);return d?'+7 '+fmt10(d):'';}
 // кликабельный телефон для звонка с мобильного
 function phoneLink(v){const d=phoneStored(v);if(!d)return '—';return `<a href="tel:+7${d}" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)">${esc('+7 '+fmt10(d))}</a>`;}
 // ссылка на адрес в 2ГИС (открывает поиск адреса в приложении/сайте)
-function address2gis(addr,cityNm){
+function address2gis(addr,cityNm,orgName){
   const a=(addr||'').trim();
   if(!a)return '<span style="color:var(--muted)">адрес не указан</span>';
-  const q=(cityNm&&cityNm!=='—'?cityNm+', ':'')+a;
+  // запрос для 2ГИС: «Название организации, Город, адрес» — чтобы 2ГИС нашёл сам магазин, а не только точку на карте
+  const org=(orgName||'').trim();
+  const q=(org?org+', ':'')+(cityNm&&cityNm!=='—'?cityNm+', ':'')+a;
   // без href/target — открытие делает только open2gis() по клику, чтобы сайт не открывался параллельно
   return `<a class="addr-link" role="button" tabindex="0" data-gis="${esc(q)}">📍 ${esc(a)}</a>`;
 }
@@ -2332,7 +2334,7 @@ function drawCourierPickupCards(el,rows){
       <div class="cc-head" data-toggle="${p.id}">
         <div class="cc-main">
           <div class="cc-client">${esc(p.name)||'Без названия'}</div>
-          <div class="cc-addr-row">${address2gis(p.address,cityName(p.city_id))}</div>
+          <div class="cc-addr-row">${address2gis(p.address,cityName(p.city_id),p.name)}</div>
           ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}</div>`:''}
         </div>
         <div class="cc-right"><span class="cc-chev">▾</span></div>
