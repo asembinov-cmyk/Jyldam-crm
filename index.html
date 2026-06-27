@@ -1992,6 +1992,12 @@ function renderDashboard(){
   // помощники: город Алматы/Астана
   const isAlmaty=cid=>/алмат/i.test(cityName(cid)||'');
   const isAstana=cid=>/астан|нур-?султан/i.test(cityName(cid)||'');
+  // город забора заказа: pickup_city_id, а если пусто — город партнёра-отправителя
+  const orderPickupCity=o=>{
+    if(o.pickup_city_id)return o.pickup_city_id;
+    if(o.partner_id){const p=S.partners.find(x=>x.id===o.partner_id);if(p&&p.city_id)return p.city_id;}
+    return null;
+  };
   // список курьеров-заборщиков (для колонок)
   const courierList=[...(S.couriers||[])].sort((a,b)=>(a.fio||'').localeCompare(b.fio||'',''));
   // собираем все даты (по дате создания заказов и заявок)
@@ -2008,8 +2014,8 @@ function renderDashboard(){
     const collectedPickups=dayPickups.filter(p=>isCollectedStatus(p.status_id));
     // заказы: всего + по городу забора (pickup_city_id)
     const ordTotal=dayOrders.length;
-    const ordAlmaty=dayOrders.filter(o=>isAlmaty(o.pickup_city_id)).length;
-    const ordAstana=dayOrders.filter(o=>isAstana(o.pickup_city_id)).length;
+    const ordAlmaty=dayOrders.filter(o=>isAlmaty(orderPickupCity(o))).length;
+    const ordAstana=dayOrders.filter(o=>isAstana(orderPickupCity(o))).length;
     // заборы: СОБРАНО из ВСЕГО + собранные по городу заявки
     const pkTotal=dayPickups.length;            // всего заявок с забором в этот день
     const pkCollected=collectedPickups.length;  // из них собрано (забрал посылки)
