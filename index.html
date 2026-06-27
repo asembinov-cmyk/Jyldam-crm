@@ -1518,7 +1518,7 @@ function showModal(title,bodyHtml,onSave,opts={}){
   const ov=document.createElement('div');ov.className='overlay';
   const foot=opts.readonly
     ? `<div class="modal-foot"><button class="btn primary" data-close>${esc(opts.closeLabel||'Закрыть')}</button></div>`
-    : `<div class="modal-foot"><button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>Сохранить</button></div>`;
+    : `<div class="modal-foot">${opts.clearBtn?'<button class="btn ghost" data-clear>Очистить</button>':''}<button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>Сохранить</button></div>`;
   ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}${opts.mid?' modal-mid':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
   document.body.appendChild(ov);
@@ -1529,6 +1529,8 @@ function showModal(title,bodyHtml,onSave,opts={}){
   ov.onclick=e=>{if(e.target===ov)close();};
   const sv=ov.querySelector('[data-save]');
   if(sv)sv.onclick=async()=>{sv.disabled=true;const ok=await onSave();sv.disabled=false;if(ok!==false)close();};
+  const clr=ov.querySelector('[data-clear]');
+  if(clr&&typeof opts.clearBtn==='function')clr.onclick=()=>opts.clearBtn(ov);
   document.addEventListener('keydown',function esc2(e){if(e.key==='Escape'){close();document.removeEventListener('keydown',esc2);}});
   const first=ov.querySelector('input,select,textarea');if(first)setTimeout(()=>first.focus(),50);
   return ov;
@@ -2583,7 +2585,19 @@ function pickupModal(id,readonly){
         await logAction('create','pickups',{entity_id:u.id,entity_label:pickupLabel(u)});}
       delete pickupDrafts[pickupDraftKey(id)]; // сохранили — черновик больше не нужен
       toast(id?'Сохранено':'Карточка создана');renderPickups();return true;
-    },{readonly:ro});
+    },{readonly:ro,clearBtn:ro?null:(ov)=>{
+      // очистить все поля кроме даты
+      ['m_name','m_address'].forEach(fid=>{const el=$(fid);if(el)el.value='';});
+      ['m_city','m_district','m_courier','m_sales','m_proc'].forEach(fid=>{const el=$(fid);if(el)el.value='';});
+      // телефон
+      const ph=$('m_phone');if(ph){ph.value='';ph.dataset.phone='';}
+      // сбросить подсветку обязательных полей
+      const cf=$('m_courier');if(cf)cf.style.borderColor='';
+      // очистить черновик
+      delete pickupDrafts[pickupDraftKey(id)];
+      const nameEl=$('m_name');if(nameEl)nameEl.focus();
+      toast('Поля очищены');
+    }});
   attachPhone('m_phone',d.phone);
   if(!ro){
     // автозапоминание: при любом изменении поля пишем черновик (не теряется при закрытии)
