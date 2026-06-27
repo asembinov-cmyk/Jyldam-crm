@@ -2558,44 +2558,54 @@ function genOrderCode(){
 // сколько заказов уже создано по этой заявке
 function ordersCountForPickup(pickupId){return S.orders.filter(o=>o.pickup_id===pickupId).length;}
 // Создаёт недостающие заказы-заготовки по заявке, подтягивая данные магазина-партнёра
+const _creatingOrders={}; // защита от параллельного создания заказов по одной заявке
 async function createOrdersFromPickup(pickupId,opts){
   opts=opts||{};
   const p=S.pickups.find(x=>x.id===pickupId);if(!p)return;
+  // если по этой заявке уже идёт создание — не запускаем второй раз (защита от двойного клика/гонки)
+  if(_creatingOrders[pickupId]){if(!opts.silent)toast('Заказы уже создаются…');return;}
   const want=Math.max(0,parseInt(p.orders||'0',10)||0);
-  if(!want){toast('Укажите количество заказов');return;}
+  if(!want){if(!opts.silent)toast('Укажите количество заказов');return;}
   const have=ordersCountForPickup(pickupId);
   const need=want-have;
   if(need<=0){if(!opts.silent)toast(have?`Уже создано ${have} заказ(ов) по заявке`:'Нечего создавать');return;}
-  // ищем партнёра по имени из заявки, чтобы подтянуть его данные
-  const partner=S.partners.find(x=>x.name===p.name)||null;
-  // тип доставки по умолчанию — курьерский, если есть такой тип
-  const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
-  const baseStatus=defaultOrderStatusId();
-  let created=0;
-  for(let i=0;i<need;i++){
-    const row={
-      code:genOrderCode(),
-      pickup_id:pickupId,
-      partner_id:partner?partner.id:null,
-      sender:partner?partner.name:(p.name||''),
-      pickup_date:p.pickup_date||null,
-      phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
-      address:'', // адрес доставки клиента заполняется вручную, не адрес магазина
-      client:'',weight:null,qty:1,
-      delivery_id:courierDelivery?courierDelivery.id:null,
-      courier_city_id:null,
-      pickup_city_id:partner?partner.city_id||null:(p.city_id||null), // город забора из партнёра/заявки
-      status_id:baseStatus,
-      sales_id:partner?partner.sales_id:(p.sales_id||null),
-      processor_id:partner?partner.processor_id:(p.processor_id||null),
-      cost:partner?(courierDelivery?partner.tariff_courier:partner.tariff_post)||0:0,
-      index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
-    };
-    const u=await dbInsert('orders',row);
-    if(u){S.orders.unshift(u);created++;}
+  _creatingOrders[pickupId]=true;
+  try{
+    // ищем партнёра по имени из заявки, чтобы подтянуть его данные
+    const partner=S.partners.find(x=>x.name===p.name)||null;
+    // тип доставки по умолчанию — курьерский, если есть такой тип
+    const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
+    const baseStatus=defaultOrderStatusId();
+    let created=0;
+    for(let i=0;i<need;i++){
+      // перепроверяем фактическое количество перед КАЖДОЙ вставкой — не создаём лишнего
+      if(ordersCountForPickup(pickupId)>=want)break;
+      const row={
+        code:genOrderCode(),
+        pickup_id:pickupId,
+        partner_id:partner?partner.id:null,
+        sender:partner?partner.name:(p.name||''),
+        pickup_date:p.pickup_date||null,
+        phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
+        address:'', // адрес доставки клиента заполняется вручную, не адрес магазина
+        client:'',weight:null,qty:1,
+        delivery_id:courierDelivery?courierDelivery.id:null,
+        courier_city_id:null,
+        pickup_city_id:partner?partner.city_id||null:(p.city_id||null), // город забора из партнёра/заявки
+        status_id:baseStatus,
+        sales_id:partner?partner.sales_id:(p.sales_id||null),
+        processor_id:partner?partner.processor_id:(p.processor_id||null),
+        cost:partner?(courierDelivery?partner.tariff_courier:partner.tariff_post)||0:0,
+        index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
+      };
+      const u=await dbInsert('orders',row);
+      if(u){S.orders.unshift(u);created++;}
+    }
+    if(created&&!opts.silent)toast(`Создано заказов: ${created}`);
+    return created;
+  }finally{
+    delete _creatingOrders[pickupId]; // снимаем блокировку в любом случае
   }
-  if(created)toast(`Создано заказов: ${created}`);
-  return created;
 }
 // Окно: список заказов, созданных по заявке, с возможностью прикрепить фото к каждому
 async function pickupOrdersModal(pickupId){
