@@ -2234,15 +2234,29 @@ async function delPickup(id){
   if(!confirm(`Удалить карточку «${p?.name||''}»?`))return;
   if(await dbDelete('pickups',id)){await logAction('delete','pickups',{entity_id:id,entity_label:pickupLabel(p)});S.pickups=S.pickups.filter(x=>x.id!==id);toast('Удалено');renderPickups();}
 }
+// ── ЧЕРНОВИКИ карточки заявки (несохранённые данные не теряются при закрытии) ──
+const pickupDrafts={}; // ключ: id заявки или 'new'
+function pickupDraftKey(id){return id||'new';}
+// собрать текущие значения формы заявки
+function readPickupForm(){
+  return {pickup_date:val('m_date'),city_id:val('m_city'),name:val('m_name'),address:val('m_address'),
+    phone:phoneVal('m_phone'),district_id:val('m_district'),courier_id:val('m_courier'),
+    orders:val('m_orders'),sales_id:val('m_sales'),processor_id:val('m_proc'),status_id:val('m_status')};
+}
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
-  const d=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',status_id:(S.statuses[0]?S.statuses[0].id:'')};
+  const base=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',status_id:(S.statuses[0]?S.statuses[0].id:'')};
   const ro=readonly||!can("pickups","edit");
+  // если есть несохранённый черновик для этой заявки — подставляем его (только при редактировании)
+  const draft=!ro?pickupDrafts[pickupDraftKey(id)]:null;
+  const d=draft?Object.assign({},base,draft):base;
+  const hasDraft=!!draft;
   const dOpts=cid=>S.districts.filter(x=>!cid||x.city_id===cid);
   const cOpts=cid=>S.couriers.filter(x=>!cid||x.city_id===cid);
   const dis=ro?'disabled':'';
   showModal(id?(ro?'Карточка забора':'Карточка забора'):'Новая карточка забора',`
+    ${hasDraft?'<div style="background:#fdf3d6;border:1px solid #e3cf9c;color:#8a5a12;border-radius:10px;padding:9px 12px;margin-bottom:14px;font-size:13px">📝 Восстановлены несохранённые данные. Нажмите «Сохранить», чтобы записать их, или измените.</div>':''}
     <div class="grid2">
       <div class="field"><label>Дата</label><input type="date" id="m_date" value="${esc(d.pickup_date||'')}" ${dis}></div>
       <div class="field"><label>Город</label><select id="m_city" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -2270,20 +2284,26 @@ function pickupModal(id,readonly){
         await logAction('update','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:buildChanges(before,p)});}
       else{const u=await dbInsert('pickups',row);if(!u)return false;S.pickups.unshift(u);
         await logAction('create','pickups',{entity_id:u.id,entity_label:pickupLabel(u)});}
+      delete pickupDrafts[pickupDraftKey(id)]; // сохранили — черновик больше не нужен
       toast(id?'Сохранено':'Карточка создана');renderPickups();return true;
     },{readonly:ro});
   attachPhone('m_phone',d.phone);
   if(!ro){
+    // автозапоминание: при любом изменении поля пишем черновик (не теряется при закрытии)
+    const saveDraft=()=>{pickupDrafts[pickupDraftKey(id)]=readPickupForm();};
+    ['m_date','m_city','m_name','m_address','m_phone','m_district','m_courier','m_orders','m_sales','m_proc','m_status'].forEach(fid=>{
+      const el=$(fid);if(el){el.addEventListener('input',saveDraft);el.addEventListener('change',saveDraft);}
+    });
     const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
       $('m_district').innerHTML='<option value="">—</option>'+dOpts(cid).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
-      $('m_courier').innerHTML='<option value="">— не назначен —</option>'+cOpts(cid).map(x=>`<option value="${x.id}">${esc(x.fio)}</option>`).join('');};
+      $('m_courier').innerHTML='<option value="">— не назначен —</option>'+cOpts(cid).map(x=>`<option value="${x.id}">${esc(x.fio)}</option>`).join('');saveDraft();};
     $('m_name').onchange=e=>{const pt=S.partners.find(x=>x.name===e.target.value);if(pt){
       if(pt.address)$('m_address').value=pt.address;
       if(pt.phone){const el=$('m_phone');el.dataset.phone=phoneStored(pt.phone);el.value=fmt10(phoneStored(pt.phone));}
       if(pt.city_id){cs.value=pt.city_id;cs.onchange();}
       if(pt.district_id)$('m_district').value=pt.district_id;
       if(pt.sales_id)$('m_sales').value=pt.sales_id;
-      if(pt.processor_id)$('m_proc').value=pt.processor_id;}};
+      if(pt.processor_id)$('m_proc').value=pt.processor_id;}saveDraft();};
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
