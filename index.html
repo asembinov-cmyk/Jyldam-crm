@@ -341,7 +341,21 @@
   .photo-view-ov .x{position:absolute;top:18px;right:22px;font-size:34px;color:#fff;cursor:pointer;line-height:1;background:none;border:none}
 
   /* ── Кабинет партнёра (моб.) ── */
-  .pcab{max-width:520px;margin:0 auto;min-height:100vh;padding:18px 16px 40px;display:flex;flex-direction:column;gap:16px}
+  .pcab{max-width:520px;margin:0 auto;min-height:100vh;padding:18px 16px 90px;display:flex;flex-direction:column;gap:16px}
+  .pcab-view{display:flex;flex-direction:column;gap:16px}
+  /* нижнее меню */
+  .pcab-nav{position:fixed;left:0;right:0;bottom:0;z-index:8500;display:flex;background:var(--card);
+    border-top:1px solid var(--line);box-shadow:0 -4px 20px -8px rgba(20,17,13,.2);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px))}
+  .pcab-nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;
+    cursor:pointer;padding:8px 4px;font:inherit;font-size:11px;font-weight:600;color:var(--muted);border-radius:12px;transition:.15s}
+  .pcab-nav-btn .pn-ic{font-size:21px;line-height:1;filter:grayscale(.4);opacity:.7}
+  .pcab-nav-btn.active{color:var(--rust)}
+  .pcab-nav-btn.active .pn-ic{filter:none;opacity:1}
+  .pcab-nav-btn:active{background:var(--paper)}
+  /* приветствие */
+  .pcab-hello{background:linear-gradient(135deg,#fff,var(--paper));border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+  .ph-greet{font-family:'Fraunces',serif;font-weight:600;font-size:21px;line-height:1.15}
+  .ph-sub{margin-top:6px;font-size:14px;color:var(--muted);font-weight:600}
   .pcab-err,.pcab-empty{padding:40px 20px;text-align:center;color:var(--muted)}
   .pcab-err{min-height:100vh;display:flex;flex-direction:column;justify-content:center;font-size:18px;font-family:'Fraunces',serif}
   .pcab-top{padding-top:8px}
@@ -350,10 +364,19 @@
     display:grid;place-items:center;color:#fff;font-family:'Fraunces',serif;font-weight:900;font-size:20px}
   .pcab-store{font-family:'Fraunces',serif;font-weight:600;font-size:20px;line-height:1.1}
   .pcab-sub{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
-  .pcab-call{width:100%;padding:20px;border:none;border-radius:16px;background:linear-gradient(135deg,var(--rust),var(--rust-dk));
-    color:#fff;font-size:18px;font-weight:700;cursor:pointer;box-shadow:0 8px 24px -6px rgba(182,80,43,.5);font-family:inherit}
+  .pcab-call{width:100%;padding:18px 20px;border:none;border-radius:16px;background:linear-gradient(135deg,var(--rust),var(--rust-dk));
+    color:#fff;font-size:18px;font-weight:700;cursor:pointer;box-shadow:0 8px 24px -6px rgba(182,80,43,.5);font-family:inherit;
+    display:flex;flex-direction:column;align-items:center;gap:4px}
+  .pcab-call small{font-size:12px;font-weight:500;opacity:.85}
+  .pcab-call.sm{padding:14px 18px;font-size:16px;margin-bottom:14px}
   .pcab-call:active{transform:scale(.98)}
   .pcab-call:disabled{opacity:.6}
+  /* QR-карточка */
+  .pcab-qr-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .pcab-qr-h{font-family:'Fraunces',serif;font-weight:600;font-size:18px}
+  .pcab-qr-sub{font-size:13px;color:var(--muted);max-width:280px}
+  .pcab-qr-box{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;margin:6px 0}
+  .pcab-qr-box img{display:block;border-radius:6px}
   .pcab-info{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
   .pcab-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px}
   .pcab-row span{color:var(--muted)}
@@ -409,7 +432,7 @@
   .pfill-cour-list{font-size:13px;color:var(--ink);line-height:1.6}
   .pfill-cour-note{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.4}
   /* плавающая кнопка WhatsApp «Служба поддержки» */
-  .wa-fab{position:fixed;right:16px;bottom:18px;z-index:9000;display:flex;align-items:center;gap:9px;background:#25D366;color:#fff;text-decoration:none;padding:11px 16px 11px 13px;border-radius:30px;box-shadow:0 6px 20px rgba(0,0,0,.22);font-weight:700;font-size:14px}
+  .wa-fab{position:fixed;right:16px;bottom:78px;z-index:9000;display:flex;align-items:center;gap:9px;background:#25D366;color:#fff;text-decoration:none;padding:11px 16px 11px 13px;border-radius:30px;box-shadow:0 6px 20px rgba(0,0,0,.22);font-weight:700;font-size:14px}
   .wa-fab span{white-space:nowrap}
   .wa-fab:active{transform:scale(.97)}
   @media (max-width:380px){.wa-fab{padding:10px 13px;font-size:13px}}
@@ -1466,19 +1489,76 @@ async function loadPartnerDirs(){
 function renderPartnerCabinet(partner){
   S.__partner=partner;
   if(!partner.__pf)partner.__pf={from:'',to:''};
+  if(!partner.__tab)partner.__tab='home';
   document.body.innerHTML=`
-  <div class="pcab">
+  <div class="pcab" id="pcabRoot">
+    <div class="pcab-view" id="pcabView"></div>
+  </div>
+  <nav class="pcab-nav" id="pcabNav">
+    <button class="pcab-nav-btn" data-ptab="home"><span class="pn-ic">🏠</span><span>Главная</span></button>
+    <button class="pcab-nav-btn" data-ptab="orders"><span class="pn-ic">📦</span><span>Заказы</span></button>
+    <button class="pcab-nav-btn" data-ptab="pickups"><span class="pn-ic">🚚</span><span>Заборы</span></button>
+    <button class="pcab-nav-btn" data-ptab="profile"><span class="pn-ic">👤</span><span>Профиль</span></button>
+  </nav>
+  <a class="wa-fab" href="https://wa.me/77072109898" target="_blank" rel="noopener" aria-label="Служба поддержки WhatsApp">
+    <svg viewBox="0 0 32 32" width="26" height="26" fill="#fff"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.6 6L4 29l8.2-1.6c1.7.9 3.6 1.4 5.6 1.4h.2c6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.8 0-3.5-.5-5-1.4l-.4-.2-4.3.8.8-4.2-.3-.4C5.9 18.6 5.4 16.8 5.4 15 5.4 9.2 10.2 4.4 16 4.4S26.6 9.2 26.6 15 21.8 24.8 16 24.8zm5.9-7.4c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.6.1-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.3-.2-.3 0-.5.1-.7.1-.1.3-.3.4-.5.2-.2.2-.3.3-.5.1-.2 0-.4 0-.5 0-.1-.7-1.7-1-2.3-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.3 5.2 4.6.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.9-.8 2.1-1.5.3-.7.3-1.4.2-1.5-.1-.2-.3-.2-.6-.4z"/></svg>
+    <span>Служба поддержки</span>
+  </a>`;
+  // навигация по вкладкам
+  document.querySelectorAll('[data-ptab]').forEach(b=>{
+    b.classList.toggle('active',b.dataset.ptab===partner.__tab);
+    b.onclick=()=>{partner.__tab=b.dataset.ptab;renderPartnerTab(partner);
+      document.querySelectorAll('[data-ptab]').forEach(x=>x.classList.toggle('active',x.dataset.ptab===partner.__tab));};
+  });
+  renderPartnerTab(partner);
+}
+
+// отрисовка активной вкладки кабинета партнёра
+function renderPartnerTab(partner){
+  const v=$('pcabView');if(!v)return;
+  const tab=partner.__tab||'home';
+  if(tab==='home')return renderPTabHome(partner);
+  if(tab==='orders')return renderPTabOrders(partner);
+  if(tab==='pickups')return renderPTabPickups(partner);
+  if(tab==='profile')return renderPTabProfile(partner);
+}
+
+// ── Вкладка ГЛАВНАЯ ──
+function renderPTabHome(partner){
+  const v=$('pcabView');
+  const hour=new Date().getHours();
+  const greet=hour<6?'Доброй ночи':hour<12?'Доброе утро':hour<18?'Добрый день':'Добрый вечер';
+  const firstName=(partner.name||'').split(' ')[0]||partner.name||'';
+  v.innerHTML=`
     <div class="pcab-top">
       <div class="pcab-brand">
         <div class="pcab-logo">JL</div>
         <div><div class="pcab-store">${esc(partner.name)}</div><div class="pcab-sub">Кабинет партнёра · Jyldam Logistics</div></div>
       </div>
     </div>
-    <button class="pcab-call" id="pcabCall">📦 Вызвать курьера</button>
+    <div class="pcab-hello"><div class="ph-greet">${esc(greet)}, ${esc(firstName)} 👋</div><div class="ph-sub" id="phStats">Загрузка…</div></div>
+    <button class="pcab-call" id="pcabCall">📦 Вызвать курьера<small>Среднее время приезда · 25–40 минут</small></button>
     <div class="pcab-info">
-      <div class="pcab-row"><span>Адрес</span><b>${esc(partner.address||'—')}</b></div>
-      <div class="pcab-row"><span>Телефон</span><b>${partner.phone?esc(phoneDisplay(partner.phone)):'—'}</b></div>
-    </div>
+      <div class="pcab-row"><span>📍 Адрес</span><b>${esc(partner.address||'—')}</b></div>
+      <div class="pcab-row"><span>📞 Телефон</span><b>${partner.phone?esc(phoneDisplay(partner.phone)):'—'}</b></div>
+    </div>`;
+  $('pcabCall').onclick=()=>partnerCallCourier(partner);
+  loadPartnerHomeStats(partner);
+}
+async function loadPartnerHomeStats(partner){
+  const el=$('phStats');if(!el)return;
+  try{
+    const today=new Date().toISOString().slice(0,10);
+    const {data}=await sb.from('orders').select('created_at').eq('partner_id',partner.id).gte('created_at',today);
+    const n=(data||[]).length;
+    el.textContent=`Сегодня отправлений: ${n}`;
+  }catch(e){el.textContent='';}
+}
+
+// ── Вкладка ЗАКАЗЫ ──
+function renderPTabOrders(partner){
+  const v=$('pcabView');
+  v.innerHTML=`
     <div class="pcab-hist">
       <div class="pcab-hist-h">Мои заказы</div>
       <div class="pcab-filters">
@@ -1490,19 +1570,72 @@ function renderPartnerCabinet(partner){
         </div>
       </div>
       <div id="pcabList" class="pcab-list"><div class="pcab-empty">Загрузка…</div></div>
-    </div>
-  </div>
-  <a class="wa-fab" href="https://wa.me/77072109898" target="_blank" rel="noopener" aria-label="Служба поддержки WhatsApp">
-    <svg viewBox="0 0 32 32" width="26" height="26" fill="#fff"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.6 6L4 29l8.2-1.6c1.7.9 3.6 1.4 5.6 1.4h.2c6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.8 0-3.5-.5-5-1.4l-.4-.2-4.3.8.8-4.2-.3-.4C5.9 18.6 5.4 16.8 5.4 15 5.4 9.2 10.2 4.4 16 4.4S26.6 9.2 26.6 15 21.8 24.8 16 24.8zm5.9-7.4c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.6.1-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.3-.2-.3 0-.5.1-.7.1-.1.3-.3.4-.5.2-.2.2-.3.3-.5.1-.2 0-.4 0-.5 0-.1-.7-1.7-1-2.3-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.3 5.2 4.6.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.9-.8 2.1-1.5.3-.7.3-1.4.2-1.5-.1-.2-.3-.2-.6-.4z"/></svg>
-    <span>Служба поддержки</span>
-  </a>`;
-  $('pcabCall').onclick=()=>partnerCallCourier(partner);
+    </div>`;
   const reload=()=>loadPartnerOrders(partner);
   $('pcabq').oninput=reload;
   $('pcabFrom').onchange=e=>{partner.__pf.from=e.target.value;reload();};
   $('pcabTo').onchange=e=>{partner.__pf.to=e.target.value;reload();};
-  $('pcabClear').onclick=()=>{partner.__pf={from:'',to:''};renderPartnerCabinet(partner);};
+  $('pcabClear').onclick=()=>{partner.__pf={from:'',to:''};renderPTabOrders(partner);};
   loadPartnerOrders(partner);
+}
+
+// ── Вкладка ЗАБОРЫ ──
+function renderPTabPickups(partner){
+  const v=$('pcabView');
+  v.innerHTML=`
+    <div class="pcab-hist">
+      <div class="pcab-hist-h">Мои заборы</div>
+      <button class="pcab-call sm" id="pcabCall2">📦 Вызвать курьера<small>Среднее время приезда · 25–40 минут</small></button>
+      <div id="pcabPickList" class="pcab-list"><div class="pcab-empty">Загрузка…</div></div>
+    </div>`;
+  $('pcabCall2').onclick=()=>partnerCallCourier(partner);
+  loadPartnerPickups(partner);
+}
+async function loadPartnerPickups(partner){
+  const box=$('pcabPickList');if(!box)return;
+  let rows=[];
+  try{
+    const {data}=await sb.from('pickups').select('*').eq('partner_id',partner.id).order('pickup_date',{ascending:false}).limit(100);
+    rows=data||[];
+  }catch(e){console.error(e);}
+  if(!rows.length){box.innerHTML='<div class="pcab-empty">Заборов пока нет</div>';return;}
+  box.innerHTML=rows.map(p=>{
+    const st=p.status_id?(statusObj(p.status_id)||{}).name:'';
+    const collected=p.status_id&&isCollectedStatus(p.status_id);
+    return `<div class="pcab-ord">
+      <div class="pcab-ord-h"><b>${esc(fmtDate(p.pickup_date))}</b><span class="pcab-ord-date">${p.orders||0} зак.</span></div>
+      <div class="pcab-ord-sub">${esc(p.address||partner.address||'—')}</div>
+      <div class="pcab-ord-meta">${st?`<span class="pcab-tag ${collected?'lock':''}">${collected?'✅ ':''}${esc(st)}</span>`:''}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Вкладка ПРОФИЛЬ (QR) ──
+function renderPTabProfile(partner){
+  const v=$('pcabView');
+  const link=location.origin+location.pathname+'?p='+encodeURIComponent(partner.qr_code||'');
+  v.innerHTML=`
+    <div class="pcab-top">
+      <div class="pcab-brand">
+        <div class="pcab-logo">JL</div>
+        <div><div class="pcab-store">${esc(partner.name)}</div><div class="pcab-sub">Профиль партнёра</div></div>
+      </div>
+    </div>
+    <div class="pcab-info">
+      <div class="pcab-row"><span>📍 Адрес</span><b>${esc(partner.address||'—')}</b></div>
+      <div class="pcab-row"><span>📞 Телефон</span><b>${partner.phone?esc(phoneDisplay(partner.phone)):'—'}</b></div>
+      ${partner.qr_code?`<div class="pcab-row"><span>Код партнёра</span><b>${esc(partner.qr_code)}</b></div>`:''}
+    </div>
+    <div class="pcab-qr-card">
+      <div class="pcab-qr-h">Мой QR-код</div>
+      <div class="pcab-qr-sub">Покажите курьеру или сохраните для входа в кабинет</div>
+      <div class="pcab-qr-box"><img id="pcabQrImg" alt="QR партнёра" width="220" height="220"></div>
+      <button class="pcab-clear" id="pcabCopyLink">Скопировать ссылку</button>
+    </div>`;
+  const img=$('pcabQrImg');
+  if(img)img.src='https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data='+encodeURIComponent(link);
+  const cp=$('pcabCopyLink');
+  if(cp)cp.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(link).then(()=>toast('Ссылка скопирована')).catch(()=>toast('Не удалось скопировать'));};
 }
 
 // загрузка и отрисовка заказов партнёра с фильтром по дате создания и дате забора
