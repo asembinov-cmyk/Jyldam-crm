@@ -1103,12 +1103,17 @@ async function doLogin(){
   await enterApp();
 }
 async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
-function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();}
+function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();
+  // по умолчанию подставляем +7 (можно стереть и ввести email)
+  const el=$('email');if(el&&!el.value){el.value='+7 ';}
+}
 function hideSplash(){const s=$('splash');if(!s)return;s.classList.add('hide');setTimeout(()=>{if(s.parentNode)s.remove();},600);}
 
 $('loginBtn').onclick=doLogin;
 $('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 $('email').addEventListener('keydown',e=>{if(e.key==='Enter')$('password').focus();});
+// при фокусе на поле логина ставим курсор в конец (после +7)
+$('email').addEventListener('focus',function(){const el=this;if(el.value){const n=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(n,n);}catch(e){}});}});
 $('logoutBtn').onclick=doLogout;
 
 /* ---------- ENTER APP: load all reference data ---------- */
