@@ -93,6 +93,8 @@
   .menu-toggle{display:none;font-size:22px;background:none;border:none;cursor:pointer;color:var(--ink);padding:2px 6px}
   .bottom-nav{display:none}
   .sidebar-backdrop{display:none}
+  .show-more{display:none}
+  .list-count{display:none}
   .logo{font-family:'Fraunces',serif;font-weight:900;font-size:20px;display:flex;align-items:center;gap:10px}
   .logo-img{height:30px;width:auto;display:block}
   .login-logo-img{height:34px;width:auto;display:block;margin-bottom:4px}
@@ -588,6 +590,19 @@
     .resp-table .qty-edit{width:80px}
     .resp-table .status-time{text-align:right;width:100%}
     .filters .date-field input{min-width:0;width:100%}
+    /* ── СВОРАЧИВАЕМЫЕ КАРТОЧКИ: свёрнуто видно только заголовок + кнопки ── */
+    .resp-table tr{position:relative}
+    .resp-table tr td[data-label="Наименование"],.resp-table tr td[data-label="ID"]{padding-top:13px}
+    .resp-table tr td[data-label="Наименование"]::after,.resp-table tr td[data-label="ID"]::after{
+      content:"▾";position:absolute;right:14px;color:var(--rust);font-size:14px;transition:transform .2s}
+    .resp-table tr.open td[data-label="Наименование"]::after,.resp-table tr.open td[data-label="ID"]::after{transform:rotate(180deg)}
+    /* свёрнутая строка: прячем все ячейки кроме заголовка и блока действий */
+    .resp-table tr:not(.open) td{display:none}
+    .resp-table tr:not(.open) td[data-label="Наименование"],
+    .resp-table tr:not(.open) td[data-label="ID"]{display:flex;border-bottom:0}
+    .resp-table tr:not(.open) td.cell-actions{display:flex;border-top:1px solid #e4e9f2}
+    .show-more{display:block;width:100%;margin:4px 0 6px;justify-content:center}
+    .list-count{display:block;text-align:center;font-size:12px;color:var(--muted);padding:4px 0 2px}
   }
 
   /* ── Загрузочный экран (сплэш) ── */
@@ -2313,6 +2328,11 @@ function localToday(){const d=new Date();const off=d.getTimezoneOffset();return 
 let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:localToday(),dateTo:localToday()};
 let pickupsPage=1; // текущая страница пагинации заявок
 let pickupsPerPage=50; // заявок на страницу
+// мобильный режим: вместо пагинации — «Показать ещё»
+const isMobileView=()=>window.matchMedia('(max-width:760px)').matches;
+const MOBILE_STEP=20; // сколько подгружать за раз на мобиле
+let pickupsMobileLimit=MOBILE_STEP; // сколько заявок показано на мобиле
+let ordersMobileLimit=MOBILE_STEP;  // сколько заказов показано на мобиле
 
 function visiblePickups(){
   if(isCourier()){
@@ -2382,12 +2402,20 @@ function drawPickups(){
   if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
   if(isCourier()){drawCourierPickupCards(el,allRows);return;}
   const staff=isStaff();
-  // ── ПАГИНАЦИЯ: по pickupsPerPage заявок на странице ──
-  const totalPages=Math.max(1,Math.ceil(allRows.length/pickupsPerPage));
-  if(pickupsPage>totalPages)pickupsPage=totalPages;
-  if(pickupsPage<1)pickupsPage=1;
-  const startIdx=(pickupsPage-1)*pickupsPerPage;
-  const rows=allRows.slice(startIdx,startIdx+pickupsPerPage);
+  const mobile=isMobileView();
+  // ── ПАГИНАЦИЯ: десктоп — постранично; мобила — «Показать ещё» ──
+  let rows,startIdx,totalPages;
+  if(mobile){
+    if(pickupsMobileLimit>allRows.length)pickupsMobileLimit=Math.max(MOBILE_STEP,allRows.length);
+    rows=allRows.slice(0,pickupsMobileLimit);
+    startIdx=0;totalPages=1;
+  }else{
+    totalPages=Math.max(1,Math.ceil(allRows.length/pickupsPerPage));
+    if(pickupsPage>totalPages)pickupsPage=totalPages;
+    if(pickupsPage<1)pickupsPage=1;
+    startIdx=(pickupsPage-1)*pickupsPerPage;
+    rows=allRows.slice(startIdx,startIdx+pickupsPerPage);
+  }
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
     ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
@@ -2410,6 +2438,12 @@ function drawPickups(){
       </div></td></tr>`).join('')}</tbody></table></div>`;
   el.querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pedit));
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pview,true));
+  // мобила: тап по строке (не по кнопке/полю) сворачивает/разворачивает карточку
+  el.querySelectorAll('[data-prow]').forEach(tr=>tr.onclick=e=>{
+    if(!isMobileView())return;
+    if(e.target.closest('button,select,input,a,.row-actions'))return;
+    tr.classList.toggle('open');
+  });
   // двойной клик по строке открывает заявку (как «Изменить», либо просмотр)
   el.querySelectorAll('[data-prow]').forEach(tr=>tr.ondblclick=e=>{
     if(e.target.closest('button,select,input,a'))return;
@@ -2428,10 +2462,22 @@ function drawPickups(){
       await dbUpdate('pickups',p.id,{orders:v});p.orders=v;toast('Кол-во обновлено');};
     inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
   });
-  renderPickupsPager(allRows.length,totalPages,startIdx,rows.length);
+  if(mobile){
+    // кнопка «Показать ещё» под списком (не плавающая)
+    if(rows.length<allRows.length){
+      const more=document.createElement('button');
+      more.className='btn ghost show-more';
+      more.textContent=`Показать ещё (${allRows.length-rows.length})`;
+      more.onclick=()=>{pickupsMobileLimit+=MOBILE_STEP;drawPickups();};
+      el.appendChild(more);
+    }
+    el.insertAdjacentHTML('beforeend',`<div class="list-count">Показано ${rows.length} из ${allRows.length}</div>`);
+  }else{
+    renderPickupsPager(allRows.length,totalPages,startIdx,rows.length);
+  }
 }
 // сброс пагинации заявок на первую страницу (при смене фильтров)
-function drawPickupsReset(){pickupsPage=1;drawPickups();}
+function drawPickupsReset(){pickupsPage=1;pickupsMobileLimit=MOBILE_STEP;drawPickups();}
 // плавающая панель пагинации заявок
 function removePickupsPager(){const ex=$('pickupsPager');if(ex)ex.remove();const m=$('main');if(m&&!$('ordersPager'))m.classList.remove('has-pager');}
 function renderPickupsPager(total,totalPages,startIdx,shownCount){
@@ -3109,12 +3155,20 @@ function drawOrders(){
   if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
   if(isCourier()){drawCourierOrderCards(el,allRows);return;}
   const staff=isStaff();
-  // ── ПАГИНАЦИЯ: показываем по ORDERS_PER_PAGE заказов на странице ──
-  const totalPages=Math.max(1,Math.ceil(allRows.length/ordersPerPage));
-  if(ordersPage>totalPages)ordersPage=totalPages;
-  if(ordersPage<1)ordersPage=1;
-  const startIdx=(ordersPage-1)*ordersPerPage;
-  const rows=allRows.slice(startIdx,startIdx+ordersPerPage);
+  const mobile=isMobileView();
+  // ── ПАГИНАЦИЯ: десктоп — постранично; мобила — «Показать ещё» ──
+  let rows,startIdx,totalPages;
+  if(mobile){
+    if(ordersMobileLimit>allRows.length)ordersMobileLimit=Math.max(MOBILE_STEP,allRows.length);
+    rows=allRows.slice(0,ordersMobileLimit);
+    startIdx=0;totalPages=1;
+  }else{
+    totalPages=Math.max(1,Math.ceil(allRows.length/ordersPerPage));
+    if(ordersPage>totalPages)ordersPage=totalPages;
+    if(ordersPage<1)ordersPage=1;
+    startIdx=(ordersPage-1)*ordersPerPage;
+    rows=allRows.slice(startIdx,startIdx+ordersPerPage);
+  }
   // если включён режим «выбраны все» — добавляем id текущей страницы в выбор
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
@@ -3152,6 +3206,12 @@ function drawOrders(){
   el.querySelectorAll('[data-oviewphoto]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.oviewphoto);});
   el.querySelectorAll('[data-oedit]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oedit));
   el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));
+  // мобила: тап по строке сворачивает/разворачивает карточку заказа
+  el.querySelectorAll('[data-orow]').forEach(tr=>tr.onclick=e=>{
+    if(!isMobileView())return;
+    if(e.target.closest('button,select,input,a,img,.row-actions,.status-cell'))return;
+    tr.classList.toggle('open');
+  });
   el.querySelectorAll('[data-odel]').forEach(b=>b.onclick=()=>delOrder(b.dataset.odel));
   el.querySelectorAll('[data-obc]').forEach(b=>b.onclick=()=>showBarcode(b.dataset.obc));
   // двойной клик по строке открывает заказ: на редактирование, если есть право, иначе просмотр
@@ -3183,11 +3243,21 @@ function drawOrders(){
     el.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);
   };
   updateKetAllChk(allRows);
-  // плавающая панель пагинации (показываем всегда, чтобы видеть «N из M»)
-  renderOrdersPager(allRows.length,totalPages,startIdx,rows.length);
+  if(mobile){
+    if(rows.length<allRows.length){
+      const more=document.createElement('button');
+      more.className='btn ghost show-more';
+      more.textContent=`Показать ещё (${allRows.length-rows.length})`;
+      more.onclick=()=>{ordersMobileLimit+=MOBILE_STEP;drawOrders();};
+      el.appendChild(more);
+    }
+    el.insertAdjacentHTML('beforeend',`<div class="list-count">Показано ${rows.length} из ${allRows.length}</div>`);
+  }else{
+    renderOrdersPager(allRows.length,totalPages,startIdx,rows.length);
+  }
 }
 // сброс пагинации на первую страницу (при смене фильтров/поиска)
-function drawOrdersReset(){ordersPage=1;ketSelected.clear();ketSelectAll=false;drawOrders();}
+function drawOrdersReset(){ordersPage=1;ordersMobileLimit=MOBILE_STEP;ketSelected.clear();ketSelectAll=false;drawOrders();}
 // синхронизирует чекбокс «выбрать все»: отмечен, если выбраны все заказы текущего фильтра
 function updateKetAllChk(allRows){
   const chk=$('ketChkAll');if(!chk)return;
