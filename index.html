@@ -2527,7 +2527,7 @@ function pickupModal(id,readonly){
       <div class="field full"><label>Адрес</label><input id="m_address" value="${esc(d.address)}" ${dis}></div>
       <div class="field"><label>Номер телефона</label><input id="m_phone" inputmode="numeric" ${dis}></div>
       <div class="field"><label>Район</label><select id="m_district" ${dis}><option value="">—</option>${dOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.district_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Курьер</label><select id="m_courier" ${dis}><option value="">— не назначен —</option>${cOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.courier_id===x.id?'selected':''}>${esc(x.fio)}</option>`).join('')}</select></div>
+      <div class="field"><label>Курьер <span style="color:var(--rust)">*</span></label><select id="m_courier" ${dis}><option value="">— выберите курьера —</option>${cOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.courier_id===x.id?'selected':''}>${esc(x.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Кол-во заказов</label><input type="number" min="0" id="m_orders" value="${esc(d.orders)}" ${dis}></div>
       <div class="field"><label>Менеджер по продажам</label><select id="m_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="m_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
@@ -2535,6 +2535,7 @@ function pickupModal(id,readonly){
     </div>`,
     ro?null:async()=>{
       const name=val('m_name').trim();if(!name){toast('Укажите наименование');return false;}
+      if(!val('m_courier')){toast('Выберите курьера');const cf=$('m_courier');if(cf){cf.focus();cf.style.borderColor='var(--rust)';}return false;}
       const prevStatus=p?(p.status_id||''):'';const newStatus=val('m_status');
       const row={pickup_date:val('m_date')||null,city_id:val('m_city')||null,name,address:val('m_address').trim(),
         phone:phoneVal('m_phone'),district_id:val('m_district')||null,courier_id:val('m_courier')||null,
@@ -2559,7 +2560,7 @@ function pickupModal(id,readonly){
     });
     const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
       $('m_district').innerHTML='<option value="">—</option>'+dOpts(cid).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
-      $('m_courier').innerHTML='<option value="">— не назначен —</option>'+cOpts(cid).map(x=>`<option value="${x.id}">${esc(x.fio)}</option>`).join('');saveDraft();};
+      $('m_courier').innerHTML='<option value="">— выберите курьера —</option>'+cOpts(cid).map(x=>`<option value="${x.id}">${esc(x.fio)}</option>`).join('');saveDraft();};
     $('m_name').onchange=e=>{const pt=S.partners.find(x=>x.name===e.target.value);if(pt){
       if(pt.address)$('m_address').value=pt.address;
       if(pt.phone){const el=$('m_phone');el.dataset.phone=phoneStored(pt.phone);el.value=fmt10(phoneStored(pt.phone));}
