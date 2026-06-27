@@ -127,6 +127,22 @@
   .dash-mini{display:flex;gap:26px;flex-wrap:wrap;padding:14px 20px;margin-bottom:22px;background:var(--card);
     border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);font-size:14px;color:var(--muted)}
   .dash-mini b{font-family:'Fraunces',serif;font-weight:900;font-size:18px;color:var(--ink);margin-right:5px}
+  /* Таблица статистики по дням */
+  .dash-stat{font-size:13px}
+  .dash-stat th{text-align:center;white-space:nowrap;padding:8px 10px}
+  .dash-stat th.grp{font-size:11px;letter-spacing:.04em;border-bottom:1px solid var(--line)}
+  .dash-stat th.grp-ord{background:#eef3fb;color:#2b5c8a}
+  .dash-stat th.grp-pk{background:#f6eed8;color:#8a5a12}
+  .dash-stat th.grp-cour{background:#eef1e8;color:#2f6d36}
+  .dash-stat th.grp-del{background:#f7e7e0;color:#8f3d20}
+  .dash-stat td.num{text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .dash-stat td.d-date{white-space:nowrap}
+  .dash-stat th.c-alm,.dash-stat td.c-alm{background:rgba(61,100,120,.06);color:#3d6478}
+  .dash-stat th.c-ast,.dash-stat td.c-ast{background:rgba(109,90,61,.06);color:#6d5a3d}
+  .dash-stat th.cour-col,.dash-stat td.cour-col{font-size:12px;min-width:54px}
+  .dash-stat tfoot .dash-total td{background:var(--paper);border-top:2px solid var(--line);font-weight:700;
+    position:sticky;bottom:0}
+  .dash-stat tfoot .dash-total td:first-child{font-family:'Fraunces',serif;font-size:14px}
   @media (max-width:760px){.dash-cards{grid-template-columns:1fr 1fr}.dash-mini{gap:14px}}
   .content{flex:1;min-width:0;padding:24px 26px}
 
@@ -1777,6 +1793,7 @@ function stopScan(){
 /* ================= МОДУЛЬ: ДАШБОРД ================= */
 function renderDashboard(){
   const orders=S.orders||[];
+  const pickups=S.pickups||[];
   // классификация по названию статуса
   const isNew=o=>{const s=orderStatusObj(o.status_id);return !s||/получено от отправ|нов|создан/i.test(s.name||'');};
   const inWay=o=>{const s=orderStatusObj(o.status_id);return s&&/прибыл|выехал|пути|курьер|отправл|передан/i.test(s.name||'');};
@@ -1785,12 +1802,43 @@ function renderDashboard(){
   const today=new Date().toISOString().slice(0,10);
   const cNew=orders.filter(isNew).length, cWay=orders.filter(inWay).length,
         cDel=orders.filter(delivered).length, cProb=orders.filter(problem).length;
-  const todayCount=orders.filter(o=>(o.created_at||'').slice(0,10)===today||(o.pickup_date||'').slice(0,10)===today).length;
+  const todayCount=orders.filter(o=>(o.created_at||'').slice(0,10)===today).length;
   const couriersOn=new Set(orders.filter(o=>o.order_courier_id).map(o=>o.order_courier_id)).size;
-  const last=[...orders].sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||'')).slice(0,8);
   const d=new Date();const days=['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
   const months=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   const dateStr=`${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}, ${days[d.getDay()]}`;
+
+  // ── СВОДНАЯ СТАТИСТИКА ПО ДНЯМ ──
+  // помощники: город Алматы/Астана
+  const isAlmaty=cid=>/алмат/i.test(cityName(cid)||'');
+  const isAstana=cid=>/астан|нур-?султан/i.test(cityName(cid)||'');
+  // список курьеров-заборщиков (для колонок)
+  const courierList=[...(S.couriers||[])].sort((a,b)=>(a.fio||'').localeCompare(b.fio||'',''));
+  // собираем все даты (по дате создания заказов и заявок)
+  const dateSet=new Set();
+  orders.forEach(o=>{const dt=(o.created_at||'').slice(0,10);if(dt)dateSet.add(dt);});
+  pickups.forEach(p=>{const dt=(p.created_at||'').slice(0,10);if(dt)dateSet.add(dt);});
+  const allDates=[...dateSet].sort((a,b)=>b.localeCompare(a)); // новые сверху
+  // строим строки статистики
+  const statRows=allDates.map(dt=>{
+    const dayOrders=orders.filter(o=>(o.created_at||'').slice(0,10)===dt);
+    const dayPickups=pickups.filter(p=>(p.created_at||'').slice(0,10)===dt);
+    // заказы: всего + по городу забора (pickup_city_id)
+    const ordTotal=dayOrders.length;
+    const ordAlmaty=dayOrders.filter(o=>isAlmaty(o.pickup_city_id)).length;
+    const ordAstana=dayOrders.filter(o=>isAstana(o.pickup_city_id)).length;
+    // заборы: всего + по городу заявки
+    const pkTotal=dayPickups.length;
+    const pkAlmaty=dayPickups.filter(p=>isAlmaty(p.city_id)).length;
+    const pkAstana=dayPickups.filter(p=>isAstana(p.city_id)).length;
+    // по курьерам-заборщикам: сколько заявок собрал каждый в этот день
+    const byCourier=courierList.map(c=>dayPickups.filter(p=>p.courier_id===c.id).length);
+    // курьерская / почтовая доставка (по типу доставки заказа)
+    const courierDel=dayOrders.filter(o=>isCourierDelivery(o.delivery_id)).length;
+    const mailDel=dayOrders.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length;
+    return {dt,ordTotal,ordAlmaty,ordAstana,pkTotal,pkAlmaty,pkAstana,byCourier,courierDel,mailDel};
+  });
+
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div></div>
     <div class="dash-cards">
@@ -1801,16 +1849,41 @@ function renderDashboard(){
     </div>
     <div class="dash-mini"><span><b>${orders.length}</b> Всего заказов</span><span><b>${todayCount}</b> Сегодня</span><span><b>${couriersOn}</b> Курьеров задействовано</span></div>
     <div class="panel">
-      <div class="panel-head"><h2>Последние заказы</h2><span class="count">${last.length}</span></div>
-      <div class="table-scroll"><table><thead><tr><th>ID</th><th>Получатель</th><th>Телефон</th><th>Статус</th><th>Курьер</th><th>Дата</th></tr></thead>
-      <tbody>${last.length?last.map(o=>`<tr>
-        <td><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong></td>
-        <td>${esc(o.client)||'—'}</td>
-        <td>${o.phone?phoneLink(o.phone):'—'}</td>
-        <td>${statusBadge(o.status_id)}</td>
-        <td>${o.order_courier_id?esc(orderCourierName(o.order_courier_id)):'—'}</td>
-        <td style="white-space:nowrap">${esc(fmtDateTime(o.created_at))}</td>
-      </tr>`).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">Пока нет заказов</td></tr>`}</tbody></table></div>
+      <div class="panel-head"><h2>Статистика по дням</h2><span class="count">${statRows.length}</span></div>
+      <div class="table-scroll"><table class="dash-stat"><thead>
+        <tr>
+          <th rowspan="2">Дата</th>
+          <th colspan="3" class="grp grp-ord">Кол-во заказов</th>
+          <th colspan="3" class="grp grp-pk">Кол-во заборов</th>
+          ${courierList.length?`<th colspan="${courierList.length}" class="grp grp-cour">Курьеры-заборщики (заявок)</th>`:''}
+          <th colspan="2" class="grp grp-del">Доставка</th>
+        </tr>
+        <tr>
+          <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
+          <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
+          ${courierList.map(c=>`<th class="cour-col" title="${esc(c.fio)}">${esc((c.fio||'').split(' ')[0])}</th>`).join('')}
+          <th>Курьерская</th><th>Почтовая</th>
+        </tr></thead>
+        <tbody>${statRows.length?statRows.map(r=>`<tr>
+          <td class="d-date"><b>${esc(fmtDate(r.dt))}</b></td>
+          <td class="num"><b>${r.ordTotal}</b></td><td class="num c-alm">${r.ordAlmaty||'—'}</td><td class="num c-ast">${r.ordAstana||'—'}</td>
+          <td class="num"><b>${r.pkTotal}</b></td><td class="num c-alm">${r.pkAlmaty||'—'}</td><td class="num c-ast">${r.pkAstana||'—'}</td>
+          ${r.byCourier.map(n=>`<td class="num cour-col">${n||'—'}</td>`).join('')}
+          <td class="num">${r.courierDel||'—'}</td><td class="num">${r.mailDel||'—'}</td>
+        </tr>`).join(''):`<tr><td colspan="${8+courierList.length}" style="text-align:center;color:var(--muted);padding:30px">Пока нет данных</td></tr>`}</tbody>
+        ${statRows.length?`<tfoot><tr class="dash-total">
+          <td>Итого</td>
+          <td class="num"><b>${statRows.reduce((s,r)=>s+r.ordTotal,0)}</b></td>
+          <td class="num c-alm">${statRows.reduce((s,r)=>s+r.ordAlmaty,0)}</td>
+          <td class="num c-ast">${statRows.reduce((s,r)=>s+r.ordAstana,0)}</td>
+          <td class="num"><b>${statRows.reduce((s,r)=>s+r.pkTotal,0)}</b></td>
+          <td class="num c-alm">${statRows.reduce((s,r)=>s+r.pkAlmaty,0)}</td>
+          <td class="num c-ast">${statRows.reduce((s,r)=>s+r.pkAstana,0)}</td>
+          ${courierList.map((c,i)=>`<td class="num cour-col">${statRows.reduce((s,r)=>s+r.byCourier[i],0)||'—'}</td>`).join('')}
+          <td class="num">${statRows.reduce((s,r)=>s+r.courierDel,0)}</td>
+          <td class="num">${statRows.reduce((s,r)=>s+r.mailDel,0)}</td>
+        </tr></tfoot>`:''}
+      </table></div>
     </div>`;
 }
 
