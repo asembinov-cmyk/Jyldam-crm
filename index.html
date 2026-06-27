@@ -426,6 +426,8 @@
   .pfill-scan{padding:0 14px;border:none;border-radius:10px;background:var(--moss);color:#fff;font-weight:600;cursor:pointer;white-space:nowrap;font-size:14px}
   .pfill-area{font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%;resize:vertical;min-height:48px}
   .pfill-check{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:600;color:var(--ink);margin:14px 0 4px;cursor:pointer;user-select:none}
+  .pfill-delivery{display:flex;flex-direction:column;gap:2px;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:6px 14px;margin:4px 0 6px}
+  .pfill-delivery .pfill-check{margin:8px 0}
   .pfill-check input{width:20px;height:20px;accent-color:var(--rust);cursor:pointer}
   .pfill-hint{font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:6px;background:var(--paper);border:1px dashed var(--line);border-radius:10px;padding:9px 11px}
   /* блок курьерских городов */
@@ -1788,21 +1790,33 @@ function partnerOrderFieldsHtml(o,i){
       <input id="trk_${o.id}" value="${esc(o.track||'')}" placeholder="Отсканируйте штрих-код">
       <button type="button" class="pfill-scan" data-scan="${o.id}">📷 Скан</button>
     </div>
-    <label class="pfill-check"><input type="checkbox" id="mail_${o.id}" data-mailchk="${o.id}" ${isMail?'checked':''}> Почтовый заказ</label>
+    <label class="pfill-l">Тип доставки</label>
+    <div class="pfill-delivery">
+      <label class="pfill-check"><input type="checkbox" id="cour_chk_${o.id}" data-courchk="${o.id}" ${!isMail?'checked':''}> 🚚 Курьерская доставка</label>
+      <label class="pfill-check"><input type="checkbox" id="mail_${o.id}" data-mailchk="${o.id}" ${isMail?'checked':''}> ✉️ Почтовая доставка</label>
+    </div>
     <div class="pfill-cour" id="cour_${o.id}" style="${isMail?'display:none':''}">
       <div class="pfill-cour-h">🚚 Курьерская доставка по городам:</div>
       <div class="pfill-cour-list">${courierCitiesSorted().map(c=>esc(c.name)).join(' · ')||'список городов пуст'}</div>
-      <div class="pfill-cour-note">В эти города мы доставляем курьерской службой. Остальные направления — почтой (отметьте «Почтовый заказ»).</div>
+      <div class="pfill-cour-note">В эти города мы доставляем курьерской службой. Остальные направления — отметьте «Почтовая доставка».</div>
     </div>
     <label class="pfill-l">Комментарий</label>
     <textarea id="cmt_${o.id}" class="pfill-area" placeholder="Укажите: ФИО · Город · Адрес · Номер телефона" rows="5">${esc(o.comment||'')}</textarea>
     <div class="pfill-hint">Можно скопировать данные из переписки (например, WhatsApp) и вставить сюда. Обязательно указать: ФИО получателя, город, адрес, номер телефона.</div>
   </div>`;
 }
-// показывать блок курьерских городов, пока «Почтовый заказ» не отмечен
+// две взаимоисключающие галочки: курьерская / почтовая. Источник правды — «Почтовая»
 function partnerToggleMail(oid){
-  const chk=$('mail_'+oid);const box=$('cour_'+oid);
-  if(chk&&box)box.style.display=chk.checked?'none':'';
+  const mail=$('mail_'+oid);const cour=$('cour_chk_'+oid);const box=$('cour_'+oid);
+  if(!mail)return;
+  if(cour)cour.checked=!mail.checked; // курьерская = противоположность почтовой
+  if(box)box.style.display=mail.checked?'none':'';
+}
+// клик по «Курьерская» — снимает «Почтовая» и наоборот
+function partnerToggleCourier(oid){
+  const mail=$('mail_'+oid);const cour=$('cour_chk_'+oid);
+  if(mail&&cour)mail.checked=!cour.checked;
+  partnerToggleMail(oid);
 }
 // собрать значения полей одного заказа для сохранения
 function partnerCollectFields(o){
@@ -1837,6 +1851,7 @@ function partnerFillOrders(partner,orders){
     const warn=(S.delivery||[]).length?'':`<div class="pcab-lockmsg" style="background:#fdf3d6;border-color:#e3cf9c;color:#8a5a12">Типы доставки не загрузились. <button type="button" id="reloadDirs" style="margin-left:6px;border:none;background:var(--rust);color:#fff;border-radius:8px;padding:4px 10px;font-weight:600">Загрузить ещё раз</button></div>`;
     wrap.innerHTML=warn+orders.map((o,i)=>partnerOrderFieldsHtml(o,i)).join('');
     wrap.querySelectorAll('[data-mailchk]').forEach(c=>c.onchange=()=>partnerToggleMail(c.dataset.mailchk));
+    wrap.querySelectorAll('[data-courchk]').forEach(c=>c.onchange=()=>partnerToggleCourier(c.dataset.courchk));
     wrap.querySelectorAll('[data-scan]').forEach(b=>{
       b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
     });
@@ -1888,6 +1903,7 @@ function partnerEditOrder(partner,orderId){
     $('pfill').querySelectorAll('input,select,button.pfill-scan').forEach(el=>el.disabled=true);
   }else{
     $('pfill').querySelectorAll('[data-mailchk]').forEach(c=>c.onchange=()=>partnerToggleMail(c.dataset.mailchk));
+    $('pfill').querySelectorAll('[data-courchk]').forEach(c=>c.onchange=()=>partnerToggleCourier(c.dataset.courchk));
     $('pfill').querySelectorAll('[data-scan]').forEach(b=>{
       b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
     });
