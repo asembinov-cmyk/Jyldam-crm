@@ -1104,7 +1104,7 @@ async function doLogin(){
   await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
-async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
+async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
 function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();
   // по умолчанию подставляем +7 (можно стереть и ввести email)
   const el=$('email');if(el&&!el.value){el.value='+7 ';}
@@ -1184,6 +1184,34 @@ async function enterApp(){
     try{ buildNav(); render(); }catch(_){ $('main').innerHTML='<div class="empty"><div class="big">Не удалось открыть раздел</div>Обновите страницу.</div>'; }
   }
   hideSplash();
+  startAutoRefresh(); // фоновое обновление данных каждые 30 сек (без сброса работы)
+}
+
+// ── ФОНОВОЕ АВТООБНОВЛЕНИЕ ДАННЫХ (каждые 30 сек, безопасно) ──
+let _autoRefreshTimer=null;
+function startAutoRefresh(){
+  if(_autoRefreshTimer)clearInterval(_autoRefreshTimer);
+  _autoRefreshTimer=setInterval(autoRefreshTick,30000); // 30 секунд
+}
+// можно ли сейчас обновлять — НЕ обновляем, если пользователь работает
+function canAutoRefresh(){
+  // открыта любая модалка/карточка — не трогаем (чтобы не сбросить ввод)
+  if(document.querySelector('.overlay'))return false;
+  // пользователь печатает/выбирает в каком-то поле — не трогаем
+  const a=document.activeElement;
+  if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return false;
+  // вкладка браузера не активна — нет смысла (обновим, когда вернётся)
+  if(document.hidden)return false;
+  // на экране входа — не обновляем
+  if($('loginScreen')&&$('loginScreen').style.display!=='none')return false;
+  return true;
+}
+async function autoRefreshTick(){
+  if(!canAutoRefresh())return; // занят — пропускаем этот цикл, попробуем через 30 сек
+  try{
+    await refreshForTab(S.tab);   // тихо тянем свежие данные для текущего раздела
+    if(canAutoRefresh())render(); // перерисовываем, только если за время загрузки никто не начал работать
+  }catch(e){console.error('autoRefresh',e);}
 }
 
 /* ---------- ХЕЛПЕРЫ ИМЁН ---------- */
