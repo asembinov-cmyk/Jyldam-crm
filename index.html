@@ -1013,11 +1013,17 @@ function ketOriginCode(cityName){
   if(/астан|нур-?султан|нур\s*султан/.test(nm))return 'ASTANA-KURER';
   return '';
 }
+// выбор аккаунта KET по ГОРОДУ ЗАБОРА заказа: Алматы → отдельный аккаунт, иначе (Астана и пр.) → основной
+function ketAccountForOrder(o){
+  const nm=(o&&o.pickup_city_id?cityName(o.pickup_city_id):'').toLowerCase();
+  if(/алмат/.test(nm))return 'almaty';
+  return 'astana'; // основной (старый) аккаунт по умолчанию
+}
 // отправить один заказ в KET
 async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
   toast('Отправка в KET…');
-  const r=await callKet({action:'send',order:orderToKet(o)});
+  const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
   const result=(r.ket&&r.ket.result)||{};
   if((result.success||'').toUpperCase()==='TRUE'){
@@ -2764,7 +2770,7 @@ function renderOrders(mode){
     let ok=0,fail=0;const errs=[];
     for(const o of list){
       if(!o.phone||o.phone.length<10){fail++;errs.push(`${o.code}: нет телефона`);continue;}
-      const r=await callKet({action:'send',order:orderToKet(o)});
+      const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
       const result=(r&&r.ket&&r.ket.result)||{};
       if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
         const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
