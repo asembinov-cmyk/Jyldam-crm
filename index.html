@@ -2,6 +2,14 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<script>
+// принудительный переход на защищённый https (если открыли по http)
+(function(){try{
+  if(location.protocol==='http:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
+    location.replace('https://'+location.host+location.pathname+location.search+location.hash);
+  }
+}catch(e){}})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Jyldam Logistics — CRM</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
