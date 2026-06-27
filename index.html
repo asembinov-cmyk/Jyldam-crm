@@ -484,6 +484,8 @@
   .pom-sub{font-size:13px;color:var(--muted);margin-bottom:10px}
   .pom-paid{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;font-weight:600;color:var(--ink);cursor:pointer}
   .pom-paid input{width:18px;height:18px;accent-color:var(--rust);cursor:pointer}
+  .pom-paidorder{color:var(--moss)}
+  .pom-paidhint{font-weight:400;color:var(--muted);font-size:12px}
   .pom-sumrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
   .pom-sumrow span{font-size:13px;color:var(--muted);font-weight:600}
   .pom-sum{width:130px;font:inherit;font-family:'Fraunces',serif;font-weight:900;font-size:15px;color:var(--rust-dk);
@@ -851,7 +853,8 @@ const FIELD_LABEL={
   processor_id:'Обработчик',district_id:'Район',name:'Наименование',fio:'ФИО',orders:'Кол-во заказов',
   full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
   tariff_courier:'Тариф курьер',qr_code:'QR-код',id_doc:'Уд. личности',paid_by_sender:'Оплачено отправителем',
-  region:'Область',city_text:'Нас. пункт',comment:'Комментарий',base_type:'Базовый тип',perms:'Права'
+  region:'Область',city_text:'Нас. пункт',comment:'Комментарий',base_type:'Базовый тип',perms:'Права',
+  order_paid:'Оплачен заказ'
 };
 // поля, которые не показываем в истории (служебные)
 const LOG_SKIP_FIELDS=new Set(['id','created_at','status_at','status_history','photos','ket_id','ket_track','ket_synced_at','perms']);
@@ -874,6 +877,7 @@ function logFieldValue(field,v){
     if(field==='role_id')return roleName(v);
     if(field==='phone')return phoneDisplay(v)||String(v);
     if(field==='paid_by_sender')return v?'да':'нет';
+    if(field==='order_paid')return v?'да':'нет';
   }catch(e){}
   return String(v);
 }
@@ -1988,6 +1992,8 @@ function stopScan(){
   if(ov)ov.style.display='none';
 }
 /* ================= МОДУЛЬ: ДАШБОРД ================= */
+// перерисовать дашборд, если он сейчас открыт (после изменения сумм и т.п.)
+function renderDashboardIfActive(){if(S.tab==='dashboard'){try{renderDashboard();}catch(e){}}}
 function renderDashboard(){
   const orders=S.orders||[];
   const pickups=S.pickups||[];
@@ -2644,8 +2650,11 @@ async function pickupOrdersModal(pickupId){
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
       <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
+      ${isStaff()?`
       <label class="pom-paid"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем</label>
-      <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—"></div>
+      <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.order_paid?'disabled':''}></div>
+      <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaidorder="${o.id}" ${o.order_paid?'checked':''}> Оплачен заказ <span class="pom-paidhint">(сумма станет 0)</span></label>
+      `:''}
     </div>`).join('');
     return head+`<div class="pom-list">${cards}</div>`;
   };
@@ -2664,22 +2673,63 @@ async function pickupOrdersModal(pickupId){
       wrap.querySelectorAll('[data-pompaid]').forEach(chk=>{
         chk.onchange=async()=>{
           const o=S.orders.find(x=>x.id===chk.dataset.pompaid);if(!o)return;
-          const v=chk.checked;
-          try{await dbUpdate('orders',o.id,{paid_by_sender:v});o.paid_by_sender=v;toast(v?'Отмечено: оплачено':'Снято: оплачено');}
-          catch(e){chk.checked=!v;toast('Не удалось сохранить');}
+          const v=chk.checked;const before=o.paid_by_sender;
+          try{
+            await dbUpdate('orders',o.id,{paid_by_sender:v});o.paid_by_sender=v;
+            await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),
+              changes:[{field:'paid_by_sender',label:FIELD_LABEL.paid_by_sender,old:before?'да':'нет',new:v?'да':'нет'}]});
+            toast(v?'Отмечено: оплачено':'Снято: оплачено');
+          }catch(e){chk.checked=!v;toast('Не удалось сохранить');}
         };
       });
-      // поле суммы заказа
+      // поле суммы заказа (ручное изменение — главнее авто)
       wrap.querySelectorAll('[data-pomsum]').forEach(inp=>{
         const commit=async()=>{
           const o=S.orders.find(x=>x.id===inp.dataset.pomsum);if(!o)return;
+          if(o.order_paid)return; // если заказ помечен оплаченным — сумма зафиксирована в 0
           const raw=inp.value.trim();
           const v=raw===''?null:Math.max(0,parseFloat(raw)||0);
           if(o.order_sum===v)return;
-          try{await dbUpdate('orders',o.id,{order_sum:v,cost:v});o.order_sum=v;toast('Сумма сохранена');}
-          catch(e){toast('Не удалось сохранить сумму');}
+          const before=o.order_sum;
+          try{
+            await dbUpdate('orders',o.id,{order_sum:v,cost:v});o.order_sum=v;o.cost=v;
+            await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),
+              changes:[{field:'order_sum',label:FIELD_LABEL.order_sum,old:before!=null?String(before):'—',new:v!=null?String(v):'—'}]});
+            toast('Сумма сохранена');
+            renderDashboardIfActive();
+          }catch(e){toast('Не удалось сохранить сумму');}
         };
         inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
+      });
+      // галочка «Оплачен заказ» — сумма→0 (исходная запоминается), снятие — возврат суммы
+      wrap.querySelectorAll('[data-pompaidorder]').forEach(chk=>{
+        chk.onchange=async()=>{
+          const o=S.orders.find(x=>x.id===chk.dataset.pompaidorder);if(!o)return;
+          const v=chk.checked;
+          const beforeSum=o.order_sum;
+          try{
+            let patch;
+            if(v){
+              // запоминаем исходную сумму и обнуляем
+              patch={order_paid:true,order_sum_orig:(o.order_sum!=null?o.order_sum:0),order_sum:0,cost:0};
+            }else{
+              // возвращаем исходную сумму
+              const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
+              patch={order_paid:false,order_sum:back,cost:back,order_sum_orig:null};
+            }
+            await dbUpdate('orders',o.id,patch);
+            Object.assign(o,patch);
+            await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[
+              {field:'order_paid',label:FIELD_LABEL.order_paid,old:v?'нет':'да',new:v?'да':'нет'},
+              {field:'order_sum',label:FIELD_LABEL.order_sum,old:beforeSum!=null?String(beforeSum):'—',new:String(o.order_sum)},
+            ]});
+            toast(v?'Заказ отмечен оплаченным (сумма 0)':'Снято · сумма возвращена');
+            // обновляем поле суммы и его доступность в карточке
+            const sumInp=wrap.querySelector(`[data-pomsum="${o.id}"]`);
+            if(sumInp){sumInp.value=o.order_sum!=null?o.order_sum:'';sumInp.disabled=!!o.order_paid;}
+            renderDashboardIfActive();
+          }catch(e){chk.checked=!v;toast('Не удалось сохранить');}
+        };
       });
       // «Создать ещё заказ» — добавляет ОДИН новый заказ, увеличивает счётчик заявки
       const cb=wrap.querySelector('#pom_create');
