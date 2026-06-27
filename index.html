@@ -3381,7 +3381,7 @@ function bindDir(table,arrKey,modalFn,deps){
   wrap.querySelectorAll('[data-d]').forEach(b=>b.onclick=async()=>{
     const arr=S[arrKey];const item=arr.find(x=>x.id===b.dataset.d);const label=item.name||item.fio||'запись';
     if(!confirm(`Удалить «${label}»?`))return;
-    if(await dbDelete(table,b.dataset.d)){S[arrKey]=arr.filter(x=>x.id!==b.dataset.d);toast('Удалено');renderSettings();}
+    if(await dbDelete(table,b.dataset.d)){S[arrKey]=arr.filter(x=>x.id!==b.dataset.d);toast('Удалено');render();}
   });
 }
 
@@ -3500,7 +3500,7 @@ function partnerModal(id){
         tariff_post:val('p_tpost')?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null};
       if(id){const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(S.partners.find(x=>x.id===id),u);}
       else{const u=await dbInsert('partners',row);if(!u)return false;S.partners.push(u);}
-      toast('Сохранено');renderSettings();return true;});
+      toast('Сохранено');renderPartnersPage();return true;});
   attachPhone('p_phone',p.phone);
   const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
 }
