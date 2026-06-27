@@ -1220,6 +1220,11 @@ function defaultOrderStatusId(){
   const byName=S.orderStatuses.find(s=>/получено от отправител/i.test(s.name||''));
   return byName?byName.id:(S.orderStatuses[0]?S.orderStatuses[0].id:null);
 }
+// статус заявки по умолчанию — «Новый» (или первый в справочнике)
+function defaultPickupStatusId(){
+  const byName=S.statuses.find(s=>/нов/i.test(s.name||''));
+  return byName?byName.id:(S.statuses[0]?S.statuses[0].id:null);
+}
 function fmtDate(d){if(!d)return '—';const p=String(d).slice(0,10).split('-');if(p.length<3)return d;return `${p[2]}.${p[1]}.${p[0]}`;}
 function fmtDateTime(ts){if(!ts)return '';const d=new Date(ts);const p=n=>String(n).padStart(2,'0');
   return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;}
@@ -2504,7 +2509,7 @@ function pickupDraftKey(id){return id||'new';}
 function readPickupForm(){
   return {pickup_date:val('m_date'),city_id:val('m_city'),name:val('m_name'),address:val('m_address'),
     phone:phoneVal('m_phone'),district_id:val('m_district'),courier_id:val('m_courier'),
-    orders:val('m_orders'),sales_id:val('m_sales'),processor_id:val('m_proc'),status_id:val('m_status')};
+    sales_id:val('m_sales'),processor_id:val('m_proc')};
 }
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
@@ -2528,18 +2533,18 @@ function pickupModal(id,readonly){
       <div class="field"><label>Номер телефона</label><input id="m_phone" inputmode="numeric" ${dis}></div>
       <div class="field"><label>Район</label><select id="m_district" ${dis}><option value="">—</option>${dOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.district_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Курьер <span style="color:var(--rust)">*</span></label><select id="m_courier" ${dis}><option value="">— выберите курьера —</option>${cOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.courier_id===x.id?'selected':''}>${esc(x.fio)}</option>`).join('')}</select></div>
-      <div class="field"><label>Кол-во заказов</label><input type="number" min="0" id="m_orders" value="${esc(d.orders)}" ${dis}></div>
       <div class="field"><label>Менеджер по продажам</label><select id="m_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="m_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
-      <div class="field full"><label>Статус</label><select id="m_status" ${dis}><option value="">—</option>${S.statuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
     </div>`,
     ro?null:async()=>{
       const name=val('m_name').trim();if(!name){toast('Укажите наименование');return false;}
       if(!val('m_courier')){toast('Выберите курьера');const cf=$('m_courier');if(cf){cf.focus();cf.style.borderColor='var(--rust)';}return false;}
-      const prevStatus=p?(p.status_id||''):'';const newStatus=val('m_status');
+      const prevStatus=p?(p.status_id||''):'';
+      // статус: у новой заявки — «Новый»; у существующей — сохраняем текущий
+      const newStatus=p?(p.status_id||defaultPickupStatusId()):defaultPickupStatusId();
       const row={pickup_date:val('m_date')||null,city_id:val('m_city')||null,name,address:val('m_address').trim(),
         phone:phoneVal('m_phone'),district_id:val('m_district')||null,courier_id:val('m_courier')||null,
-        orders:parseInt(val('m_orders')||'0',10)||0,sales_id:val('m_sales')||null,processor_id:val('m_proc')||null,
+        orders:(p?(parseInt(p.orders||'0',10)||0):0),sales_id:val('m_sales')||null,processor_id:val('m_proc')||null,
         status_id:newStatus||null};
       let hist=p&&Array.isArray(p.status_history)?p.status_history.slice():[];
       if(newStatus&&newStatus!==prevStatus){row.status_at=new Date().toISOString();hist.push({statusId:newStatus,at:row.status_at});}
@@ -2555,7 +2560,7 @@ function pickupModal(id,readonly){
   if(!ro){
     // автозапоминание: при любом изменении поля пишем черновик (не теряется при закрытии)
     const saveDraft=()=>{pickupDrafts[pickupDraftKey(id)]=readPickupForm();};
-    ['m_date','m_city','m_name','m_address','m_phone','m_district','m_courier','m_orders','m_sales','m_proc','m_status'].forEach(fid=>{
+    ['m_date','m_city','m_name','m_address','m_phone','m_district','m_courier','m_sales','m_proc'].forEach(fid=>{
       const el=$(fid);if(el){el.addEventListener('input',saveDraft);el.addEventListener('change',saveDraft);}
     });
     const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
