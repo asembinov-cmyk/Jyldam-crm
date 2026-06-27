@@ -87,8 +87,8 @@
 
   /* APP */
   .app-shell{display:none}
-  header.topbar{border-bottom:1px solid var(--line);background:rgba(246,242,233,.92);
-    backdrop-filter:blur(8px);position:sticky;top:0;z-index:60}
+  header.topbar{border-bottom:1px solid var(--line);background:#f6f2e9;
+    position:sticky;top:0;z-index:60}
   .topbar-inner{padding:12px 22px;display:flex;align-items:center;gap:16px}
   .menu-toggle{display:none;font-size:22px;background:none;border:none;cursor:pointer;color:var(--ink);padding:2px 6px}
   .logo{font-family:'Fraunces',serif;font-weight:900;font-size:20px;display:flex;align-items:center;gap:10px}
@@ -261,10 +261,10 @@
   .stat .v small{font-size:13px;font-family:'Spline Sans',sans-serif;color:var(--muted);font-weight:500}
 
   /* MODAL */
-  .overlay{position:fixed;inset:0;background:rgba(20,17,13,.45);backdrop-filter:blur(2px);display:grid;
+  .overlay{position:fixed;inset:0;background:rgba(20,17,13,.55);display:grid;
     place-items:center;z-index:100;padding:20px}
   .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:560px;
-    box-shadow:0 30px 80px -30px rgba(20,17,13,.6);max-height:90vh;overflow:auto}
+    box-shadow:0 30px 80px -30px rgba(20,17,13,.6);max-height:90vh;overflow:auto;will-change:transform}
   .modal-wide{max-width:1240px}
   .modal-mid{max-width:720px}
   /* двухколоночный макет карточки заказа: фото слева (половина), форма справа */
