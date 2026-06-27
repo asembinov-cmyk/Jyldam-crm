@@ -91,6 +91,8 @@
     position:sticky;top:0;z-index:60}
   .topbar-inner{padding:12px 22px;display:flex;align-items:center;gap:16px}
   .menu-toggle{display:none;font-size:22px;background:none;border:none;cursor:pointer;color:var(--ink);padding:2px 6px}
+  .bottom-nav{display:none}
+  .sidebar-backdrop{display:none}
   .logo{font-family:'Fraunces',serif;font-weight:900;font-size:20px;display:flex;align-items:center;gap:10px}
   .logo-img{height:30px;width:auto;display:block}
   .login-logo-img{height:34px;width:auto;display:block;margin-bottom:4px}
@@ -536,15 +538,30 @@
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
     .page-head h1{font-size:24px}
     .user-box{padding-left:10px}
-    .content{padding:18px 16px}
-    /* боковая панель -> горизонтальные вкладки сверху */
+    .content{padding:18px 16px;padding-bottom:84px}
+    /* боковая панель -> выдвижное меню (off-canvas) */
     .app-body{display:block}
-    .sidebar{position:static;width:auto;flex:none;min-height:0;height:auto;overflow:visible;border-right:none;border-bottom:1px solid var(--line);
-      padding:10px 14px;background:rgba(238,242,249,.92);flex-direction:row;flex-wrap:wrap;align-items:center}
-    .side-nav{flex-direction:row;flex-wrap:wrap;gap:6px;overflow:visible;flex:1}
-    .side-nav button{font-size:13px;padding:8px 13px;border-radius:30px;background:var(--card);border-color:var(--line)}
-    .side-nav button.active{background:var(--moss);color:#fff;border-color:var(--moss)}
-    .sidebar-logout{margin-top:0;width:auto;flex:none;border-radius:30px}
+    .menu-toggle{display:block}
+    .sidebar{position:fixed;top:0;left:0;height:100vh;width:270px;max-width:82vw;z-index:200;
+      transform:translateX(-100%);transition:transform .26s ease;border-right:1px solid var(--line);
+      border-bottom:none;background:var(--card);padding:18px 14px;overflow-y:auto;
+      flex-direction:column;align-items:stretch;box-shadow:0 0 40px -8px rgba(20,30,60,.4)}
+    .sidebar.open{transform:translateX(0)}
+    .side-nav{flex-direction:column;flex-wrap:nowrap;gap:4px;overflow:visible;flex:1}
+    .side-nav button{font-size:14px;padding:11px 14px;border-radius:10px;background:transparent;border-color:transparent;justify-content:flex-start}
+    .side-nav button.active{background:var(--paper);color:var(--rust-dk);border-color:var(--line)}
+    .sidebar-logout{margin-top:14px;width:100%;flex:none;border-radius:10px}
+    .sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(20,30,60,.45);z-index:190}
+    .sidebar-backdrop.show{display:block}
+    /* нижняя панель быстрых вкладок */
+    .bottom-nav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:150;background:var(--card);
+      border-top:1px solid var(--line);box-shadow:0 -4px 20px -12px rgba(20,30,60,.4);
+      padding:6px 4px;padding-bottom:max(6px,env(safe-area-inset-bottom))}
+    .bottom-nav button{flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;
+      align-items:center;gap:3px;padding:6px 2px;color:var(--muted);font:inherit;font-size:10.5px;font-weight:600}
+    .bottom-nav button svg{width:22px;height:22px}
+    .bottom-nav button.active{color:var(--rust)}
+    .bottom-nav button .bn-more{font-size:21px;line-height:22px;height:22px;display:grid;place-items:center}
     /* Адаптивная таблица заявок: строки -> карточки */
     .resp-table{border:0}
     .resp-table thead{display:none}
@@ -761,9 +778,11 @@
     </div>
   </div></header>
   <div class="app-body">
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <aside class="sidebar" id="sidebar"><nav class="side-nav" id="navTabs"></nav><button class="btn ghost sm sidebar-logout" id="logoutBtn">Выйти</button></aside>
     <main class="content" id="main"></main>
   </div>
+  <nav class="bottom-nav" id="bottomNav"></nav>
 </div>
 
 <script>
@@ -1150,6 +1169,12 @@ $('email').addEventListener('keydown',e=>{if(e.key==='Enter')$('password').focus
 $('email').addEventListener('focus',function(){const el=this;if(el.value){const n=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(n,n);}catch(e){}});}});
 $('logoutBtn').onclick=doLogout;
 
+// ── МОБИЛЬНОЕ ВЫДВИЖНОЕ МЕНЮ ──
+function openSidebar(){const s=$('sidebar'),b=$('sidebarBackdrop');if(s)s.classList.add('open');if(b)b.classList.add('show');}
+function closeSidebar(){const s=$('sidebar'),b=$('sidebarBackdrop');if(s)s.classList.remove('open');if(b)b.classList.remove('show');}
+if($('menuToggle'))$('menuToggle').onclick=()=>{const s=$('sidebar');if(s&&s.classList.contains('open'))closeSidebar();else openSidebar();};
+if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeSidebar;
+
 /* ---------- ENTER APP: load all reference data ---------- */
 async function loadAll(){
   const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips,pickups,orders]=await Promise.all([
@@ -1446,14 +1471,40 @@ function buildNav(){
   $('navTabs').innerHTML=html;
   $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
     if(b.dataset.disabled){toast('Раздел в разработке');return;}
-    S.tab=b.dataset.tab;saveNav();buildNav();
+    S.tab=b.dataset.tab;saveNav();buildNav();closeSidebar();
     $('main').innerHTML='<div class="loading">Обновляем данные…</div>';
     await refreshForTab(S.tab);
     render();
   });
+  buildBottomNav();
 }
 
-/* ================= МОДУЛЬ: ИСТОРИЯ ИЗМЕНЕНИЙ ================= */
+// нижняя панель быстрых вкладок (мобильная). Показывает 4 частых раздела + «Ещё» (открывает полное меню)
+function buildBottomNav(){
+  const el=$('bottomNav');if(!el)return;
+  let items=[];
+  if(isCourierBase()){
+    if(can('pickups','view'))items.push({k:'pickups',label:'Заборы',icon:'pickups'});
+    if(can('orders','view'))items.push({k:'orders',label:'Заказы',icon:'orders'});
+  }else{
+    items.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
+    if(can('pickups','view'))items.push({k:'pickups',label:'Заборы',icon:'pickups'});
+    if(can('orders','view'))items.push({k:'orders',label:'Заказы',icon:'orders'});
+    if(can('directories','view'))items.push({k:'partners',label:'Партнёры',icon:'partners'});
+  }
+  items=items.slice(0,4); // максимум 4 быстрых
+  let html=items.map(it=>`<button data-bn="${it.k}" class="${S.tab===it.k?'active':''}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span></button>`).join('');
+  // кнопка «Ещё» — открывает полное боковое меню
+  html+=`<button data-bnmore="1"><span class="bn-more">☰</span><span>Ещё</span></button>`;
+  el.innerHTML=html;
+  el.querySelectorAll('[data-bn]').forEach(b=>b.onclick=async()=>{
+    S.tab=b.dataset.bn;saveNav();buildNav();closeSidebar();
+    $('main').innerHTML='<div class="loading">Обновляем данные…</div>';
+    await refreshForTab(S.tab);render();
+  });
+  const more=el.querySelector('[data-bnmore]');
+  if(more)more.onclick=()=>openSidebar();
+}
 let hf={q:'',action:'',entity:'',user:'',from:'',to:''};
 const ACTION_LABEL={create:'Создание',update:'Изменение',delete:'Удаление',status:'Смена статуса',ket:'Отправка в KET',login:'Вход',logout:'Выход'};
 
