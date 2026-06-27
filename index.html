@@ -129,6 +129,7 @@
   .dash-card .dc-v{font-family:'Fraunces',serif;font-weight:900;font-size:30px;line-height:1}
   .dash-card .dc-k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-top:3px}
   .dash-card .dc-extra{font-size:11.5px;color:var(--ink);margin-top:6px;font-weight:600}
+  .dash-card .dc-period{font-size:10.5px;color:var(--muted);margin-top:6px;letter-spacing:.02em}
   .dash-card.c-new{background:linear-gradient(135deg,#eef3fb,var(--card))}.dash-card.c-new .dc-ic{background:#3b6fb0}
   .dash-card.c-pickup{background:linear-gradient(135deg,#f7eed8,var(--card))}.dash-card.c-pickup .dc-ic{background:var(--gold)}
   /* карточка городов */
@@ -2026,28 +2027,39 @@ function renderDashboard(){
     return {dt,ordTotal,ordAlmaty,ordAstana,pkTotal,pkCollected,pkAlmaty,pkAstana,byCourier,courierDel,mailDel};
   });
 
-  // ── ДАННЫЕ ДЛЯ ВЕРХНИХ КАРТОЧЕК ──
-  // 1) Заявки на забор (все активные): ожидают (новые/не собранные) vs выполняются (в процессе)
-  const pkActive=pickups.filter(p=>!isCollectedStatus(p.status_id)); // ещё не собранные = активные
+  // ── ДАННЫЕ ДЛЯ ВЕРХНИХ КАРТОЧЕК (за текущий месяц) ──
+  // границы текущего месяца
+  const now=new Date();
+  const mStart=new Date(now.getFullYear(),now.getMonth(),1);
+  const mEnd=new Date(now.getFullYear(),now.getMonth()+1,0);
+  const monthStr=`${mStart.getFullYear()}-${String(mStart.getMonth()+1).padStart(2,'0')}-01`;
+  const monthEndStr=`${mEnd.getFullYear()}-${String(mEnd.getMonth()+1).padStart(2,'0')}-${String(mEnd.getDate()).padStart(2,'0')}`;
+  const inMonth=d=>{const x=(d||'').slice(0,10);return x&&x>=monthStr&&x<=monthEndStr;};
+  // подпись периода: 01.06.2026 – 30.06.2026
+  const periodLabel=`${fmtDate(monthStr)} – ${fmtDate(monthEndStr)}`;
+
+  // 1) ОБЩЕЕ КОЛ-ВО ЗАКАЗОВ за месяц по ДАТЕ ЗАБОРА (pickup_date)
+  const ordersMonth=orders.filter(o=>inMonth(o.pickup_date)).length;
+  // 2) Заявки на забор: собрано за месяц (по дате забора) + сегодня ожидается
+  const pkMonth=pickups.filter(p=>inMonth(p.pickup_date));
+  const pkCollectedMonth=pkMonth.filter(p=>isCollectedStatus(p.status_id)).length;
   const isWaiting=p=>{const s=statusObj(p.status_id);return !s||/нов|ожид|создан|принят/i.test(s.name||'');};
-  const isInProgress=p=>{const s=statusObj(p.status_id);return s&&/процесс|выполн|назнач|выехал|пути|работ/i.test(s.name||'');};
-  const pkWaiting=pkActive.filter(isWaiting).length;
-  const pkInProgress=pkActive.filter(isInProgress).length;
-  const pkActiveTotal=pkActive.length;
-  // 2) По городам (все активные заявки)
-  const cityAstana=pkActive.filter(p=>isAstana(p.city_id)).length;
-  const cityAlmaty=pkActive.filter(p=>isAlmaty(p.city_id)).length;
-  // 3) Курьерская vs Почтовая (все заказы с типом доставки)
-  const delCourier=orders.filter(o=>isCourierDelivery(o.delivery_id)).length;
-  const delMail=orders.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length;
+  const pkTodayWaiting=pickups.filter(p=>(p.pickup_date||'').slice(0,10)===today&&isWaiting(p)).length;
+  // 3) По городам: СОБРАНО за месяц (по дате забора)
+  const pkCollMonth=pkMonth.filter(p=>isCollectedStatus(p.status_id));
+  const cityAstana=pkCollMonth.filter(p=>isAstana(p.city_id)).length;
+  const cityAlmaty=pkCollMonth.filter(p=>isAlmaty(p.city_id)).length;
+  // 4) Курьерская vs Почтовая за месяц (по дате забора заказа)
+  const ordMonth=orders.filter(o=>inMonth(o.pickup_date));
+  const delCourier=ordMonth.filter(o=>isCourierDelivery(o.delivery_id)).length;
+  const delMail=ordMonth.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length;
   const delTotal=delCourier+delMail;
   const pctCourier=delTotal?Math.round(delCourier/delTotal*100):0;
   const pctMail=delTotal?100-pctCourier:0;
-  // 4) Финансы (выручка по order_sum)
-  const monthStart=new Date();monthStart.setDate(1);const monthStr=monthStart.toISOString().slice(0,10);
+  // 5) Финансы (выручка по order_sum) — сегодня и за месяц (по дате забора)
   const sumOf=arr=>arr.reduce((s,o)=>s+(parseFloat(o.order_sum)||0),0);
-  const revToday=sumOf(orders.filter(o=>(o.created_at||'').slice(0,10)===today));
-  const revMonth=sumOf(orders.filter(o=>(o.created_at||'').slice(0,10)>=monthStr));
+  const revToday=sumOf(orders.filter(o=>(o.pickup_date||'').slice(0,10)===today));
+  const revMonth=sumOf(ordMonth);
   const fmtMoney=n=>{if(n>=1000000)return (n/1000000).toFixed(1).replace('.0','')+' млн';return Math.round(n).toLocaleString('ru-RU');};
   // SVG-донат курьерская/почтовая
   const R=34,C=2*Math.PI*R;const courLen=C*pctCourier/100;
@@ -2058,11 +2070,11 @@ function renderDashboard(){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div></div>
     <div class="dash-cards">
-      <div class="dash-card c-new"><div class="dc-ic">＋</div><div><div class="dc-v">${cNew}</div><div class="dc-k">Новые</div></div></div>
-      <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkActiveTotal}</div><div class="dc-k">Заявки на забор</div><div class="dc-extra">${pkWaiting} ожидают · ${pkInProgress} выполняются</div></div></div>
-      <div class="dash-card c-cities"><div class="dc-cities"><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div></div></div>
-      <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div></div></div></div>
-      <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div></div></div>
+      <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div><div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-cities"><div class="dc-cities"><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">собрано · ${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
+      <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
     </div>
     <div class="dash-mini"><span><b>${orders.length}</b> Всего заказов</span><span><b>${todayCount}</b> Сегодня</span><span><b>${couriersOn}</b> Курьеров задействовано</span></div>
     <div class="panel">
