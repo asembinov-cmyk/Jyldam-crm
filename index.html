@@ -1522,7 +1522,11 @@ function showModal(title,bodyHtml,onSave,opts={}){
   ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}${opts.mid?' modal-mid':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
   document.body.appendChild(ov);
-  const close=()=>ov.remove();
+  const close=()=>{
+    // beforeClose может запретить закрытие (например, требовать фото)
+    if(typeof opts.beforeClose==='function'&&opts.beforeClose()===false)return;
+    ov.remove();
+  };
   ov.querySelector('.x').onclick=close;
   if(ov.querySelector('[data-cancel]'))ov.querySelector('[data-cancel]').onclick=close;
   if(ov.querySelector('[data-close]'))ov.querySelector('[data-close]').onclick=close;
@@ -2618,7 +2622,7 @@ function pickupModal(id,readonly){
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:''};
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',paidBySender:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -2708,14 +2712,19 @@ async function pickupOrdersModal(pickupId){
       <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${isStaff()?`
-      <label class="pom-paid"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем</label>
-      <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.order_paid?'disabled':''}></div>
-      <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaidorder="${o.id}" ${o.order_paid?'checked':''}> Оплачен заказ <span class="pom-paidhint">(сумма станет 0)</span></label>
+      <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.paid_by_sender?'disabled':''}></div>
+      <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем <span class="pom-paidhint">(сумма станет 0)</span></label>
       `:''}
     </div>`).join('');
     return head+`<div class="pom-list">${cards}</div>`;
   };
-  showInfo(`Заказы заявки · ${esc(p.name)}`,renderBody(),{closeLabel:'Сохранить'});
+  showInfo(`Заказы заявки · ${p.name||''}`,renderBody(),{closeLabel:'Сохранить',beforeClose:()=>{
+    // фото обязательно: проверяем, что у каждого заказа есть хотя бы одно фото
+    const list=S.orders.filter(o=>o.pickup_id===pickupId);
+    const noPhoto=list.filter(o=>!pickupPhotos(o).length);
+    if(noPhoto.length){toast(`Добавьте фото к заказам (${noPhoto.length} без фото)`);return false;}
+    return true;
+  }});
   drawPickups(); // обновляем счётчик в карточке заявки сразу после автосоздания
   // навешиваем обработчики (после вставки в DOM)
   setTimeout(()=>{
@@ -2727,15 +2736,32 @@ async function pickupOrdersModal(pickupId){
         bindPhotoBlock(box,o,redraw,'orders');
       });
       // галочка «Оплачено отправителем»
+      // галочка «Оплачено отправителем» — обнуляет сумму (исходная запоминается), снятие — возврат
       wrap.querySelectorAll('[data-pompaid]').forEach(chk=>{
         chk.onchange=async()=>{
           const o=S.orders.find(x=>x.id===chk.dataset.pompaid);if(!o)return;
-          const v=chk.checked;const before=o.paid_by_sender;
+          const v=chk.checked;const beforeSum=o.order_sum;
           try{
-            await dbUpdate('orders',o.id,{paid_by_sender:v});o.paid_by_sender=v;
-            await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),
-              changes:[{field:'paid_by_sender',label:FIELD_LABEL.paid_by_sender,old:before?'да':'нет',new:v?'да':'нет'}]});
-            toast(v?'Отмечено: оплачено':'Снято: оплачено');
+            let patch;
+            if(v){
+              // запоминаем исходную сумму и обнуляем
+              patch={paid_by_sender:true,order_sum_orig:(o.order_sum!=null?o.order_sum:0),order_sum:0,cost:0};
+            }else{
+              // возвращаем исходную сумму
+              const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
+              patch={paid_by_sender:false,order_sum:back,cost:back,order_sum_orig:null};
+            }
+            await dbUpdate('orders',o.id,patch);
+            Object.assign(o,patch);
+            await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[
+              {field:'paid_by_sender',label:FIELD_LABEL.paid_by_sender,old:v?'нет':'да',new:v?'да':'нет'},
+              {field:'order_sum',label:FIELD_LABEL.order_sum,old:beforeSum!=null?String(beforeSum):'—',new:String(o.order_sum)},
+            ]});
+            toast(v?'Оплачено отправителем · сумма 0':'Снято · сумма возвращена');
+            // обновляем поле суммы и его доступность
+            const sumInp=wrap.querySelector(`[data-pomsum="${o.id}"]`);
+            if(sumInp){sumInp.value=o.order_sum!=null?o.order_sum:'';sumInp.disabled=!!o.paid_by_sender;}
+            renderDashboardIfActive();
           }catch(e){chk.checked=!v;toast('Не удалось сохранить');}
         };
       });
@@ -2743,7 +2769,7 @@ async function pickupOrdersModal(pickupId){
       wrap.querySelectorAll('[data-pomsum]').forEach(inp=>{
         const commit=async()=>{
           const o=S.orders.find(x=>x.id===inp.dataset.pomsum);if(!o)return;
-          if(o.order_paid)return; // если заказ помечен оплаченным — сумма зафиксирована в 0
+          if(o.paid_by_sender)return; // если оплачено отправителем — сумма зафиксирована в 0
           const raw=inp.value.trim();
           const v=raw===''?null:Math.max(0,parseFloat(raw)||0);
           if(o.order_sum===v)return;
@@ -2757,36 +2783,6 @@ async function pickupOrdersModal(pickupId){
           }catch(e){toast('Не удалось сохранить сумму');}
         };
         inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
-      });
-      // галочка «Оплачен заказ» — сумма→0 (исходная запоминается), снятие — возврат суммы
-      wrap.querySelectorAll('[data-pompaidorder]').forEach(chk=>{
-        chk.onchange=async()=>{
-          const o=S.orders.find(x=>x.id===chk.dataset.pompaidorder);if(!o)return;
-          const v=chk.checked;
-          const beforeSum=o.order_sum;
-          try{
-            let patch;
-            if(v){
-              // запоминаем исходную сумму и обнуляем
-              patch={order_paid:true,order_sum_orig:(o.order_sum!=null?o.order_sum:0),order_sum:0,cost:0};
-            }else{
-              // возвращаем исходную сумму
-              const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
-              patch={order_paid:false,order_sum:back,cost:back,order_sum_orig:null};
-            }
-            await dbUpdate('orders',o.id,patch);
-            Object.assign(o,patch);
-            await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[
-              {field:'order_paid',label:FIELD_LABEL.order_paid,old:v?'нет':'да',new:v?'да':'нет'},
-              {field:'order_sum',label:FIELD_LABEL.order_sum,old:beforeSum!=null?String(beforeSum):'—',new:String(o.order_sum)},
-            ]});
-            toast(v?'Заказ отмечен оплаченным (сумма 0)':'Снято · сумма возвращена');
-            // обновляем поле суммы и его доступность в карточке
-            const sumInp=wrap.querySelector(`[data-pomsum="${o.id}"]`);
-            if(sumInp){sumInp.value=o.order_sum!=null?o.order_sum:'';sumInp.disabled=!!o.order_paid;}
-            renderDashboardIfActive();
-          }catch(e){chk.checked=!v;toast('Не удалось сохранить');}
-        };
       });
       // «Создать ещё заказ» — добавляет ОДИН новый заказ, увеличивает счётчик заявки
       const cb=wrap.querySelector('#pom_create');
@@ -2847,6 +2843,11 @@ function renderOrders(mode){
           <option value="phone" ${of.missing==='phone'?'selected':''}>Нет телефона</option>
           <option value="track" ${of.missing==='track'?'selected':''}>Нет трек-кода</option>
           <option value="index" ${of.missing==='index'?'selected':''}>Нет индекса</option>
+        </select>
+        <select id="ofpaid" title="Фильтр по оплате отправителем">
+          <option value="">Оплата: все</option>
+          <option value="yes" ${of.paidBySender==='yes'?'selected':''}>Оплачено отправителем</option>
+          <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
       </div>
       <div class="filters filters-dates">
@@ -2919,6 +2920,7 @@ function renderOrders(mode){
     drawOrdersReset();
   };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
+  if($('ofpaid'))$('ofpaid').onchange=e=>{of.paidBySender=e.target.value;drawOrdersReset();};
   if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
   if($('ofcreatefrom'))$('ofcreatefrom').onchange=e=>{of.createFrom=e.target.value;renderOrders(ordersMode);};
   if($('ofcreateto'))$('ofcreateto').onchange=e=>{of.createTo=e.target.value;renderOrders(ordersMode);};
@@ -2977,6 +2979,9 @@ function filteredOrders(){
     }
     // фильтр по городу забора
     if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
+    // фильтр по оплате отправителем
+    if(of.paidBySender==='yes'&&!o.paid_by_sender)return false;
+    if(of.paidBySender==='no'&&o.paid_by_sender)return false;
     if(q){const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
