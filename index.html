@@ -2713,6 +2713,8 @@ async function pickupOrdersModal(pickupId){
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${isStaff()?`
       <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.paid_by_sender?'disabled':''}></div>
+      `:''}
+      ${(isStaff()||isCourier())?`
       <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем <span class="pom-paidhint">(сумма станет 0)</span></label>
       `:''}
     </div>`).join('');
