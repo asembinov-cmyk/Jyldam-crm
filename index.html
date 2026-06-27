@@ -135,6 +135,7 @@
   /* карточка городов */
   .dash-card.c-cities{background:linear-gradient(135deg,#eef1e8,var(--card));padding:14px 16px}
   .dc-cities{display:flex;flex-direction:column;gap:10px;width:100%}
+  .dc-cities-h{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:2px}
   .dcity{display:flex;align-items:center;gap:8px;font-size:13px}
   .dcity-n{font-weight:700;color:var(--ink);min-width:54px}
   .dcity-dots{flex:1;color:var(--moss);letter-spacing:1px;font-size:10px;overflow:hidden;white-space:nowrap}
@@ -2094,7 +2095,7 @@ function renderDashboard(){
     <div class="dash-cards">
       <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div><div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
-      <div class="dash-card c-cities"><div class="dc-cities"><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">собрано · ${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Собрано заявок по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
       <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
     </div>
