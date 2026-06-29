@@ -1384,12 +1384,16 @@ function startAutoRefresh(){
   _autoRefreshTimer=setInterval(autoRefreshTick,30000); // 30 секунд
 }
 // можно ли сейчас обновлять — НЕ обновляем, если пользователь работает
+let _lastScrollAt=0;
+window.addEventListener('scroll',()=>{_lastScrollAt=Date.now();},{passive:true});
 function canAutoRefresh(){
   // открыта любая модалка/карточка — не трогаем (чтобы не сбросить ввод)
   if(document.querySelector('.overlay'))return false;
   // пользователь печатает/выбирает в каком-то поле — не трогаем
   const a=document.activeElement;
   if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return false;
+  // пользователь активно листает (скроллил менее 3 сек назад) — не дёргаем
+  if(Date.now()-_lastScrollAt<3000)return false;
   // вкладка браузера не активна — нет смысла (обновим, когда вернётся)
   if(document.hidden)return false;
   // на экране входа — не обновляем
@@ -1399,8 +1403,13 @@ function canAutoRefresh(){
 async function autoRefreshTick(){
   if(!canAutoRefresh())return; // занят — пропускаем этот цикл, попробуем через 30 сек
   try{
+    // запоминаем позицию прокрутки, чтобы не «дёргать» экран при перерисовке
+    const sx=window.scrollX, sy=window.scrollY;
     await refreshForTab(S.tab);   // тихо тянем свежие данные для текущего раздела
-    if(canAutoRefresh())render(); // перерисовываем, только если за время загрузки никто не начал работать
+    if(canAutoRefresh()){
+      render(); // перерисовываем, только если за время загрузки никто не начал работать
+      requestAnimationFrame(()=>{try{window.scrollTo(sx,sy);}catch(e){}});
+    }
   }catch(e){console.error('autoRefresh',e);}
 }
 
