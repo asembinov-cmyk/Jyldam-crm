@@ -91,6 +91,19 @@
     position:sticky;top:0;z-index:60}
   .topbar-inner{padding:12px 22px;display:flex;align-items:center;gap:16px}
   .menu-toggle{display:none;font-size:22px;background:none;border:none;cursor:pointer;color:var(--ink);padding:2px 6px}
+  .calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+  @media (max-width:760px){.calc-grid{grid-template-columns:1fr}}
+  .calc-panel{padding:18px 20px}
+  .calc-h{font-family:'Fraunces',serif;font-weight:600;font-size:16px;margin-bottom:12px}
+  .calc-note{font-size:12.5px;color:var(--muted);margin-bottom:12px;line-height:1.4}
+  .calc-norm-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .calc-norm-row:last-child{border-bottom:0}
+  .cn-label{font-size:14px;font-weight:600;display:flex;flex-direction:column;gap:2px}
+  .cn-hint{font-size:11.5px;color:var(--muted);font-weight:400}
+  .cn-input{flex:none;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+  .cn-input input{width:110px;text-align:right;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px}
+  .calc-save-bar{display:flex;align-items:center;gap:14px}
+  .calc-saved{color:var(--moss);font-weight:600;font-size:14px}
   .bottom-nav{display:none}
   .sidebar-backdrop{display:none}
   .show-more{display:none}
@@ -1224,6 +1237,8 @@ async function loadAll(){
   Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips,pickups,orders});
   // профили и роли — если есть право на модуль "Пользователи"
   if(can('users','view')){ S.profiles=await dbList('profiles',{order:'created_at',asc:true}); }
+  // настройки калькуляции (нормативы)
+  try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){S.calcSettings=null;}
 }
 
 // Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
@@ -1261,6 +1276,8 @@ async function refreshForTab(tab){
       S.roles=await dbList('roles',{order:'created_at',asc:true});
     }else if(tab==='history'){
       await loadActivityLog();
+    }else if(tab==='calc'){
+      try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){}
     }
   }catch(e){console.error('refresh',e);}
 }
@@ -1657,11 +1674,74 @@ function renderCash(){
     <div class="page-head"><div><h1>Касса</h1><p>Учёт денежных операций</p></div></div>
     <div class="panel"><div class="empty"><div class="big">Раздел в разработке</div>Здесь будет касса: приход, расход, баланс.</div></div>`;
 }
+/* ================= МОДУЛЬ: КАЛЬКУЛЯЦИЯ ================= */
+// определения статей расходов калькуляции.
+// kind: 'fixed' — фиксированная стоимость за заказ; 'fund' — месячный фонд, делится на заказы месяца
+const CALC_FIELDS=[
+  {key:'courier',   label:'Курьер (за заказ)',            kind:'fixed', hint:'Стоимость работы курьера'},
+  {key:'pack',      label:'Пакет (за заказ)',             kind:'fixed', hint:'Стоимость пакета'},
+  {key:'gofra',     label:'Гофра (за заказ)',             kind:'fixed', hint:'Стоимость гофры'},
+  {key:'blank',     label:'Бланк (за заказ)',             kind:'fixed', hint:'Печать транспортной наклейки'},
+  {key:'sms',       label:'SMS (за заказ)',               kind:'fixed', hint:'Стоимость SMS-уведомлений'},
+  {key:'driver',    label:'Водитель (за заказ)',          kind:'fixed', hint:'Перевозка склад ↔ сортировка'},
+  {key:'freight',   label:'Доставка груза (за заказ)',    kind:'fixed', hint:'Междугородняя перевозка (курьер по городу — 0)'},
+  {key:'fund_logist',  label:'Фонд ЗП логистов (в месяц)',   kind:'fund', hint:'Делится на кол-во заказов за месяц'},
+  {key:'fund_manager', label:'Фонд ЗП менеджеров (в месяц)', kind:'fund', hint:'Делится на кол-во заказов за месяц'},
+  {key:'fund_processor',label:'Фонд обработки (в месяц)',    kind:'fund', hint:'Делится на кол-во заказов за месяц'},
+];
+// значение норматива из настроек (или 0)
+function calcNorm(key){const cs=S.calcSettings||{};const v=cs[key];return v!=null&&v!==''?parseFloat(v):0;}
+function calcMinProfit(){const cs=S.calcSettings||{};return cs.min_profit!=null&&cs.min_profit!==''?parseFloat(cs.min_profit):0;}
+
 function renderCalc(){
   if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  const cs=S.calcSettings||{};
+  const fixedFields=CALC_FIELDS.filter(f=>f.kind==='fixed');
+  const fundFields=CALC_FIELDS.filter(f=>f.kind==='fund');
+  const fieldRow=f=>`<div class="calc-norm-row">
+    <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
+    <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
+  </div>`;
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Калькуляция</h1><p>Расчёты и сводки</p></div></div>
-    <div class="panel"><div class="empty"><div class="big">Раздел в разработке</div>Здесь будет калькуляция: расчёт стоимости, сводные таблицы.</div></div>`;
+    <div class="page-head"><div><h1>Калькуляция</h1><p>Нормативы расходов для расчёта себестоимости заказов</p></div></div>
+    <div class="calc-grid">
+      <div class="panel calc-panel">
+        <h3 class="calc-h">Фиксированные расходы (за заказ)</h3>
+        ${fixedFields.map(fieldRow).join('')}
+      </div>
+      <div class="panel calc-panel">
+        <h3 class="calc-h">Распределяемые фонды (в месяц)</h3>
+        <p class="calc-note">Эти суммы делятся на количество заказов за месяц. Чем больше заказов — тем меньше на каждый.</p>
+        ${fundFields.map(fieldRow).join('')}
+        <h3 class="calc-h" style="margin-top:18px">Контроль прибыли</h3>
+        <div class="calc-norm-row">
+          <div class="cn-label">Минимальная прибыль<span class="cn-hint">Ниже — жёлтая индикация в заказе</span></div>
+          <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="min_profit" value="${cs.min_profit!=null&&cs.min_profit!==''?esc(cs.min_profit):''}" placeholder="0"> ₸</div>
+        </div>
+      </div>
+    </div>
+    <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы</button><span class="calc-saved" id="calcSaved"></span></div>`;
+  $('calcSaveBtn').onclick=saveCalcSettings;
+}
+
+async function saveCalcSettings(){
+  const btn=$('calcSaveBtn');if(btn)btn.disabled=true;
+  const row={};
+  document.querySelectorAll('[data-calcnorm]').forEach(inp=>{
+    const k=inp.dataset.calcnorm;const v=inp.value.trim();
+    row[k]=v===''?0:parseFloat(v)||0;
+  });
+  try{
+    let saved;
+    if(S.calcSettings&&S.calcSettings.id){
+      saved=await dbUpdate('calc_settings',S.calcSettings.id,row);
+    }else{
+      saved=await dbInsert('calc_settings',row);
+    }
+    if(saved){S.calcSettings=saved;const s=$('calcSaved');if(s){s.textContent='Сохранено ✓';setTimeout(()=>{if(s)s.textContent='';},2500);}toast('Нормативы сохранены');}
+    else toast('Не удалось сохранить');
+  }catch(e){console.error(e);toast('Ошибка сохранения');}
+  if(btn)btn.disabled=false;
 }
 
 /* ---------- MODAL ENGINE ---------- */
