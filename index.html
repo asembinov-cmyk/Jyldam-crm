@@ -121,6 +121,8 @@
   .calc-courier-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
   .calc-courier-tbl td{padding:10px;border-bottom:1px solid var(--line)}
   .calc-courier-tbl th:not(:first-child),.calc-courier-tbl td:not(:first-child){text-align:right}
+  .filters-toggle{display:none}
+  .filters-body{display:contents}
   .bottom-nav{display:none}
   .sidebar-backdrop{display:none}
   .show-more{display:none}
@@ -602,6 +604,9 @@
     .resp-table thead{display:none}
     .resp-table,.resp-table tbody,.resp-table tr,.resp-table td{display:block;width:100%}
     .table-scroll{overflow-x:visible}
+    /* грид статистики дашборда — оставляем горизонтальную прокрутку */
+    .dash-stat-scroll{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+    .dash-stat-scroll .dash-stat{min-width:560px}
     .resp-table tr{
       background:var(--card);border:1px solid var(--line);border-radius:14px;
       box-shadow:var(--shadow);margin-bottom:14px;padding:6px 4px;overflow:hidden;
@@ -629,6 +634,10 @@
     .filters .date-field{width:100%}
     .filters input,.filters select{width:100%}
     .filters #pfdateclear,.filters #ofdateclear{align-self:stretch!important;width:100%}
+    /* сворачиваемые фильтры под кнопкой «Фильтры» */
+    .filters-toggle{display:block;width:100%;justify-content:center}
+    .filters-body{display:none}
+    .filters-body.open{display:flex;flex-direction:column;gap:10px;width:100%}
     /* ── СВОРАЧИВАЕМЫЕ КАРТОЧКИ: свёрнуто видно только заголовок + кнопки ── */
     .resp-table tr{position:relative}
     .resp-table tr td[data-label="Наименование"],.resp-table tr td[data-label="ID"]{padding-top:13px}
@@ -638,7 +647,10 @@
     /* свёрнутая строка: прячем все ячейки кроме заголовка и блока действий */
     .resp-table tr:not(.open) td{display:none}
     .resp-table tr:not(.open) td[data-label="Наименование"],
-    .resp-table tr:not(.open) td[data-label="ID"]{display:flex;border-bottom:0}
+    .resp-table tr:not(.open) td[data-label="ID"],
+    .resp-table tr:not(.open) td[data-label="Отправитель"],
+    .resp-table tr:not(.open) td[data-label="Статус"]{display:flex;border-bottom:1px solid #e4e9f2}
+    .resp-table tr:not(.open) td[data-label="ID"]{border-bottom:1px solid #e4e9f2}
     .resp-table tr:not(.open) td.cell-actions{display:flex;border-top:1px solid #e4e9f2}
     .show-more{display:block;width:100%;margin:4px 0 6px;justify-content:center}
     .list-count{display:block;text-align:center;font-size:12px;color:var(--muted);padding:4px 0 2px}
@@ -2642,7 +2654,7 @@ function renderDashboard(){
     <div class="dash-mini"><span><b>${orders.length}</b> Всего заказов</span><span><b>${todayCount}</b> Сегодня</span><span><b>${couriersOn}</b> Курьеров задействовано</span></div>
     <div class="panel">
       <div class="panel-head"><h2>Статистика по дням</h2><span class="count">${statRows.length}</span></div>
-      <div class="table-scroll"><table class="dash-stat"><thead>
+      <div class="table-scroll dash-stat-scroll"><table class="dash-stat"><thead>
         <tr>
           <th rowspan="2">Дата</th>
           <th colspan="3" class="grp grp-ord">Кол-во заказов</th>
@@ -3356,6 +3368,8 @@ function renderOrders(mode){
       <div class="panel-head"><h2>Список заказов</h2><span class="count" id="ordersCount">${list.length}</span></div>
       <div class="filters">
         <input class="search" id="ofq" placeholder="Поиск: ID, трек, клиент…" value="${esc(of.q)}">
+        <button type="button" class="btn ghost sm filters-toggle" id="ofFiltersToggle">Фильтры ▾</button>
+        <div class="filters-body" id="ofFiltersBody">
         <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partner?partnerName(of.partner):'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
@@ -3372,19 +3386,20 @@ function renderOrders(mode){
           <option value="yes" ${of.paidBySender==='yes'?'selected':''}>Оплачено отправителем</option>
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
-      </div>
-      <div class="filters filters-dates">
-        <span class="fdate-lbl">Создан:</span>
-        <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
-        <input type="date" id="ofcreateto" value="${esc(of.createTo)}" title="Дата создания по">
-        <span class="fdate-lbl">Забор:</span>
-        <input type="date" id="ofpickfrom" value="${esc(of.pickFrom)}" title="Дата забора с">
-        <input type="date" id="ofpickto" value="${esc(of.pickTo)}" title="Дата забора по">
-        <span class="fdate-lbl">Доставка:</span>
-        <input type="date" id="ofdelfrom" value="${esc(of.delFrom)}" title="Дата доставки с">
-        <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">
-        <button class="btn sm" id="oftoday">Сегодня</button>
-        <button class="btn sm" id="ofdateclear">Все даты</button>
+        <div class="filters filters-dates" style="padding:0;margin:0">
+          <span class="fdate-lbl">Создан:</span>
+          <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
+          <input type="date" id="ofcreateto" value="${esc(of.createTo)}" title="Дата создания по">
+          <span class="fdate-lbl">Забор:</span>
+          <input type="date" id="ofpickfrom" value="${esc(of.pickFrom)}" title="Дата забора с">
+          <input type="date" id="ofpickto" value="${esc(of.pickTo)}" title="Дата забора по">
+          <span class="fdate-lbl">Доставка:</span>
+          <input type="date" id="ofdelfrom" value="${esc(of.delFrom)}" title="Дата доставки с">
+          <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">
+          <button class="btn sm" id="oftoday">Сегодня</button>
+          <button class="btn sm" id="ofdateclear">Все даты</button>
+        </div>
+        </div>
       </div>
       <div id="orderTable"></div>
     </div>`;
@@ -3433,6 +3448,7 @@ function renderOrders(mode){
     renderOrders();
   };
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrdersReset();};
+  if($('ofFiltersToggle'))$('ofFiltersToggle').onclick=()=>{const b=$('ofFiltersBody');if(b)b.classList.toggle('open');$('ofFiltersToggle').classList.toggle('active');};
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrdersReset();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrdersReset();};
   if($('ofpartner'))$('ofpartner').oninput=e=>{
