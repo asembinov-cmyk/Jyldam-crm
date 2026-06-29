@@ -104,6 +104,23 @@
   .cn-input input{width:110px;text-align:right;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px}
   .calc-save-bar{display:flex;align-items:center;gap:14px}
   .calc-saved{color:var(--moss);font-weight:600;font-size:14px}
+  .calc-city-head{display:grid;grid-template-columns:1fr 130px 130px;gap:10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;padding:6px 0;border-bottom:1px solid var(--line)}
+  .calc-city-row{display:grid;grid-template-columns:1fr 130px 130px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+  .calc-city-row:last-child{border-bottom:0}
+  .ccr-name{font-size:14px;font-weight:600}
+  .calc-city-row input{text-align:right;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px}
+  .calc-sum-bar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+  .calc-sum-bar select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer}
+  .calc-sum-cnt{color:var(--muted);font-size:14px}
+  .calc-totals{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px}
+  @media (max-width:760px){.calc-totals{grid-template-columns:1fr 1fr}}
+  .ct-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
+  .ct-k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+  .ct-v{font-family:'Fraunces',serif;font-weight:900;font-size:24px;margin-top:6px;line-height:1}
+  .calc-courier-tbl{width:100%;border-collapse:collapse;font-size:14px}
+  .calc-courier-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
+  .calc-courier-tbl td{padding:10px;border-bottom:1px solid var(--line)}
+  .calc-courier-tbl th:not(:first-child),.calc-courier-tbl td:not(:first-child){text-align:right}
   .bottom-nav{display:none}
   .sidebar-backdrop{display:none}
   .show-more{display:none}
@@ -1239,6 +1256,7 @@ async function loadAll(){
   if(can('users','view')){ S.profiles=await dbList('profiles',{order:'created_at',asc:true}); }
   // настройки калькуляции (нормативы)
   try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){S.calcSettings=null;}
+  try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){S.calcCityNorms=[];}
 }
 
 // Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
@@ -1278,6 +1296,8 @@ async function refreshForTab(tab){
       await loadActivityLog();
     }else if(tab==='calc'){
       try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){}
+      try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){}
+      try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
     }
   }catch(e){console.error('refresh',e);}
 }
@@ -1692,9 +1712,76 @@ const CALC_FIELDS=[
 // значение норматива из настроек (или 0)
 function calcNorm(key){const cs=S.calcSettings||{};const v=cs[key];return v!=null&&v!==''?parseFloat(v):0;}
 function calcMinProfit(){const cs=S.calcSettings||{};return cs.min_profit!=null&&cs.min_profit!==''?parseFloat(cs.min_profit):0;}
+// городской норматив (курьер/межгород) по id города; если для города не задан — берём общий
+function calcCityNorm(cityId,key){
+  const row=(S.calcCityNorms||[]).find(r=>r.city_id===cityId);
+  if(row&&row[key]!=null&&row[key]!=='')return parseFloat(row[key]);
+  return calcNorm(key); // запасной — общий норматив
+}
+// город забора заказа (pickup_city_id, иначе город партнёра)
+function orderCalcCity(o){
+  if(o.pickup_city_id)return o.pickup_city_id;
+  if(o.partner_id){const p=(S.partners||[]).find(x=>x.id===o.partner_id);if(p&&p.city_id)return p.city_id;}
+  return null;
+}
+// кол-во заказов за месяц даты забора заказа (для деления фондов)
+function ordersInOrderMonth(o){
+  const d=(o.pickup_date||o.created_at||'').slice(0,7); // YYYY-MM
+  if(!d)return 1;
+  const n=(S.orders||[]).filter(x=>((x.pickup_date||x.created_at||'').slice(0,7))===d).length;
+  return n||1;
+}
+// ПОЛНЫЙ РАСЧЁТ калькуляции заказа: выручка, статьи расходов, прибыль, маржа, ROI.
+// Если у заказа есть сохранённый снимок calc — используем его статьи (старые заказы не пересчитываются нормативами).
+function calcOrder(o){
+  const cityId=orderCalcCity(o);
+  const snap=(o.calc&&typeof o.calc==='object')?o.calc:null;
+  // выручка = сумма заказа (если не задана — 0)
+  const revenue=(o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0;
+  const monthOrders=ordersInOrderMonth(o);
+  // строим статьи расходов
+  const items=CALC_FIELDS.map(f=>{
+    let amount;
+    if(snap&&snap.items&&snap.items[f.key]!=null){
+      amount=parseFloat(snap.items[f.key])||0; // снимок (вкл. ручные правки)
+    }else if(f.kind==='fund'){
+      amount=Math.round((calcNorm(f.key)/monthOrders)*100)/100; // фонд ÷ заказы месяца
+    }else if(f.key==='courier'||f.key==='freight'){
+      amount=calcCityNorm(cityId,f.key); // по городу
+    }else{
+      amount=calcNorm(f.key); // общий фикс
+    }
+    return {key:f.key,label:f.label,amount};
+  });
+  const totalCost=items.reduce((s,it)=>s+(it.amount||0),0);
+  const profit=revenue-totalCost;
+  const margin=revenue>0?(profit/revenue*100):0;
+  const roi=totalCost>0?(profit/totalCost*100):0;
+  return {revenue,items,totalCost,profit,margin,roi,cityId,monthOrders};
+}
+// цвет индикации прибыли: red/yellow/green
+function calcProfitColor(profit){
+  if(profit<0)return 'red';
+  if(profit<calcMinProfit())return 'yellow';
+  return 'green';
+}
 
+let calcSub='norms'; // подвкладка раздела Калькуляция: norms | summary
 function renderCalc(){
   if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Калькуляция</h1><p>Себестоимость, прибыль и заработок по заказам</p></div></div>
+    <div class="subtabs">
+      <button data-calcsub="norms" class="${calcSub==='norms'?'active':''}">Нормативы</button>
+      <button data-calcsub="summary" class="${calcSub==='summary'?'active':''}">Сводка</button>
+    </div>
+    <div id="calcContent"></div>`;
+  $('main').querySelectorAll('[data-calcsub]').forEach(b=>b.onclick=()=>{calcSub=b.dataset.calcsub;renderCalc();});
+  if(calcSub==='norms')renderCalcNorms();
+  else renderCalcSummary();
+}
+
+function renderCalcNorms(){
   const cs=S.calcSettings||{};
   const fixedFields=CALC_FIELDS.filter(f=>f.kind==='fixed');
   const fundFields=CALC_FIELDS.filter(f=>f.kind==='fund');
@@ -1702,8 +1789,10 @@ function renderCalc(){
     <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
     <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
   </div>`;
-  $('main').innerHTML=`
-    <div class="page-head"><div><h1>Калькуляция</h1><p>Нормативы расходов для расчёта себестоимости заказов</p></div></div>
+  // города, где может быть своя ставка (Астана/Алматы и прочие из справочника)
+  const cities=(S.cities||[]);
+  const cityNorm=(cid,key)=>{const r=(S.calcCityNorms||[]).find(x=>x.city_id===cid);return r&&r[key]!=null&&r[key]!==''?r[key]:'';};
+  $('calcContent').innerHTML=`
     <div class="calc-grid">
       <div class="panel calc-panel">
         <h3 class="calc-h">Фиксированные расходы (за заказ)</h3>
@@ -1711,14 +1800,24 @@ function renderCalc(){
       </div>
       <div class="panel calc-panel">
         <h3 class="calc-h">Распределяемые фонды (в месяц)</h3>
-        <p class="calc-note">Эти суммы делятся на количество заказов за месяц. Чем больше заказов — тем меньше на каждый.</p>
+        <p class="calc-note">Делятся на количество заказов за месяц. Чем больше заказов — тем меньше на каждый.</p>
         ${fundFields.map(fieldRow).join('')}
         <h3 class="calc-h" style="margin-top:18px">Контроль прибыли</h3>
         <div class="calc-norm-row">
-          <div class="cn-label">Минимальная прибыль<span class="cn-hint">Ниже — жёлтая индикация в заказе</span></div>
+          <div class="cn-label">Минимальная прибыль<span class="cn-hint">Ниже — жёлтая индикация</span></div>
           <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="min_profit" value="${cs.min_profit!=null&&cs.min_profit!==''?esc(cs.min_profit):''}" placeholder="0"> ₸</div>
         </div>
       </div>
+    </div>
+    <div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Нормативы по городам</h3>
+      <p class="calc-note">Курьер и доставка груза (межгород) могут отличаться по городам. Если поле пустое — берётся общий норматив выше.</p>
+      <div class="calc-city-head"><span>Город</span><span>Курьер (₸)</span><span>Доставка груза (₸)</span></div>
+      ${cities.map(c=>`<div class="calc-city-row" data-citynorm="${c.id}">
+        <span class="ccr-name">${esc(c.name)}</span>
+        <input type="number" min="0" step="0.01" data-ccourier="${c.id}" value="${esc(cityNorm(c.id,'courier'))}" placeholder="общий">
+        <input type="number" min="0" step="0.01" data-cfreight="${c.id}" value="${esc(cityNorm(c.id,'freight'))}" placeholder="общий">
+      </div>`).join('')}
     </div>
     <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы</button><span class="calc-saved" id="calcSaved"></span></div>`;
   $('calcSaveBtn').onclick=saveCalcSettings;
@@ -1738,10 +1837,75 @@ async function saveCalcSettings(){
     }else{
       saved=await dbInsert('calc_settings',row);
     }
-    if(saved){S.calcSettings=saved;const s=$('calcSaved');if(s){s.textContent='Сохранено ✓';setTimeout(()=>{if(s)s.textContent='';},2500);}toast('Нормативы сохранены');}
-    else toast('Не удалось сохранить');
+    if(saved)S.calcSettings=saved;
+    // городские нормативы (курьер/межгород)
+    const cityRows=document.querySelectorAll('[data-citynorm]');
+    for(const el of cityRows){
+      const cid=el.dataset.citynorm;
+      const courierV=el.querySelector(`[data-ccourier="${cid}"]`).value.trim();
+      const freightV=el.querySelector(`[data-cfreight="${cid}"]`).value.trim();
+      const existing=(S.calcCityNorms||[]).find(r=>r.city_id===cid);
+      // если оба пустые и записи нет — пропускаем
+      if(courierV===''&&freightV===''&&!existing)continue;
+      const payload={city_id:cid,courier:courierV===''?null:parseFloat(courierV)||0,freight:freightV===''?null:parseFloat(freightV)||0};
+      if(existing){const u=await dbUpdate('calc_city_norms',existing.id,payload);if(u)Object.assign(existing,u);}
+      else{const u=await dbInsert('calc_city_norms',payload);if(u){if(!S.calcCityNorms)S.calcCityNorms=[];S.calcCityNorms.push(u);}}
+    }
+    const s=$('calcSaved');if(s){s.textContent='Сохранено ✓';setTimeout(()=>{if(s)s.textContent='';},2500);}
+    toast('Нормативы сохранены');
   }catch(e){console.error(e);toast('Ошибка сохранения');}
   if(btn)btn.disabled=false;
+}
+
+// ── СВОДКА: итоги и заработок курьеров ──
+let calcSummaryMonth={year:new Date().getFullYear(),month:new Date().getMonth()};
+function renderCalcSummary(){
+  const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const sel=`${calcSummaryMonth.year}-${String(calcSummaryMonth.month+1).padStart(2,'0')}`;
+  // заказы выбранного месяца (по дате забора)
+  const monthOrders=(S.orders||[]).filter(o=>((o.pickup_date||o.created_at||'').slice(0,7))===sel);
+  // считаем калькуляцию каждого
+  const calcs=monthOrders.map(o=>({o,c:calcOrder(o)}));
+  const totRevenue=calcs.reduce((s,x)=>s+x.c.revenue,0);
+  const totCost=calcs.reduce((s,x)=>s+x.c.totalCost,0);
+  const totProfit=totRevenue-totCost;
+  const avgMargin=totRevenue>0?(totProfit/totRevenue*100):0;
+  const avgRoi=totCost>0?(totProfit/totCost*100):0;
+  // заработок курьеров доставки: courier-норматив города заказа, по order_courier_id
+  const byCourier={};
+  calcs.forEach(({o,c})=>{
+    const cid=o.order_courier_id;if(!cid)return;
+    const courierCost=(c.items.find(i=>i.key==='courier')||{}).amount||0;
+    if(!byCourier[cid])byCourier[cid]={count:0,earn:0};
+    byCourier[cid].count++;byCourier[cid].earn+=courierCost;
+  });
+  const courierRows=Object.entries(byCourier)
+    .map(([cid,v])=>({name:orderCourierName(cid),count:v.count,earn:v.earn}))
+    .sort((a,b)=>b.earn-a.earn);
+  const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
+  const profitColor=totProfit<0?'#c0392b':(totProfit<calcMinProfit()*monthOrders.length?'#c08a2d':'#2e7d32');
+  $('calcContent').innerHTML=`
+    <div class="calc-sum-bar">
+      <select id="calcSumMonth">${months.map((m,i)=>`<option value="${i}" ${calcSummaryMonth.month===i?'selected':''}>${m}</option>`).join('')}</select>
+      <select id="calcSumYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${calcSummaryMonth.year===y?'selected':''}>${y}</option>`;return o;})()}</select>
+      <span class="calc-sum-cnt">Заказов: <b>${monthOrders.length}</b></span>
+    </div>
+    <div class="calc-totals">
+      <div class="ct-card"><div class="ct-k">Выручка</div><div class="ct-v">${fmtMoney(totRevenue)}</div></div>
+      <div class="ct-card"><div class="ct-k">Итого расходы</div><div class="ct-v">${fmtMoney(totCost)}</div></div>
+      <div class="ct-card"><div class="ct-k">Чистая прибыль</div><div class="ct-v" style="color:${profitColor}">${fmtMoney(totProfit)}</div></div>
+      <div class="ct-card"><div class="ct-k">Маржинальность</div><div class="ct-v">${avgMargin.toFixed(1)}%</div></div>
+      <div class="ct-card"><div class="ct-k">ROI</div><div class="ct-v">${avgRoi.toFixed(1)}%</div></div>
+    </div>
+    <div class="panel calc-panel">
+      <h3 class="calc-h">Заработок курьеров доставки</h3>
+      <p class="calc-note">Считается по нормативу «Курьер» города заказа, для заказов, присвоенных курьеру в этом месяце.</p>
+      ${courierRows.length?`<table class="calc-courier-tbl"><thead><tr><th>Курьер</th><th>Заказов</th><th>Заработок</th></tr></thead>
+        <tbody>${courierRows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.count}</td><td><b>${fmtMoney(r.earn)}</b></td></tr>`).join('')}</tbody></table>`
+        :'<div class="empty"><div class="big">Нет данных</div>За этот месяц нет заказов с назначенным курьером.</div>'}
+    </div>`;
+  $('calcSumMonth').onchange=e=>{calcSummaryMonth.month=parseInt(e.target.value,10);renderCalcSummary();};
+  $('calcSumYear').onchange=e=>{calcSummaryMonth.year=parseInt(e.target.value,10);renderCalcSummary();};
 }
 
 /* ---------- MODAL ENGINE ---------- */
