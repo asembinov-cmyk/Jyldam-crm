@@ -1271,10 +1271,10 @@ $('email').addEventListener('input',function(){
   const el=this;const raw=el.value;
   // если есть буквы или @ — это email, форматирование не применяем
   if(/[a-zA-Zа-яА-Я@]/.test(raw))return;
-  // вытаскиваем 10 цифр (убираем 7/8 в начале)
+  // все цифры из поля
   let d=raw.replace(/\D/g,'');
-  if(d.length===11&&(d[0]==='7'||d[0]==='8'))d=d.slice(1);
-  else if(d.length>10&&d[0]==='8')d=d.slice(1);
+  // префикс +7 даёт ведущую 7 (или пользователь ввёл 8) — убираем код страны
+  if(d[0]==='7'||d[0]==='8')d=d.slice(1);
   d=d.slice(0,10);
   el.value=d.length?'+7 '+fmt10(d):'+7 ';
   // курсор в конец (телефон вводят последовательно)
