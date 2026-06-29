@@ -222,6 +222,8 @@
   .dash-period-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
   .head-actions{margin-left:auto;display:flex;gap:10px}
+  .btn.btn-excel{background:#1d7a44;border-color:#166336;color:#fff}
+  .btn.btn-excel:hover{background:#166336}
 
   .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);
     overflow:hidden;margin-bottom:24px}
@@ -3354,7 +3356,7 @@ function renderOrders(mode){
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
-      ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn ghost" id="exportXlsx">⬇ Выгрузить Excel</button><button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
+      ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button><button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
