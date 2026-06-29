@@ -185,6 +185,9 @@
   .page-head{padding:8px 0 18px;display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
   .page-head h1{font-family:'Fraunces',serif;font-weight:900;font-size:30px;letter-spacing:-.03em;line-height:1}
   .page-head p{color:var(--muted);font-size:14px;margin-top:7px}
+  .dash-head{justify-content:space-between}
+  .dash-period-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
   .head-actions{margin-left:auto;display:flex;gap:10px}
 
   .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);
@@ -2190,6 +2193,8 @@ function stopScan(){
 /* ================= МОДУЛЬ: ДАШБОРД ================= */
 // перерисовать дашборд, если он сейчас открыт (после изменения сумм и т.п.)
 function renderDashboardIfActive(){if(S.tab==='dashboard'){try{renderDashboard();}catch(e){}}}
+// выбранный период дашборда (по умолчанию текущий месяц/год)
+let dashPeriod={year:new Date().getFullYear(),month:new Date().getMonth()}; // month 0-11
 function renderDashboard(){
   const orders=S.orders||[];
   const pickups=S.pickups||[];
@@ -2223,7 +2228,10 @@ function renderDashboard(){
   const dateSet=new Set();
   orders.forEach(o=>{const dt=(o.created_at||'').slice(0,10);if(dt)dateSet.add(dt);});
   pickups.forEach(p=>{const dt=(p.pickup_date||'').slice(0,10);if(dt)dateSet.add(dt);});
-  const allDates=[...dateSet].sort((a,b)=>b.localeCompare(a)); // новые сверху
+  const allDatesAll=[...dateSet].sort((a,b)=>b.localeCompare(a)); // новые сверху
+  // фильтруем даты по выбранному месяцу/году (как и верхние карточки)
+  const selMonthStr=`${dashPeriod.year}-${String(dashPeriod.month+1).padStart(2,'0')}`;
+  const allDates=allDatesAll.filter(dt=>dt.slice(0,7)===selMonthStr);
   // строим строки статистики
   const statRows=allDates.map(dt=>{
     const dayOrders=orders.filter(o=>(o.created_at||'').slice(0,10)===dt);
@@ -2252,11 +2260,10 @@ function renderDashboard(){
     return {dt,ordTotal,ordAlmaty,ordAstana,pkTotal,pkCollected,pkAlmaty,pkAstana,byCourier,courierDel,mailDel};
   });
 
-  // ── ДАННЫЕ ДЛЯ ВЕРХНИХ КАРТОЧЕК (за текущий месяц) ──
-  // границы текущего месяца
-  const now=new Date();
-  const mStart=new Date(now.getFullYear(),now.getMonth(),1);
-  const mEnd=new Date(now.getFullYear(),now.getMonth()+1,0);
+  // ── ДАННЫЕ ДЛЯ ВЕРХНИХ КАРТОЧЕК (за выбранный месяц) ──
+  // границы выбранного месяца (dashPeriod)
+  const mStart=new Date(dashPeriod.year,dashPeriod.month,1);
+  const mEnd=new Date(dashPeriod.year,dashPeriod.month+1,0);
   const monthStr=`${mStart.getFullYear()}-${String(mStart.getMonth()+1).padStart(2,'0')}-01`;
   const monthEndStr=`${mEnd.getFullYear()}-${String(mEnd.getMonth()+1).padStart(2,'0')}-${String(mEnd.getDate()).padStart(2,'0')}`;
   const inMonth=d=>{const x=(d||'').slice(0,10);return x&&x>=monthStr&&x<=monthEndStr;};
@@ -2293,7 +2300,13 @@ function renderDashboard(){
     <text x="45" y="49" text-anchor="middle" font-size="17" font-weight="800" font-family="'Fraunces',serif" fill="var(--ink)">${pctCourier}%</text></svg>`;
 
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div></div>
+    <div class="page-head dash-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div>
+      <div class="dash-period-filter">
+        <select id="dashMonth">${months.map((m,i)=>`<option value="${i}" ${dashPeriod.month===i?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)}</option>`).join('')}</select>
+        <select id="dashYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${dashPeriod.year===y?'selected':''}>${y}</option>`;return o;})()}</select>
+        <button class="btn ghost sm" id="dashThisMonth">Текущий</button>
+      </div>
+    </div>
     <div class="dash-cards">
       <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div><div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
@@ -2339,6 +2352,10 @@ function renderDashboard(){
         </tr></tfoot>`:''}
       </table></div>
     </div>`;
+  // обработчики фильтра периода
+  if($('dashMonth'))$('dashMonth').onchange=e=>{dashPeriod.month=parseInt(e.target.value,10);renderDashboard();};
+  if($('dashYear'))$('dashYear').onchange=e=>{dashPeriod.year=parseInt(e.target.value,10);renderDashboard();};
+  if($('dashThisMonth'))$('dashThisMonth').onclick=()=>{dashPeriod={year:new Date().getFullYear(),month:new Date().getMonth()};renderDashboard();};
 }
 
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
