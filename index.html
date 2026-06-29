@@ -573,6 +573,9 @@
 
   @media (max-width:760px){
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
+    .stats.stats-5,.stats.stats-1{grid-template-columns:1fr 1fr;max-width:none}
+    .stats .stat{padding:13px 14px}
+    .stats .stat .v{font-size:24px}
     .page-head h1{font-size:24px}
     .user-box{padding-left:10px}
     .content{padding:18px 16px;padding-bottom:84px}
@@ -649,6 +652,8 @@
     .resp-table tr:not(.open) td[data-label="Наименование"],
     .resp-table tr:not(.open) td[data-label="ID"],
     .resp-table tr:not(.open) td[data-label="Отправитель"],
+    .resp-table tr:not(.open) td[data-label="ФИО клиента"],
+    .resp-table tr:not(.open) td[data-label="Город"],
     .resp-table tr:not(.open) td[data-label="Статус"]{display:flex;border-bottom:1px solid #e4e9f2}
     .resp-table tr:not(.open) td[data-label="ID"]{border-bottom:1px solid #e4e9f2}
     .resp-table tr:not(.open) td.cell-actions{display:flex;border-top:1px solid #e4e9f2}
