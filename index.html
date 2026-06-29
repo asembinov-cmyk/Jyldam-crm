@@ -956,12 +956,31 @@ function pickupLabel(p){return p?(p.name||('заявка '+p.id)):'';}
 
 /* ---------- ФОТО (Supabase Storage) ---------- */
 const PHOTO_BUCKET='pickup-photos';
+// сжимает изображение в браузере перед загрузкой: уменьшает до maxSide px и пережимает в JPEG.
+// Возвращает Blob (или исходный файл, если сжать не удалось).
+async function compressImage(file,maxSide=1280,quality=0.72){
+  try{
+    if(!file||!/^image\//.test(file.type||''))return file; // не картинка — как есть
+    const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(file);});
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=dataUrl;});
+    let {width:w,height:h}=img;
+    if(w<=maxSide&&h<=maxSide&&file.size<600*1024)return file; // уже маленькое — не трогаем
+    if(w>h){if(w>maxSide){h=Math.round(h*maxSide/w);w=maxSide;}}
+    else{if(h>maxSide){w=Math.round(w*maxSide/h);h=maxSide;}}
+    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+    const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
+    const blob=await new Promise(res=>canvas.toBlob(res,'image/jpeg',quality));
+    if(!blob||blob.size>=file.size)return file; // если не стало меньше — оставляем оригинал
+    return blob;
+  }catch(e){console.error('compress',e);return file;}
+}
 // загружает файл в подпапку prefix (например 'order/ID'), возвращает {path,url} или null
 async function uploadPhoto(prefix,file){
   try{
-    const ext=(file.name&&file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'')||'jpg';
-    const path=`${prefix}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.${ext}`;
-    const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,file,{contentType:file.type||'image/jpeg',upsert:false});
+    // сжимаем фото перед загрузкой — ускоряет и загрузку, и показ
+    const blob=await compressImage(file);
+    const path=`${prefix}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+    const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false});
     if(error){console.error('upload',error);toast('Ошибка загрузки: '+error.message);return null;}
     const {data}=sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
     // сохраняем, кто и когда загрузил фото (для новых фото)
@@ -2616,7 +2635,7 @@ function zoomPhoto(url){
 function photoBlockHtml(p,canEdit){
   const ph=pickupPhotos(p);
   const thumbs=ph.map((f,i)=>`<div class="photo-thumb">
-    <img src="${esc(f.url)}" data-pview-photo="${esc(f.url)}">
+    <img src="${esc(f.url)}" data-pview-photo="${esc(f.url)}" loading="lazy" decoding="async">
     ${canEdit?`<button class="del" data-pdelphoto="${p.id}" data-idx="${i}" title="Удалить">×</button>`:''}
   </div>`).join('');
   const adder=canEdit?`<label class="photo-add">📷 Снять фото
@@ -3180,7 +3199,7 @@ function drawOrders(){
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
       const photoCell=ph.length
-        ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
+        ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" loading="lazy" decoding="async" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
         : '<span style="color:var(--line)">—</span>';
       return `<tr data-orow="${o.id}" style="cursor:pointer">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
