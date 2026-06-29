@@ -2548,7 +2548,7 @@ function renderDashboard(){
     return null;
   };
   // список курьеров-заборщиков (для колонок)
-  const courierList=[...(S.couriers||[])].sort((a,b)=>(a.fio||'').localeCompare(b.fio||'',''));
+  const courierList=[...(S.couriers||[])].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
   // собираем все даты (по дате создания заказов и заявок)
   const dateSet=new Set();
   orders.forEach(o=>{const dt=(o.created_at||'').slice(0,10);if(dt)dateSet.add(dt);});
