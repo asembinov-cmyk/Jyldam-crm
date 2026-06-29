@@ -2734,7 +2734,7 @@ function renderPickups(){
       ${isStaff()?`<div class="stat"><div class="stat-ic">${ICONS.users}</div><div class="stat-body"><div class="k">Курьеров</div><div class="v">${new Set(list.map(p=>p.courier_id).filter(Boolean)).size}</div></div></div>`:''}
     </div>
     <div class="panel">
-      <div class="panel-head"><h2>Карточки забора</h2><span class="count">${list.length}</span></div>
+      <div class="panel-head"><h2>Карточки забора</h2><span class="count" id="pickupsCount">${list.length}</span></div>
       <div class="filters">
         <input class="search" id="pfq" placeholder="Поиск: наименование, адрес, номер…" value="${esc(pf.q)}">
         ${isStaff()?`<select id="pfcity"><option value="">Все города</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:''}
@@ -2771,6 +2771,8 @@ function filteredPickups(){
 }
 function drawPickups(){
   const el=$('pickupTable');const allRows=filteredPickups();
+  // обновляем счётчик рядом с «Карточки забора» (отфильтрованное кол-во)
+  {const cnt=$('pickupsCount');if(cnt)cnt.textContent=allRows.length;}
   removePickupsPager();
   if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
   if(isCourier()){drawCourierPickupCards(el,allRows);return;}
