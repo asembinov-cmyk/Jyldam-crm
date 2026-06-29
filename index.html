@@ -1059,6 +1059,22 @@ async function callSetPassword(payload){
   }catch(e){return {error:String(e&&e.message||e)};}
 }
 
+// смена телефона/email (логина) сотрудника через Edge Function update-user (только для админа)
+async function callUpdateUser(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/update-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
+
 /* ================= ИНТЕГРАЦИЯ С KET ================= */
 // низкоуровневый вызов прокси ket-proxy
 async function callKet(payload){
@@ -4450,7 +4466,7 @@ function staffModal(id){
   const u=S.profiles.find(x=>x.id===id);if(!u)return;
   showModal('Карточка сотрудника',`
     <div class="grid2">
-      <div class="field full"><label>Email (логин)</label><input value="${esc(u.email||'')}" readonly></div>
+      <div class="field full"><label>Email (логин)</label><input id="u_email" value="${esc(u.email||'')}"><span class="hint">Для входа по email. Если задан телефон — вход также по телефону.</span></div>
       <div class="field"><label>ФИО</label><input id="u_name" value="${esc(u.full_name||'')}"></div>
       <div class="field"><label>Телефон</label><input id="u_phone" inputmode="numeric"></div>
       <div class="field"><label>Город</label><select id="u_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${u.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -4470,7 +4486,23 @@ function staffModal(id){
       // синхронизируем старое текстовое поле role для серверного RLS (current_role_name)
       const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
       const courier_kind=baseType==='courier'?val('u_kind'):null;
-      const row={full_name:val('u_name').trim(),phone:phoneVal('u_phone'),city_id:val('u_city')||null,
+      const newPhone=phoneVal('u_phone');
+      const newEmail=val('u_email').trim();
+      // изменился ли логин (телефон или email)?
+      const phoneChanged=newPhone!==(u.phone||'');
+      const emailChanged=newEmail!==(u.email||'')&&newEmail!=='';
+      if(phoneChanged||emailChanged){
+        if(!isAdmin()){toast('Менять логин может только администратор');return false;}
+        toast('Обновляем данные входа…');
+        const payload={user_id:id};
+        if(phoneChanged&&newPhone)payload.phone=newPhone;
+        if(emailChanged)payload.email=newEmail;
+        const out=await callUpdateUser(payload);
+        if(out.error){alert('Не удалось изменить логин:\n\n'+out.error);return false;}
+        // подхватываем новый email из ответа
+        if(out.email)u.email=out.email;
+      }
+      const row={full_name:val('u_name').trim(),phone:newPhone,city_id:val('u_city')||null,
         position:val('u_pos').trim(),role_id:roleId||null,role:legacy,courier_kind};
       const u2=await dbUpdate('profiles',id,row);if(!u2)return false;Object.assign(u,u2);
       if(id===S.me.id){await loadMe({user:{id:S.me.id,email:S.me.email}});buildNav();}
