@@ -222,6 +222,10 @@
   .dash-period-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
   .head-actions{margin-left:auto;display:flex;gap:10px}
+  .chk-line{display:flex;align-items:center;gap:8px;font-weight:500;font-size:14px;padding:5px 0;cursor:pointer}
+  .chk-line input{width:17px;height:17px;cursor:pointer}
+  .cc-give{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .cc-give-tag{font-size:11px;font-weight:600;background:rgba(37,70,201,.10);color:var(--rust-dk);border-radius:6px;padding:2px 8px}
   .btn.btn-excel{background:#1d7a44;border-color:#166336;color:#fff}
   .btn.btn-excel:hover{background:#166336}
 
@@ -948,6 +952,7 @@ const FIELD_LABEL={
   processor_id:'Обработчик',district_id:'Район',name:'Наименование',fio:'ФИО',orders:'Кол-во заказов',
   full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
   tariff_courier:'Тариф курьер',qr_code:'QR-код',id_doc:'Уд. личности',paid_by_sender:'Оплачено отправителем',
+  give_packets:'Пакеты для партнёра',give_invoices:'Накладные для партнёра',
   region:'Область',city_text:'Нас. пункт',comment:'Комментарий',base_type:'Базовый тип',perms:'Права',
   order_paid:'Оплачен заказ'
 };
@@ -2912,6 +2917,7 @@ function drawCourierPickupCards(el,rows){
           <div class="cc-client">${esc(p.name)||'Без названия'}</div>
           <div class="cc-addr-row">${address2gis(p.address,cityName(p.city_id),p.name)}</div>
           ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}</div>`:''}
+          ${(p.give_packets||p.give_invoices)?`<div class="cc-give">${p.give_packets?'<span class="cc-give-tag">📦 Пакеты для партнёра</span>':''}${p.give_invoices?'<span class="cc-give-tag">📄 Накладные для партнёра</span>':''}</div>`:''}
         </div>
         <div class="cc-right"><span class="cc-chev">▾</span></div>
       </div>
@@ -3080,12 +3086,14 @@ function pickupDraftKey(id){return id||'new';}
 function readPickupForm(){
   return {pickup_date:val('m_date'),city_id:val('m_city'),name:val('m_name'),address:val('m_address'),
     phone:phoneVal('m_phone'),district_id:val('m_district'),courier_id:val('m_courier'),
+    give_packets:$('m_packets')?$('m_packets').checked:false,
+    give_invoices:$('m_invoices')?$('m_invoices').checked:false,
     sales_id:val('m_sales'),processor_id:val('m_proc')};
 }
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
-  const base=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',status_id:(S.statuses[0]?S.statuses[0].id:'')};
+  const base=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',give_packets:false,give_invoices:false,status_id:(S.statuses[0]?S.statuses[0].id:'')};
   const ro=readonly||!can("pickups","edit");
   // если есть несохранённый черновик для этой заявки — подставляем его (только при редактировании)
   const draft=!ro?pickupDrafts[pickupDraftKey(id)]:null;
@@ -3106,6 +3114,11 @@ function pickupModal(id,readonly){
       <div class="field"><label>Курьер <span style="color:var(--rust)">*</span></label><select id="m_courier" ${dis}><option value="">— выберите курьера —</option>${cOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.courier_id===x.id?'selected':''}>${esc(x.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Менеджер по продажам</label><select id="m_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="m_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+      <div class="field full">
+        <label style="margin-bottom:6px">Для партнёра</label>
+        <label class="chk-line"><input type="checkbox" id="m_packets" ${d.give_packets?'checked':''} ${dis}> Пакеты для партнёра</label>
+        <label class="chk-line"><input type="checkbox" id="m_invoices" ${d.give_invoices?'checked':''} ${dis}> Накладные для партнёра</label>
+      </div>
     </div>`,
     ro?null:async()=>{
       const name=val('m_name').trim();if(!name){toast('Укажите наименование');return false;}
@@ -3116,6 +3129,8 @@ function pickupModal(id,readonly){
       const row={pickup_date:val('m_date')||null,city_id:val('m_city')||null,name,address:val('m_address').trim(),
         phone:phoneVal('m_phone'),district_id:val('m_district')||null,courier_id:val('m_courier')||null,
         orders:(p?(parseInt(p.orders||'0',10)||0):0),sales_id:val('m_sales')||null,processor_id:val('m_proc')||null,
+        give_packets:$('m_packets')?$('m_packets').checked:false,
+        give_invoices:$('m_invoices')?$('m_invoices').checked:false,
         status_id:newStatus||null};
       let hist=p&&Array.isArray(p.status_history)?p.status_history.slice():[];
       if(newStatus&&newStatus!==prevStatus){row.status_at=new Date().toISOString();hist.push({statusId:newStatus,at:row.status_at});}
