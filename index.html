@@ -623,6 +623,12 @@
     .resp-table .qty-edit{width:80px}
     .resp-table .status-time{text-align:right;width:100%}
     .filters .date-field input{min-width:0;width:100%}
+    /* фильтры на мобиле — каждый элемент на всю ширину, ничего не налезает */
+    .filters{flex-direction:column;align-items:stretch;gap:10px}
+    .filters-dates{flex-direction:column;align-items:stretch}
+    .filters .date-field{width:100%}
+    .filters input,.filters select{width:100%}
+    .filters #pfdateclear,.filters #ofdateclear{align-self:stretch!important;width:100%}
     /* ── СВОРАЧИВАЕМЫЕ КАРТОЧКИ: свёрнуто видно только заголовок + кнопки ── */
     .resp-table tr{position:relative}
     .resp-table tr td[data-label="Наименование"],.resp-table tr td[data-label="ID"]{padding-top:13px}
@@ -1346,7 +1352,7 @@ async function enterApp(){
     console.error('render',e);
     // если сохранённая вкладка битая — сбрасываем и пробуем заново
     S.tab='dashboard';
-    try{ buildNav(); render(); }catch(_){ $('main').innerHTML='<div class="empty"><div class="big">Не удалось открыть раздел</div>Обновите страницу.</div>'; }
+    try{ buildNav(); render(); }catch(err){ $('main').innerHTML='<div class="empty"><div class="big">Не удалось открыть раздел</div><div style="font-size:12px;color:var(--rust);margin-top:10px;word-break:break-word">'+esc(String(err&&err.message||err))+'</div>Обновите страницу.</div>'; }
   }
   hideSplash();
   startAutoRefresh(); // фоновое обновление данных каждые 30 сек (без сброса работы)
