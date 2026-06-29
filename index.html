@@ -3404,7 +3404,7 @@ function orderModal(id,readonly){
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
-      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.order_paid?'disabled':''}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.order_paid?'checked':''} ${dis}> Оплачен заказ <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
+      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" id="postCityField" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Город (почтовая)</label><select id="o_postcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -3436,18 +3436,18 @@ function orderModal(id,readonly){
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
         cost:(val('o_sum')!==''?parseFloat(val('o_sum')):0),pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,comment:val('o_comment').trim(),
         order_courier_id:val('o_ocourier')||null};
-      // галочка «Оплачен заказ»: сумма→0 (исходная запоминается), снятие — возврат
+      // галочка «Оплачено отправителем»: сумма→0 (исходная запоминается), снятие — возврат
       if($('o_paidorder')){
         const paidNow=$('o_paidorder').checked;
         if(paidNow){
-          if(!o||!o.order_paid){row.order_sum_orig=(row.order_sum!=null?row.order_sum:0);} // запоминаем при первом включении
+          if(!o||!o.paid_by_sender){row.order_sum_orig=(row.order_sum!=null?row.order_sum:0);} // запоминаем при первом включении
           else{row.order_sum_orig=(o.order_sum_orig!=null?o.order_sum_orig:0);}
-          row.order_paid=true;row.order_sum=0;row.cost=0;
+          row.paid_by_sender=true;row.order_sum=0;row.cost=0;
         }else{
           // если сняли галочку, а сумму вручную не меняли — вернём исходную
-          if(o&&o.order_paid){const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
+          if(o&&o.paid_by_sender){const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
             if(val('o_sum')===''||parseFloat(val('o_sum'))===0){row.order_sum=back;row.cost=back;}}
-          row.order_paid=false;row.order_sum_orig=null;
+          row.paid_by_sender=false;row.order_sum_orig=null;
         }
       }
       if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
