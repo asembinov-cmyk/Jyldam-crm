@@ -1709,6 +1709,15 @@ const CALC_FIELDS=[
   {key:'fund_manager', label:'Фонд ЗП менеджеров (в месяц)', kind:'fund', hint:'Делится на кол-во заказов за месяц'},
   {key:'fund_processor',label:'Фонд обработки (в месяц)',    kind:'fund', hint:'Делится на кол-во заказов за месяц'},
 ];
+// ПОЧТОВЫЕ фиксированные расходы (за заказ) — применяются к заказам с типом доставки «почта»
+const CALC_POST_FIELDS=[
+  {key:'post_pack',   label:'Пакет (за заказ)',          hint:'Упаковка для почтового заказа'},
+  {key:'post_gofra',  label:'Гофра (за заказ)',          hint:'Гофра для почтового заказа'},
+  {key:'post_blank',  label:'Бланк (за заказ)',          hint:'Печать наклейки'},
+  {key:'post_sms',    label:'SMS (за заказ)',            hint:'SMS-уведомления'},
+  {key:'post_driver', label:'Водитель (за заказ)',       hint:'Перевозка склад ↔ сортировка'},
+  {key:'post_freight',label:'Доставка почтой (за заказ)',hint:'Стоимость отправки почтой'},
+];
 // значение норматива из настроек (или 0)
 function calcNorm(key){const cs=S.calcSettings||{};const v=cs[key];return v!=null&&v!==''?parseFloat(v):0;}
 function calcMinProfit(){const cs=S.calcSettings||{};return cs.min_profit!=null&&cs.min_profit!==''?parseFloat(cs.min_profit):0;}
@@ -1739,25 +1748,40 @@ function calcOrder(o){
   // выручка = сумма заказа (если не задана — 0)
   const revenue=(o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0;
   const monthOrders=ordersInOrderMonth(o);
-  // строим статьи расходов
-  const items=CALC_FIELDS.map(f=>{
-    let amount;
-    if(snap&&snap.items&&snap.items[f.key]!=null){
-      amount=parseFloat(snap.items[f.key])||0; // снимок (вкл. ручные правки)
-    }else if(f.kind==='fund'){
-      amount=Math.round((calcNorm(f.key)/monthOrders)*100)/100; // фонд ÷ заказы месяца
-    }else if(f.key==='courier'||f.key==='freight'){
-      amount=calcCityNorm(cityId,f.key); // по городу
-    }else{
-      amount=calcNorm(f.key); // общий фикс
-    }
-    return {key:f.key,label:f.label,amount};
-  });
+  // тип доставки: курьерская или почтовая
+  const isCourierType=isCourierDelivery(o.delivery_id);
+  let items;
+  if(isCourierType){
+    // КУРЬЕРСКИЙ заказ — статьи из CALC_FIELDS (курьер/межгород по городу)
+    items=CALC_FIELDS.map(f=>{
+      let amount;
+      if(snap&&snap.items&&snap.items[f.key]!=null)amount=parseFloat(snap.items[f.key])||0;
+      else if(f.kind==='fund')amount=Math.round((calcNorm(f.key)/monthOrders)*100)/100;
+      else if(f.key==='courier'||f.key==='freight')amount=calcCityNorm(cityId,f.key);
+      else amount=calcNorm(f.key);
+      return {key:f.key,label:f.label,amount};
+    });
+  }else{
+    // ПОЧТОВЫЙ заказ — почтовые фиксированные статьи + распределяемые фонды (общие)
+    const postItems=CALC_POST_FIELDS.map(f=>{
+      let amount;
+      if(snap&&snap.items&&snap.items[f.key]!=null)amount=parseFloat(snap.items[f.key])||0;
+      else amount=calcNorm(f.key);
+      return {key:f.key,label:f.label,amount};
+    });
+    const fundItems=CALC_FIELDS.filter(f=>f.kind==='fund').map(f=>{
+      let amount;
+      if(snap&&snap.items&&snap.items[f.key]!=null)amount=parseFloat(snap.items[f.key])||0;
+      else amount=Math.round((calcNorm(f.key)/monthOrders)*100)/100;
+      return {key:f.key,label:f.label,amount};
+    });
+    items=postItems.concat(fundItems);
+  }
   const totalCost=items.reduce((s,it)=>s+(it.amount||0),0);
   const profit=revenue-totalCost;
   const margin=revenue>0?(profit/revenue*100):0;
   const roi=totalCost>0?(profit/totalCost*100):0;
-  return {revenue,items,totalCost,profit,margin,roi,cityId,monthOrders};
+  return {revenue,items,totalCost,profit,margin,roi,cityId,monthOrders,isCourierType};
 }
 // цвет индикации прибыли: red/yellow/green
 function calcProfitColor(profit){
@@ -1795,7 +1819,7 @@ function renderCalcNorms(){
   $('calcContent').innerHTML=`
     <div class="calc-grid">
       <div class="panel calc-panel">
-        <h3 class="calc-h">Фиксированные расходы (за заказ)</h3>
+        <h3 class="calc-h">Курьерская доставка — общие расходы (за заказ)</h3>
         ${fixedFields.map(fieldRow).join('')}
       </div>
       <div class="panel calc-panel">
@@ -1810,13 +1834,21 @@ function renderCalcNorms(){
       </div>
     </div>
     <div class="panel calc-panel" style="margin-bottom:18px">
-      <h3 class="calc-h">Нормативы по городам</h3>
+      <h3 class="calc-h">Курьерская доставка — нормативы по городам</h3>
       <p class="calc-note">Курьер и доставка груза (межгород) могут отличаться по городам. Если поле пустое — берётся общий норматив выше.</p>
       <div class="calc-city-head"><span>Город</span><span>Курьер (₸)</span><span>Доставка груза (₸)</span></div>
       ${cities.map(c=>`<div class="calc-city-row" data-citynorm="${c.id}">
         <span class="ccr-name">${esc(c.name)}</span>
         <input type="number" min="0" step="0.01" data-ccourier="${c.id}" value="${esc(cityNorm(c.id,'courier'))}" placeholder="общий">
         <input type="number" min="0" step="0.01" data-cfreight="${c.id}" value="${esc(cityNorm(c.id,'freight'))}" placeholder="общий">
+      </div>`).join('')}
+    </div>
+    <div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Почтовая доставка — фиксированные расходы (за заказ)</h3>
+      <p class="calc-note">Применяются к заказам с типом доставки «почта». Распределяемые фонды (логист, менеджер, обработка) общие для всех заказов.</p>
+      ${CALC_POST_FIELDS.map(f=>`<div class="calc-norm-row">
+        <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
+        <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
       </div>`).join('')}
     </div>
     <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы</button><span class="calc-saved" id="calcSaved"></span></div>`;
@@ -1871,6 +1903,10 @@ function renderCalcSummary(){
   const totProfit=totRevenue-totCost;
   const avgMargin=totRevenue>0?(totProfit/totRevenue*100):0;
   const avgRoi=totCost>0?(totProfit/totCost*100):0;
+  // разбивка курьерские / почтовые
+  const cour=calcs.filter(x=>x.c.isCourierType), post=calcs.filter(x=>!x.c.isCourierType);
+  const sumBlock=arr=>({cnt:arr.length,rev:arr.reduce((s,x)=>s+x.c.revenue,0),cost:arr.reduce((s,x)=>s+x.c.totalCost,0),profit:arr.reduce((s,x)=>s+(x.c.revenue-x.c.totalCost),0)});
+  const courSum=sumBlock(cour), postSum=sumBlock(post);
   // заработок курьеров доставки: courier-норматив города заказа, по order_courier_id
   const byCourier={};
   calcs.forEach(({o,c})=>{
@@ -1896,6 +1932,15 @@ function renderCalcSummary(){
       <div class="ct-card"><div class="ct-k">Чистая прибыль</div><div class="ct-v" style="color:${profitColor}">${fmtMoney(totProfit)}</div></div>
       <div class="ct-card"><div class="ct-k">Маржинальность</div><div class="ct-v">${avgMargin.toFixed(1)}%</div></div>
       <div class="ct-card"><div class="ct-k">ROI</div><div class="ct-v">${avgRoi.toFixed(1)}%</div></div>
+    </div>
+    <div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Разбивка по типу доставки</h3>
+      <table class="calc-courier-tbl"><thead><tr><th>Тип</th><th>Заказов</th><th>Выручка</th><th>Расходы</th><th>Прибыль</th></tr></thead>
+        <tbody>
+          <tr><td>Курьерская</td><td>${courSum.cnt}</td><td>${fmtMoney(courSum.rev)}</td><td>${fmtMoney(courSum.cost)}</td><td><b style="color:${courSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(courSum.profit)}</b></td></tr>
+          <tr><td>Почтовая</td><td>${postSum.cnt}</td><td>${fmtMoney(postSum.rev)}</td><td>${fmtMoney(postSum.cost)}</td><td><b style="color:${postSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(postSum.profit)}</b></td></tr>
+          <tr style="border-top:2px solid var(--line)"><td><b>Всего (общий котёл)</b></td><td><b>${courSum.cnt+postSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
+        </tbody></table>
     </div>
     <div class="panel calc-panel">
       <h3 class="calc-h">Заработок курьеров доставки</h3>
