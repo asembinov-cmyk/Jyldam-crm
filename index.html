@@ -1248,6 +1248,20 @@ function hideSplash(){const s=$('splash');if(!s)return;s.classList.add('hide');s
 $('loginBtn').onclick=doLogin;
 $('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 $('email').addEventListener('keydown',e=>{if(e.key==='Enter')$('password').focus();});
+// форматирование телефона в поле логина: +7 (777) 777-77-77. Email не трогаем.
+$('email').addEventListener('input',function(){
+  const el=this;const raw=el.value;
+  // если есть буквы или @ — это email, форматирование не применяем
+  if(/[a-zA-Zа-яА-Я@]/.test(raw))return;
+  // вытаскиваем 10 цифр (убираем 7/8 в начале)
+  let d=raw.replace(/\D/g,'');
+  if(d.length===11&&(d[0]==='7'||d[0]==='8'))d=d.slice(1);
+  else if(d.length>10&&d[0]==='8')d=d.slice(1);
+  d=d.slice(0,10);
+  el.value=d.length?'+7 '+fmt10(d):'+7 ';
+  // курсор в конец (телефон вводят последовательно)
+  const n=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(n,n);}catch(e){}});
+});
 // при фокусе на поле логина ставим курсор в конец (после +7)
 $('email').addEventListener('focus',function(){const el=this;if(el.value){const n=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(n,n);}catch(e){}});}});
 $('logoutBtn').onclick=doLogout;
