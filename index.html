@@ -2221,7 +2221,7 @@ function calcProfitColor(profit,period){
   return 'green';
 }
 
-let calcSub='norms'; // подвкладка раздела Калькуляция: norms | summary
+let calcSub='courier'; // подвкладка раздела Калькуляция: courier | mail | summary
 // выбранный период нормативов (год-месяц). По умолчанию текущий.
 let calcNormPeriod={year:new Date().getFullYear(),month:new Date().getMonth()};
 function calcPeriodStr(p){p=p||calcNormPeriod;return `${p.year}-${String(p.month+1).padStart(2,'0')}`;}
@@ -2232,16 +2232,19 @@ function renderCalc(){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Калькуляция</h1><p>Себестоимость, прибыль и заработок по заказам</p></div></div>
     <div class="subtabs">
-      <button data-calcsub="norms" class="${calcSub==='norms'?'active':''}">Нормативы</button>
-      <button data-calcsub="summary" class="${calcSub==='summary'?'active':''}">Сводка</button>
+      <button data-calcsub="courier" class="${calcSub==='courier'?'active':''}">Курьерская доставка</button>
+      <button data-calcsub="mail" class="${calcSub==='mail'?'active':''}">Почтовая доставка</button>
+      <button data-calcsub="summary" class="${calcSub==='summary'?'active':''}">Общая сводка</button>
     </div>
     <div id="calcContent"></div>`;
   $('main').querySelectorAll('[data-calcsub]').forEach(b=>b.onclick=()=>{calcSub=b.dataset.calcsub;renderCalc();});
-  if(calcSub==='norms')renderCalcNorms();
+  if(calcSub==='courier'||calcSub==='norms')renderCalcNorms('courier');
+  else if(calcSub==='mail')renderCalcNorms('mail');
   else renderCalcSummary();
 }
 
-function renderCalcNorms(){
+function renderCalcNorms(type){
+  type=type||'courier';
   const P=calcPeriodStr();
   const cs=calcCurrentSettings();
   const monthsRU=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
@@ -2251,24 +2254,19 @@ function renderCalcNorms(){
     <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
     <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
   </div>`;
-  // города, где может быть своя ставка (Астана/Алматы и прочие из справочника)
   const cities=(S.cities||[]);
   const cityNorm=(cid,key)=>{const all=S.calcCityNorms||[];let r=all.find(x=>x.city_id===cid&&x.period===P)||all.find(x=>x.city_id===cid&&!x.period);return r&&r[key]!=null&&r[key]!==''?r[key]:'';};
   const periodBar=`<div class="calc-period-bar"><span>Нормативы за:</span>
     <select id="calcNormMonth">${monthsRU.map((m,i)=>`<option value="${i}" ${calcNormPeriod.month===i?'selected':''}>${m}</option>`).join('')}</select>
     <select id="calcNormYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${calcNormPeriod.year===y?'selected':''}>${y}</option>`;return o;})()}</select></div>`;
-  $('calcContent').innerHTML=periodBar+`
-    <div class="calc-grid">
-      <div class="panel calc-panel">
-        <h3 class="calc-h">Курьерская доставка — общие расходы (за заказ)</h3>
-        ${fixedFields.map(fieldRow).join('')}
-      </div>
+  // общий блок: фонды + сотрудники + менеджеры + контроль прибыли (нужен на обеих вкладках)
+  const fundsBlock=`
       <div class="panel calc-panel">
         <h3 class="calc-h">Распределяемые фонды (в месяц)</h3>
         <p class="calc-note">Делятся на количество заказов за месяц. Чем больше заказов — тем меньше на каждый.</p>
         ${fundFields.map(fieldRow).join('')}
         <h3 class="calc-h" style="margin-top:18px">Сотрудники: оклад + за заказ</h3>
-        <p class="calc-note">Оклад делится на все заказы за месяц. «За заказ»: у менеджера продаж (напр. 150₸) начисляется только заказам с указанным менеджером; у обработчика (напр. 80₸) — на каждый заказ.</p>
+        <p class="calc-note">Оклад делится на все заказы за месяц. «За заказ»: менеджер продаж (150₸) — заказам с указанным менеджером; обработчик (80₸) — на каждый.</p>
         <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Сотрудник</span><span>Оклад/мес</span><span>За заказ</span></div>
         ${CALC_SALARY_FIELDS.map(f=>`<div class="calc-city-row" style="grid-template-columns:1fr 110px 110px">
           <span class="ccr-name">${esc(f.label)}</span>
@@ -2276,7 +2274,7 @@ function renderCalcNorms(){
           <input type="number" min="0" step="0.01" data-calcnorm="${f.perKey}" value="${cs[f.perKey]!=null&&cs[f.perKey]!==''?esc(cs[f.perKey]):''}" placeholder="0">
         </div>`).join('')}
         <h3 class="calc-h" style="margin-top:18px">Менеджеры по продажам (персонально)</h3>
-        <p class="calc-note">Оклад каждого идёт в общий котёл (сумма всех окладов ÷ заказы месяца). Ставка за заказ применяется к заказам этого менеджера.</p>
+        <p class="calc-note">Оклад каждого идёт в общий котёл. Ставка за заказ применяется к заказам этого менеджера.</p>
         <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Менеджер</span><span>Оклад/мес</span><span>За заказ</span></div>
         ${(S.sales||[]).map(sm=>{
           const salV=calcSalesNorm(sm.id,'salary',P);const perV=calcSalesNorm(sm.id,'per_order',P);
@@ -2291,26 +2289,9 @@ function renderCalcNorms(){
           <div class="cn-label">Минимальная прибыль<span class="cn-hint">Ниже — жёлтая индикация</span></div>
           <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="min_profit" value="${cs.min_profit!=null&&cs.min_profit!==''?esc(cs.min_profit):''}" placeholder="0"> ₸</div>
         </div>
-      </div>
-    </div>
-    <div class="panel calc-panel" style="margin-bottom:18px">
-      <h3 class="calc-h">Курьерская доставка — нормативы по городам</h3>
-      <p class="calc-note">Курьер и доставка груза (межгород) могут отличаться по городам. Если поле пустое — берётся общий норматив выше.</p>
-      <div class="calc-city-head"><span>Город</span><span>Курьер (₸)</span><span>Доставка груза (₸)</span></div>
-      ${cities.map(c=>`<div class="calc-city-row" data-citynorm="${c.id}">
-        <span class="ccr-name">${esc(c.name)}</span>
-        <input type="number" min="0" step="0.01" data-ccourier="${c.id}" value="${esc(cityNorm(c.id,'courier'))}" placeholder="общий">
-        <input type="number" min="0" step="0.01" data-cfreight="${c.id}" value="${esc(cityNorm(c.id,'freight'))}" placeholder="общий">
-      </div>`).join('')}
-    </div>
-    <div class="panel calc-panel" style="margin-bottom:18px">
-      <h3 class="calc-h">Почтовая доставка — фиксированные расходы (за заказ)</h3>
-      <p class="calc-note">Применяются к заказам с типом доставки «почта». Распределяемые фонды (логист, менеджер, обработка) общие для всех заказов.</p>
-      ${CALC_POST_FIELDS.map(f=>`<div class="calc-norm-row">
-        <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
-        <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
-      </div>`).join('')}
-    </div>
+      </div>`;
+  // блок «Оплата заборщикам» (нужен на обеих вкладках)
+  const pickersBlock=`
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Оплата заборщикам (за заказ)</h3>
       <p class="calc-note">Персональная ставка каждому заборщику за один забранный заказ.</p>
@@ -2323,11 +2304,63 @@ function renderCalcNorms(){
           <input type="number" min="0" step="0.01" data-cpay="${c.id}" value="${esc(v)}" placeholder="0">
         </div>`;
       }).join('')}
+    </div>`;
+  let html;
+  if(type==='mail'){
+    // ПОЧТОВАЯ вкладка: почтовые расходы + фонды + заборщики
+    html=`
+    <div class="calc-grid">
+      <div class="panel calc-panel">
+        <h3 class="calc-h">Почтовая доставка — фиксированные расходы (за заказ)</h3>
+        <p class="calc-note">Применяются к заказам с типом доставки «почта».</p>
+        ${CALC_POST_FIELDS.map(f=>`<div class="calc-norm-row">
+          <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
+          <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
+        </div>`).join('')}
+      </div>
+      ${fundsBlock}
     </div>
-    <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>`;
+    ${pickersBlock}`;
+  }else{
+    // КУРЬЕРСКАЯ вкладка: общие расходы + фонды + компактные города + заборщики
+    html=`
+    <div class="calc-grid">
+      <div class="panel calc-panel">
+        <h3 class="calc-h">Курьерская доставка — общие расходы (за заказ)</h3>
+        ${fixedFields.map(fieldRow).join('')}
+      </div>
+      ${fundsBlock}
+    </div>
+    <div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Нормативы по городам</h3>
+      <p class="calc-note">Курьер и доставка груза по городам. Пусто = берётся общий норматив. Показаны города, где задана ставка; остальные — по кнопке.</p>
+      ${compactCityNorms(cities,cityNorm)}
+    </div>
+    ${pickersBlock}`;
+  }
+  $('calcContent').innerHTML=periodBar+html+
+    `<div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>`;
   $('calcSaveBtn').onclick=saveCalcSettings;
-  if($('calcNormMonth'))$('calcNormMonth').onchange=e=>{calcNormPeriod.month=parseInt(e.target.value,10);renderCalcNorms();};
-  if($('calcNormYear'))$('calcNormYear').onchange=e=>{calcNormPeriod.year=parseInt(e.target.value,10);renderCalcNorms();};
+  if($('calcNormMonth'))$('calcNormMonth').onchange=e=>{calcNormPeriod.month=parseInt(e.target.value,10);renderCalc();};
+  if($('calcNormYear'))$('calcNormYear').onchange=e=>{calcNormPeriod.year=parseInt(e.target.value,10);renderCalc();};
+  const showAllBtn=$('cityShowAll');if(showAllBtn)showAllBtn.onclick=()=>{_calcShowAllCities=true;renderCalc();};
+}
+
+// компактный блок городских нормативов: по умолчанию только заполненные + Астана/Алматы, остальное по кнопке
+let _calcShowAllCities=false;
+function compactCityNorms(cities,cityNorm){
+  const isFilled=c=>cityNorm(c.id,'courier')!==''||cityNorm(c.id,'freight')!=='';
+  const isMain=c=>/алмат|астан|нур-?султан|шымкент/i.test(c.name||'');
+  const shown=_calcShowAllCities?cities:cities.filter(c=>isFilled(c)||isMain(c));
+  const hiddenCount=cities.length-shown.length;
+  const row=c=>`<div class="calc-city-row" data-citynorm="${c.id}">
+    <span class="ccr-name">${esc(c.name)}</span>
+    <input type="number" min="0" step="0.01" data-ccourier="${c.id}" value="${esc(cityNorm(c.id,'courier'))}" placeholder="общий">
+    <input type="number" min="0" step="0.01" data-cfreight="${c.id}" value="${esc(cityNorm(c.id,'freight'))}" placeholder="общий">
+  </div>`;
+  return `<div class="calc-city-head"><span>Город</span><span>Курьер (₸)</span><span>Доставка груза (₸)</span></div>
+    ${shown.map(row).join('')}
+    ${(!_calcShowAllCities&&hiddenCount>0)?`<button type="button" class="btn ghost sm" id="cityShowAll" style="margin-top:10px">Показать все города (${hiddenCount})</button>`:''}`;
 }
 
 async function saveCalcSettings(){
