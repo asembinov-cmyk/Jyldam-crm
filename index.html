@@ -222,6 +222,18 @@
   .dash-period-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
   .head-actions{margin-left:auto;display:flex;gap:10px}
+  .ic-orders-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:10px 0 8px;flex-wrap:wrap}
+  .ic-orders-list{max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:4px}
+  .ic-order-row{display:grid;grid-template-columns:24px 90px 1fr 120px;gap:10px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:14px}
+  .ic-order-row:last-child{border-bottom:0}
+  .ic-order-row input{width:17px;height:17px}
+  .ic-o-code{font-weight:700}
+  .ic-o-track{color:var(--muted);font-size:12px}
+  .ic-calc-live{margin-top:10px;padding:10px 12px;background:rgba(37,70,201,.07);border-radius:10px;font-size:14px}
+  .ic-view-head{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;font-size:14px}
+  .ic-view-tbl{width:100%;border-collapse:collapse;font-size:14px}
+  .ic-view-tbl th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted);padding:7px 9px;border-bottom:1px solid var(--line)}
+  .ic-view-tbl td{padding:8px 9px;border-bottom:1px solid var(--line)}
   .chk-line{display:flex;align-items:center;gap:8px;font-weight:500;font-size:14px;padding:5px 0;cursor:pointer}
   .chk-line input{width:17px;height:17px;cursor:pointer}
   .cc-give{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
@@ -1312,6 +1324,7 @@ async function loadAll(){
   // настройки калькуляции (нормативы)
   try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){S.calcSettings=null;}
   try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){S.calcCityNorms=[];}
+  try{S.shipments=await dbList('shipments',{});}catch(e){S.shipments=[];}
 }
 
 // Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
@@ -1349,6 +1362,9 @@ async function refreshForTab(tab){
       S.roles=await dbList('roles',{order:'created_at',asc:true});
     }else if(tab==='history'){
       await loadActivityLog();
+    }else if(tab==='intercity'){
+      try{S.shipments=await dbList('shipments',{});}catch(e){}
+      try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
     }else if(tab==='calc'){
       try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){}
       try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){}
@@ -1545,6 +1561,7 @@ const ICONS={
   money:'<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M5 9v6M19 9v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   cash:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 9l2-4h14l2 4M3 9h18v9a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 13h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   calc:'<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 6h8M8 11h2M12 11h.01M15 11h1M8 15h2M12 15h.01M15 15v3M8 18h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  intercity:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 8l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 8v8l9 4 9-4V8" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 12v8" stroke="currentColor" stroke-width="1.7"/></svg>',
 };
 
 function buildNav(){
@@ -1562,6 +1579,7 @@ function buildNav(){
     const delivery=[];
     if(can('orders','view'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
     if(can('orders','view'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
+    if(isAdmin())delivery.push({k:'intercity',label:'Отправки межгород',icon:'intercity'});
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
 
     // раздел «Деньги» — только админ
@@ -1749,6 +1767,7 @@ function render(){
   else if(S.tab==='history')renderHistory();
   else if(S.tab==='cash')renderCash();
   else if(S.tab==='calc')renderCalc();
+  else if(S.tab==='intercity')renderIntercity();
 }
 
 /* ================= МОДУЛЬ: ДЕНЬГИ ================= */
@@ -1758,6 +1777,189 @@ function renderCash(){
     <div class="page-head"><div><h1>Касса</h1><p>Учёт денежных операций</p></div></div>
     <div class="panel"><div class="empty"><div class="big">Раздел в разработке</div>Здесь будет касса: приход, расход, баланс.</div></div>`;
 }
+/* ================= МОДУЛЬ: ОТПРАВКИ МЕЖГОРОД ================= */
+// список типов транспорта
+const TRANSPORT_TYPES=['Азия Фрейт','Авиа','Авто','Ж/Д','Курьер','Другое'];
+
+// склад отправки текущего пользователя (город из профиля)
+function myWarehouseCityId(){return (S.me&&S.me.city_id)||'';}
+
+// заказы, доступные для отправки межгородом в город получения cityId:
+// курьерская доставка, город получения = cityId, ещё не в отправке (нет intercity_shipment_id)
+function ordersForIntercity(cityId){
+  return (S.orders||[]).filter(o=>
+    isCourierDelivery(o.delivery_id) &&
+    o.courier_city_id===cityId &&
+    !o.intercity_shipment_id
+  );
+}
+
+function renderIntercity(){
+  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  const rows=[...(S.shipments||[])].sort((a,b)=>(b.ship_date||b.created_at||'').localeCompare(a.ship_date||a.created_at||''));
+  const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Отправки межгород</h1><p>Учёт коробок, отправленных в другие города</p></div>
+      <div class="head-actions"><button class="btn primary" id="newShipment">＋ Создать отправку</button></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Отправки</h2><span class="count">${rows.length}</span></div>
+      <div class="table-scroll">
+      <table class="resp-table ic-table"><thead><tr>
+        <th>Дата</th><th>Склад отправки</th><th>Город получения</th><th>Транспорт</th>
+        <th>Вес</th><th>Стоимость коробки</th><th>Заказов</th><th>За 1 заказ</th><th>Отправитель</th><th></th>
+      </tr></thead><tbody>
+      ${rows.length?rows.map(s=>{
+        const cnt=(s.order_ids||[]).length;
+        const per=cnt?Math.round((s.box_cost||0)/cnt):0;
+        return `<tr>
+          <td data-label="Дата">${esc(fmtDate(s.ship_date))}</td>
+          <td data-label="Склад отправки">${esc(cityName(s.warehouse_city_id))}</td>
+          <td data-label="Город получения">${esc(courierCityName(s.dest_city_id))}</td>
+          <td data-label="Транспорт">${esc(s.transport||'—')}</td>
+          <td data-label="Вес">${s.weight?esc(s.weight)+' кг':'—'}</td>
+          <td data-label="Стоимость коробки">${fmtMoney(s.box_cost)}</td>
+          <td data-label="Заказов">${cnt}</td>
+          <td data-label="За 1 заказ">${fmtMoney(per)}</td>
+          <td data-label="Отправитель">${esc(s.sender_name||'—')}</td>
+          <td data-label="" class="cell-actions"><div class="row-actions">
+            <button class="btn sm ghost" data-icview="${s.id}">Заказы</button>
+            <button class="btn sm danger" data-icdel="${s.id}">Удалить</button>
+          </div></td>
+        </tr>`;
+      }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Пока нет отправок</div>Нажмите «Создать отправку».</div></td></tr>`}
+      </tbody></table></div>
+    </div>`;
+  $('newShipment').onclick=()=>shipmentModal();
+  $('main').querySelectorAll('[data-icview]').forEach(b=>b.onclick=()=>shipmentOrdersModal(b.dataset.icview));
+  $('main').querySelectorAll('[data-icdel]').forEach(b=>b.onclick=()=>delShipment(b.dataset.icdel));
+}
+
+// форма создания отправки
+function shipmentModal(){
+  const destCities=(S.courier_cities||[]); // города получения (курьерские)
+  let selectedDest='';
+  let pickedOrders=[]; // выбранные заказы (по умолчанию все из города)
+  const body=`
+    <div class="form-grid">
+      <div class="field"><label>Дата отправки</label><input type="date" id="s_date" value="${localToday()}"></div>
+      <div class="field"><label>Склад отправки</label><input id="s_wh" value="${esc(cityName(myWarehouseCityId())||'')}" readonly><span class="hint">Автоматически — город вашего аккаунта</span></div>
+      <div class="field"><label>Город получения <span style="color:var(--rust)">*</span></label>
+        <select id="s_dest"><option value="">— выберите город —</option>${destCities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Тип транспорта</label>
+        <select id="s_transport">${TRANSPORT_TYPES.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select></div>
+      <div class="field"><label>Вес (кг) <span class="hint" style="font-weight:400">для Азия Фрейт</span></label><input type="number" min="0" step="0.01" id="s_weight" placeholder="0"></div>
+      <div class="field"><label>Стоимость отправки коробки (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="s_cost" placeholder="0"></div>
+    </div>
+    <div id="s_orders_wrap" style="margin-top:8px">
+      <div class="hint" style="padding:10px 0">Выберите город получения — подтянутся заказы для отправки.</div>
+    </div>`;
+  showModal('Новая отправка межгород',body,async()=>{
+    const dest=val('s_dest');
+    if(!dest){toast('Выберите город получения');return false;}
+    const cost=parseFloat(val('s_cost'))||0;
+    if(!cost){toast('Укажите стоимость отправки коробки');return false;}
+    const ids=pickedOrders.filter(id=>document.querySelector(`[data-icorder="${id}"]`)?.checked);
+    if(!ids.length){toast('Нет заказов в коробке');return false;}
+    const per=Math.round(cost/ids.length);
+    const row={
+      ship_date:val('s_date')||localToday(),
+      warehouse_city_id:myWarehouseCityId()||null,
+      dest_city_id:dest,
+      transport:val('s_transport')||'',
+      weight:val('s_weight')?parseFloat(val('s_weight')):null,
+      box_cost:cost,
+      order_ids:ids,
+      per_order:per,
+      sender_id:(S.me&&S.me.id)||null,
+      sender_name:(S.me&&(S.me.full_name||S.me.email))||'',
+    };
+    const saved=await dbInsert('shipments',row);
+    if(!saved){toast('Не удалось сохранить');return false;}
+    if(!S.shipments)S.shipments=[];S.shipments.push(saved);
+    // записываем стоимость межгорода в каждый заказ (для калькуляции) + помечаем как отправленный
+    for(const oid of ids){
+      await dbUpdate('orders',oid,{intercity_cost:per,intercity_shipment_id:saved.id});
+      const o=(S.orders||[]).find(x=>x.id===oid);if(o){o.intercity_cost=per;o.intercity_shipment_id=saved.id;}
+    }
+    toast(`Отправка создана · ${ids.length} заказов · ${per.toLocaleString('ru-RU')} ₸/заказ`);
+    renderIntercity();return true;
+  },{wide:true});
+  // обработчик выбора города — подтягиваем заказы
+  setTimeout(()=>{
+    const sel=$('s_dest');if(!sel)return;
+    sel.onchange=()=>{
+      selectedDest=sel.value;
+      const wrap=$('s_orders_wrap');
+      if(!selectedDest){wrap.innerHTML='<div class="hint" style="padding:10px 0">Выберите город получения.</div>';pickedOrders=[];return;}
+      const list=ordersForIntercity(selectedDest);
+      pickedOrders=list.map(o=>o.id);
+      if(!list.length){wrap.innerHTML='<div class="empty" style="padding:20px"><div class="big">Нет заказов</div>В этот город нет курьерских заказов, ожидающих отправки.</div>';return;}
+      wrap.innerHTML=`
+        <div class="ic-orders-head">
+          <b>Заказы для отправки (${list.length})</b>
+          <span class="hint">Снимите галочку, чтобы исключить заказ из коробки</span>
+        </div>
+        <div class="ic-orders-list">
+          ${list.map(o=>`<label class="ic-order-row">
+            <input type="checkbox" data-icorder="${o.id}" checked>
+            <span class="ic-o-code">${esc(o.code||o.id.slice(0,6))}</span>
+            <span class="ic-o-client">${esc(o.client||o.sender||'—')}</span>
+            <span class="ic-o-track">${esc(o.track||'')}</span>
+          </label>`).join('')}
+        </div>
+        <div class="ic-calc-live" id="s_live"></div>`;
+      updateShipLive();
+      wrap.querySelectorAll('[data-icorder]').forEach(c=>c.onchange=updateShipLive);
+    };
+    // пересчёт «за 1 заказ» вживую
+    const costInp=$('s_cost');if(costInp)costInp.oninput=updateShipLive;
+  },50);
+}
+// живой пересчёт стоимости за заказ в форме
+function updateShipLive(){
+  const live=$('s_live');if(!live)return;
+  const cost=parseFloat(($('s_cost')||{}).value)||0;
+  const checked=document.querySelectorAll('[data-icorder]:checked').length;
+  const per=checked?Math.round(cost/checked):0;
+  live.innerHTML=`В коробке: <b>${checked}</b> заказов · Стоимость за 1 заказ: <b>${per.toLocaleString('ru-RU')} ₸</b>`;
+}
+
+// просмотр заказов в отправке
+function shipmentOrdersModal(id){
+  const s=(S.shipments||[]).find(x=>x.id===id);if(!s)return;
+  const ids=s.order_ids||[];
+  const per=ids.length?Math.round((s.box_cost||0)/ids.length):0;
+  const rows=ids.map(oid=>{
+    const o=(S.orders||[]).find(x=>x.id===oid);
+    if(!o)return `<tr><td colspan="4" style="color:var(--muted)">Заказ удалён (${esc(oid.slice(0,6))})</td></tr>`;
+    return `<tr><td>${esc(o.code||'')}</td><td>${esc(o.client||o.sender||'—')}</td><td>${esc(o.track||'—')}</td><td>${per.toLocaleString('ru-RU')} ₸</td></tr>`;
+  }).join('');
+  showInfo(`Отправка в ${courierCityName(s.dest_city_id)}`,`
+    <div class="ic-view-head">
+      <div>Дата: <b>${esc(fmtDate(s.ship_date))}</b></div>
+      <div>Транспорт: <b>${esc(s.transport||'—')}</b>${s.weight?` · Вес: <b>${esc(s.weight)} кг</b>`:''}</div>
+      <div>Стоимость коробки: <b>${Math.round(s.box_cost||0).toLocaleString('ru-RU')} ₸</b> · За 1 заказ: <b>${per.toLocaleString('ru-RU')} ₸</b></div>
+      <div>Отправитель: <b>${esc(s.sender_name||'—')}</b></div>
+    </div>
+    <table class="ic-view-tbl"><thead><tr><th>Код</th><th>Клиент</th><th>Трек</th><th>Стоимость</th></tr></thead><tbody>${rows}</tbody></table>`);
+}
+
+// удаление отправки — снимает метки с заказов
+async function delShipment(id){
+  const s=(S.shipments||[]).find(x=>x.id===id);if(!s)return;
+  if(!confirm('Удалить эту отправку? Стоимость межгорода с заказов будет снята.'))return;
+  const ok=await dbDelete('shipments',id);
+  if(!ok){toast('Не удалось удалить');return;}
+  // снимаем стоимость и метку с заказов
+  for(const oid of (s.order_ids||[])){
+    await dbUpdate('orders',oid,{intercity_cost:null,intercity_shipment_id:null});
+    const o=(S.orders||[]).find(x=>x.id===oid);if(o){o.intercity_cost=null;o.intercity_shipment_id=null;}
+  }
+  S.shipments=(S.shipments||[]).filter(x=>x.id!==id);
+  toast('Отправка удалена');renderIntercity();
+}
+
 /* ================= МОДУЛЬ: КАЛЬКУЛЯЦИЯ ================= */
 // определения статей расходов калькуляции.
 // kind: 'fixed' — фиксированная стоимость за заказ; 'fund' — месячный фонд, делится на заказы месяца
@@ -1821,7 +2023,11 @@ function calcOrder(o){
       let amount;
       if(snap&&snap.items&&snap.items[f.key]!=null)amount=parseFloat(snap.items[f.key])||0;
       else if(f.kind==='fund')amount=Math.round((calcNorm(f.key)/monthOrders)*100)/100;
-      else if(f.key==='courier'||f.key==='freight')amount=calcCityNorm(cityId,f.key);
+      else if(f.key==='freight'){
+        // реальная стоимость межгорода из отправки (если заказ отправлен коробкой), иначе норматив города
+        amount=(o.intercity_cost!=null&&o.intercity_cost!=='')?parseFloat(o.intercity_cost)||0:calcCityNorm(cityId,'freight');
+      }
+      else if(f.key==='courier')amount=calcCityNorm(cityId,f.key);
       else amount=calcNorm(f.key);
       return {key:f.key,label:f.label,amount};
     });
