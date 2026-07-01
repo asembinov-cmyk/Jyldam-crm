@@ -1349,6 +1349,7 @@ async function loadAll(){
   try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){S.calcSettings=null;}
   try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){S.calcCityNorms=[];}
   try{S.calcCourierNorms=await dbList('calc_courier_norms',{});}catch(e){S.calcCourierNorms=[];}
+  try{S.calcSalesNorms=await dbList('calc_sales_norms',{});}catch(e){S.calcSalesNorms=[];}
   try{S.shipments=await dbList('shipments',{});}catch(e){S.shipments=[];}
   try{S.warehouses=await dbList('warehouses',{order:'name'});}catch(e){S.warehouses=[];}
 }
@@ -1395,6 +1396,7 @@ async function refreshForTab(tab){
       try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){}
       try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){}
       try{S.calcCourierNorms=await dbList('calc_courier_norms',{});}catch(e){}
+      try{S.calcSalesNorms=await dbList('calc_sales_norms',{});}catch(e){}
       try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
     }
   }catch(e){console.error('refresh',e);}
@@ -2016,7 +2018,6 @@ const CALC_FIELDS=[
 ];
 // сотрудники с окладом (делится на заказы месяца) + ставкой за заказ
 const CALC_SALARY_FIELDS=[
-  {salaryKey:'salary_manager',   perKey:'perorder_manager',   label:'Менеджер по продажам'},
   {salaryKey:'salary_processor', perKey:'perorder_processor', label:'Менеджер обработчик'},
 ];
 // ПОЧТОВЫЕ фиксированные расходы (за заказ) — применяются к заказам с типом доставки «почта»
@@ -2046,6 +2047,16 @@ function calcCourierPay(courierId){
   const row=(S.calcCourierNorms||[]).find(r=>r.courier_id===courierId);
   return row&&row.pay!=null&&row.pay!==''?parseFloat(row.pay):0;
 }
+// ставки менеджера продаж (оклад и за заказ) по id менеджера из справочника sales_managers
+function calcSalesNorm(salesId,key){
+  if(!salesId)return 0;
+  const row=(S.calcSalesNorms||[]).find(r=>r.sales_id===salesId);
+  return row&&row[key]!=null&&row[key]!==''?parseFloat(row[key]):0;
+}
+// сумма окладов всех менеджеров продаж (общий котёл)
+function calcSalesTotalSalary(){
+  return (S.calcSalesNorms||[]).reduce((s,r)=>s+(r.salary!=null&&r.salary!==''?parseFloat(r.salary)||0:0),0);
+}
 // заборщик заказа: через заявку, из которой создан заказ (pickup.courier_id)
 function orderPickerCourier(o){
   if(!o.pickup_id)return null;
@@ -2065,12 +2076,12 @@ function orderCourierFinance(o){
   const blank=calcNorm('blank');
   const pack=calcNorm('pack');
   const adminCourier=calcNorm('admin_courier'); // фикс 120 по умолчанию
-  // ОБЩИЙ ОКЛАД = сумма окладов (менеджер продаж + обработчик + логист) ÷ все заказы месяца
-  const totalSalary=calcNorm('salary_manager')+calcNorm('salary_processor')+calcNorm('fund_logist');
+  // ОБЩИЙ ОКЛАД = сумма окладов менеджеров продаж (все трое) + оклад обработчика + фонд логиста, ÷ все заказы месяца
+  const totalSalary=calcSalesTotalSalary()+calcNorm('salary_processor')+calcNorm('fund_logist');
   const commonSalary=Math.round((totalSalary/monthOrders)*100)/100;
-  // менеджер по продажам: только ставка за заказ (150), если в заказе указан менеджер продаж
-  const manager=o.sales_id?calcNorm('perorder_manager'):0;
-  // менеджер обработчик: только ставка за заказ (80), на все заказы
+  // менеджер по продажам: персональная ставка за заказ того менеджера, что указан в заказе
+  const manager=o.sales_id?calcSalesNorm(o.sales_id,'per_order'):0;
+  // менеджер обработчик: ставка за заказ (80), на все заказы
   const processor=calcNorm('perorder_processor');
   const totalCost=intercity+courierPay+pickerPay+blank+pack+adminCourier+commonSalary+manager+processor;
   const remainder=revenue-totalCost;
@@ -2131,13 +2142,16 @@ function calcOrder(o){
     });
     items=postItems.concat(fundItems);
   }
-  // статьи «оклад + за заказ» (менеджер продаж, обработчик) — для всех заказов
+  // статьи «оклад + за заказ»: обработчик (общий) + менеджер продаж (персональный)
   CALC_SALARY_FIELDS.forEach(f=>{
     const salary=Math.round((calcNorm(f.salaryKey)/monthOrders)*100)/100;
-    // для менеджера продаж ставка за заказ только если в заказе указан менеджер (sales_id)
-    const per=(f.salaryKey==='salary_manager'&&!o.sales_id)?0:calcNorm(f.perKey);
+    const per=calcNorm(f.perKey);
     items.push({key:f.salaryKey,label:f.label,amount:salary+per});
   });
+  // менеджер продаж: оклады всех в котёл ÷ заказы месяца + персональная ставка за заказ
+  const salesCommon=Math.round((calcSalesTotalSalary()/monthOrders)*100)/100;
+  const salesPer=o.sales_id?calcSalesNorm(o.sales_id,'per_order'):0;
+  items.push({key:'sales_manager',label:'Менеджер по продажам',amount:salesCommon+salesPer});
   const totalCost=items.reduce((s,it)=>s+(it.amount||0),0);
   const profit=revenue-totalCost;
   const margin=revenue>0?(profit/revenue*100):0;
@@ -2195,6 +2209,17 @@ function renderCalcNorms(){
           <input type="number" min="0" step="0.01" data-calcnorm="${f.salaryKey}" value="${cs[f.salaryKey]!=null&&cs[f.salaryKey]!==''?esc(cs[f.salaryKey]):''}" placeholder="0">
           <input type="number" min="0" step="0.01" data-calcnorm="${f.perKey}" value="${cs[f.perKey]!=null&&cs[f.perKey]!==''?esc(cs[f.perKey]):''}" placeholder="0">
         </div>`).join('')}
+        <h3 class="calc-h" style="margin-top:18px">Менеджеры по продажам (персонально)</h3>
+        <p class="calc-note">Оклад каждого идёт в общий котёл (сумма всех окладов ÷ заказы месяца). Ставка за заказ применяется к заказам этого менеджера.</p>
+        <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Менеджер</span><span>Оклад/мес</span><span>За заказ</span></div>
+        ${(S.sales||[]).map(sm=>{
+          const salV=calcSalesNorm(sm.id,'salary');const perV=calcSalesNorm(sm.id,'per_order');
+          return `<div class="calc-city-row" data-salespay="${sm.id}" style="grid-template-columns:1fr 110px 110px">
+            <span class="ccr-name">${esc(sm.fio)}</span>
+            <input type="number" min="0" step="0.01" data-ssalary="${sm.id}" value="${salV?esc(salV):''}" placeholder="0">
+            <input type="number" min="0" step="0.01" data-sper="${sm.id}" value="${perV?esc(perV):''}" placeholder="0">
+          </div>`;
+        }).join('')}
         <h3 class="calc-h" style="margin-top:18px">Контроль прибыли</h3>
         <div class="calc-norm-row">
           <div class="cn-label">Минимальная прибыль<span class="cn-hint">Ниже — жёлтая индикация</span></div>
@@ -2276,6 +2301,18 @@ async function saveCalcSettings(){
       const payload={courier_id:cid,pay:v===''?0:parseFloat(v)||0};
       if(existing){const u=await dbUpdate('calc_courier_norms',existing.id,payload);if(u)Object.assign(existing,u);}
       else{const u=await dbInsert('calc_courier_norms',payload);if(u){if(!S.calcCourierNorms)S.calcCourierNorms=[];S.calcCourierNorms.push(u);}}
+    }
+    // ставки менеджеров продаж (оклад + за заказ)
+    const salesRows=document.querySelectorAll('[data-salespay]');
+    for(const el of salesRows){
+      const sid=el.dataset.salespay;
+      const sal=el.querySelector(`[data-ssalary="${sid}"]`).value.trim();
+      const per=el.querySelector(`[data-sper="${sid}"]`).value.trim();
+      const existing=(S.calcSalesNorms||[]).find(r=>r.sales_id===sid);
+      if(sal===''&&per===''&&!existing)continue;
+      const payload={sales_id:sid,salary:sal===''?0:parseFloat(sal)||0,per_order:per===''?0:parseFloat(per)||0};
+      if(existing){const u=await dbUpdate('calc_sales_norms',existing.id,payload);if(u)Object.assign(existing,u);}
+      else{const u=await dbInsert('calc_sales_norms',payload);if(u){if(!S.calcSalesNorms)S.calcSalesNorms=[];S.calcSalesNorms.push(u);}}
     }
     toast('Нормативы сохранены');
   }catch(e){console.error(e);toast('Ошибка сохранения');}
