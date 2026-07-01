@@ -555,6 +555,7 @@
   .ofin-row{display:flex;justify-content:space-between;align-items:center;font-size:14px}
   .ofin-row span{color:var(--muted)}
   .ofin-total{border-top:1px solid var(--line);padding-top:8px;margin-top:4px;font-size:15px}
+  .ofin-subtotal{border-top:1px dashed var(--line);padding-top:6px;margin-top:4px;color:var(--muted)}
   .ofin-total span{color:var(--ink);font-weight:600}
   .o-paidorder input{width:18px;height:18px;accent-color:var(--moss);cursor:pointer}
   .pom-paidhint{font-weight:400;color:var(--muted);font-size:12px}
@@ -2010,9 +2011,13 @@ const CALC_FIELDS=[
   {key:'sms',       label:'SMS (за заказ)',               kind:'fixed', hint:'Стоимость SMS-уведомлений'},
   {key:'driver',    label:'Водитель (за заказ)',          kind:'fixed', hint:'Перевозка склад ↔ сортировка'},
   {key:'freight',   label:'Доставка груза (за заказ)',    kind:'fixed', hint:'Междугородняя перевозка (курьер по городу — 0)'},
+  {key:'admin_courier', label:'ЗП Администратор курьера (за заказ)', kind:'fixed', hint:'Фиксированная ставка за заказ'},
   {key:'fund_logist',  label:'Фонд ЗП логистов (в месяц)',   kind:'fund', hint:'Делится на кол-во заказов за месяц'},
-  {key:'fund_manager', label:'Фонд ЗП менеджеров (в месяц)', kind:'fund', hint:'Делится на кол-во заказов за месяц'},
-  {key:'fund_processor',label:'Фонд обработки (в месяц)',    kind:'fund', hint:'Делится на кол-во заказов за месяц'},
+];
+// сотрудники с окладом (делится на заказы месяца) + ставкой за заказ
+const CALC_SALARY_FIELDS=[
+  {salaryKey:'salary_manager',   perKey:'perorder_manager',   label:'Менеджер по продажам'},
+  {salaryKey:'salary_processor', perKey:'perorder_processor', label:'Менеджер обработчик'},
 ];
 // ПОЧТОВЫЕ фиксированные расходы (за заказ) — применяются к заказам с типом доставки «почта»
 const CALC_POST_FIELDS=[
@@ -2023,8 +2028,11 @@ const CALC_POST_FIELDS=[
   {key:'post_driver', label:'Водитель (за заказ)',       hint:'Перевозка склад ↔ сортировка'},
   {key:'post_freight',label:'Доставка почтой (за заказ)',hint:'Стоимость отправки почтой'},
 ];
-// значение норматива из настроек (или 0)
-function calcNorm(key){const cs=S.calcSettings||{};const v=cs[key];return v!=null&&v!==''?parseFloat(v):0;}
+// значение норматива из настроек (или 0). admin_courier по умолчанию 120.
+function calcNorm(key){const cs=S.calcSettings||{};const v=cs[key];
+  if(v!=null&&v!=='')return parseFloat(v);
+  if(key==='admin_courier')return 120; // дефолт ЗП администратора курьера
+  return 0;}
 function calcMinProfit(){const cs=S.calcSettings||{};return cs.min_profit!=null&&cs.min_profit!==''?parseFloat(cs.min_profit):0;}
 // городской норматив (курьер/межгород) по id города; если для города не задан — берём общий
 function calcCityNorm(cityId,key){
@@ -2044,17 +2052,31 @@ function orderPickerCourier(o){
   const pk=(S.pickups||[]).find(p=>p.id===o.pickup_id);
   return pk?pk.courier_id:null;
 }
-// финансовая раскладка курьерского заказа: межгород, курьер города, заборщик, остаток
+// финансовая раскладка курьерского заказа: все статьи расходов + остаток
 function orderCourierFinance(o){
   const revenue=(o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0;
-  // стоимость межгород — из отправки (intercity_cost), иначе норматив города получения
   const cityId=o.courier_city_id||orderCalcCity(o);
+  const monthOrders=ordersInOrderMonth(o); // кол-во заказов за месяц (для деления окладов/фондов)
+  // межгород — из отправки (intercity_cost), иначе 0
   const intercity=(o.intercity_cost!=null&&o.intercity_cost!=='')?parseFloat(o.intercity_cost)||0:0;
-  const courierPay=calcCityNorm(o.courier_city_id||cityId,'courier'); // оплата курьеру города назначения
+  const courierPay=calcCityNorm(o.courier_city_id||cityId,'courier'); // оплата курьеру города
   const pickerId=orderPickerCourier(o);
-  const pickerPay=calcCourierPay(pickerId);
-  const remainder=revenue-intercity-courierPay-pickerPay;
-  return {revenue,intercity,courierPay,pickerId,pickerPay,remainder};
+  const pickerPay=calcCourierPay(pickerId); // оплата заборщику (персонально)
+  const blank=calcNorm('blank');
+  const pack=calcNorm('pack');
+  const adminCourier=calcNorm('admin_courier'); // фикс 120 по умолчанию
+  const logist=Math.round((calcNorm('fund_logist')/monthOrders)*100)/100; // фонд логистов ÷ заказы месяца
+  // менеджеры: оклад ÷ заказы месяца + ставка за заказ
+  const mgrSalary=Math.round((calcNorm('salary_manager')/monthOrders)*100)/100;
+  const mgrPer=calcNorm('perorder_manager');
+  const manager=mgrSalary+mgrPer;
+  const procSalary=Math.round((calcNorm('salary_processor')/monthOrders)*100)/100;
+  const procPer=calcNorm('perorder_processor');
+  const processor=procSalary+procPer;
+  const totalCost=intercity+courierPay+pickerPay+blank+pack+adminCourier+logist+manager+processor;
+  const remainder=revenue-totalCost;
+  return {revenue,intercity,courierPay,pickerId,pickerPay,blank,pack,adminCourier,logist,
+    manager,mgrSalary,mgrPer,processor,procSalary,procPer,monthOrders,totalCost,remainder};
 }
 // город забора заказа (pickup_city_id, иначе город партнёра)
 function orderCalcCity(o){
@@ -2110,6 +2132,12 @@ function calcOrder(o){
     });
     items=postItems.concat(fundItems);
   }
+  // статьи «оклад + за заказ» (менеджер продаж, обработчик) — для всех заказов
+  CALC_SALARY_FIELDS.forEach(f=>{
+    const salary=Math.round((calcNorm(f.salaryKey)/monthOrders)*100)/100;
+    const per=calcNorm(f.perKey);
+    items.push({key:f.salaryKey,label:f.label,amount:salary+per});
+  });
   const totalCost=items.reduce((s,it)=>s+(it.amount||0),0);
   const profit=revenue-totalCost;
   const margin=revenue>0?(profit/revenue*100):0;
@@ -2159,6 +2187,14 @@ function renderCalcNorms(){
         <h3 class="calc-h">Распределяемые фонды (в месяц)</h3>
         <p class="calc-note">Делятся на количество заказов за месяц. Чем больше заказов — тем меньше на каждый.</p>
         ${fundFields.map(fieldRow).join('')}
+        <h3 class="calc-h" style="margin-top:18px">Сотрудники: оклад + за заказ</h3>
+        <p class="calc-note">Оклад делится на кол-во заказов за месяц + фиксированная ставка за каждый заказ.</p>
+        <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Сотрудник</span><span>Оклад/мес</span><span>За заказ</span></div>
+        ${CALC_SALARY_FIELDS.map(f=>`<div class="calc-city-row" style="grid-template-columns:1fr 110px 110px">
+          <span class="ccr-name">${esc(f.label)}</span>
+          <input type="number" min="0" step="0.01" data-calcnorm="${f.salaryKey}" value="${cs[f.salaryKey]!=null&&cs[f.salaryKey]!==''?esc(cs[f.salaryKey]):''}" placeholder="0">
+          <input type="number" min="0" step="0.01" data-calcnorm="${f.perKey}" value="${cs[f.perKey]!=null&&cs[f.perKey]!==''?esc(cs[f.perKey]):''}" placeholder="0">
+        </div>`).join('')}
         <h3 class="calc-h" style="margin-top:18px">Контроль прибыли</h3>
         <div class="calc-norm-row">
           <div class="cn-label">Минимальная прибыль<span class="cn-hint">Ниже — жёлтая индикация</span></div>
@@ -4159,9 +4195,16 @@ function orderModal(id,readonly){
             <div class="ofin-row"><span>Стоимость отправки межгород</span><b>${m(f.intercity)}</b></div>
             <div class="ofin-row"><span>Оплата курьеру города</span><b>${m(f.courierPay)}</b></div>
             <div class="ofin-row"><span>Оплата заборщику${f.pickerId?' ('+esc(courierName(f.pickerId))+')':''}</span><b>${m(f.pickerPay)}</b></div>
+            <div class="ofin-row"><span>Бланк</span><b>${m(f.blank)}</b></div>
+            <div class="ofin-row"><span>Пакет</span><b>${m(f.pack)}</b></div>
+            <div class="ofin-row"><span>ЗП Администратор курьера</span><b>${m(f.adminCourier)}</b></div>
+            <div class="ofin-row"><span>ЗП Логист (фонд÷${f.monthOrders})</span><b>${m(f.logist)}</b></div>
+            <div class="ofin-row"><span>ЗП Менеджер по продажам</span><b>${m(f.manager)}</b></div>
+            <div class="ofin-row"><span>ЗП Менеджер обработчик</span><b>${m(f.processor)}</b></div>
+            <div class="ofin-row ofin-subtotal"><span>Итого расходы</span><b>${m(f.totalCost)}</b></div>
             <div class="ofin-row ofin-total"><span>Остаток</span><b style="color:${f.remainder<0?'#c0392b':'#2e7d32'}">${m(f.remainder)}</b></div>
           </div>
-          <span class="hint">Межгород — из модуля отправок; курьер — норматив города; заборщик — ставка из калькуляции.</span>
+          <span class="hint">Межгород — из отправок; курьер — норматив города; заборщик — ставка из калькуляции; оклады менеджеров делятся на ${f.monthOrders} заказов месяца.</span>
         </div>`;
       })():''}
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
