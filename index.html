@@ -1873,19 +1873,33 @@ function renderIntercity(){
   $('main').querySelectorAll('[data-icdel]').forEach(b=>b.onclick=()=>delShipment(b.dataset.icdel));
 }
 
+// города получения (курьерские), куда есть неотправленные курьерские заказы на дату
+function destCitiesForDate(date){
+  const ids=new Set();
+  (S.orders||[]).forEach(o=>{
+    if(!isCourierDelivery(o.delivery_id))return;
+    if(o.intercity_shipment_id)return;
+    if(!o.courier_city_id)return;
+    if(date){const d=(o.pickup_date||o.created_at||'').slice(0,10);if(d!==date)return;}
+    ids.add(o.courier_city_id);
+  });
+  return (S.courier_cities||[]).filter(c=>ids.has(c.id));
+}
 // форма создания отправки
 function shipmentModal(){
-  const destCities=(S.courier_cities||[]); // города получения (курьерские)
   let selectedDest='';
   let pickedOrders=[]; // выбранные заказы (по умолчанию все из города)
+  const initDate=localToday();
+  const initCities=destCitiesForDate(initDate);
   const body=`
     <div class="form-grid">
-      <div class="field"><label>Дата отправки</label><input type="date" id="s_date" value="${localToday()}"></div>
+      <div class="field"><label>Дата отправки</label><input type="date" id="s_date" value="${initDate}"></div>
       <div class="field"><label>Склад отправки <span style="color:var(--rust)">*</span></label>
         <select id="s_wh"><option value="">— выберите склад —</option>${(S.warehouses||[]).map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select>
         ${(!S.warehouses||!S.warehouses.length)?'<span class="hint" style="color:var(--rust)">Добавьте склады в Справочники → Склады отправки</span>':''}</div>
       <div class="field"><label>Город получения <span style="color:var(--rust)">*</span></label>
-        <select id="s_dest"><option value="">— выберите город —</option>${destCities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+        <select id="s_dest"><option value="">${initCities.length?'— выберите город —':'нет заказов на эту дату'}</option>${initCities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+        <span class="hint">Показаны города, куда есть заказы на выбранную дату.</span></div>
       <div class="field"><label>Тип транспорта</label>
         <select id="s_transport">${TRANSPORT_TYPES.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select></div>
       <div class="field"><label>Вес (кг) <span class="hint" style="font-weight:400">для Азия Фрейт</span></label><input type="number" min="0" step="0.01" id="s_weight" placeholder="0"></div>
@@ -1956,7 +1970,14 @@ function shipmentModal(){
       wrap.querySelectorAll('[data-icorder]').forEach(c=>c.onchange=updateShipLive);
     };
     sel.onchange=rebuild;
-    if($('s_date'))$('s_date').onchange=rebuild; // смена даты тоже пересобирает список
+    if($('s_date'))$('s_date').onchange=()=>{
+      // при смене даты пересобираем список городов получения (только те, куда есть заказы)
+      const date=($('s_date')||{}).value||'';
+      const cities=destCitiesForDate(date);
+      sel.innerHTML=`<option value="">${cities.length?'— выберите город —':'нет заказов на эту дату'}</option>`+cities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      selectedDest='';
+      rebuild();
+    };
     // пересчёт «за 1 заказ» вживую
     const costInp=$('s_cost');if(costInp)costInp.oninput=updateShipLive;
   },50);
