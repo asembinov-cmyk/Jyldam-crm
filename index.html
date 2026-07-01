@@ -913,14 +913,27 @@ function loadNav(){
 
 /* ---------- DATA LAYER ---------- */
 async function dbList(table,opts={}){
-  let q=sb.from(table).select('*');
-  if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
+  // Supabase отдаёт максимум 1000 строк за запрос. Если строк больше — грузим постранично.
+  const PAGE=1000;
+  const fetchPage=(from,to)=>{
+    let q=sb.from(table).select('*');
+    if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
+    q=q.range(from,to);
+    return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))]);
+  };
   try{
-    // таймаут 12с: зависший запрос (RLS и т.п.) не блокирует вход
-    const res=await Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000))]);
-    const {data,error}=res;
-    if(error){console.error(table,error);return [];}
-    return data||[];
+    let all=[],from=0;
+    while(true){
+      const res=await fetchPage(from,from+PAGE-1);
+      const {data,error}=res;
+      if(error){console.error(table,error);return all;}
+      const chunk=data||[];
+      all=all.concat(chunk);
+      if(chunk.length<PAGE)break; // последняя страница
+      from+=PAGE;
+      if(from>50000)break; // предохранитель от бесконечного цикла
+    }
+    return all;
   }catch(e){console.error('dbList',table,e&&e.message);return [];}
 }
 // таблицы, логируемые автоматически в обёртках (orders/pickups логируются отдельно с подробностями)
