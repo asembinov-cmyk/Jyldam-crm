@@ -889,7 +889,7 @@ const S={
   dir:'cities',
   // справочники-кэш
   cities:[],districts:[],couriers:[],order_couriers:[],sales:[],processors:[],
-  partners:[],statuses:[],orderStatuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],
+  partners:[],statuses:[],orderStatuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],warehouses:[],
   pickups:[],orders:[],activityLog:[],
   myPerms:null, myBaseType:'staff',
 };
@@ -918,9 +918,9 @@ async function dbList(table,opts={}){
   }catch(e){console.error('dbList',table,e&&e.message);return [];}
 }
 // таблицы, логируемые автоматически в обёртках (orders/pickups логируются отдельно с подробностями)
-const AUTO_LOG_TABLES=new Set(['partners','cities','districts','couriers','order_couriers','sales_managers','processors','statuses','order_statuses','delivery_types','courier_cities','post_ips','profiles','roles']);
+const AUTO_LOG_TABLES=new Set(['partners','cities','districts','couriers','order_couriers','sales_managers','processors','statuses','order_statuses','delivery_types','courier_cities','post_ips','profiles','roles','warehouses']);
 // карта таблица→ключ кэша в S (для поиска "до" и подписи)
-const TABLE_ARRKEY={partners:'partners',cities:'cities',districts:'districts',couriers:'couriers',order_couriers:'order_couriers',sales_managers:'sales',processors:'processors',statuses:'statuses',order_statuses:'orderStatuses',delivery_types:'delivery',courier_cities:'courier_cities',post_ips:'post_ips',profiles:'profiles',roles:'roles'};
+const TABLE_ARRKEY={partners:'partners',cities:'cities',districts:'districts',couriers:'couriers',order_couriers:'order_couriers',sales_managers:'sales',processors:'processors',statuses:'statuses',order_statuses:'orderStatuses',delivery_types:'delivery',courier_cities:'courier_cities',post_ips:'post_ips',profiles:'profiles',roles:'roles',warehouses:'warehouses'};
 function recLabel(rec){return rec?(rec.name||rec.fio||rec.full_name||rec.code||rec.email||('#'+rec.id)):'';}
 function findCached(table,id){const k=TABLE_ARRKEY[table];const arr=k&&S[k];return Array.isArray(arr)?arr.find(x=>x&&x.id===id):null;}
 async function dbInsert(table,row){
@@ -952,7 +952,7 @@ const ENTITY_LABEL={
   orders:'Заказ',pickups:'Заявка на забор',partners:'Партнёр',cities:'Город',districts:'Район',
   couriers:'Курьер (заборщик)',order_couriers:'Курьер по заказам',sales_managers:'Менеджер по продажам',
   processors:'Обработчик',statuses:'Статус забора',order_statuses:'Статус заказа',delivery_types:'Тип доставки',
-  courier_cities:'Курьерский город',post_ips:'ИП для Почты',profiles:'Сотрудник',roles:'Роль',auth:'Система'
+  courier_cities:'Курьерский город',post_ips:'ИП для Почты',profiles:'Сотрудник',roles:'Роль',warehouses:'Склад отправки',auth:'Система'
 };
 // человекочитаемые подписи полей (для детальных правок)
 const FIELD_LABEL={
@@ -1325,6 +1325,7 @@ async function loadAll(){
   try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){S.calcSettings=null;}
   try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){S.calcCityNorms=[];}
   try{S.shipments=await dbList('shipments',{});}catch(e){S.shipments=[];}
+  try{S.warehouses=await dbList('warehouses',{order:'name'});}catch(e){S.warehouses=[];}
 }
 
 // Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
@@ -1794,6 +1795,9 @@ function ordersForIntercity(cityId){
   );
 }
 
+// имя склада отправки из справочника
+function warehouseName(id){return ((S.warehouses||[]).find(w=>w.id===id)||{}).name||'—';}
+
 function renderIntercity(){
   if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const rows=[...(S.shipments||[])].sort((a,b)=>(b.ship_date||b.created_at||'').localeCompare(a.ship_date||a.created_at||''));
@@ -1814,7 +1818,7 @@ function renderIntercity(){
         const per=cnt?Math.round((s.box_cost||0)/cnt):0;
         return `<tr>
           <td data-label="Дата">${esc(fmtDate(s.ship_date))}</td>
-          <td data-label="Склад отправки">${esc(cityName(s.warehouse_city_id))}</td>
+          <td data-label="Склад отправки">${esc(s.warehouse_id?warehouseName(s.warehouse_id):cityName(s.warehouse_city_id))}</td>
           <td data-label="Город получения">${esc(courierCityName(s.dest_city_id))}</td>
           <td data-label="Транспорт">${esc(s.transport||'—')}</td>
           <td data-label="Вес">${s.weight?esc(s.weight)+' кг':'—'}</td>
@@ -1843,7 +1847,9 @@ function shipmentModal(){
   const body=`
     <div class="form-grid">
       <div class="field"><label>Дата отправки</label><input type="date" id="s_date" value="${localToday()}"></div>
-      <div class="field"><label>Склад отправки</label><input id="s_wh" value="${esc(cityName(myWarehouseCityId())||'')}" readonly><span class="hint">Автоматически — город вашего аккаунта</span></div>
+      <div class="field"><label>Склад отправки <span style="color:var(--rust)">*</span></label>
+        <select id="s_wh"><option value="">— выберите склад —</option>${(S.warehouses||[]).map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select>
+        ${(!S.warehouses||!S.warehouses.length)?'<span class="hint" style="color:var(--rust)">Добавьте склады в Справочники → Склады отправки</span>':''}</div>
       <div class="field"><label>Город получения <span style="color:var(--rust)">*</span></label>
         <select id="s_dest"><option value="">— выберите город —</option>${destCities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Тип транспорта</label>
@@ -1857,6 +1863,8 @@ function shipmentModal(){
   showModal('Новая отправка межгород',body,async()=>{
     const dest=val('s_dest');
     if(!dest){toast('Выберите город получения');return false;}
+    const wh=val('s_wh');
+    if(!wh){toast('Выберите склад отправки');return false;}
     const cost=parseFloat(val('s_cost'))||0;
     if(!cost){toast('Укажите стоимость отправки коробки');return false;}
     const ids=pickedOrders.filter(id=>document.querySelector(`[data-icorder="${id}"]`)?.checked);
@@ -1864,7 +1872,7 @@ function shipmentModal(){
     const per=Math.round(cost/ids.length);
     const row={
       ship_date:val('s_date')||localToday(),
-      warehouse_city_id:myWarehouseCityId()||null,
+      warehouse_id:wh,
       dest_city_id:dest,
       transport:val('s_transport')||'',
       weight:val('s_weight')?parseFloat(val('s_weight')):null,
@@ -4242,7 +4250,7 @@ function renderSettings(){
     ['couriers','Курьеры (заборщики)'],['order_couriers','Курьеры по заказам'],
     ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
     ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
-    ['courier_cities','Курьерские города'],['post_ips','ИП для Почты']];
+    ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки']];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Справочники</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр справочников (редактирование — у администратора)'}</p></div></div>
     <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
@@ -4250,7 +4258,7 @@ function renderSettings(){
   $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;saveNav();renderSettings();});
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
-    delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp};
+    delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses};
   (map[S.dir]||dirCities)();
 }
 // отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
@@ -4625,6 +4633,19 @@ function postIpModal(id){const c=id?S.post_ips.find(x=>x.id===id):{name:''};
     async()=>{const name=val('ip_name').trim();if(!name){toast('Укажите наименование');return false;}
       if(id){const u=await dbUpdate('post_ips',id,{name});if(!u)return false;Object.assign(S.post_ips.find(x=>x.id===id),u);}
       else{const u=await dbInsert('post_ips',{name});if(!u)return false;S.post_ips.push(u);}
+      toast('Сохранено');renderSettings();return true;});}
+
+/* Склады отправки (для модуля Отправки межгород) */
+function dirWarehouses(){
+  dirGrid({title:'Склады отправки',arrKey:'warehouses',table:'warehouses',modalFn:warehouseModal,emptyText:'Нет складов',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[{key:'name',label:'Склад',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`}]});
+}
+function warehouseModal(id){const c=id?S.warehouses.find(x=>x.id===id):{name:''};
+  showModal(id?'Склад отправки':'Новый склад',`<div class="field"><label>Название склада</label><input id="wh_name" value="${esc(c.name)}" placeholder="Напр. Астана, Алматы"></div>`,
+    async()=>{const name=val('wh_name').trim();if(!name){toast('Укажите название');return false;}
+      if(id){const u=await dbUpdate('warehouses',id,{name});if(!u)return false;Object.assign(S.warehouses.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('warehouses',{name});if(!u)return false;S.warehouses.push(u);}
       toast('Сохранено');renderSettings();return true;});}
 
 /* ================= МОДУЛЬ: ПОЛЬЗОВАТЕЛИ И РОЛИ ================= */
