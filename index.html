@@ -2066,10 +2066,11 @@ function orderCourierFinance(o){
   const pack=calcNorm('pack');
   const adminCourier=calcNorm('admin_courier'); // фикс 120 по умолчанию
   const logist=Math.round((calcNorm('fund_logist')/monthOrders)*100)/100; // фонд логистов ÷ заказы месяца
-  // менеджеры: оклад ÷ заказы месяца + ставка за заказ
+  // менеджер по продажам: оклад ÷ все заказы месяца + ставка за заказ ТОЛЬКО если в заказе указан менеджер продаж
   const mgrSalary=Math.round((calcNorm('salary_manager')/monthOrders)*100)/100;
-  const mgrPer=calcNorm('perorder_manager');
+  const mgrPer=o.sales_id?calcNorm('perorder_manager'):0; // 150₸ только если закреплён менеджер продаж
   const manager=mgrSalary+mgrPer;
+  // менеджер обработчик: оклад ÷ все заказы месяца + ставка за КАЖДЫЙ заказ
   const procSalary=Math.round((calcNorm('salary_processor')/monthOrders)*100)/100;
   const procPer=calcNorm('perorder_processor');
   const processor=procSalary+procPer;
@@ -2135,7 +2136,8 @@ function calcOrder(o){
   // статьи «оклад + за заказ» (менеджер продаж, обработчик) — для всех заказов
   CALC_SALARY_FIELDS.forEach(f=>{
     const salary=Math.round((calcNorm(f.salaryKey)/monthOrders)*100)/100;
-    const per=calcNorm(f.perKey);
+    // для менеджера продаж ставка за заказ только если в заказе указан менеджер (sales_id)
+    const per=(f.salaryKey==='salary_manager'&&!o.sales_id)?0:calcNorm(f.perKey);
     items.push({key:f.salaryKey,label:f.label,amount:salary+per});
   });
   const totalCost=items.reduce((s,it)=>s+(it.amount||0),0);
@@ -2188,7 +2190,7 @@ function renderCalcNorms(){
         <p class="calc-note">Делятся на количество заказов за месяц. Чем больше заказов — тем меньше на каждый.</p>
         ${fundFields.map(fieldRow).join('')}
         <h3 class="calc-h" style="margin-top:18px">Сотрудники: оклад + за заказ</h3>
-        <p class="calc-note">Оклад делится на кол-во заказов за месяц + фиксированная ставка за каждый заказ.</p>
+        <p class="calc-note">Оклад делится на все заказы за месяц. «За заказ»: у менеджера продаж (напр. 150₸) начисляется только заказам с указанным менеджером; у обработчика (напр. 80₸) — на каждый заказ.</p>
         <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Сотрудник</span><span>Оклад/мес</span><span>За заказ</span></div>
         ${CALC_SALARY_FIELDS.map(f=>`<div class="calc-city-row" style="grid-template-columns:1fr 110px 110px">
           <span class="ccr-name">${esc(f.label)}</span>
