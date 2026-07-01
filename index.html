@@ -2065,19 +2065,17 @@ function orderCourierFinance(o){
   const blank=calcNorm('blank');
   const pack=calcNorm('pack');
   const adminCourier=calcNorm('admin_courier'); // фикс 120 по умолчанию
-  const logist=Math.round((calcNorm('fund_logist')/monthOrders)*100)/100; // фонд логистов ÷ заказы месяца
-  // менеджер по продажам: оклад ÷ все заказы месяца + ставка за заказ ТОЛЬКО если в заказе указан менеджер продаж
-  const mgrSalary=Math.round((calcNorm('salary_manager')/monthOrders)*100)/100;
-  const mgrPer=o.sales_id?calcNorm('perorder_manager'):0; // 150₸ только если закреплён менеджер продаж
-  const manager=mgrSalary+mgrPer;
-  // менеджер обработчик: оклад ÷ все заказы месяца + ставка за КАЖДЫЙ заказ
-  const procSalary=Math.round((calcNorm('salary_processor')/monthOrders)*100)/100;
-  const procPer=calcNorm('perorder_processor');
-  const processor=procSalary+procPer;
-  const totalCost=intercity+courierPay+pickerPay+blank+pack+adminCourier+logist+manager+processor;
+  // ОБЩИЙ ОКЛАД = сумма окладов (менеджер продаж + обработчик + логист) ÷ все заказы месяца
+  const totalSalary=calcNorm('salary_manager')+calcNorm('salary_processor')+calcNorm('fund_logist');
+  const commonSalary=Math.round((totalSalary/monthOrders)*100)/100;
+  // менеджер по продажам: только ставка за заказ (150), если в заказе указан менеджер продаж
+  const manager=o.sales_id?calcNorm('perorder_manager'):0;
+  // менеджер обработчик: только ставка за заказ (80), на все заказы
+  const processor=calcNorm('perorder_processor');
+  const totalCost=intercity+courierPay+pickerPay+blank+pack+adminCourier+commonSalary+manager+processor;
   const remainder=revenue-totalCost;
-  return {revenue,intercity,courierPay,pickerId,pickerPay,blank,pack,adminCourier,logist,
-    manager,mgrSalary,mgrPer,processor,procSalary,procPer,monthOrders,totalCost,remainder};
+  return {revenue,intercity,courierPay,pickerId,pickerPay,blank,pack,adminCourier,commonSalary,
+    manager,processor,monthOrders,totalCost,remainder};
 }
 // город забора заказа (pickup_city_id, иначе город партнёра)
 function orderCalcCity(o){
@@ -4200,13 +4198,13 @@ function orderModal(id,readonly){
             <div class="ofin-row"><span>Бланк</span><b>${m(f.blank)}</b></div>
             <div class="ofin-row"><span>Пакет</span><b>${m(f.pack)}</b></div>
             <div class="ofin-row"><span>ЗП Администратор курьера</span><b>${m(f.adminCourier)}</b></div>
-            <div class="ofin-row"><span>ЗП Логист (фонд÷${f.monthOrders})</span><b>${m(f.logist)}</b></div>
-            <div class="ofin-row"><span>ЗП Менеджер по продажам</span><b>${m(f.manager)}</b></div>
+            <div class="ofin-row"><span>Общий оклад (÷${f.monthOrders} заказов)</span><b>${m(f.commonSalary)}</b></div>
+            <div class="ofin-row"><span>ЗП Менеджер по продажам${o.sales_id?'':' (не указан)'}</span><b>${m(f.manager)}</b></div>
             <div class="ofin-row"><span>ЗП Менеджер обработчик</span><b>${m(f.processor)}</b></div>
             <div class="ofin-row ofin-subtotal"><span>Итого расходы</span><b>${m(f.totalCost)}</b></div>
             <div class="ofin-row ofin-total"><span>Остаток</span><b style="color:${f.remainder<0?'#c0392b':'#2e7d32'}">${m(f.remainder)}</b></div>
           </div>
-          <span class="hint">Межгород — из отправок; курьер — норматив города; заборщик — ставка из калькуляции; оклады менеджеров делятся на ${f.monthOrders} заказов месяца.</span>
+          <span class="hint">Общий оклад (менеджеры + логист) делится на ${f.monthOrders} заказов месяца. Менеджер продаж (150₸) — только заказам с указанным менеджером; обработчик (80₸) — на каждый.</span>
         </div>`;
       })():''}
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
