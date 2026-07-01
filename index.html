@@ -3803,6 +3803,7 @@ function renderOrders(mode){
         ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partner?partnerName(of.partner):'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
         <select id="ofpickupcity" title="Город, откуда забрали заказ"><option value="">Город забора: все</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${of.pickupCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
         <select id="ofdestcity" title="Город, куда уходит заказ"><option value="">Город получения: все</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${of.destCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        <select id="ofsales" title="Менеджер по продажам"><option value="">Менеджер: все</option>${S.sales.map(s=>`<option value="${s.id}" ${of.sales===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select>
         <select id="ofmissing" title="Показать заказы с незаполненным полем">
           <option value="">Заполненность: все</option>
           <option value="client" ${of.missing==='client'?'selected':''}>Нет ФИО клиента</option>
@@ -3892,6 +3893,7 @@ function renderOrders(mode){
   if($('ofpaid'))$('ofpaid').onchange=e=>{of.paidBySender=e.target.value;drawOrdersReset();};
   if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
   if($('ofdestcity'))$('ofdestcity').onchange=e=>{of.destCity=e.target.value;drawOrdersReset();};
+  if($('ofsales'))$('ofsales').onchange=e=>{of.sales=e.target.value;drawOrdersReset();};
   if($('ofcreatefrom'))$('ofcreatefrom').onchange=e=>{of.createFrom=e.target.value;renderOrders(ordersMode);};
   if($('ofcreateto'))$('ofcreateto').onchange=e=>{of.createTo=e.target.value;renderOrders(ordersMode);};
   if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrdersReset();};
@@ -3950,6 +3952,7 @@ function filteredOrders(){
     // фильтр по городу забора
     if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
     if(of.destCity&&o.courier_city_id!==of.destCity)return false;
+    if(of.sales&&o.sales_id!==of.sales)return false;
     // фильтр по оплате отправителем
     if(of.paidBySender==='yes'&&!o.paid_by_sender)return false;
     if(of.paidBySender==='no'&&o.paid_by_sender)return false;
@@ -4026,7 +4029,7 @@ function drawOrders(){
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th><th>Город</th><th>Адрес</th><th>Статус</th><th>Трек-код</th>
+    <th>Тип доставки</th><th>Город</th>${staff?'<th>Менеджер</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
@@ -4044,6 +4047,7 @@ function drawOrders(){
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>
+      ${staff?`<td data-label="Менеджер">${o.sales_id?esc(salesName(o.sales_id)):'<span style="color:var(--muted)">—</span>'}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
       <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
