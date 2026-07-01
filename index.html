@@ -2344,23 +2344,25 @@ function renderCalcNorms(type){
   if($('calcNormMonth'))$('calcNormMonth').onchange=e=>{calcNormPeriod.month=parseInt(e.target.value,10);renderCalc();};
   if($('calcNormYear'))$('calcNormYear').onchange=e=>{calcNormPeriod.year=parseInt(e.target.value,10);renderCalc();};
   const showAllBtn=$('cityShowAll');if(showAllBtn)showAllBtn.onclick=()=>{_calcShowAllCities=true;renderCalc();};
+  const hideBtn=$('cityHide');if(hideBtn)hideBtn.onclick=()=>{_calcShowAllCities=false;renderCalc();};
 }
 
-// компактный блок городских нормативов: по умолчанию только заполненные + Астана/Алматы, остальное по кнопке
+// сворачиваемый блок городских нормативов: по умолчанию свёрнут, раскрывается по кнопке
 let _calcShowAllCities=false;
 function compactCityNorms(cities,cityNorm){
-  const isFilled=c=>cityNorm(c.id,'courier')!==''||cityNorm(c.id,'freight')!=='';
-  const isMain=c=>/алмат|астан|нур-?султан|шымкент/i.test(c.name||'');
-  const shown=_calcShowAllCities?cities:cities.filter(c=>isFilled(c)||isMain(c));
-  const hiddenCount=cities.length-shown.length;
   const row=c=>`<div class="calc-city-row" data-citynorm="${c.id}">
     <span class="ccr-name">${esc(c.name)}</span>
     <input type="number" min="0" step="0.01" data-ccourier="${c.id}" value="${esc(cityNorm(c.id,'courier'))}" placeholder="общий">
     <input type="number" min="0" step="0.01" data-cfreight="${c.id}" value="${esc(cityNorm(c.id,'freight'))}" placeholder="общий">
   </div>`;
+  if(!_calcShowAllCities){
+    // свёрнуто — только кнопка (но поля рендерим скрытыми, чтобы сохранение видело значения)
+    return `<button type="button" class="btn ghost sm" id="cityShowAll"><i style="font-style:normal">▾</i> Показать нормативы по городам (${cities.length})</button>
+      <div style="display:none">${cities.map(row).join('')}</div>`;
+  }
   return `<div class="calc-city-head"><span>Город</span><span>Курьер (₸)</span><span>Доставка груза (₸)</span></div>
-    ${shown.map(row).join('')}
-    ${(!_calcShowAllCities&&hiddenCount>0)?`<button type="button" class="btn ghost sm" id="cityShowAll" style="margin-top:10px">Показать все города (${hiddenCount})</button>`:''}`;
+    ${cities.map(row).join('')}
+    <button type="button" class="btn ghost sm" id="cityHide" style="margin-top:10px"><i style="font-style:normal">▴</i> Свернуть список</button>`;
 }
 
 async function saveCalcSettings(){
