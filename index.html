@@ -1785,14 +1785,17 @@ const TRANSPORT_TYPES=['Азия Фрейт','Авиа','Авто','Ж/Д','Ку
 // склад отправки текущего пользователя (город из профиля)
 function myWarehouseCityId(){return (S.me&&S.me.city_id)||'';}
 
-// заказы, доступные для отправки межгородом в город получения cityId:
-// курьерская доставка, город получения = cityId, ещё не в отправке (нет intercity_shipment_id)
-function ordersForIntercity(cityId){
-  return (S.orders||[]).filter(o=>
-    isCourierDelivery(o.delivery_id) &&
-    o.courier_city_id===cityId &&
-    !o.intercity_shipment_id
-  );
+// заказы, доступные для отправки межгородом:
+// курьерская доставка, город получения = cityId, дата забора = date (если задана), ещё не в отправке
+function ordersForIntercity(cityId,date){
+  return (S.orders||[]).filter(o=>{
+    if(!isCourierDelivery(o.delivery_id))return false;
+    if(o.courier_city_id!==cityId)return false;
+    if(o.intercity_shipment_id)return false;
+    // фильтр по дате забора заказа (если дата выбрана)
+    if(date){const d=(o.pickup_date||o.created_at||'').slice(0,10);if(d!==date)return false;}
+    return true;
+  });
 }
 
 // имя склада отправки из справочника
@@ -1893,20 +1896,21 @@ function shipmentModal(){
     toast(`Отправка создана · ${ids.length} заказов · ${per.toLocaleString('ru-RU')} ₸/заказ`);
     renderIntercity();return true;
   },{wide:true});
-  // обработчик выбора города — подтягиваем заказы
+  // обработчик выбора города/даты — подтягиваем заказы
   setTimeout(()=>{
     const sel=$('s_dest');if(!sel)return;
-    sel.onchange=()=>{
+    const rebuild=()=>{
       selectedDest=sel.value;
+      const date=($('s_date')||{}).value||'';
       const wrap=$('s_orders_wrap');
       if(!selectedDest){wrap.innerHTML='<div class="hint" style="padding:10px 0">Выберите город получения.</div>';pickedOrders=[];return;}
-      const list=ordersForIntercity(selectedDest);
+      const list=ordersForIntercity(selectedDest,date);
       pickedOrders=list.map(o=>o.id);
-      if(!list.length){wrap.innerHTML='<div class="empty" style="padding:20px"><div class="big">Нет заказов</div>В этот город нет курьерских заказов, ожидающих отправки.</div>';return;}
+      if(!list.length){wrap.innerHTML=`<div class="empty" style="padding:20px"><div class="big">Нет заказов</div>Нет курьерских заказов в этот город на ${esc(fmtDate(date))}, ожидающих отправки.</div>`;return;}
       wrap.innerHTML=`
         <div class="ic-orders-head">
           <b>Заказы для отправки (${list.length})</b>
-          <span class="hint">Снимите галочку, чтобы исключить заказ из коробки</span>
+          <span class="hint">Дата забора: ${esc(fmtDate(date))} · снимите галочку, чтобы исключить заказ</span>
         </div>
         <div class="ic-orders-list">
           ${list.map(o=>`<label class="ic-order-row">
@@ -1920,6 +1924,8 @@ function shipmentModal(){
       updateShipLive();
       wrap.querySelectorAll('[data-icorder]').forEach(c=>c.onchange=updateShipLive);
     };
+    sel.onchange=rebuild;
+    if($('s_date'))$('s_date').onchange=rebuild; // смена даты тоже пересобирает список
     // пересчёт «за 1 заказ» вживую
     const costInp=$('s_cost');if(costInp)costInp.oninput=updateShipLive;
   },50);
