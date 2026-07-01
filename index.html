@@ -550,6 +550,12 @@
   .pom-paid input{width:18px;height:18px;accent-color:var(--rust);cursor:pointer}
   .pom-paidorder{color:var(--moss)}
   .o-paidorder{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:14px;font-weight:600;color:var(--moss);cursor:pointer;user-select:none}
+  .o-finance{background:rgba(37,70,201,.05);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .ofin-grid{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+  .ofin-row{display:flex;justify-content:space-between;align-items:center;font-size:14px}
+  .ofin-row span{color:var(--muted)}
+  .ofin-total{border-top:1px solid var(--line);padding-top:8px;margin-top:4px;font-size:15px}
+  .ofin-total span{color:var(--ink);font-weight:600}
   .o-paidorder input{width:18px;height:18px;accent-color:var(--moss);cursor:pointer}
   .pom-paidhint{font-weight:400;color:var(--muted);font-size:12px}
   .pom-sumrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
@@ -1328,6 +1334,7 @@ async function loadAll(){
   // настройки калькуляции (нормативы)
   try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){S.calcSettings=null;}
   try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){S.calcCityNorms=[];}
+  try{S.calcCourierNorms=await dbList('calc_courier_norms',{});}catch(e){S.calcCourierNorms=[];}
   try{S.shipments=await dbList('shipments',{});}catch(e){S.shipments=[];}
   try{S.warehouses=await dbList('warehouses',{order:'name'});}catch(e){S.warehouses=[];}
 }
@@ -1373,6 +1380,7 @@ async function refreshForTab(tab){
     }else if(tab==='calc'){
       try{const cs=await dbList('calc_settings',{});S.calcSettings=cs&&cs.length?cs[0]:null;}catch(e){}
       try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){}
+      try{S.calcCourierNorms=await dbList('calc_courier_norms',{});}catch(e){}
       try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
     }
   }catch(e){console.error('refresh',e);}
@@ -2011,6 +2019,30 @@ function calcCityNorm(cityId,key){
   if(row&&row[key]!=null&&row[key]!=='')return parseFloat(row[key]);
   return calcNorm(key); // запасной — общий норматив
 }
+// персональная ставка заборщика (оплата за заказ) по id заборщика
+function calcCourierPay(courierId){
+  if(!courierId)return 0;
+  const row=(S.calcCourierNorms||[]).find(r=>r.courier_id===courierId);
+  return row&&row.pay!=null&&row.pay!==''?parseFloat(row.pay):0;
+}
+// заборщик заказа: через заявку, из которой создан заказ (pickup.courier_id)
+function orderPickerCourier(o){
+  if(!o.pickup_id)return null;
+  const pk=(S.pickups||[]).find(p=>p.id===o.pickup_id);
+  return pk?pk.courier_id:null;
+}
+// финансовая раскладка курьерского заказа: межгород, курьер города, заборщик, остаток
+function orderCourierFinance(o){
+  const revenue=(o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0;
+  // стоимость межгород — из отправки (intercity_cost), иначе норматив города получения
+  const cityId=o.courier_city_id||orderCalcCity(o);
+  const intercity=(o.intercity_cost!=null&&o.intercity_cost!=='')?parseFloat(o.intercity_cost)||0:0;
+  const courierPay=calcCityNorm(o.courier_city_id||cityId,'courier'); // оплата курьеру города назначения
+  const pickerId=orderPickerCourier(o);
+  const pickerPay=calcCourierPay(pickerId);
+  const remainder=revenue-intercity-courierPay-pickerPay;
+  return {revenue,intercity,courierPay,pickerId,pickerPay,remainder};
+}
 // город забора заказа (pickup_city_id, иначе город партнёра)
 function orderCalcCity(o){
   if(o.pickup_city_id)return o.pickup_city_id;
@@ -2139,6 +2171,19 @@ function renderCalcNorms(){
         <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
       </div>`).join('')}
     </div>
+    <div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Оплата заборщикам (за заказ)</h3>
+      <p class="calc-note">Персональная ставка каждому заборщику за один забранный заказ.</p>
+      <div class="calc-city-head" style="grid-template-columns:1fr 130px"><span>Заборщик</span><span>Оплата (₸)</span></div>
+      ${(S.couriers||[]).map(c=>{
+        const row=(S.calcCourierNorms||[]).find(x=>x.courier_id===c.id);
+        const v=row&&row.pay!=null&&row.pay!==''?row.pay:'';
+        return `<div class="calc-city-row" data-courpay="${c.id}" style="grid-template-columns:1fr 130px">
+          <span class="ccr-name">${esc(c.fio)}</span>
+          <input type="number" min="0" step="0.01" data-cpay="${c.id}" value="${esc(v)}" placeholder="0">
+        </div>`;
+      }).join('')}
+    </div>
     <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы</button><span class="calc-saved" id="calcSaved"></span></div>`;
   $('calcSaveBtn').onclick=saveCalcSettings;
 }
@@ -2172,6 +2217,17 @@ async function saveCalcSettings(){
       else{const u=await dbInsert('calc_city_norms',payload);if(u){if(!S.calcCityNorms)S.calcCityNorms=[];S.calcCityNorms.push(u);}}
     }
     const s=$('calcSaved');if(s){s.textContent='Сохранено ✓';setTimeout(()=>{if(s)s.textContent='';},2500);}
+    // ставки заборщиков
+    const payRows=document.querySelectorAll('[data-courpay]');
+    for(const el of payRows){
+      const cid=el.dataset.courpay;
+      const v=el.querySelector(`[data-cpay="${cid}"]`).value.trim();
+      const existing=(S.calcCourierNorms||[]).find(r=>r.courier_id===cid);
+      if(v===''&&!existing)continue;
+      const payload={courier_id:cid,pay:v===''?0:parseFloat(v)||0};
+      if(existing){const u=await dbUpdate('calc_courier_norms',existing.id,payload);if(u)Object.assign(existing,u);}
+      else{const u=await dbInsert('calc_courier_norms',payload);if(u){if(!S.calcCourierNorms)S.calcCourierNorms=[];S.calcCourierNorms.push(u);}}
+    }
     toast('Нормативы сохранены');
   }catch(e){console.error(e);toast('Ошибка сохранения');}
   if(btn)btn.disabled=false;
@@ -3407,7 +3463,7 @@ function pickupModal(id,readonly){
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',paidBySender:''};
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -3626,6 +3682,7 @@ function renderOrders(mode){
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partner?partnerName(of.partner):'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
         <select id="ofpickupcity" title="Город, откуда забрали заказ"><option value="">Город забора: все</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${of.pickupCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        <select id="ofdestcity" title="Город, куда уходит заказ"><option value="">Город получения: все</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${of.destCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
         <select id="ofmissing" title="Показать заказы с незаполненным полем">
           <option value="">Заполненность: все</option>
           <option value="client" ${of.missing==='client'?'selected':''}>Нет ФИО клиента</option>
@@ -3714,6 +3771,7 @@ function renderOrders(mode){
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
   if($('ofpaid'))$('ofpaid').onchange=e=>{of.paidBySender=e.target.value;drawOrdersReset();};
   if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
+  if($('ofdestcity'))$('ofdestcity').onchange=e=>{of.destCity=e.target.value;drawOrdersReset();};
   if($('ofcreatefrom'))$('ofcreatefrom').onchange=e=>{of.createFrom=e.target.value;renderOrders(ordersMode);};
   if($('ofcreateto'))$('ofcreateto').onchange=e=>{of.createTo=e.target.value;renderOrders(ordersMode);};
   if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrdersReset();};
@@ -3771,6 +3829,7 @@ function filteredOrders(){
     }
     // фильтр по городу забора
     if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
+    if(of.destCity&&o.courier_city_id!==of.destCity)return false;
     // фильтр по оплате отправителем
     if(of.paidBySender==='yes'&&!o.paid_by_sender)return false;
     if(of.paidBySender==='no'&&o.paid_by_sender)return false;
@@ -4078,6 +4137,20 @@ function orderModal(id,readonly){
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      ${(isStaff()&&d.id&&isCourierDelivery(d.delivery_id))?(()=>{
+        const f=orderCourierFinance(d);const m=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+        return `<div class="field full o-finance">
+          <label>Финансы по заказу (курьерская)</label>
+          <div class="ofin-grid">
+            <div class="ofin-row"><span>Сумма заказа</span><b>${m(f.revenue)}</b></div>
+            <div class="ofin-row"><span>Стоимость отправки межгород</span><b>${m(f.intercity)}</b></div>
+            <div class="ofin-row"><span>Оплата курьеру города</span><b>${m(f.courierPay)}</b></div>
+            <div class="ofin-row"><span>Оплата заборщику${f.pickerId?' ('+esc(courierName(f.pickerId))+')':''}</span><b>${m(f.pickerPay)}</b></div>
+            <div class="ofin-row ofin-total"><span>Остаток</span><b style="color:${f.remainder<0?'#c0392b':'#2e7d32'}">${m(f.remainder)}</b></div>
+          </div>
+          <span class="hint">Межгород — из модуля отправок; курьер — норматив города; заборщик — ставка из калькуляции.</span>
+        </div>`;
+      })():''}
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" id="postCityField" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Город (почтовая)</label><select id="o_postcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
