@@ -1152,6 +1152,10 @@ function orderToKet(o){
   };
   if(o.index)data.index=o.index;             // индекс (для почты)
   if(o.deliver_date)data.date_delivery=o.deliver_date; // дата доставки (YYYY-MM-DD), имя поля по требованию KET
+  // дата принятия/подтверждения заказа = дата создания заказа в нашей системе (YYYY-MM-DD)
+  // для курьерки это «принятие», для обзвона — «подтверждение»; в KET это одно поле fill_date
+  const fillDate=(o.created_at||'').slice(0,10);
+  if(fillDate)data.fill_date=fillDate;
   if(courier){
     // КУРЬЕРСКАЯ доставка: KET ждёт kz_delivery = числовой код города назначения
     const code=ketDeliveryCode(cityNm);
