@@ -1396,11 +1396,16 @@ async function refreshForTab(tab){
       try{S.shipments=await dbList('shipments',{});}catch(e){}
       try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
     }else if(tab==='calc'){
-      try{S.calcSettingsAll=await dbList('calc_settings',{});}catch(e){}
-      try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){}
-      try{S.calcCourierNorms=await dbList('calc_courier_norms',{});}catch(e){}
-      try{S.calcSalesNorms=await dbList('calc_sales_norms',{});}catch(e){}
-      try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
+      // нормативы грузим параллельно (быстрее, чем по очереди)
+      try{
+        const [cs,cc,cn,sn]=await Promise.all([
+          dbList('calc_settings',{}),dbList('calc_city_norms',{}),
+          dbList('calc_courier_norms',{}),dbList('calc_sales_norms',{})
+        ]);
+        S.calcSettingsAll=cs;S.calcCityNorms=cc;S.calcCourierNorms=cn;S.calcSalesNorms=sn;
+      }catch(e){}
+      // заказы уже загружены при входе — перезагружаем только если их нет
+      if(!S.orders||!S.orders.length){try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}}
     }
   }catch(e){console.error('refresh',e);}
 }
@@ -2139,11 +2144,17 @@ function orderCalcCity(o){
   return null;
 }
 // кол-во заказов за месяц даты забора заказа (для деления фондов)
+// кэш количества заказов по месяцам (сбрасывается при изменении S.orders)
+let _monthCountCache=null,_monthCountLen=-1;
 function ordersInOrderMonth(o){
   const d=(o.pickup_date||o.created_at||'').slice(0,7); // YYYY-MM
   if(!d)return 1;
-  const n=(S.orders||[]).filter(x=>((x.pickup_date||x.created_at||'').slice(0,7))===d).length;
-  return n||1;
+  // строим кэш один раз за проход, а не перебираем все заказы для каждого
+  if(!_monthCountCache||_monthCountLen!==(S.orders||[]).length){
+    _monthCountCache={};_monthCountLen=(S.orders||[]).length;
+    (S.orders||[]).forEach(x=>{const m=(x.pickup_date||x.created_at||'').slice(0,7);if(m)_monthCountCache[m]=(_monthCountCache[m]||0)+1;});
+  }
+  return _monthCountCache[d]||1;
 }
 // ПОЛНЫЙ РАСЧЁТ калькуляции заказа: выручка, статьи расходов, прибыль, маржа, ROI.
 // Если у заказа есть сохранённый снимок calc — используем его статьи (старые заказы не пересчитываются нормативами).
