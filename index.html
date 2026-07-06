@@ -1201,16 +1201,35 @@ function ketOriginCode(cityName){
   return '';
 }
 // КОД типа доставки KET по городу НАЗНАЧЕНИЯ (поле kz_delivery) для курьерской доставки.
-// Сопоставление по ключевым словам в названии города (рус/каз/лат варианты).
+// Коды заданы по официальному списку. Порядок важен: более специфичные — раньше.
 const KET_DELIVERY_CODES=[
-  [/актау|aktau/i,2],[/актобе|aktobe/i,3],[/алмат|almat/i,4],
-  [/астан|нур-?султан|astana/i,5],[/атырау|atyrau/i,6],
-  [/караганд|karagand/i,10],[/кокшетау|kokshetau/i,11],[/костанай|kostanai/i,12],
-  [/кызылорд|kyzylord/i,14],[/павлодар|pavlodar/i,15],[/петропавл|petropavl/i,16],
-  [/сарыагаш|saryagash/i,19],[/семей|semei/i,21],[/шымкент|шимкент|shimkent|chimkent/i,22],
-  [/талдыкорган|taldykorgan/i,23],[/тараз|taraz/i,24],[/туркестан|turkestan/i,26],
-  [/уральск|uralsk/i,27],[/усть-?каменогорск|ust-?kamenogorsk/i,28],
-  [/жетысай|zhetysai/i,30],[/жезказган|zhezkazgan/i,31],[/кентау|kentau/i,93],
+  [/аксай|aksai|aksay/i,1],
+  [/актобе|aktobe/i,3],           // актобе раньше актау (оба на «акт»)
+  [/актау|aktau/i,2],
+  [/алмат|almat/i,4],
+  [/астан|нур-?султан|astana/i,5],
+  [/атырау|atyrau/i,6],
+  [/балхаш|balkhash|balhash/i,91],
+  [/жанаозен|zhanaozen|janaozen/i,29],
+  [/жезказган|zhezkazgan|jezkazgan/i,31],
+  [/караганд|karagand/i,10],
+  [/каскелен|kaskelen/i,88],
+  [/кокшетау|kokshetau/i,11],
+  [/кызылорд|kyzylord|kzylord/i,14],
+  [/костанай|kostanai|kostanay/i,12],
+  [/кульсары|kulsary|kulsary/i,13],
+  [/павлодар|pavlodar/i,15],
+  [/петропавл|petropavl/i,16],
+  [/сатпаев|satpaev|satbaev/i,20],
+  [/семей|semei|semey/i,21],
+  [/талдыкорган|taldykorgan/i,23],
+  [/тараз|taraz/i,24],
+  [/темиртау|temirtau/i,25],
+  [/туркестан|turkestan/i,26],
+  [/уральск|uralsk/i,27],
+  [/усть-?каменогорск|ust-?kamenogorsk/i,28],
+  [/шымкент|шимкент|shimkent|chimkent|shymkent/i,22],
+  [/экибастуз|ekibastuz/i,9],
 ];
 function ketDeliveryCode(cityName){
   const nm=(cityName||'').trim();
