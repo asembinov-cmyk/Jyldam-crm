@@ -3921,25 +3921,45 @@ function renderOrders(mode){
     let msg=`Отправить в KET заказов: ${list.length} (${source})?`;
     if(already)msg+=`\n(из них ${already} уже были отправлены — будут отправлены повторно)`;
     if(!confirm(msg))return;
-    const b=$('ketSendSel');b.disabled=true;
-    let ok=0,fail=0;const errs=[];
-    for(const o of list){
-      if(!o.phone||o.phone.length<10){fail++;errs.push(`${o.code}: нет телефона`);continue;}
-      const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
-      const result=(r&&r.ket&&r.ket.result)||{};
-      if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
-        const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
-        if(u)Object.assign(o,u);
-        logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:result.id||null}});
-        ok++;
-      }else{
-        fail++;
-        // собираем причину: ошибка прокси, либо message от KET, либо сырой ответ
+    const b=$('ketSendSel');b.disabled=true;const origLabel=b.textContent;
+    // отправка одного заказа → {ok, reason, retry}
+    const sendOne=async(o)=>{
+      if(!o.phone||o.phone.length<10)return {ok:false,reason:`${o.code}: нет телефона`};
+      try{
+        const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
+        const result=(r&&r.ket&&r.ket.result)||{};
+        if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
+          const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
+          if(u)Object.assign(o,u);
+          logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:result.id||null}});
+          return {ok:true};
+        }
         const reason=r.error||result.message||(r&&r.raw)||(r&&JSON.stringify(r.ket))||'неизвестно';
-        errs.push(`${o.code}: ${reason}`);
+        return {ok:false,reason:`${o.code}: ${reason}`,retry:true};
+      }catch(e){return {ok:false,reason:`${o.code}: ${String(e&&e.message||e)}`,retry:true};}
+    };
+    const BATCH=10; // отправляем по 10 заказов параллельно
+    let ok=0,fail=0;const errs=[];let failedOrders=[];
+    const runBatches=async(orders)=>{
+      for(let i=0;i<orders.length;i+=BATCH){
+        const chunk=orders.slice(i,i+BATCH);
+        b.textContent=`Отправка… ${Math.min(i+BATCH,orders.length)}/${orders.length}`;
+        const results=await Promise.all(chunk.map(o=>sendOne(o).then(res=>({o,res}))));
+        results.forEach(({o,res})=>{
+          if(res.ok)ok++;
+          else{fail++;errs.push(res.reason);if(res.retry)failedOrders.push(o);}
+        });
       }
+    };
+    await runBatches(list);
+    // автоповтор неудачных (одна попытка)
+    if(failedOrders.length){
+      const retryList=failedOrders.slice();failedOrders=[];
+      fail-=retryList.length;errs.length=Math.max(0,errs.length-retryList.length);
+      b.textContent=`Повтор ${retryList.length}…`;
+      await runBatches(retryList);
     }
-    b.disabled=false;
+    b.disabled=false;b.textContent=origLabel;
     toast(`Отправлено в KET: ${ok}${fail?(', с ошибкой: '+fail):''}`);
     if(errs.length)alert('Не отправлены:\n\n'+errs.join('\n'));
     ketSelected.clear();ketSelectAll=false;
