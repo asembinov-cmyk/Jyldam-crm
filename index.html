@@ -3081,7 +3081,7 @@ async function aiRecognizeFromPhoto(o){
     const resp=await fetch(url);const blob=await resp.blob();
     const media_type=blob.type||'image/jpeg';
     const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob);});
-    const system='Ты распознаёшь рукописные и печатные бланки посылок логистической компании (Казахстан). На фото есть поле ПОЛУЧАТЕЛЬ с ФИО, адресом и телефоном. Верни СТРОГО JSON без пояснений и markdown, формат: {"client":"ФИО получателя","address":"адрес получателя","phone":"телефон 10 цифр без +7/8"}. Если поле не читается — оставь пустую строку. Телефон: убери код страны, оставь 10 цифр. Не выдумывай — если не уверен, пустая строка.';
+    const system='Ты распознаёшь рукописные и печатные бланки посылок логистической компании (Казахстан). На фото есть поле ПОЛУЧАТЕЛЬ с ФИО, адресом и телефоном. Верни СТРОГО JSON без пояснений и markdown, формат: {"client":"ФИО получателя","address":"адрес получателя","phone":"телефон только цифры"}. Телефон верни как есть на бланке, только цифры без пробелов и скобок (например 87026679187 или 7026679187). Если поле не читается — пустая строка. Не выдумывай — если не уверен, пустая строка.';
     const prompt='Извлеки данные ПОЛУЧАТЕЛЯ (ФИО, адрес, телефон) с этого бланка. Верни только JSON.';
     const r=await callAI({system,prompt,image:{media_type,data:b64},model:'claude-sonnet-5',max_tokens:400});
     if(r.error){setNote('Ошибка: '+r.error,'err');if(btn)btn.disabled=false;return;}
@@ -3092,8 +3092,12 @@ async function aiRecognizeFromPhoto(o){
     if(data.client&&$('o_client')){$('o_client').value=data.client;filled.push('ФИО');}
     if(data.address&&$('o_address')){$('o_address').value=data.address;filled.push('адрес');}
     if(data.phone&&$('o_phone')){
-      const digits=String(data.phone).replace(/\D/g,'').replace(/^[78]/,'').slice(-10);
-      if(digits.length===10){$('o_phone').value='+7 '+fmt10(digits);filled.push('телефон');}
+      let digits=String(data.phone).replace(/\D/g,''); // только цифры
+      // код страны 7/8 убираем ТОЛЬКО если 11 цифр (иначе теряем первую 7 у номеров 77xx)
+      if(digits.length===11&&(digits[0]==='7'||digits[0]==='8'))digits=digits.slice(1);
+      digits=digits.slice(-10); // на всякий случай последние 10
+      if(digits.length>=10){$('o_phone').value='+7 '+fmt10(digits.slice(0,10));filled.push('телефон');}
+      else if(digits.length>=9){$('o_phone').value='+7 '+fmt10(digits);filled.push('телефон (проверьте)');}
     }
     if(filled.length)setNote('Заполнено: '+filled.join(', ')+'. Проверьте и при необходимости поправьте.','ok');
     else setNote('Не удалось распознать данные. Впишите вручную.','err');
