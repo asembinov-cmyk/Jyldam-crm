@@ -234,6 +234,10 @@
   .ai-input-row{display:flex;gap:8px}
   .ai-input-row input{flex:1;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px}
   .ai-note{font-size:11px;color:var(--muted);text-align:center}
+  .ai-recog-note{font-size:13px;margin-top:8px;padding:8px 10px;border-radius:8px;display:none}
+  .ai-recog-note.load{display:block;background:rgba(37,70,201,.08);color:var(--rust-dk)}
+  .ai-recog-note.ok{display:block;background:rgba(46,125,50,.10);color:#2e7d32}
+  .ai-recog-note.err{display:block;background:rgba(192,57,43,.10);color:#c0392b}
   .dash-period-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
   .head-actions{margin-left:auto;display:flex;gap:10px}
@@ -3063,6 +3067,40 @@ function stopScan(){
 function renderDashboardIfActive(){if(S.tab==='dashboard'){try{renderDashboard();}catch(e){}}}
 // выбранный период дашборда (по умолчанию текущий месяц/год)
 let dashPeriod={year:new Date().getFullYear(),month:new Date().getMonth()}; // month 0-11
+// ИИ-распознавание данных получателя (ФИО/адрес/телефон) с фото заказа → заполнение полей карточки
+async function aiRecognizeFromPhoto(o){
+  const note=$('oAiNote');const btn=$('oAiRecognize');
+  const setNote=(t,cls)=>{if(note){note.textContent=t;note.className='ai-recog-note '+(cls||'');}};
+  const ph=pickupPhotos(o);
+  if(!ph.length){setNote('Нет фото для распознавания','err');return;}
+  const url=(ph[0]&&ph[0].url)||'';
+  if(!url){setNote('Не удалось получить фото','err');return;}
+  if(btn)btn.disabled=true;setNote('Распознаю данные с фото…','load');
+  try{
+    // грузим картинку и переводим в base64
+    const resp=await fetch(url);const blob=await resp.blob();
+    const media_type=blob.type||'image/jpeg';
+    const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob);});
+    const system='Ты распознаёшь рукописные и печатные бланки посылок логистической компании (Казахстан). На фото есть поле ПОЛУЧАТЕЛЬ с ФИО, адресом и телефоном. Верни СТРОГО JSON без пояснений и markdown, формат: {"client":"ФИО получателя","address":"адрес получателя","phone":"телефон 10 цифр без +7/8"}. Если поле не читается — оставь пустую строку. Телефон: убери код страны, оставь 10 цифр. Не выдумывай — если не уверен, пустая строка.';
+    const prompt='Извлеки данные ПОЛУЧАТЕЛЯ (ФИО, адрес, телефон) с этого бланка. Верни только JSON.';
+    const r=await callAI({system,prompt,image:{media_type,data:b64},model:'claude-sonnet-5',max_tokens:400});
+    if(r.error){setNote('Ошибка: '+r.error,'err');if(btn)btn.disabled=false;return;}
+    let txt=(r.text||'').trim().replace(/^```json/i,'').replace(/```$/,'').trim();
+    let data;try{data=JSON.parse(txt);}catch(e){setNote('Не удалось разобрать ответ ИИ. Попробуйте ещё раз.','err');if(btn)btn.disabled=false;return;}
+    // заполняем поля (не затираем уже заполненное без надобности — но предлагаем распознанное)
+    let filled=[];
+    if(data.client&&$('o_client')){$('o_client').value=data.client;filled.push('ФИО');}
+    if(data.address&&$('o_address')){$('o_address').value=data.address;filled.push('адрес');}
+    if(data.phone&&$('o_phone')){
+      const digits=String(data.phone).replace(/\D/g,'').replace(/^[78]/,'').slice(-10);
+      if(digits.length===10){$('o_phone').value='+7 '+fmt10(digits);filled.push('телефон');}
+    }
+    if(filled.length)setNote('Заполнено: '+filled.join(', ')+'. Проверьте и при необходимости поправьте.','ok');
+    else setNote('Не удалось распознать данные. Впишите вручную.','err');
+  }catch(e){setNote('Ошибка распознавания: '+String(e&&e.message||e),'err');}
+  if(btn)btn.disabled=false;
+}
+
 // ── ИИ-АССИСТЕНТ: вопросы к данным словами ──
 // собираем КОМПАКТНУЮ сводку (агрегаты, не сырые заказы) — дёшево и быстро для ИИ
 function aiBuildDataSummary(){
@@ -3636,7 +3674,8 @@ function orderBigPhotoInner(o,canEdit){
     <label class="photo-add">🖼️ Из галереи<input type="file" accept="image/*" multiple data-paddphoto="${o.id}" style="display:none"></label>
   </div>`:'';
   const delBtn=(ph.length&&canEdit)?`<button type="button" class="btn sm danger" data-pdelphoto data-idx="0" style="margin-top:8px">Удалить это фото</button>`:'';
-  return `<label>Фотографии заказа</label>${big}${byLine}${rotBtns}${thumbs}${delBtn}${adder}`;
+  const aiBtn=(ph.length&&canEdit&&isStaff())?`<button type="button" class="btn ai-btn" id="oAiRecognize" style="margin-top:10px;width:100%">🤖 Распознать данные с фото</button><div class="ai-recog-note" id="oAiNote"></div>`:'';
+  return `<label>Фотографии заказа</label>${big}${byLine}${rotBtns}${thumbs}${delBtn}${aiBtn}${adder}`;
 }
 // подпись «загрузил: имя · дата» для фото (только если есть автор)
 function photoByLabel(f){
@@ -4606,6 +4645,9 @@ function orderModal(id,readonly){
         main.onmouseup=()=>{if(dragging){dragging=false;main.style.cursor='grab';}};
         main.onmouseleave=()=>{if(dragging){dragging=false;main.style.cursor='grab';}};
       }
+      // ИИ-распознавание данных получателя с фото
+      const aiBtn=pc.querySelector('#oAiRecognize');
+      if(aiBtn)aiBtn.onclick=e=>{e.stopPropagation();aiRecognizeFromPhoto(o);};
     };
     const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=orderBigPhotoInner(o,!ro);bindBig();};
     bindBig();
