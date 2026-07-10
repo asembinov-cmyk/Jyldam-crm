@@ -1397,16 +1397,20 @@ async function loadAll(){
     dbList('pickups',{order:'created_at',asc:false}),dbList('orders',{order:'created_at',asc:false}),
   ]);
   Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips,pickups,orders});
-  // профили и роли — если есть право на модуль "Пользователи"
-  if(can('users','view')){ S.profiles=await dbList('profiles',{order:'created_at',asc:true}); }
-  // настройки калькуляции (нормативы)
-  // настройки калькуляции: все строки (по месяцам + дефолтная без периода)
-  try{S.calcSettingsAll=await dbList('calc_settings',{});}catch(e){S.calcSettingsAll=[];}
-  try{S.calcCityNorms=await dbList('calc_city_norms',{});}catch(e){S.calcCityNorms=[];}
-  try{S.calcCourierNorms=await dbList('calc_courier_norms',{});}catch(e){S.calcCourierNorms=[];}
-  try{S.calcSalesNorms=await dbList('calc_sales_norms',{});}catch(e){S.calcSalesNorms=[];}
-  try{S.shipments=await dbList('shipments',{});}catch(e){S.shipments=[];}
-  try{S.warehouses=await dbList('warehouses',{order:'name'});}catch(e){S.warehouses=[];}
+  // остальное грузим ПАРАЛЛЕЛЬНО (было по очереди — тормозило вход)
+  const tail=await Promise.all([
+    can('users','view')?dbList('profiles',{order:'created_at',asc:true}):Promise.resolve(null),
+    dbList('calc_settings',{}).catch(()=>[]),
+    dbList('calc_city_norms',{}).catch(()=>[]),
+    dbList('calc_courier_norms',{}).catch(()=>[]),
+    dbList('calc_sales_norms',{}).catch(()=>[]),
+    dbList('shipments',{}).catch(()=>[]),
+    dbList('warehouses',{order:'name'}).catch(()=>[]),
+  ]);
+  if(tail[0])S.profiles=tail[0];
+  S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
+  S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
+  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];
 }
 
 // Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
@@ -1717,9 +1721,9 @@ function buildNav(){
   $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
     if(b.dataset.disabled){toast('Раздел в разработке');return;}
     S.tab=b.dataset.tab;saveNav();buildNav();closeSidebar();
-    $('main').innerHTML='<div class="loading">Обновляем данные…</div>';
-    await refreshForTab(S.tab);
-    render();
+    render(); // мгновенно рисуем из уже загруженных данных
+    const myTab=S.tab;
+    refreshForTab(myTab).then(()=>{if(S.tab===myTab)render();}).catch(()=>{}); // свежие данные в фоне
   });
   buildBottomNav();
 }
@@ -1744,8 +1748,9 @@ function buildBottomNav(){
   el.innerHTML=html;
   el.querySelectorAll('[data-bn]').forEach(b=>b.onclick=async()=>{
     S.tab=b.dataset.bn;saveNav();buildNav();closeSidebar();
-    $('main').innerHTML='<div class="loading">Обновляем данные…</div>';
-    await refreshForTab(S.tab);render();
+    render(); // мгновенно из кэша
+    const myTab=S.tab;
+    refreshForTab(myTab).then(()=>{if(S.tab===myTab)render();}).catch(()=>{}); // свежее в фоне
   });
   const more=el.querySelector('[data-bnmore]');
   if(more)more.onclick=()=>openSidebar();
