@@ -3111,9 +3111,16 @@ async function aiRecognizeFromPhoto(o){
       let digits=String(data.phone).replace(/\D/g,''); // только цифры
       // код страны 7/8 убираем ТОЛЬКО если 11 цифр (иначе теряем первую 7 у номеров 77xx)
       if(digits.length===11&&(digits[0]==='7'||digits[0]==='8'))digits=digits.slice(1);
-      digits=digits.slice(-10); // на всякий случай последние 10
-      if(digits.length>=10){$('o_phone').value='+7 '+fmt10(digits.slice(0,10));filled.push('телефон');}
-      else if(digits.length>=9){$('o_phone').value='+7 '+fmt10(digits);filled.push('телефон (проверьте)');}
+      digits=digits.slice(-10); // последние 10 цифр (без кода страны — +7 уже в поле)
+      const el=$('o_phone');
+      if(digits.length>=10){
+        const d=digits.slice(0,10);
+        el.dataset.phone=d;el.value=fmt10(d); // +7 не пишем — он уже отображён в поле
+        filled.push('телефон');
+      }else if(digits.length>=9){
+        el.dataset.phone=digits;el.value=fmt10(digits);
+        filled.push('телефон (проверьте)');
+      }
     }
     if(filled.length)setNote('Заполнено: '+filled.join(', ')+'. Проверьте и при необходимости поправьте.','ok');
     else setNote('Не удалось распознать данные. Впишите вручную.','err');
