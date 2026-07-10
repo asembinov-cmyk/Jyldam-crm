@@ -3230,7 +3230,6 @@ function aiBuildDataSummary(){
   const orders=S.orders||[];
   const mon=o=>(o.pickup_date||o.created_at||'').slice(0,7);
   const by=(fn)=>{const m={};orders.forEach(o=>{const k=fn(o);if(k==null||k==='')return;m[k]=(m[k]||0)+1;});return m;};
-  // вложенная разбивка: сущность → {месяц: кол-во, Всего: N}
   const byNested=(nameFn,filterFn)=>{
     const m={};
     orders.forEach(o=>{
@@ -3243,30 +3242,45 @@ function aiBuildDataSummary(){
     return m;
   };
   const byMonth=by(o=>mon(o));
-  // менеджеры продаж с разбивкой по месяцам
   const bySalesMonth=byNested(o=>o.sales_id?salesName(o.sales_id):'');
-  // курьеры доставки с разбивкой по месяцам
   const byCourierMonth=byNested(o=>o.order_courier_id?orderCourierName(o.order_courier_id):'');
-  // города получения (курьерские) с разбивкой по месяцам
   const byCityMonth=byNested(o=>o.courier_city_id?courierCityName(o.courier_city_id):'', o=>isCourierDelivery(o.delivery_id));
-  // статусы
+  // ПАРТНЁРЫ: заказы по партнёру и месяцам. Считаем через заявки (pickup → partner) + напрямую по orders.
+  const pickupById={};(S.pickups||[]).forEach(p=>{pickupById[p.id]=p;});
+  const partnerOrders=byNested(o=>{
+    let pid=o.partner_id;
+    if(!pid&&o.pickup_id&&pickupById[o.pickup_id])pid=pickupById[o.pickup_id].partner_id;
+    return pid?partnerName(pid):'';
+  });
+  // ВСЕ партнёры из справочника (чтобы видеть тех, кто дал 0 заказов)
+  const allPartners={};(S.partners||[]).forEach(p=>{
+    const nm=p.name||p.title||'';if(!nm)return;
+    allPartners[nm]=partnerOrders[nm]?partnerOrders[nm].Всего:0;
+  });
+  const partnersNoOrders=Object.entries(allPartners).filter(([n,c])=>c===0).map(([n])=>n);
+  // заявки на забор по месяцам
+  const pickupsByMonth={};(S.pickups||[]).forEach(p=>{const mm=(p.pickup_date||p.created_at||'').slice(0,7);if(mm)pickupsByMonth[mm]=(pickupsByMonth[mm]||0)+1;});
   const byStatus={};orders.forEach(o=>{if(!o.status_id)return;const s=orderStatusObj(o.status_id);const n=s?s.name:'';if(n)byStatus[n]=(byStatus[n]||0)+1;});
-  // тип доставки
   let courier=0,mail=0;orders.forEach(o=>{if(isCourierDelivery(o.delivery_id))courier++;else mail++;});
-  // выручка по месяцам
   const revMonth={};orders.forEach(o=>{const mm=mon(o);if(!mm)return;const s=parseFloat(o.order_sum)||0;revMonth[mm]=(revMonth[mm]||0)+s;});
   const noTrack=orders.filter(o=>!o.track).length;
   const noClient=orders.filter(o=>!o.client).length;
   const noPhone=orders.filter(o=>!o.phone).length;
   return {
-    Пояснение:'Числа в разбивках — это заказы по месяцам в формате ГГГГ-ММ, плюс поле Всего за все месяцы. Например Заказы_менеджеров["Шамшиева"]["2026-07"] = заказы Шамшиевой за июль 2026.',
+    Пояснение:'Разбивки — заказы по месяцам ГГГГ-ММ + поле Всего. Партнёры_все_заказов = сколько всего заказов дал каждый партнёр (0 = не давал). Партнёры_без_заказов — список тех, кто не дал ни одного заказа.',
     Всего_заказов:orders.length,
+    Всего_партнёров:(S.partners||[]).length,
+    Всего_заявок_на_забор:(S.pickups||[]).length,
     Курьерских:courier, Почтовых:mail,
     Заказов_по_месяцам:byMonth,
+    Заявок_по_месяцам:pickupsByMonth,
     Выручка_по_месяцам:Object.fromEntries(Object.entries(revMonth).map(([k,v])=>[k,Math.round(v)])),
     Заказы_менеджеров:bySalesMonth,
     Заказы_курьеров_доставки:byCourierMonth,
     Заказы_по_городам:byCityMonth,
+    Заказы_партнёров_по_месяцам:partnerOrders,
+    Партнёры_все_заказов:allPartners,
+    Партнёры_без_заказов:partnersNoOrders,
     Заказов_по_статусам:byStatus,
     Без_трек_кода:noTrack, Без_ФИО_клиента:noClient, Без_телефона:noPhone,
   };
@@ -3275,7 +3289,7 @@ let _aiHistory=[];
 function aiAssistantModal(){
   const body=`
     <div class="ai-wrap">
-      <div class="ai-hint">Задайте вопрос о заказах словами. Например: «Сколько заказов у Шамшиевой?», «Какой курьер собрал больше всего?», «Сколько заказов без трек-кода?»</div>
+      <div class="ai-hint">Задайте вопрос о заказах, партнёрах, курьерах словами. Например: «Какие партнёры не давали заказы?», «Сколько заказов у Шамшиевой за июль?», «Какой курьер собрал больше всего?», «Сколько заказов без трек-кода?»</div>
       <div class="ai-log" id="aiLog">${_aiHistory.map(m=>`<div class="ai-msg ai-${m.role}">${esc(m.text)}</div>`).join('')||'<div class="ai-empty">Пока нет вопросов</div>'}</div>
       <div class="ai-input-row">
         <input id="aiQ" placeholder="Ваш вопрос…" autocomplete="off">
@@ -3291,9 +3305,9 @@ function aiAssistantModal(){
     log.innerHTML+=`<div class="ai-msg ai-user">${esc(q)}</div><div class="ai-msg ai-assistant ai-loading" id="aiLoading">Думаю…</div>`;
     log.scrollTop=log.scrollHeight;$('aiQ').value='';btn.disabled=true;
     const summary=aiBuildDataSummary();
-    const system='Ты — аналитик логистической компании Jyldam. Отвечай кратко и по делу на русском, опираясь ТОЛЬКО на предоставленную сводку данных в JSON. В разбивках (Заказы_менеджеров, Заказы_курьеров_доставки, Заказы_по_городам) для каждого имени указаны заказы по месяцам в формате ГГГГ-ММ и общее поле Всего. Месяцы: 2026-06 = июнь 2026, 2026-07 = июль 2026 и т.д. Если спрашивают про конкретный месяц — бери значение нужного месяца из разбивки. Если данных для точного ответа нет — так и скажи. Не выдумывай цифры. Суммы округляй, добавляй «₸».';
+    const system='Ты — аналитик логистической компании Jyldam. Отвечай кратко и по делу на русском, опираясь ТОЛЬКО на предоставленную сводку данных в JSON. В разбивках для каждого имени указаны заказы по месяцам ГГГГ-ММ и поле Всего. Месяцы: 2026-06 = июнь, 2026-07 = июль. Для партнёров: Партнёры_все_заказов — сколько всего заказов дал каждый (0 = не давал), Партнёры_без_заказов — готовый список не дававших. Если спрашивают про конкретный месяц — бери значение месяца из разбивки. Если данных нет — скажи об этом. Не выдумывай. Суммы округляй, добавляй «₸». Списки можешь давать полностью.';
     const prompt=`Сводка данных по заказам (JSON):\n${JSON.stringify(summary)}\n\nВопрос: ${q}`;
-    const r=await callAI({system,prompt,model:'claude-haiku-4-5-20251001',max_tokens:800});
+    const r=await callAI({system,prompt,model:'claude-haiku-4-5-20251001',max_tokens:1500});
     const loading=$('aiLoading');if(loading)loading.remove();
     const answer=r.error?('Ошибка: '+r.error):(r.text||'Нет ответа');
     _aiHistory.push({role:'assistant',text:answer});
