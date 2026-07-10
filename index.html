@@ -4493,7 +4493,7 @@ function drawOrders(){
   }
 }
 // сброс пагинации на первую страницу (при смене фильтров/поиска)
-function drawOrdersReset(){ordersPage=1;ordersMobileLimit=MOBILE_STEP;ketSelected.clear();ketSelectAll=false;drawOrders();}
+function drawOrdersReset(){ordersPage=1;ordersMobileLimit=MOBILE_STEP;ketSelectAll=false;drawOrders();}
 // синхронизирует чекбокс «выбрать все»: отмечен, если выбраны все заказы текущего фильтра
 function updateKetAllChk(allRows){
   const chk=$('ketChkAll');if(!chk)return;
