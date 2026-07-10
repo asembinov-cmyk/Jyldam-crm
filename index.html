@@ -2653,20 +2653,22 @@ function showModal(title,bodyHtml,onSave,opts={}){
   ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}${opts.mid?' modal-mid':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
   document.body.appendChild(ov);
+  // жёсткое закрытие — всегда работает (крестик, Escape, клик мимо): выход без сохранения
+  const forceClose=()=>{ov.remove();};
+  // закрытие с проверкой (кнопка Сохранить/Закрыть): beforeClose может запретить
   const close=()=>{
-    // beforeClose может запретить закрытие (например, требовать фото)
     if(typeof opts.beforeClose==='function'&&opts.beforeClose()===false)return;
     ov.remove();
   };
-  ov.querySelector('.x').onclick=close;
-  if(ov.querySelector('[data-cancel]'))ov.querySelector('[data-cancel]').onclick=close;
-  if(ov.querySelector('[data-close]'))ov.querySelector('[data-close]').onclick=close;
-  ov.onclick=e=>{if(e.target===ov)close();};
+  ov.querySelector('.x').onclick=forceClose;         // крестик — всегда закрывает
+  if(ov.querySelector('[data-cancel]'))ov.querySelector('[data-cancel]').onclick=forceClose;
+  if(ov.querySelector('[data-close]'))ov.querySelector('[data-close]').onclick=close; // кнопка «Сохранить» — с проверкой
+  ov.onclick=e=>{if(e.target===ov)forceClose();};    // клик мимо — закрывает
   const sv=ov.querySelector('[data-save]');
-  if(sv)sv.onclick=async()=>{sv.disabled=true;const ok=await onSave();sv.disabled=false;if(ok!==false)close();};
+  if(sv)sv.onclick=async()=>{sv.disabled=true;const ok=await onSave();sv.disabled=false;if(ok!==false)forceClose();};
   const clr=ov.querySelector('[data-clear]');
   if(clr&&typeof opts.clearBtn==='function')clr.onclick=()=>opts.clearBtn(ov);
-  document.addEventListener('keydown',function esc2(e){if(e.key==='Escape'){close();document.removeEventListener('keydown',esc2);}});
+  document.addEventListener('keydown',function esc2(e){if(e.key==='Escape'){forceClose();document.removeEventListener('keydown',esc2);}});
   const first=ov.querySelector('input,select,textarea');if(first)setTimeout(()=>first.focus(),50);
   return ov;
 }
