@@ -1868,20 +1868,31 @@ function renderCash(){
 }
 /* ================= МОДУЛЬ: ОТПРАВКИ МЕЖГОРОД ================= */
 // список типов транспорта
-const TRANSPORT_TYPES=['Азия Фрейт','Авиа','Авто','Ж/Д','Курьер','Другое'];
+const TRANSPORT_TYPES=['Авиа','Индрайвер','Автобус','Другое'];
 
 // склад отправки текущего пользователя (город из профиля)
 function myWarehouseCityId(){return (S.me&&S.me.city_id)||'';}
 
+// id города забора, соответствующего складу (по совпадению названия склада и города)
+function warehousePickupCityId(whId){
+  const wh=(S.warehouses||[]).find(w=>w.id===whId);
+  if(!wh)return null;
+  const nm=(wh.name||'').trim().toLowerCase();
+  const city=(S.cities||[]).find(c=>(c.name||'').trim().toLowerCase()===nm);
+  return city?city.id:null;
+}
+
 // заказы, доступные для отправки межгородом:
-// курьерская доставка, город получения = cityId, дата забора = date (если задана), ещё не в отправке
-function ordersForIntercity(cityId,date){
+// курьерская доставка, город получения = cityId, дата забора = date, склад (город забора) = whId, ещё не в отправке
+function ordersForIntercity(cityId,date,whId){
+  const whCityId=whId?warehousePickupCityId(whId):null;
   return (S.orders||[]).filter(o=>{
     if(!isCourierDelivery(o.delivery_id))return false;
     if(o.courier_city_id!==cityId)return false;
     if(o.intercity_shipment_id)return false;
-    // фильтр по дате забора заказа (если дата выбрана)
     if(date){const d=(o.pickup_date||o.created_at||'').slice(0,10);if(d!==date)return false;}
+    // фильтр по складу: город забора заказа = город склада
+    if(whCityId&&o.pickup_city_id!==whCityId)return false;
     return true;
   });
 }
@@ -1930,14 +1941,16 @@ function renderIntercity(){
   $('main').querySelectorAll('[data-icdel]').forEach(b=>b.onclick=()=>delShipment(b.dataset.icdel));
 }
 
-// города получения (курьерские), куда есть неотправленные курьерские заказы на дату
-function destCitiesForDate(date){
+// города получения (курьерские), куда есть неотправленные курьерские заказы на дату (и склад, если задан)
+function destCitiesForDate(date,whId){
+  const whCityId=whId?warehousePickupCityId(whId):null;
   const ids=new Set();
   (S.orders||[]).forEach(o=>{
     if(!isCourierDelivery(o.delivery_id))return;
     if(o.intercity_shipment_id)return;
     if(!o.courier_city_id)return;
     if(date){const d=(o.pickup_date||o.created_at||'').slice(0,10);if(d!==date)return;}
+    if(whCityId&&o.pickup_city_id!==whCityId)return;
     ids.add(o.courier_city_id);
   });
   return (S.courier_cities||[]).filter(c=>ids.has(c.id));
@@ -1947,7 +1960,6 @@ function shipmentModal(){
   let selectedDest='';
   let pickedOrders=[]; // выбранные заказы (по умолчанию все из города)
   const initDate=localToday();
-  const initCities=destCitiesForDate(initDate);
   const body=`
     <div class="form-grid">
       <div class="field"><label>Дата отправки</label><input type="date" id="s_date" value="${initDate}"></div>
@@ -1955,11 +1967,11 @@ function shipmentModal(){
         <select id="s_wh"><option value="">— выберите склад —</option>${(S.warehouses||[]).map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select>
         ${(!S.warehouses||!S.warehouses.length)?'<span class="hint" style="color:var(--rust)">Добавьте склады в Справочники → Склады отправки</span>':''}</div>
       <div class="field"><label>Город получения <span style="color:var(--rust)">*</span></label>
-        <select id="s_dest"><option value="">${initCities.length?'— выберите город —':'нет заказов на эту дату'}</option>${initCities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
-        <span class="hint">Показаны города, куда есть заказы на выбранную дату.</span></div>
+        <select id="s_dest"><option value="">— сначала выберите склад —</option></select>
+        <span class="hint">Показаны города с заказами выбранного склада на дату.</span></div>
       <div class="field"><label>Тип транспорта</label>
         <select id="s_transport">${TRANSPORT_TYPES.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select></div>
-      <div class="field"><label>Вес (кг) <span class="hint" style="font-weight:400">для Азия Фрейт</span></label><input type="number" min="0" step="0.01" id="s_weight" placeholder="0"></div>
+      <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="s_weight" placeholder="0"></div>
       <div class="field"><label>Стоимость отправки коробки (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="s_cost" placeholder="0"></div>
     </div>
     <div id="s_orders_wrap" style="margin-top:8px">
@@ -1998,15 +2010,16 @@ function shipmentModal(){
     toast(`Отправка создана · ${ids.length} заказов · ${per.toLocaleString('ru-RU')} ₸/заказ`);
     renderIntercity();return true;
   },{wide:true});
-  // обработчик выбора города/даты — подтягиваем заказы
+  // обработчик выбора склада/города/даты — подтягиваем заказы
   setTimeout(()=>{
     const sel=$('s_dest');if(!sel)return;
     const rebuild=()=>{
       selectedDest=sel.value;
       const date=($('s_date')||{}).value||'';
+      const wh=($('s_wh')||{}).value||'';
       const wrap=$('s_orders_wrap');
       if(!selectedDest){wrap.innerHTML='<div class="hint" style="padding:10px 0">Выберите город получения.</div>';pickedOrders=[];return;}
-      const list=ordersForIntercity(selectedDest,date);
+      const list=ordersForIntercity(selectedDest,date,wh);
       pickedOrders=list.map(o=>o.id);
       if(!list.length){wrap.innerHTML=`<div class="empty" style="padding:20px"><div class="big">Нет заказов</div>Нет курьерских заказов в этот город на ${esc(fmtDate(date))}, ожидающих отправки.</div>`;return;}
       wrap.innerHTML=`
@@ -2026,15 +2039,18 @@ function shipmentModal(){
       updateShipLive();
       wrap.querySelectorAll('[data-icorder]').forEach(c=>c.onchange=updateShipLive);
     };
-    sel.onchange=rebuild;
-    if($('s_date'))$('s_date').onchange=()=>{
-      // при смене даты пересобираем список городов получения (только те, куда есть заказы)
+    // пересобрать список городов получения по дате и складу
+    const rebuildCities=()=>{
       const date=($('s_date')||{}).value||'';
-      const cities=destCitiesForDate(date);
-      sel.innerHTML=`<option value="">${cities.length?'— выберите город —':'нет заказов на эту дату'}</option>`+cities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      const wh=($('s_wh')||{}).value||'';
+      const cities=destCitiesForDate(date,wh);
+      sel.innerHTML=`<option value="">${cities.length?'— выберите город —':'нет заказов'}</option>`+cities.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
       selectedDest='';
       rebuild();
     };
+    sel.onchange=rebuild;
+    if($('s_wh'))$('s_wh').onchange=rebuildCities; // смена склада — пересобрать города и заказы
+    if($('s_date'))$('s_date').onchange=rebuildCities;
     // пересчёт «за 1 заказ» вживую
     const costInp=$('s_cost');if(costInp)costInp.oninput=updateShipLive;
   },50);
