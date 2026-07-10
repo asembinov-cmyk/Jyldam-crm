@@ -221,6 +221,19 @@
   .page-head h1{font-family:'Fraunces',serif;font-weight:900;font-size:30px;letter-spacing:-.03em;line-height:1}
   .page-head p{color:var(--muted);font-size:14px;margin-top:7px}
   .dash-head{justify-content:space-between}
+  .ai-btn{background:linear-gradient(135deg,#6d3bd4,#2546c9);color:#fff;border:none}
+  .ai-btn:hover{filter:brightness(1.08)}
+  .ai-wrap{display:flex;flex-direction:column;gap:12px;min-width:min(560px,80vw)}
+  .ai-hint{font-size:13px;color:var(--muted);background:rgba(37,70,201,.06);padding:10px 12px;border-radius:10px}
+  .ai-log{display:flex;flex-direction:column;gap:10px;max-height:44vh;overflow-y:auto;padding:4px}
+  .ai-empty{color:var(--muted);text-align:center;padding:20px;font-size:14px}
+  .ai-msg{padding:10px 13px;border-radius:12px;font-size:14px;line-height:1.5;white-space:pre-wrap;max-width:88%}
+  .ai-user{align-self:flex-end;background:var(--rust);color:#fff;border-bottom-right-radius:4px}
+  .ai-assistant{align-self:flex-start;background:var(--paper);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .ai-loading{color:var(--muted);font-style:italic}
+  .ai-input-row{display:flex;gap:8px}
+  .ai-input-row input{flex:1;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px}
+  .ai-note{font-size:11px;color:var(--muted);text-align:center}
   .dash-period-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
   .head-actions{margin-left:auto;display:flex;gap:10px}
@@ -1141,6 +1154,21 @@ async function callKet(payload){
   const token=sess&&sess.session?sess.session.access_token:'';
   try{
     const res=await fetch(`${SUPABASE_URL}/functions/v1/ket-proxy`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
+// вызов ИИ через безопасный прокси ai-proxy
+async function callAI(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/ai-proxy`,{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
       body:JSON.stringify(payload),
@@ -3035,6 +3063,74 @@ function stopScan(){
 function renderDashboardIfActive(){if(S.tab==='dashboard'){try{renderDashboard();}catch(e){}}}
 // выбранный период дашборда (по умолчанию текущий месяц/год)
 let dashPeriod={year:new Date().getFullYear(),month:new Date().getMonth()}; // month 0-11
+// ── ИИ-АССИСТЕНТ: вопросы к данным словами ──
+// собираем КОМПАКТНУЮ сводку (агрегаты, не сырые заказы) — дёшево и быстро для ИИ
+function aiBuildDataSummary(){
+  const orders=S.orders||[];
+  const by=(fn)=>{const m={};orders.forEach(o=>{const k=fn(o);if(k==null||k==='')return;m[k]=(m[k]||0)+1;});return m;};
+  // по месяцам
+  const byMonth=by(o=>(o.pickup_date||o.created_at||'').slice(0,7));
+  // по менеджерам продаж
+  const bySales={};orders.forEach(o=>{if(!o.sales_id)return;const n=salesName(o.sales_id);bySales[n]=(bySales[n]||0)+1;});
+  // по курьерам доставки
+  const byCourier={};orders.forEach(o=>{if(!o.order_courier_id)return;const n=orderCourierName(o.order_courier_id);byCourier[n]=(byCourier[n]||0)+1;});
+  // по городам получения (курьерские)
+  const byCity={};orders.forEach(o=>{if(!isCourierDelivery(o.delivery_id)||!o.courier_city_id)return;const n=courierCityName(o.courier_city_id);byCity[n]=(byCity[n]||0)+1;});
+  // по статусам
+  const byStatus={};orders.forEach(o=>{if(!o.status_id)return;const s=orderStatusObj(o.status_id);const n=s?s.name:'';if(n)byStatus[n]=(byStatus[n]||0)+1;});
+  // по типу доставки
+  let courier=0,mail=0;orders.forEach(o=>{if(isCourierDelivery(o.delivery_id))courier++;else mail++;});
+  // выручка по месяцам
+  const revMonth={};orders.forEach(o=>{const m=(o.pickup_date||o.created_at||'').slice(0,7);if(!m)return;const s=parseFloat(o.order_sum)||0;revMonth[m]=(revMonth[m]||0)+s;});
+  // незаполненные
+  const noTrack=orders.filter(o=>!o.track).length;
+  const noClient=orders.filter(o=>!o.client).length;
+  const noPhone=orders.filter(o=>!o.phone).length;
+  return {
+    Всего_заказов:orders.length,
+    Курьерских:courier, Почтовых:mail,
+    Заказов_по_месяцам:byMonth,
+    Выручка_по_месяцам:Object.fromEntries(Object.entries(revMonth).map(([k,v])=>[k,Math.round(v)])),
+    Заказов_по_менеджерам_продаж:bySales,
+    Заказов_по_курьерам_доставки:byCourier,
+    Заказов_по_городам_получения:byCity,
+    Заказов_по_статусам:byStatus,
+    Без_трек_кода:noTrack, Без_ФИО_клиента:noClient, Без_телефона:noPhone,
+  };
+}
+let _aiHistory=[];
+function aiAssistantModal(){
+  const body=`
+    <div class="ai-wrap">
+      <div class="ai-hint">Задайте вопрос о заказах словами. Например: «Сколько заказов у Шамшиевой?», «Какой курьер собрал больше всего?», «Сколько заказов без трек-кода?»</div>
+      <div class="ai-log" id="aiLog">${_aiHistory.map(m=>`<div class="ai-msg ai-${m.role}">${esc(m.text)}</div>`).join('')||'<div class="ai-empty">Пока нет вопросов</div>'}</div>
+      <div class="ai-input-row">
+        <input id="aiQ" placeholder="Ваш вопрос…" autocomplete="off">
+        <button class="btn primary" id="aiAsk">Спросить</button>
+      </div>
+      <div class="ai-note">ИИ отвечает по сводке ваших данных. Точные списки смотрите в фильтрах.</div>
+    </div>`;
+  showInfo('🤖 Помощник по данным',body,{wide:true});
+  const ask=async()=>{
+    const q=($('aiQ')||{}).value?.trim();if(!q)return;
+    const log=$('aiLog');const btn=$('aiAsk');
+    _aiHistory.push({role:'user',text:q});
+    log.innerHTML+=`<div class="ai-msg ai-user">${esc(q)}</div><div class="ai-msg ai-assistant ai-loading" id="aiLoading">Думаю…</div>`;
+    log.scrollTop=log.scrollHeight;$('aiQ').value='';btn.disabled=true;
+    const summary=aiBuildDataSummary();
+    const system='Ты — аналитик логистической компании Jyldam. Отвечай кратко и по делу на русском, опираясь ТОЛЬКО на предоставленную сводку данных в JSON. Если данных для точного ответа нет — так и скажи. Не выдумывай цифры. Округляй суммы, добавляй «₸» к деньгам.';
+    const prompt=`Сводка данных по заказам (JSON):\n${JSON.stringify(summary)}\n\nВопрос: ${q}`;
+    const r=await callAI({system,prompt,model:'claude-haiku-4-5-20251001',max_tokens:800});
+    const loading=$('aiLoading');if(loading)loading.remove();
+    const answer=r.error?('Ошибка: '+r.error):(r.text||'Нет ответа');
+    _aiHistory.push({role:'assistant',text:answer});
+    log.innerHTML+=`<div class="ai-msg ai-assistant">${esc(answer)}</div>`;
+    log.scrollTop=log.scrollHeight;btn.disabled=false;$('aiQ').focus();
+  };
+  if($('aiAsk'))$('aiAsk').onclick=ask;
+  if($('aiQ'))$('aiQ').onkeydown=e=>{if(e.key==='Enter')ask();};
+}
+
 function renderDashboard(){
   const orders=S.orders||[];
   const pickups=S.pickups||[];
@@ -3142,6 +3238,7 @@ function renderDashboard(){
   $('main').innerHTML=`
     <div class="page-head dash-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div>
       <div class="dash-period-filter">
+        ${isStaff()?'<button class="btn ai-btn sm" id="dashAI">🤖 Помощник</button>':''}
         <select id="dashMonth">${months.map((m,i)=>`<option value="${i}" ${dashPeriod.month===i?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)}</option>`).join('')}</select>
         <select id="dashYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${dashPeriod.year===y?'selected':''}>${y}</option>`;return o;})()}</select>
         <button class="btn ghost sm" id="dashThisMonth">Текущий</button>
@@ -3196,6 +3293,7 @@ function renderDashboard(){
   if($('dashMonth'))$('dashMonth').onchange=e=>{dashPeriod.month=parseInt(e.target.value,10);renderDashboard();};
   if($('dashYear'))$('dashYear').onchange=e=>{dashPeriod.year=parseInt(e.target.value,10);renderDashboard();};
   if($('dashThisMonth'))$('dashThisMonth').onclick=()=>{dashPeriod={year:new Date().getFullYear(),month:new Date().getMonth()};renderDashboard();};
+  if($('dashAI'))$('dashAI').onclick=()=>aiAssistantModal();
 }
 
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
