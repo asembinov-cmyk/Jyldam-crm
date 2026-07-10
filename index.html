@@ -242,6 +242,13 @@
   .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
   .head-actions{margin-left:auto;display:flex;gap:10px}
   .ic-orders-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:10px 0 8px;flex-wrap:wrap}
+  .ic-totals{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .ic-total-item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:3px;min-width:120px}
+  .ic-total-item span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em}
+  .ic-total-item b{font-size:20px;font-weight:700}
+  .ic-total-money b{color:#2e7d32}
+  .ic-filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .ic-filters input,.ic-filters select{padding:9px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:var(--card)}
   .ic-orders-list{max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:4px}
   .ic-order-row{display:grid;grid-template-columns:24px 90px 1fr 120px;gap:10px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:14px}
   .ic-order-row:last-child{border-bottom:0}
@@ -1905,13 +1912,44 @@ function ordersForIntercity(cityId,date,whId){
 // имя склада отправки из справочника
 function warehouseName(id){return ((S.warehouses||[]).find(w=>w.id===id)||{}).name||'—';}
 
+let icFilter={date:'',wh:'',dest:'',transport:''};
 function renderIntercity(){
   if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
-  const rows=[...(S.shipments||[])].sort((a,b)=>(b.ship_date||b.created_at||'').localeCompare(a.ship_date||a.created_at||''));
   const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  const all=[...(S.shipments||[])].sort((a,b)=>(b.ship_date||b.created_at||'').localeCompare(a.ship_date||a.created_at||''));
+  // применяем фильтры
+  const rows=all.filter(s=>{
+    if(icFilter.date&&(s.ship_date||'').slice(0,10)!==icFilter.date)return false;
+    if(icFilter.wh&&s.warehouse_id!==icFilter.wh)return false;
+    if(icFilter.dest&&s.dest_city_id!==icFilter.dest)return false;
+    if(icFilter.transport&&(s.transport||'')!==icFilter.transport)return false;
+    return true;
+  });
+  // итоги по отфильтрованному
+  const totalBoxes=rows.length;
+  const totalCost=rows.reduce((sum,s)=>sum+(parseFloat(s.box_cost)||0),0);
+  const totalOrders=rows.reduce((sum,s)=>sum+((s.order_ids||[]).length),0);
+  // города и склады для селектов (из имеющихся отправок)
+  const usedWh=[...new Set(all.map(s=>s.warehouse_id).filter(Boolean))];
+  const usedDest=[...new Set(all.map(s=>s.dest_city_id).filter(Boolean))];
+  const usedTr=[...new Set(all.map(s=>s.transport).filter(Boolean))];
+  const totalsBar=`<div class="ic-totals">
+    <div class="ic-total-item"><span>Коробок</span><b>${totalBoxes}</b></div>
+    <div class="ic-total-item"><span>Заказов в них</span><b>${totalOrders}</b></div>
+    <div class="ic-total-item ic-total-money"><span>Потрачено на отправку</span><b>${fmtMoney(totalCost)}</b></div>
+    ${icFilter.date?`<div class="ic-total-item"><span>За дату</span><b>${esc(fmtDate(icFilter.date))}</b></div>`:''}
+  </div>`;
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Отправки межгород</h1><p>Учёт коробок, отправленных в другие города</p></div>
       <div class="head-actions"><button class="btn primary" id="newShipment">＋ Создать отправку</button></div>
+    </div>
+    ${totalsBar}
+    <div class="ic-filters">
+      <input type="date" id="icfDate" value="${esc(icFilter.date)}" title="Дата отправки">
+      <select id="icfWh"><option value="">Склад: все</option>${usedWh.map(id=>`<option value="${id}" ${icFilter.wh===id?'selected':''}>${esc(warehouseName(id))}</option>`).join('')}</select>
+      <select id="icfDest"><option value="">Город получения: все</option>${usedDest.map(id=>`<option value="${id}" ${icFilter.dest===id?'selected':''}>${esc(courierCityName(id))}</option>`).join('')}</select>
+      <select id="icfTr"><option value="">Транспорт: все</option>${usedTr.map(t=>`<option value="${esc(t)}" ${icFilter.transport===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      ${(icFilter.date||icFilter.wh||icFilter.dest||icFilter.transport)?'<button class="btn ghost sm" id="icfClear">Сбросить</button>':''}
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Отправки</h2><span class="count">${rows.length}</span></div>
@@ -1935,14 +1973,23 @@ function renderIntercity(){
           <td data-label="Отправитель">${esc(s.sender_name||'—')}</td>
           <td data-label="" class="cell-actions"><div class="row-actions">
             <button class="btn sm ghost" data-icview="${s.id}">Заказы</button>
-            <button class="btn sm danger" data-icdel="${s.id}">Удалить</button>
+            ${isAdmin()?`<button class="btn sm ghost" data-icedit="${s.id}">Изменить</button>`:''}
+            ${isAdmin()?`<button class="btn sm danger" data-icdel="${s.id}">Удалить</button>`:''}
           </div></td>
         </tr>`;
-      }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Пока нет отправок</div>Нажмите «Создать отправку».</div></td></tr>`}
+      }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.date||icFilter.wh||icFilter.dest||icFilter.transport)?'Измените фильтры.':'Нажмите «Создать отправку».'}</div></td></tr>`}
       </tbody></table></div>
-    </div>`;
+    </div>
+    ${rows.length?totalsBar:''}`;
   $('newShipment').onclick=()=>shipmentModal();
+  // фильтры
+  if($('icfDate'))$('icfDate').onchange=e=>{icFilter.date=e.target.value;renderIntercity();};
+  if($('icfWh'))$('icfWh').onchange=e=>{icFilter.wh=e.target.value;renderIntercity();};
+  if($('icfDest'))$('icfDest').onchange=e=>{icFilter.dest=e.target.value;renderIntercity();};
+  if($('icfTr'))$('icfTr').onchange=e=>{icFilter.transport=e.target.value;renderIntercity();};
+  if($('icfClear'))$('icfClear').onclick=()=>{icFilter={date:'',wh:'',dest:'',transport:''};renderIntercity();};
   $('main').querySelectorAll('[data-icview]').forEach(b=>b.onclick=()=>shipmentOrdersModal(b.dataset.icview));
+  $('main').querySelectorAll('[data-icedit]').forEach(b=>b.onclick=()=>shipmentEditModal(b.dataset.icedit));
   $('main').querySelectorAll('[data-icdel]').forEach(b=>b.onclick=()=>delShipment(b.dataset.icdel));
 }
 
@@ -2087,6 +2134,46 @@ function shipmentOrdersModal(id){
       <div>Отправитель: <b>${esc(s.sender_name||'—')}</b></div>
     </div>
     <table class="ic-view-tbl"><thead><tr><th>Код</th><th>Клиент</th><th>Трек</th><th>Стоимость</th></tr></thead><tbody>${rows}</tbody></table>`);
+}
+
+// редактирование отправки (только админ): дата, склад, транспорт, вес, стоимость коробки
+// при изменении стоимости пересчитывается «за 1 заказ» и обновляется intercity_cost в заказах
+function shipmentEditModal(id){
+  if(!isAdmin())return;
+  const s=(S.shipments||[]).find(x=>x.id===id);if(!s)return;
+  const body=`
+    <div class="form-grid">
+      <div class="field"><label>Дата отправки</label><input type="date" id="se_date" value="${esc((s.ship_date||'').slice(0,10))}"></div>
+      <div class="field"><label>Склад отправки</label>
+        <select id="se_wh"><option value="">—</option>${(S.warehouses||[]).map(w=>`<option value="${w.id}" ${s.warehouse_id===w.id?'selected':''}>${esc(w.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Тип транспорта</label>
+        <select id="se_transport">${TRANSPORT_TYPES.map(t=>`<option value="${esc(t)}" ${s.transport===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
+      <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="se_weight" value="${s.weight!=null?esc(s.weight):''}" placeholder="0"></div>
+      <div class="field"><label>Стоимость отправки коробки (₸)</label><input type="number" min="0" step="0.01" id="se_cost" value="${s.box_cost!=null?esc(s.box_cost):''}" placeholder="0"></div>
+    </div>
+    <div class="hint" style="margin-top:8px">Заказов в коробке: ${(s.order_ids||[]).length}. При изменении стоимости пересчитается «за 1 заказ» и обновится в калькуляции.</div>`;
+  showModal('Изменить отправку',body,async()=>{
+    const cost=parseFloat(val('se_cost'))||0;
+    const ids=s.order_ids||[];
+    const per=ids.length?Math.round(cost/ids.length):0;
+    const upd={
+      ship_date:val('se_date')||s.ship_date,
+      warehouse_id:val('se_wh')||null,
+      transport:val('se_transport')||'',
+      weight:val('se_weight')?parseFloat(val('se_weight')):null,
+      box_cost:cost,
+      per_order:per,
+    };
+    const saved=await dbUpdate('shipments',id,upd);
+    if(!saved){toast('Не удалось сохранить');return false;}
+    Object.assign(s,saved);
+    // обновляем стоимость межгорода в заказах
+    for(const oid of ids){
+      await dbUpdate('orders',oid,{intercity_cost:per});
+      const o=(S.orders||[]).find(x=>x.id===oid);if(o)o.intercity_cost=per;
+    }
+    toast('Отправка изменена');renderIntercity();return true;
+  },{wide:true});
 }
 
 // удаление отправки — снимает метки с заказов
