@@ -237,6 +237,27 @@
   .ai-input-row input{flex:1;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px}
   .ai-note{font-size:11px;color:var(--muted);text-align:center}
   .ai-recog-note{font-size:13px;margin-top:8px;padding:8px 10px;border-radius:8px;display:none}
+  /* лента уведомлений */
+  .nf-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .nf-chip{padding:8px 14px;border:1px solid var(--line);border-radius:20px;background:var(--card);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+  .nf-chip:hover{border-color:var(--rust)}
+  .nf-chip.active{background:var(--rust);color:#fff;border-color:var(--rust)}
+  .nf-sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+  .nf-day{padding:0 0 6px}
+  .nf-day-title{display:flex;align-items:center;gap:8px;padding:12px 18px 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);position:sticky;top:0;background:var(--card);z-index:1}
+  .nf-day-count{background:var(--paper);padding:2px 8px;border-radius:10px;font-size:11px}
+  .nf-item{display:flex;gap:12px;align-items:flex-start;padding:11px 18px;border-bottom:1px solid var(--line);transition:.12s}
+  .nf-item:hover{background:var(--paper)}
+  .nf-ico{width:30px;height:30px;border-radius:9px;background:var(--paper);display:flex;align-items:center;justify-content:center;font-size:15px;flex:0 0 auto}
+  .nf-body{flex:1;min-width:0}
+  .nf-line{font-size:14px;line-height:1.45}
+  .nf-obj{color:var(--rust);font-weight:600}
+  .nf-changes{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .nf-changes span{font-size:11px;color:var(--muted);background:var(--paper);padding:2px 7px;border-radius:6px}
+  .nf-time{font-size:12px;color:var(--muted);flex:0 0 auto;padding-top:3px}
+  .nf-warn .nf-ico{background:rgba(192,57,43,.12)}
+  .nf-ok .nf-ico{background:rgba(46,125,50,.12)}
+  .nf-muted{opacity:.65}
   .ai-recog-note.load{display:block;background:rgba(37,70,201,.08);color:var(--rust-dk)}
   .ai-recog-note.ok{display:block;background:rgba(46,125,50,.10);color:#2e7d32}
   .ai-recog-note.err{display:block;background:rgba(192,57,43,.10);color:#c0392b}
@@ -1455,7 +1476,7 @@ async function refreshForTab(tab){
     }else if(tab==='users'){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
-    }else if(tab==='history'){
+    }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
     }else if(tab==='intercity'){
       try{S.shipments=await dbList('shipments',{});}catch(e){}
@@ -1698,7 +1719,7 @@ function buildNav(){
     if(partnerItems.length)groups.push({title:'Партнёры',items:partnerItems});
     const histItems=[];
     if(isStaff())histItems.push({k:'history',label:'История изменений',icon:'history'}); // менеджеры и админ
-    histItems.push({k:'notify',label:'Уведомления',icon:'bell',disabled:true});
+    histItems.push({k:'notify',label:'Уведомления',icon:'bell'});
     groups.push({title:'История',items:histItems});
 
     const team=[];
@@ -1777,6 +1798,88 @@ async function loadActivityLog(){
 function logActorName(r){return r.user_name||'—';}
 function fmtLogTime(ts){if(!ts)return '';const d=new Date(ts);const p=n=>String(n).padStart(2,'0');
   return {date:`${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}`,time:`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`};}
+
+/* ================= МОДУЛЬ: УВЕДОМЛЕНИЯ (лента активности) ================= */
+// правила отображения событий: иконка, важность, текст
+const NOTIFY_RULES={
+  create:{icon:'➕',level:'info',verb:'создал'},
+  update:{icon:'✏️',level:'info',verb:'изменил'},
+  delete:{icon:'🗑',level:'warn',verb:'удалил'},
+  status:{icon:'🔄',level:'info',verb:'сменил статус'},
+  ket:   {icon:'📤',level:'ok',  verb:'отправил в KET'},
+  login: {icon:'🔑',level:'muted',verb:'вошёл в систему'},
+  logout:{icon:'🚪',level:'muted',verb:'вышел'},
+};
+// категория события (для фильтров)
+function notifyCategory(a){
+  const e=a.entity||'';
+  if(e==='orders')return 'orders';
+  if(e==='pickups')return 'pickups';
+  if(e==='profiles'||e==='roles'||e==='auth')return 'staff';
+  if(['couriers','order_couriers','sales_managers','processors','partners','cities','districts','statuses','order_statuses','delivery_types','courier_cities','post_ips','warehouses'].includes(e))return 'dict';
+  if(e==='shipments')return 'intercity';
+  return 'other';
+}
+let nf={cat:'',action:'',mine:false};
+function renderNotify(){
+  if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  const log=S.activityLog||[];
+  // фильтрация
+  const rows=log.filter(a=>{
+    if(nf.cat&&notifyCategory(a)!==nf.cat)return false;
+    if(nf.action&&a.action!==nf.action)return false;
+    if(nf.mine&&a.user_id!==(S.me&&S.me.id))return false;
+    return true;
+  });
+  // группировка по дням
+  const groups={};
+  rows.forEach(a=>{
+    const d=(a.created_at||'').slice(0,10);
+    if(!groups[d])groups[d]=[];
+    groups[d].push(a);
+  });
+  const days=Object.keys(groups).sort((a,b)=>b.localeCompare(a));
+  const today=localToday();
+  const yest=(()=>{const d=new Date();d.setDate(d.getDate()-1);return d.toISOString().slice(0,10);})();
+  const dayTitle=d=>d===today?'Сегодня':(d===yest?'Вчера':fmtDate(d));
+  const timeOf=s=>{const t=(s||'').slice(11,16);return t||'';};
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Уведомления</h1><p>Лента событий и действий в системе</p></div>
+      <div class="head-actions"><button class="btn ghost" id="nfReload">⟳ Обновить</button></div>
+    </div>
+    <div class="nf-filters">
+      <button class="nf-chip ${!nf.cat?'active':''}" data-nfcat="">Все</button>
+      <button class="nf-chip ${nf.cat==='orders'?'active':''}" data-nfcat="orders">📦 Заказы</button>
+      <button class="nf-chip ${nf.cat==='pickups'?'active':''}" data-nfcat="pickups">🚚 Заявки</button>
+      <button class="nf-chip ${nf.cat==='intercity'?'active':''}" data-nfcat="intercity">🚛 Межгород</button>
+      <button class="nf-chip ${nf.cat==='staff'?'active':''}" data-nfcat="staff">👤 Сотрудники</button>
+      <button class="nf-chip ${nf.cat==='dict'?'active':''}" data-nfcat="dict">📋 Справочники</button>
+      <span class="nf-sep"></span>
+      <button class="nf-chip ${nf.mine?'active':''}" id="nfMine">Только мои</button>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>События</h2><span class="count">${rows.length}</span></div>
+      ${days.length?days.map(d=>`
+        <div class="nf-day">
+          <div class="nf-day-title">${esc(dayTitle(d))}<span class="nf-day-count">${groups[d].length}</span></div>
+          ${groups[d].map(a=>{
+            const r=NOTIFY_RULES[a.action]||{icon:'•',level:'info',verb:a.action};
+            const ent=FIELD_LABEL[a.entity]||a.entity||'';
+            return `<div class="nf-item nf-${r.level}">
+              <div class="nf-ico">${r.icon}</div>
+              <div class="nf-body">
+                <div class="nf-line"><b>${esc(a.user_name||'—')}</b> ${esc(r.verb)} ${esc(ent.toLowerCase())} ${a.entity_label?`<span class="nf-obj">${esc(a.entity_label)}</span>`:''}</div>
+                ${a.changes&&a.changes.length?`<div class="nf-changes">${a.changes.slice(0,3).map(c=>`<span>${esc(FIELD_LABEL[c.field]||c.field)}: ${esc(String(c.to||'—')).slice(0,40)}</span>`).join('')}${a.changes.length>3?`<span>+${a.changes.length-3}</span>`:''}</div>`:''}
+              </div>
+              <div class="nf-time">${esc(timeOf(a.created_at))}</div>
+            </div>`;
+          }).join('')}
+        </div>`).join(''):'<div class="empty"><div class="big">Нет событий</div>Измените фильтры или подождите новых действий.</div>'}
+    </div>`;
+  $('main').querySelectorAll('[data-nfcat]').forEach(b=>b.onclick=()=>{nf.cat=b.dataset.nfcat;renderNotify();});
+  if($('nfMine'))$('nfMine').onclick=()=>{nf.mine=!nf.mine;renderNotify();};
+  if($('nfReload'))$('nfReload').onclick=async()=>{await loadActivityLog();renderNotify();toast('Обновлено');};
+}
 
 function renderHistory(){
   if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div></div>';return;}
@@ -1868,6 +1971,7 @@ function render(){
   else if(S.tab==='settings')renderSettings();
   else if(S.tab==='users')renderUsers();
   else if(S.tab==='history')renderHistory();
+  else if(S.tab==='notify')renderNotify();
   else if(S.tab==='cash')renderCash();
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
