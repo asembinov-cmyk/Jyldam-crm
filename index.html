@@ -1631,7 +1631,49 @@ async function enterApp(){
 let _autoRefreshTimer=null;
 function startAutoRefresh(){
   if(_autoRefreshTimer)clearInterval(_autoRefreshTimer);
-  _autoRefreshTimer=setInterval(autoRefreshTick,30000); // 30 секунд
+  _autoRefreshTimer=setInterval(autoRefreshTick,30000); // 30 секунд — страховка, если Realtime отвалится
+  startRealtime(); // мгновенные обновления
+}
+
+/* ── REALTIME: мгновенное обновление статусов и данных ── */
+let _rtChannel=null,_rtPending=false,_rtTimer=null;
+function startRealtime(){
+  try{
+    if(_rtChannel){sb.removeChannel(_rtChannel);_rtChannel=null;}
+    _rtChannel=sb.channel('jyldam-live')
+      // изменения заявок на забор
+      .on('postgres_changes',{event:'*',schema:'public',table:'pickups'},payload=>applyRealtime('pickups',payload))
+      // изменения заказов
+      .on('postgres_changes',{event:'*',schema:'public',table:'orders'},payload=>applyRealtime('orders',payload))
+      .subscribe();
+  }catch(e){console.warn('realtime',e);}
+}
+// применяем изменение из базы к данным в памяти
+function applyRealtime(table,payload){
+  try{
+    const arr=table==='pickups'?(S.pickups||[]):(S.orders||[]);
+    const row=payload.new||payload.old;
+    if(!row||!row.id)return;
+    if(payload.eventType==='INSERT'){
+      if(!arr.find(x=>x.id===row.id))arr.unshift(row);
+    }else if(payload.eventType==='UPDATE'){
+      const i=arr.findIndex(x=>x.id===row.id);
+      if(i>=0)Object.assign(arr[i],row); else arr.unshift(row);
+    }else if(payload.eventType==='DELETE'){
+      const i=arr.findIndex(x=>x.id===row.id);
+      if(i>=0)arr.splice(i,1);
+    }
+    scheduleRtRender();
+  }catch(e){console.warn('applyRealtime',e);}
+}
+// перерисовка с небольшой задержкой (чтобы не дёргать экран при пачке изменений)
+function scheduleRtRender(){
+  if(_rtTimer)clearTimeout(_rtTimer);
+  _rtTimer=setTimeout(()=>{
+    _rtTimer=null;
+    if(!canAutoRefresh())return; // пользователь занят — не мешаем, обновим позже
+    try{render();buildNav();}catch(e){}
+  },400);
 }
 // можно ли сейчас обновлять — НЕ обновляем, если пользователь работает
 let _lastScrollAt=0;
