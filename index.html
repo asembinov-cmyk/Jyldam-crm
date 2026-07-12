@@ -3624,8 +3624,16 @@ function renderDashboard(){
     if(o.partner_id){const p=S.partners.find(x=>x.id===o.partner_id);if(p&&p.city_id)return p.city_id;}
     return null;
   };
-  // список курьеров-заборщиков (для колонок)
-  const courierList=[...(S.couriers||[])].sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
+  // список курьеров-заборщиков (для колонок): только те, у кого есть заявки в выбранном месяце
+  const _selMonth=`${dashPeriod.year}-${String(dashPeriod.month+1).padStart(2,'0')}`;
+  const _activeCourierIds=new Set();
+  (pickups||[]).forEach(p=>{
+    const d=(p.pickup_date||'').slice(0,7);
+    if(d===_selMonth&&p.courier_id)_activeCourierIds.add(p.courier_id);
+  });
+  const courierList=[...(S.couriers||[])]
+    .filter(c=>_activeCourierIds.has(c.id))   // без заявок за месяц — не показываем (тестовые/неактивные)
+    .sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
   // собираем все даты (по дате создания заказов и заявок)
   const dateSet=new Set();
   orders.forEach(o=>{const dt=(o.created_at||'').slice(0,10);if(dt)dateSet.add(dt);});
@@ -3717,7 +3725,6 @@ function renderDashboard(){
       <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
       <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
     </div>
-    <div class="dash-mini"><span><b>${orders.length}</b> Всего заказов</span><span><b>${todayCount}</b> Сегодня</span><span><b>${couriersOn}</b> Курьеров задействовано</span></div>
     <div class="panel">
       <div class="panel-head"><h2>Статистика по дням</h2><span class="count">${statRows.length}</span></div>
       <div class="table-scroll dash-stat-scroll"><table class="dash-stat"><thead>
