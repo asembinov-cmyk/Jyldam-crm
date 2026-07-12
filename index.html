@@ -149,21 +149,45 @@
   .app-body{display:flex;align-items:flex-start;min-height:calc(100vh - 57px)}
   .sidebar{width:220px;flex:0 0 220px;border-right:1px solid var(--line);background:var(--card);
     position:sticky;top:57px;align-self:stretch;height:calc(100vh - 57px);padding:16px 12px;
-    display:flex;flex-direction:column;overflow:hidden}
+    display:flex;flex-direction:column;overflow:hidden;transition:width .18s ease,flex-basis .18s ease}
   .side-nav{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1;min-height:0}
   .sidebar-logout{margin-top:12px;flex:none;width:100%;justify-content:center;color:#c0392b;border-color:#e3b0a8}
   .sidebar-logout:hover{background:#c0392b;color:#fff;border-color:#c0392b}
   .side-nav button{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;
-    border:1px solid transparent;background:transparent;color:var(--muted);padding:11px 14px;border-radius:10px;transition:.15s;display:flex;align-items:center;gap:10px}
-  .side-nav button:hover{color:var(--ink);background:rgba(20,30,60,.04)}
-  .side-nav button.active{color:var(--rust-dk);background:var(--paper);border-color:var(--line)}
+    border:1px solid transparent;background:transparent;color:var(--muted);padding:11px 14px;border-radius:10px;
+    transition:background .15s,color .15s,transform .15s,box-shadow .15s;display:flex;align-items:center;gap:10px;position:relative}
+  /* hover: мягкая подсветка + лёгкий сдвиг (без «прыжков») */
+  .side-nav button:hover{color:var(--ink);background:#F5F8FF;transform:translateX(2px);box-shadow:0 1px 3px rgba(20,30,60,.06)}
+  /* активный пункт — в цвете своей группы */
+  .side-nav button.active{color:var(--nav-col,var(--rust-dk));background:var(--paper);border-color:var(--line)}
+  .side-nav button.active::before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--nav-col,var(--rust))}
+  .side-nav button.active svg{color:var(--nav-col,var(--rust-dk))}
   .side-nav button svg{width:19px;height:19px;flex:none}
   .side-nav button.disabled{opacity:.45;cursor:default}
-  .side-nav button.disabled:hover{background:transparent;color:var(--muted)}
+  .side-nav button.disabled:hover{background:transparent;color:var(--muted);transform:none;box-shadow:none}
   .side-nav .nav-group{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
-    padding:14px 14px 4px;opacity:.7}
+    padding:14px 14px 4px;opacity:.75;display:flex;align-items:center;gap:7px}
+  .ng-dot{width:7px;height:7px;border-radius:50%;flex:none}
   .side-nav .nav-badge{margin-left:auto;font-size:11px;font-weight:700;background:var(--rust);color:#fff;
     min-width:18px;height:18px;border-radius:9px;display:inline-grid;place-items:center;padding:0 5px}
+  /* кнопка сворачивания */
+  .nav-collapse-btn{position:absolute;right:-11px;top:14px;width:22px;height:22px;border-radius:50%;
+    border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:13px;line-height:1;
+    cursor:pointer;display:grid;place-items:center;z-index:5;transition:.15s;padding:0}
+  .nav-collapse-btn:hover{background:var(--rust);color:#fff;border-color:var(--rust)}
+  /* свёрнутое меню: только иконки */
+  body.nav-collapsed .sidebar{width:64px;flex:0 0 64px;padding:16px 8px}
+  body.nav-collapsed .side-nav button span:not(.nav-badge){display:none}
+  body.nav-collapsed .side-nav button{justify-content:center;padding:11px 0}
+  body.nav-collapsed .side-nav .nav-group{font-size:0;padding:12px 0 4px;justify-content:center}
+  body.nav-collapsed .ng-dot{width:16px;height:3px;border-radius:2px}
+  body.nav-collapsed .sidebar-logout{font-size:0;padding:9px 0}
+  body.nav-collapsed .sidebar-logout::after{content:'⏻';font-size:15px}
+  body.nav-collapsed .nav-badge{position:absolute;top:5px;right:6px;min-width:16px;height:16px;font-size:10px}
+  @media (max-width:900px){.nav-collapse-btn{display:none}body.nav-collapsed .sidebar{width:220px;flex:0 0 220px;padding:16px 12px}
+    body.nav-collapsed .side-nav button span{display:inline}body.nav-collapsed .side-nav button{justify-content:flex-start;padding:11px 14px}
+    body.nav-collapsed .side-nav .nav-group{font-size:10px;padding:14px 14px 4px;justify-content:flex-start}
+    body.nav-collapsed .sidebar-logout{font-size:14px}body.nav-collapsed .sidebar-logout::after{content:''}}
 
   /* ── Дашборд ── */
   .dash-cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
@@ -953,7 +977,7 @@
   </div></header>
   <div class="app-body">
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
-    <aside class="sidebar" id="sidebar"><nav class="side-nav" id="navTabs"></nav><button class="btn ghost sm sidebar-logout" id="logoutBtn">Выйти</button></aside>
+    <aside class="sidebar" id="sidebar"><button class="nav-collapse-btn" id="navCollapse" title="Свернуть меню">‹</button><nav class="side-nav" id="navTabs"></nav><button class="btn ghost sm sidebar-logout" id="logoutBtn">Выйти</button></aside>
     <main class="content" id="main"></main>
   </div>
   <nav class="bottom-nav" id="bottomNav"></nav>
@@ -1444,6 +1468,19 @@ $('email').addEventListener('input',function(){
 // при фокусе на поле логина ставим курсор в конец (после +7)
 $('email').addEventListener('focus',function(){const el=this;if(el.value){const n=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(n,n);}catch(e){}});}});
 $('logoutBtn').onclick=doLogout;
+// сворачивание бокового меню (состояние запоминается)
+function applyNavCollapsed(){
+  const on=localStorage.getItem('navCollapsed')==='1';
+  document.body.classList.toggle('nav-collapsed',on);
+  const b=$('navCollapse');
+  if(b){b.textContent=on?'›':'‹';b.title=on?'Развернуть меню':'Свернуть меню';}
+}
+if($('navCollapse'))$('navCollapse').onclick=()=>{
+  const on=localStorage.getItem('navCollapsed')==='1';
+  localStorage.setItem('navCollapsed',on?'0':'1');
+  applyNavCollapsed();
+};
+applyNavCollapsed();
 
 // ── МОБИЛЬНОЕ ВЫДВИЖНОЕ МЕНЮ ──
 function openSidebar(){const s=$('sidebar'),b=$('sidebarBackdrop');if(s)s.classList.add('open');if(b)b.classList.add('show');}
@@ -1721,6 +1758,15 @@ const ICONS={
   intercity:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 8l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 8v8l9 4 9-4V8" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 12v8" stroke="currentColor" stroke-width="1.7"/></svg>',
 };
 
+// цвета групп бокового меню (акцент у заголовка и активного пункта)
+const NAV_COLORS={
+  'Основное':'#2546c9',            // синий
+  'Доставка':'#e07b2a',            // оранжевый
+  'Деньги':'#2e7d32',              // зелёный
+  'Партнёры':'#8e44ad',            // фиолетовый
+  'История':'#0e7490',             // бирюзовый
+  'Команда и настройки':'#6b7280', // серый
+};
 function buildNav(){
   const courier=isCourierBase();
   // структура: группы и пункты. active:false — нарисован, но неактивен
@@ -1775,7 +1821,8 @@ function buildNav(){
 
   let html='';
   groups.forEach(g=>{
-    if(g.title)html+=`<div class="nav-group">${esc(g.title)}</div>`;
+    const col=NAV_COLORS[g.title]||'#6b7280';
+    if(g.title)html+=`<div class="nav-group"><span class="ng-dot" style="background:${col}"></span>${esc(g.title)}</div>`;
     g.items.forEach(it=>{
       const cls=[it.disabled?'disabled':'',S.tab===it.k?'active':''].filter(Boolean).join(' ');
       // бейдж срочных задач на «Уведомлениях»
@@ -1783,7 +1830,7 @@ function buildNav(){
       if(it.k==='notify'){
         try{const c=notifyIssues().filter(i=>i.lvl==='crit').length;if(c)badge=`<span class="nav-badge">${c}</span>`;}catch(e){}
       }
-      html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''}>${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
+      html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
     });
   });
   $('navTabs').innerHTML=html;
