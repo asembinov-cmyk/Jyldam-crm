@@ -256,6 +256,9 @@
   .nf-i-desc{font-size:13px;color:var(--muted);margin-top:2px}
   .nf-i-arrow{color:var(--muted);font-size:18px}
   .nav-badge{margin-left:auto;background:#c0392b;color:#fff;font-size:11px;font-weight:800;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
+  .nf-collapse-head{user-select:none;transition:.12s}
+  .nf-collapse-head:hover{background:var(--paper)}
+  .nf-collapse-ico{margin-left:auto;color:var(--muted);font-size:14px}
   .nf-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
   .nf-chip{padding:8px 14px;border:1px solid var(--line);border-radius:20px;background:var(--card);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
   .nf-chip:hover{border-color:var(--rust)}
@@ -1844,6 +1847,7 @@ function notifyCategory(a){
   return 'other';
 }
 let nf={cat:'',action:'',mine:false};
+let _nfEventsOpen=false; // блок «Важные события» свёрнут по умолчанию
 
 // ── СБОР ЗАДАЧ И ПРОБЛЕМ (то, что требует действия) ──
 function notifyIssues(){
@@ -1858,12 +1862,10 @@ function notifyIssues(){
   // ── ЗАКАЗЫ: незаполненные поля
   const noPhone=orders.filter(o=>!o.phone&&isMine(o));
   const noClient=orders.filter(o=>!o.client&&isMine(o));
-  const noTrack=orders.filter(o=>!o.track&&isCourierDelivery(o.delivery_id)===false&&isMine(o)); // почтовые без трека
   const noSum=orders.filter(o=>(!o.order_sum||parseFloat(o.order_sum)===0)&&!o.paid_by_sender&&isMine(o));
   if(isStaff()){
     if(noPhone.length)issues.push({lvl:'crit',ico:'📵',title:`${noPhone.length} заказов без телефона`,desc:'Без телефона нельзя доставить и отправить в KET',act:'orders',filter:{missing:'phone'}});
     if(noClient.length)issues.push({lvl:'warn',ico:'👤',title:`${noClient.length} заказов без ФИО клиента`,desc:'Заполните получателя',act:'orders',filter:{missing:'client'}});
-    if(noTrack.length)issues.push({lvl:'warn',ico:'🏷',title:`${noTrack.length} почтовых заказов без трек-кода`,desc:'Проставьте трек-коды',act:'mail'});
     if(noSum.length)issues.push({lvl:'info',ico:'₸',title:`${noSum.length} заказов без суммы`,desc:'Проверьте стоимость доставки',act:'orders'});
   }
   // ── ЗАЯВКИ: без курьера
@@ -1877,18 +1879,6 @@ function notifyIssues(){
     if(notDone.length)issues.push({lvl:'crit',ico:'📋',title:`У вас ${notDone.length} заявок на сегодня`,desc:'Не забудьте забрать посылки',act:'pickups'});
     const noPhotos=(S.orders||[]).filter(o=>o.order_courier_id===me&&!(Array.isArray(o.photos)&&o.photos.length));
     if(noPhotos.length)issues.push({lvl:'warn',ico:'📷',title:`${noPhotos.length} ваших заказов без фото`,desc:'Добавьте фото бланка',act:'orders'});
-  }
-  // ── SLA: заказы, зависшие в статусе (>2 дней без изменения)
-  if(isStaff()){
-    const stale=orders.filter(o=>{
-      if(!o.status_id)return false;
-      const st=orderStatusObj(o.status_id);
-      if(st&&/доставлен|вручен|выдан|завершен/i.test(st.name||''))return false; // финальные — не считаем
-      const upd=o.updated_at||o.created_at;if(!upd)return false;
-      const days=(Date.now()-new Date(upd).getTime())/86400000;
-      return days>2;
-    });
-    if(stale.length)issues.push({lvl:'warn',ico:'⏰',title:`${stale.length} заказов зависли в статусе`,desc:'Не меняли статус более 2 дней',act:'orders'});
   }
   return issues;
 }
@@ -1951,7 +1941,11 @@ function renderNotify(){
     </div>
 
     <div class="panel">
-      <div class="panel-head"><h2>Важные события</h2><span class="count">${events.length}</span></div>
+      <div class="panel-head nf-collapse-head" id="nfEvToggle" style="cursor:pointer">
+        <h2>Важные события</h2><span class="count">${events.length}</span>
+        <span class="nf-collapse-ico">${_nfEventsOpen?'▴':'▾'}</span>
+      </div>
+      <div id="nfEvBody" style="${_nfEventsOpen?'':'display:none'}">
       ${events.length?events.map(a=>{
         const r=NOTIFY_RULES[a.action]||{icon:'•',level:'info',verb:a.action};
         const ent=FIELD_LABEL[a.entity]||a.entity||'';
@@ -1961,7 +1955,10 @@ function renderNotify(){
           <div class="nf-time">${esc(dayOf(a.created_at))} ${esc(timeOf(a.created_at))}</div>
         </div>`;
       }).join(''):'<div class="empty" style="padding:20px">Пока нет событий</div>'}
+      </div>
     </div>`;
+  // сворачивание блока событий
+  if($('nfEvToggle'))$('nfEvToggle').onclick=()=>{_nfEventsOpen=!_nfEventsOpen;renderNotify();};
   // переходы по клику на задачу
   $('main').querySelectorAll('[data-nfgo]').forEach(el=>el.onclick=()=>{
     const tab=el.dataset.nfgo;
