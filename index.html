@@ -147,48 +147,66 @@
 
   /* боковая панель + контент */
   .app-body{display:flex;align-items:flex-start;min-height:calc(100vh - 57px)}
-  .sidebar{width:220px;flex:0 0 220px;border-right:1px solid var(--line);background:var(--card);
+  /* ── ТЁМНОЕ БОКОВОЕ МЕНЮ ── */
+  .sidebar{width:224px;flex:0 0 224px;border-right:1px solid rgba(255,255,255,.06);
+    background:linear-gradient(180deg,#161d2f 0%,#111726 100%);
     position:sticky;top:57px;align-self:stretch;height:calc(100vh - 57px);padding:16px 12px;
     display:flex;flex-direction:column;overflow:visible;transition:width .18s ease,flex-basis .18s ease}
-  .side-nav{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1;min-height:0}
-  .sidebar-logout{margin-top:12px;flex:none;width:100%;justify-content:center;color:#c0392b;border-color:#e3b0a8}
+  .side-nav{display:flex;flex-direction:column;gap:3px;overflow-y:auto;flex:1;min-height:0}
+  .side-nav::-webkit-scrollbar{width:5px}
+  .side-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+  .sidebar-logout{margin-top:12px;flex:none;width:100%;justify-content:center;
+    color:#ff8f7a;border-color:rgba(255,143,122,.3);background:transparent}
   .sidebar-logout:hover{background:#c0392b;color:#fff;border-color:#c0392b}
   .side-nav button{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;
-    border:1px solid transparent;background:transparent;color:var(--muted);padding:11px 14px;border-radius:10px;
-    transition:background .15s,color .15s,transform .15s,box-shadow .15s;display:flex;align-items:center;gap:10px;position:relative}
-  /* hover: мягкая подсветка + лёгкий сдвиг (без «прыжков») */
-  .side-nav button:hover{color:var(--ink);background:#F5F8FF;transform:translateX(2px);box-shadow:0 1px 3px rgba(20,30,60,.06)}
-  /* активный пункт — в цвете своей группы */
-  .side-nav button.active{color:var(--nav-col,var(--rust-dk));background:var(--paper);border-color:var(--line)}
-  .side-nav button.active::before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--nav-col,var(--rust))}
-  .side-nav button.active svg{color:var(--nav-col,var(--rust-dk))}
-  .side-nav button svg{width:19px;height:19px;flex:none}
-  .side-nav button.disabled{opacity:.45;cursor:default}
-  .side-nav button.disabled:hover{background:transparent;color:var(--muted);transform:none;box-shadow:none}
-  .side-nav .nav-group{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
-    padding:14px 14px 4px;opacity:.75;display:flex;align-items:center;gap:7px}
-  .ng-dot{width:7px;height:7px;border-radius:50%;flex:none}
-  .side-nav .nav-badge{margin-left:auto;font-size:11px;font-weight:700;background:var(--rust);color:#fff;
-    min-width:18px;height:18px;border-radius:9px;display:inline-grid;place-items:center;padding:0 5px}
+    border:1px solid transparent;background:transparent;color:rgba(255,255,255,.62);padding:10px 13px;border-radius:10px;
+    transition:background .16s,color .16s,transform .16s;display:flex;align-items:center;gap:11px;position:relative}
+  .side-nav button:hover{color:#fff;background:rgba(255,255,255,.07);transform:translateX(2px)}
+  /* активный пункт — заливка в цвете группы */
+  .side-nav button.active{color:#fff;background:var(--nav-col,#2546c9);border-color:transparent;
+    box-shadow:0 3px 12px -2px var(--nav-col,#2546c9)}
+  .side-nav button.active svg{color:#fff}
+  .side-nav button svg{width:19px;height:19px;flex:none;opacity:.9}
+  .side-nav button.disabled{opacity:.32;cursor:default}
+  .side-nav button.disabled:hover{background:transparent;color:rgba(255,255,255,.62);transform:none}
+  .side-nav .nav-group{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
+    color:rgba(255,255,255,.38);padding:15px 13px 5px;display:flex;align-items:center;gap:7px}
+  .ng-dot{width:7px;height:7px;border-radius:50%;flex:none;box-shadow:0 0 6px currentColor}
+  .side-nav .nav-badge{margin-left:auto;font-size:11px;font-weight:800;background:rgba(255,255,255,.16);color:#fff;
+    min-width:20px;height:19px;border-radius:10px;display:inline-grid;place-items:center;padding:0 6px}
+  .side-nav .nav-badge.nb-crit{background:#e5484d;color:#fff}
+  .side-nav button.active .nav-badge{background:rgba(255,255,255,.26)}
+  /* профиль пользователя внизу меню */
+  .side-user{display:flex;align-items:center;gap:10px;padding:11px 10px;margin-top:10px;flex:none;
+    border-top:1px solid rgba(255,255,255,.07)}
+  .su-ava{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#2546c9,#6d3bd4);
+    color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;flex:none}
+  .su-info{min-width:0;flex:1}
+  .su-name{font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .su-role{font-size:11px;color:rgba(255,255,255,.45);display:flex;align-items:center;gap:5px}
+  .su-dot{width:6px;height:6px;border-radius:50%;background:#2ecc71;box-shadow:0 0 6px #2ecc71}
   /* кнопка сворачивания */
   .nav-collapse-btn{position:absolute;right:-14px;top:12px;width:28px;height:28px;border-radius:50%;
     border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:16px;line-height:1;
     cursor:pointer;display:grid;place-items:center;z-index:20;transition:.15s;padding:0;
-    box-shadow:0 2px 8px rgba(20,30,60,.12);font-weight:700}
+    box-shadow:0 2px 8px rgba(20,30,60,.18);font-weight:700}
   .nav-collapse-btn:hover{background:var(--rust);color:#fff;border-color:var(--rust);transform:scale(1.08)}
   /* свёрнутое меню: только иконки */
-  body.nav-collapsed .sidebar{width:64px;flex:0 0 64px;padding:16px 8px}
+  body.nav-collapsed .sidebar{width:66px;flex:0 0 66px;padding:16px 9px}
   body.nav-collapsed .side-nav button span:not(.nav-badge){display:none}
   body.nav-collapsed .side-nav button{justify-content:center;padding:11px 0}
-  body.nav-collapsed .side-nav .nav-group{font-size:0;padding:12px 0 4px;justify-content:center}
-  body.nav-collapsed .ng-dot{width:16px;height:3px;border-radius:2px}
+  body.nav-collapsed .side-nav .nav-group{font-size:0;padding:12px 0 5px;justify-content:center}
+  body.nav-collapsed .ng-dot{width:18px;height:3px;border-radius:2px}
   body.nav-collapsed .sidebar-logout{font-size:0;padding:9px 0}
   body.nav-collapsed .sidebar-logout::after{content:'⏻';font-size:15px}
-  body.nav-collapsed .nav-badge{position:absolute;top:5px;right:6px;min-width:16px;height:16px;font-size:10px}
-  @media (max-width:900px){.nav-collapse-btn{display:none}body.nav-collapsed .sidebar{width:220px;flex:0 0 220px;padding:16px 12px}
-    body.nav-collapsed .side-nav button span{display:inline}body.nav-collapsed .side-nav button{justify-content:flex-start;padding:11px 14px}
-    body.nav-collapsed .side-nav .nav-group{font-size:10px;padding:14px 14px 4px;justify-content:flex-start}
-    body.nav-collapsed .sidebar-logout{font-size:14px}body.nav-collapsed .sidebar-logout::after{content:''}}
+  body.nav-collapsed .nav-badge{position:absolute;top:3px;right:4px;min-width:17px;height:17px;font-size:10px;margin:0}
+  body.nav-collapsed .side-user{justify-content:center;padding:11px 0}
+  body.nav-collapsed .su-info{display:none}
+  @media (max-width:900px){.nav-collapse-btn{display:none}body.nav-collapsed .sidebar{width:224px;flex:0 0 224px;padding:16px 12px}
+    body.nav-collapsed .side-nav button span{display:inline}body.nav-collapsed .side-nav button{justify-content:flex-start;padding:10px 13px}
+    body.nav-collapsed .side-nav .nav-group{font-size:10px;padding:15px 13px 5px;justify-content:flex-start}
+    body.nav-collapsed .sidebar-logout{font-size:14px}body.nav-collapsed .sidebar-logout::after{content:''}
+    body.nav-collapsed .su-info{display:block}}
 
   /* ── Дашборд ── */
   .dash-cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
@@ -198,6 +216,10 @@
   .dash-card .dc-v{font-family:'Fraunces',serif;font-weight:900;font-size:30px;line-height:1}
   .dash-card .dc-k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-top:3px}
   .dash-card .dc-extra{font-size:11.5px;color:var(--ink);margin-top:6px;font-weight:600}
+  .dc-trend{font-size:12px;font-weight:800;margin-top:5px;display:flex;align-items:center;gap:5px}
+  .dc-trend span{font-weight:600;color:var(--muted);font-size:11px}
+  .dc-trend.tr-up{color:#2e7d32}
+  .dc-trend.tr-down{color:#c0392b}
   .dash-card .dc-period{font-size:10.5px;color:var(--muted);margin-top:6px;letter-spacing:.02em}
   .dash-card.c-new{background:linear-gradient(135deg,#eef3fb,var(--card))}.dash-card.c-new .dc-ic{background:#3b6fb0}
   .dash-card.c-pickup{background:linear-gradient(135deg,#f7eed8,var(--card))}.dash-card.c-pickup .dc-ic{background:var(--gold)}
@@ -978,7 +1000,7 @@
   </div></header>
   <div class="app-body">
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
-    <aside class="sidebar" id="sidebar"><button class="nav-collapse-btn" id="navCollapse" title="Свернуть меню">‹</button><nav class="side-nav" id="navTabs"></nav><button class="btn ghost sm sidebar-logout" id="logoutBtn">Выйти</button></aside>
+    <aside class="sidebar" id="sidebar"><button class="nav-collapse-btn" id="navCollapse" title="Свернуть меню">‹</button><nav class="side-nav" id="navTabs"></nav><div class="side-user" id="sideUser"></div><button class="btn ghost sm sidebar-logout" id="logoutBtn">Выйти</button></aside>
     <main class="content" id="main"></main>
   </div>
   <nav class="bottom-nav" id="bottomNav"></nav>
@@ -1768,6 +1790,18 @@ const NAV_COLORS={
   'История':'#0e7490',             // бирюзовый
   'Команда и настройки':'#6b7280', // серый
 };
+// счётчик заявок на СЕГОДНЯ в работе (Новая / В пути) — для бейджа в меню
+function pickupsTodayActive(){
+  const today=(()=>{const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);})();
+  return (S.pickups||[]).filter(p=>{
+    if((p.pickup_date||'').slice(0,10)!==today)return false;
+    const st=statusObj(p.status_id);
+    const nm=(st&&st.name||'').toLowerCase();
+    if(!nm)return true; // без статуса — считаем как новую
+    // считаем только «новая» и «в пути»; забрал/отменён/завершён — нет
+    return /нов|пути|выехал|принял/i.test(nm);
+  }).length;
+}
 function buildNav(){
   const courier=isCourierBase();
   // структура: группы и пункты. active:false — нарисован, но неактивен
@@ -1826,15 +1860,27 @@ function buildNav(){
     if(g.title)html+=`<div class="nav-group"><span class="ng-dot" style="background:${col}"></span>${esc(g.title)}</div>`;
     g.items.forEach(it=>{
       const cls=[it.disabled?'disabled':'',S.tab===it.k?'active':''].filter(Boolean).join(' ');
-      // бейдж срочных задач на «Уведомлениях»
+      // бейджи: заявки на сегодня (в работе) и срочные задачи в центре контроля
       let badge='';
+      if(it.k==='pickups'&&!courier){
+        try{const c=pickupsTodayActive();if(c)badge=`<span class="nav-badge" title="Заявок на сегодня в работе">${c}</span>`;}catch(e){}
+      }
       if(it.k==='notify'){
-        try{const c=notifyIssues().filter(i=>i.lvl==='crit').length;if(c)badge=`<span class="nav-badge">${c}</span>`;}catch(e){}
+        try{const c=notifyIssues().filter(i=>i.lvl==='crit').length;if(c)badge=`<span class="nav-badge nb-crit">${c}</span>`;}catch(e){}
       }
       html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
     });
   });
   $('navTabs').innerHTML=html;
+  // профиль внизу меню (аватар с инициалами + роль + индикатор онлайн)
+  const su=$('sideUser');
+  if(su){
+    const nm=(S.me&&(S.me.full_name||S.me.email))||'—';
+    const init=nm.trim().split(/\s+/).map(w=>w[0]||'').slice(0,2).join('').toUpperCase()||'?';
+    const role=isAdmin()?'Администратор':(isCourier()?'Курьер':'Менеджер');
+    su.innerHTML=`<div class="su-ava" title="${esc(nm)}">${esc(init)}</div>
+      <div class="su-info"><div class="su-name">${esc(nm)}</div><div class="su-role"><span class="su-dot"></span>${esc(role)}</div></div>`;
+  }
   $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
     if(b.dataset.disabled){toast('Раздел в разработке');return;}
     S.tab=b.dataset.tab;saveNav();buildNav();closeSidebar();
@@ -3781,6 +3827,19 @@ function renderDashboard(){
   const donut=`<svg viewBox="0 0 90 90" width="78" height="78"><circle cx="45" cy="45" r="${R}" fill="none" stroke="#3d6478" stroke-width="14"/>
     <circle cx="45" cy="45" r="${R}" fill="none" stroke="#c97a3d" stroke-width="14" stroke-dasharray="${courLen} ${C}" transform="rotate(-90 45 45)" stroke-linecap="butt"/>
     <text x="45" y="49" text-anchor="middle" font-size="17" font-weight="800" font-family="'Fraunces',serif" fill="var(--ink)">${pctCourier}%</text></svg>`;
+  // ТРЕНДЫ: сравнение с прошлым месяцем
+  const prevM=(()=>{let y=dashPeriod.year,m=dashPeriod.month-1;if(m<0){m=11;y--;}return `${y}-${String(m+1).padStart(2,'0')}`;})();
+  const inPrev=d=>(d||'').slice(0,7)===prevM;
+  const ordersPrev=orders.filter(o=>inPrev(o.pickup_date)).length;
+  const pkPrev=pickups.filter(p=>inPrev(p.pickup_date)&&isCollectedStatus(p.status_id)).length;
+  const trendPct=(cur,prev)=>prev>0?Math.round((cur-prev)/prev*100):null;
+  const trOrders=trendPct(ordersMonth,ordersPrev);
+  const trPickups=trendPct(pkCollectedMonth,pkPrev);
+  const trendHtml=v=>{
+    if(v===null||v===0)return '';
+    const up=v>0;
+    return `<div class="dc-trend ${up?'tr-up':'tr-down'}">${up?'↑':'↓'} ${Math.abs(v)}% <span>к прошлому месяцу</span></div>`;
+  };
 
   $('main').innerHTML=`
     <div class="page-head dash-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div>
@@ -3792,8 +3851,8 @@ function renderDashboard(){
       </div>
     </div>
     <div class="dash-cards">
-      <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
-      <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div><div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div>${trendHtml(trOrders)}<div class="dc-period">${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div>${trendHtml(trPickups)}<div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Собрано заявок по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
       <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
