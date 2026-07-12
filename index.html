@@ -4156,7 +4156,7 @@ function pickupModal(id,readonly){
       <div class="field"><label>Курьер <span style="color:var(--rust)">*</span></label><select id="m_courier" ${dis}><option value="">— выберите курьера —</option>${cOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.courier_id===x.id?'selected':''}>${esc(x.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Менеджер по продажам</label><select id="m_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="m_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
-      <div class="field full">
+      <div class="field">
         <label style="margin-bottom:6px">Для партнёра</label>
         <label class="chk-line"><input type="checkbox" id="m_packets" ${d.give_packets?'checked':''} ${dis}> Пакеты для партнёра</label>
         <label class="chk-line"><input type="checkbox" id="m_invoices" ${d.give_invoices?'checked':''} ${dis}> Накладные для партнёра</label>
