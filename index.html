@@ -268,6 +268,10 @@
   .nf-ai-act{font-size:13px;color:#6d3bd4;font-weight:600;margin-top:4px}
   .nf-ai-empty{padding:22px 18px;font-size:14px;color:var(--muted);line-height:1.5}
   .nf-ai-load{padding:22px 18px;font-size:14px;color:var(--muted);font-style:italic}
+  .hist-pager{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .hp-info{font-size:13px;color:var(--muted)}
+  .hp-btns{display:flex;align-items:center;gap:10px}
+  .hp-page{font-size:13px;font-weight:700}
   .nf-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
   .nf-chip{padding:8px 14px;border:1px solid var(--line);border-radius:20px;background:var(--card);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
   .nf-chip:hover{border-color:var(--rust)}
@@ -1820,7 +1824,10 @@ function buildBottomNav(){
   const more=el.querySelector('[data-bnmore]');
   if(more)more.onclick=()=>openSidebar();
 }
-let hf={q:'',action:'',entity:'',user:'',from:'',to:''};
+// по умолчанию история показывает СЕГОДНЯШНИЙ день (через фильтр можно любой период)
+const _todayStr=(()=>{const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);})();
+let hf={q:'',action:'',entity:'',user:'',from:_todayStr,to:_todayStr};
+let histPage=1;const HIST_PER_PAGE=50;
 const ACTION_LABEL={create:'Создание',update:'Изменение',delete:'Удаление',status:'Смена статуса',ket:'Отправка в KET',login:'Вход',logout:'Выход'};
 
 async function loadActivityLog(){
@@ -2076,18 +2083,21 @@ function renderHistory(){
         <span class="fdate-lbl">Период:</span>
         <input type="date" id="hffrom" value="${esc(hf.from)}" title="С даты">
         <input type="date" id="hfto" value="${esc(hf.to)}" title="По дату">
+        <button class="btn sm ghost" id="hfAll" title="Показать за всё время">Все дни</button>
         <button class="btn sm" id="hfclear">Сбросить</button>
       </div>
       <div id="histTable"></div>
     </div>`;
   $('histReload').onclick=async()=>{$('histTable').innerHTML='<div class="loading">Обновляем…</div>';await loadActivityLog();renderHistory();};
-  $('hfq').oninput=e=>{hf.q=e.target.value;drawHistory();};
-  $('hfaction').onchange=e=>{hf.action=e.target.value;drawHistory();};
-  $('hfentity').onchange=e=>{hf.entity=e.target.value;drawHistory();};
-  $('hfuser').onchange=e=>{hf.user=e.target.value;drawHistory();};
-  $('hffrom').onchange=e=>{hf.from=e.target.value;drawHistory();};
-  $('hfto').onchange=e=>{hf.to=e.target.value;drawHistory();};
-  $('hfclear').onclick=()=>{hf={q:'',action:'',entity:'',user:'',from:'',to:''};renderHistory();};
+  const hDraw=()=>{histPage=1;drawHistory();}; // при смене фильтра — на первую страницу
+  $('hfq').oninput=e=>{hf.q=e.target.value;hDraw();};
+  $('hfaction').onchange=e=>{hf.action=e.target.value;hDraw();};
+  $('hfentity').onchange=e=>{hf.entity=e.target.value;hDraw();};
+  $('hfuser').onchange=e=>{hf.user=e.target.value;hDraw();};
+  $('hffrom').onchange=e=>{hf.from=e.target.value;hDraw();};
+  $('hfto').onchange=e=>{hf.to=e.target.value;hDraw();};
+  $('hfclear').onclick=()=>{hf={q:'',action:'',entity:'',user:'',from:_todayStr,to:_todayStr};histPage=1;renderHistory();};
+  if($('hfAll'))$('hfAll').onclick=()=>{hf.from='';hf.to='';histPage=1;renderHistory();};
   drawHistory();
 }
 function filteredHistory(){
@@ -2115,10 +2125,15 @@ function changesHtml(r){
 function drawHistory(){
   const el=$('histTable');const rows=filteredHistory();
   const cnt=$('histCount');if(cnt)cnt.textContent=rows.length;
-  if(!rows.length){el.innerHTML='<div class="empty"><div class="big">Записей нет</div>Измените фильтры или подождите новых действий.</div>';return;}
+  if(!rows.length){el.innerHTML='<div class="empty"><div class="big">Записей нет</div>Измените фильтры или период — по умолчанию показан сегодняшний день.</div>';return;}
+  // пагинация
+  const pages=Math.max(1,Math.ceil(rows.length/HIST_PER_PAGE));
+  if(histPage>pages)histPage=pages;
+  const from=(histPage-1)*HIST_PER_PAGE;
+  const pageRows=rows.slice(from,from+HIST_PER_PAGE);
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата и время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Что изменилось</th></tr></thead>
-    <tbody>${rows.map(r=>{
+    <tbody>${pageRows.map(r=>{
       const t=fmtLogTime(r.created_at);
       const ent=ENTITY_LABEL[r.entity]||r.entity;
       const lbl=r.entity_label?(' '+r.entity_label):'';
@@ -2129,7 +2144,17 @@ function drawHistory(){
         <td data-label="Объект">${esc(ent)}${lbl?`<strong>${esc(lbl)}</strong>`:''}</td>
         <td data-label="Что изменилось">${changesHtml(r)}</td>
       </tr>`;
-    }).join('')}</tbody></table></div>`;
+    }).join('')}</tbody></table></div>
+    ${pages>1?`<div class="hist-pager">
+      <span class="hp-info">Показаны ${from+1}–${Math.min(from+HIST_PER_PAGE,rows.length)} из ${rows.length}</span>
+      <div class="hp-btns">
+        <button class="btn sm ghost" id="hpPrev" ${histPage<=1?'disabled':''}>‹ Назад</button>
+        <span class="hp-page">Стр. ${histPage} / ${pages}</span>
+        <button class="btn sm ghost" id="hpNext" ${histPage>=pages?'disabled':''}>Вперёд ›</button>
+      </div>
+    </div>`:''}`;
+  if($('hpPrev'))$('hpPrev').onclick=()=>{if(histPage>1){histPage--;drawHistory();}};
+  if($('hpNext'))$('hpNext').onclick=()=>{if(histPage<pages){histPage++;drawHistory();}};
 }
 
 /* ---------- РОУТЕР ---------- */
