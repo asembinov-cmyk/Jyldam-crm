@@ -259,6 +259,15 @@
   .nf-collapse-head{user-select:none;transition:.12s}
   .nf-collapse-head:hover{background:var(--paper)}
   .nf-collapse-ico{margin-left:auto;color:var(--muted);font-size:14px}
+  .nf-ai-panel{border:1px solid rgba(109,59,212,.25);background:linear-gradient(180deg,rgba(109,59,212,.03),transparent)}
+  .nf-ai-item{display:flex;gap:13px;align-items:flex-start;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .nf-ai-item:last-child{border-bottom:0}
+  .nf-ai-ico{width:36px;height:36px;border-radius:11px;background:rgba(109,59,212,.10);display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto}
+  .nf-ai-body{flex:1;min-width:0}
+  .nf-ai-title{font-size:15px;font-weight:700;line-height:1.35}
+  .nf-ai-act{font-size:13px;color:#6d3bd4;font-weight:600;margin-top:4px}
+  .nf-ai-empty{padding:22px 18px;font-size:14px;color:var(--muted);line-height:1.5}
+  .nf-ai-load{padding:22px 18px;font-size:14px;color:var(--muted);font-style:italic}
   .nf-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
   .nf-chip{padding:8px 14px;border:1px solid var(--line);border-radius:20px;background:var(--card);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
   .nf-chip:hover{border-color:var(--rust)}
@@ -1740,7 +1749,7 @@ function buildNav(){
     if(partnerItems.length)groups.push({title:'Партнёры',items:partnerItems});
     const histItems=[];
     if(isStaff())histItems.push({k:'history',label:'История изменений',icon:'history'}); // менеджеры и админ
-    histItems.push({k:'notify',label:'Уведомления',icon:'bell'});
+    histItems.push({k:'notify',label:'Центр контроля',icon:'bell'});
     groups.push({title:'История',items:histItems});
 
     const team=[];
@@ -1884,51 +1893,84 @@ function notifyIssues(){
 }
 
 // ── СВОДКА ДНЯ (для руководителя/персонала) ──
-function notifyDaily(){
-  const orders=S.orders||[];const pickups=S.pickups||[];
+// ── НЕОБЫЧНЫЕ СОБЫТИЯ (аномалии, а не вся лента) ──
+function notifyHighlights(){
+  const orders=S.orders||[];const out=[];
   const today=localToday();
-  const yest=(()=>{const d=new Date();d.setDate(d.getDate()-1);return d.toISOString().slice(0,10);})();
-  const dayOrders=d=>orders.filter(o=>(o.pickup_date||o.created_at||'').slice(0,10)===d);
-  const tOrders=dayOrders(today),yOrders=dayOrders(yest);
-  const sum=arr=>arr.reduce((s,o)=>s+(parseFloat(o.order_sum)||0),0);
-  const tRev=sum(tOrders),yRev=sum(yOrders);
-  const diff=yOrders.length?Math.round((tOrders.length-yOrders.length)/yOrders.length*100):0;
-  const revDiff=yRev?Math.round((tRev-yRev)/yRev*100):0;
-  const tPickups=pickups.filter(p=>(p.pickup_date||'').slice(0,10)===today);
-  const donePickups=tPickups.filter(p=>{const st=statusObj(p.status_id);return st&&/забрал|завершен|выполн/i.test(st.name||'');});
-  return {orders:tOrders.length,diff,revenue:tRev,revDiff,pickups:tPickups.length,donePickups:donePickups.length,
-    courier:tOrders.filter(o=>isCourierDelivery(o.delivery_id)).length,mail:tOrders.filter(o=>!isCourierDelivery(o.delivery_id)).length};
+  const dayCount=d=>orders.filter(o=>(o.pickup_date||o.created_at||'').slice(0,10)===d).length;
+  // считаем заказы по дням за последние 30 дней
+  const days=[];
+  for(let i=0;i<30;i++){const d=new Date();d.setDate(d.getDate()-i);days.push(d.toISOString().slice(0,10));}
+  const counts=days.map(dayCount).filter(n=>n>0);
+  const tCount=dayCount(today);
+  if(counts.length>3){
+    const max=Math.max(...counts.slice(1)); // максимум без сегодня
+    const avg=Math.round(counts.slice(1).reduce((a,b)=>a+b,0)/(counts.length-1));
+    if(tCount>max&&tCount>0)out.push({ico:'🏆',lvl:'ok',title:`Сегодня рекорд: ${tCount} заказов`,desc:`Прошлый максимум — ${max}`});
+    else if(avg&&tCount>0&&tCount<avg*0.6)out.push({ico:'📉',lvl:'warn',title:`Сегодня заказов меньше обычного: ${tCount}`,desc:`Средний день — ${avg} заказов`});
+    else if(avg&&tCount>avg*1.4)out.push({ico:'📈',lvl:'ok',title:`Сегодня заказов больше обычного: ${tCount}`,desc:`Средний день — ${avg} заказов`});
+  }
+  // новые партнёры (появились за последние 7 дней)
+  const weekAgo=(()=>{const d=new Date();d.setDate(d.getDate()-7);return d.toISOString().slice(0,10);})();
+  const newPartners=(S.partners||[]).filter(p=>(p.created_at||'').slice(0,10)>=weekAgo);
+  newPartners.slice(0,3).forEach(p=>out.push({ico:'🤝',lvl:'ok',title:`Новый партнёр: ${p.name||''}`,desc:'Подключён за последнюю неделю'}));
+  // партнёры, которые давно не давали заказов (были активны, но 14+ дней тишина)
+  const pickupById={};(S.pickups||[]).forEach(p=>{pickupById[p.id]=p;});
+  const lastOrderByPartner={};
+  orders.forEach(o=>{
+    let pid=o.partner_id;
+    if(!pid&&o.pickup_id&&pickupById[o.pickup_id])pid=pickupById[o.pickup_id].partner_id;
+    if(!pid)return;
+    const d=(o.pickup_date||o.created_at||'').slice(0,10);
+    if(!lastOrderByPartner[pid]||d>lastOrderByPartner[pid])lastOrderByPartner[pid]=d;
+  });
+  const twoWeeks=(()=>{const d=new Date();d.setDate(d.getDate()-14);return d.toISOString().slice(0,10);})();
+  const sleeping=Object.entries(lastOrderByPartner).filter(([pid,d])=>d<twoWeeks).slice(0,3);
+  sleeping.forEach(([pid,d])=>out.push({ico:'😴',lvl:'warn',title:`Партнёр «${partnerName(pid)}» молчит`,desc:`Последний заказ — ${fmtDate(d)}`}));
+  return out;
 }
 
-// ── ВАЖНЫЕ СОБЫТИЯ (только значимое, не вся история) ──
+// важные события (сырые) — для сворачиваемого блока
 function notifyEvents(){
   const log=S.activityLog||[];
-  // только значимые действия: создание, удаление, отправка в KET, смена статуса
-  return log.filter(a=>['create','delete','ket','status'].includes(a.action)).slice(0,25);
+  return log.filter(a=>['create','delete','ket'].includes(a.action)).slice(0,20);
+}
+
+// ── ИИ-ИНСАЙТЫ: выводы и рекомендации по данным ──
+let _aiInsights=null,_aiInsightsLoading=false;
+async function loadAiInsights(){
+  if(_aiInsightsLoading)return;
+  _aiInsightsLoading=true;
+  const box=$('nfAiBox');
+  if(box)box.innerHTML='<div class="nf-ai-load">🤖 Анализирую данные…</div>';
+  try{
+    const summary=aiBuildDataSummary();
+    const system='Ты — аналитик логистической компании. Найди в данных 3-5 ВАЖНЫХ наблюдений, требующих внимания руководителя: аномалии, падения, риски, возможности. Не пересказывай очевидное. Для каждого дай КОНКРЕТНУЮ рекомендацию. Верни СТРОГО JSON-массив без пояснений и без markdown: [{"icon":"эмодзи","title":"краткий вывод","action":"что сделать"}]. Пример: [{"icon":"📉","title":"Заказы партнёра Magnum упали на 34%","action":"Связаться с партнёром, выяснить причину"}]. Пиши по-русски, кратко. Только реальные выводы из данных, не выдумывай.';
+    const prompt=`Данные компании (JSON):\n${JSON.stringify(summary)}\n\nНайди важные наблюдения и дай рекомендации.`;
+    const r=await callAI({system,prompt,model:'claude-sonnet-5',max_tokens:1200});
+    if(r.error)throw new Error(r.error);
+    let txt=(r.text||'').trim().replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/```$/,'').trim();
+    const arr=JSON.parse(txt);
+    _aiInsights=Array.isArray(arr)?arr:[];
+  }catch(e){
+    _aiInsights=[{icon:'⚠️',title:'Не удалось получить выводы',action:String(e&&e.message||e).slice(0,120)}];
+  }
+  _aiInsightsLoading=false;
+  renderNotify();
 }
 
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const issues=notifyIssues();
-  const daily=notifyDaily();
+  const highlights=notifyHighlights();
   const events=notifyEvents();
-  const fmtM=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
-  const trend=(v)=>v===0?'':(v>0?`<span class="nf-up">▲ ${v}%</span>`:`<span class="nf-down">▼ ${Math.abs(v)}%</span>`);
   const crit=issues.filter(i=>i.lvl==='crit').length;
   const timeOf=s=>{const t=(s||'').slice(11,16);return t||'';};
   const dayOf=s=>{const d=(s||'').slice(0,10);return d===localToday()?'сегодня':fmtDate(d);};
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Уведомления</h1><p>${crit?`<span style="color:#c0392b;font-weight:700">${crit} срочных задач</span> · `:''}Что требует вашего внимания</p></div>
+    <div class="page-head"><div><h1>Центр контроля</h1><p>${crit?`<span style="color:#c0392b;font-weight:700">${crit} срочных</span> · `:''}Задачи, выводы и важные изменения</p></div>
       <div class="head-actions"><button class="btn ghost" id="nfReload">⟳ Обновить</button></div>
     </div>
-
-    ${isStaff()?`
-    <div class="nf-daily">
-      <div class="nf-dcard"><span>Заказов сегодня</span><b>${daily.orders}</b>${trend(daily.diff)}</div>
-      <div class="nf-dcard"><span>Выручка сегодня</span><b>${fmtM(daily.revenue)}</b>${trend(daily.revDiff)}</div>
-      <div class="nf-dcard"><span>Заявки собраны</span><b>${daily.donePickups} / ${daily.pickups}</b></div>
-      <div class="nf-dcard"><span>Курьерских / почтовых</span><b>${daily.courier} / ${daily.mail}</b></div>
-    </div>`:''}
 
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-head"><h2>⚠️ Требует внимания</h2><span class="count">${issues.length}</span></div>
@@ -1940,9 +1982,36 @@ function renderNotify(){
         </div>`).join(''):'<div class="empty" style="padding:28px"><div class="big">✅ Всё в порядке</div>Нет задач, требующих внимания.</div>'}
     </div>
 
+    ${isStaff()?`
+    <div class="panel nf-ai-panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>💡 Выводы ИИ</h2>
+        <button class="btn ai-btn sm" id="nfAiRun" style="margin-left:auto">${_aiInsights?'Обновить анализ':'Проанализировать'}</button>
+      </div>
+      <div id="nfAiBox">
+        ${_aiInsights?_aiInsights.map(x=>`
+          <div class="nf-ai-item">
+            <div class="nf-ai-ico">${esc(x.icon||'💡')}</div>
+            <div class="nf-ai-body">
+              <div class="nf-ai-title">${esc(x.title||'')}</div>
+              ${x.action?`<div class="nf-ai-act">→ ${esc(x.action)}</div>`:''}
+            </div>
+          </div>`).join(''):'<div class="nf-ai-empty">ИИ проанализирует данные и найдёт важные тенденции: падение заказов у партнёров, аномалии, риски. Нажмите «Проанализировать».</div>'}
+      </div>
+    </div>`:''}
+
+    ${highlights.length?`
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>✨ Необычное</h2><span class="count">${highlights.length}</span></div>
+      ${highlights.map(h=>`
+        <div class="nf-issue nf-i-${h.lvl}">
+          <div class="nf-i-ico">${h.ico}</div>
+          <div class="nf-i-body"><div class="nf-i-title">${esc(h.title)}</div><div class="nf-i-desc">${esc(h.desc)}</div></div>
+        </div>`).join('')}
+    </div>`:''}
+
     <div class="panel">
       <div class="panel-head nf-collapse-head" id="nfEvToggle" style="cursor:pointer">
-        <h2>Важные события</h2><span class="count">${events.length}</span>
+        <h2>Лента событий</h2><span class="count">${events.length}</span>
         <span class="nf-collapse-ico">${_nfEventsOpen?'▴':'▾'}</span>
       </div>
       <div id="nfEvBody" style="${_nfEventsOpen?'':'display:none'}">
@@ -1957,8 +2026,8 @@ function renderNotify(){
       }).join(''):'<div class="empty" style="padding:20px">Пока нет событий</div>'}
       </div>
     </div>`;
-  // сворачивание блока событий
   if($('nfEvToggle'))$('nfEvToggle').onclick=()=>{_nfEventsOpen=!_nfEventsOpen;renderNotify();};
+  if($('nfAiRun'))$('nfAiRun').onclick=()=>loadAiInsights();
   // переходы по клику на задачу
   $('main').querySelectorAll('[data-nfgo]').forEach(el=>el.onclick=()=>{
     const tab=el.dataset.nfgo;
