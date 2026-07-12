@@ -220,6 +220,20 @@
   .dc-trend span{font-weight:600;color:var(--muted);font-size:11px}
   .dc-trend.tr-up{color:#2e7d32}
   .dc-trend.tr-down{color:#c0392b}
+  /* второй ряд карточек дашборда */
+  .dash-cards-2{margin-bottom:22px}
+  .dash-card.c-total{background:linear-gradient(135deg,#eef2ff,#f8faff)}
+  .dash-card.c-total2{background:linear-gradient(135deg,#eefbf3,#f7fdfa)}
+  .dash-card.c-top{align-items:flex-start;padding:16px 18px}
+  .dc-top{width:100%;display:flex;flex-direction:column;gap:5px}
+  .dc-top-h{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:4px}
+  .dtop-row{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.5}
+  .dtop-i{width:17px;height:17px;border-radius:5px;background:var(--paper);color:var(--muted);
+    font-size:10px;font-weight:800;display:grid;place-items:center;flex:none}
+  .dtop-row:first-of-type .dtop-i{background:#ffd76e;color:#7a5600}
+  .dtop-n{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dtop-v{font-weight:800;font-family:'Fraunces',serif}
+  .dtop-empty{font-size:12px;color:var(--muted);padding:8px 0}
   .dash-card .dc-period{font-size:10.5px;color:var(--muted);margin-top:6px;letter-spacing:.02em}
   .dash-card.c-new{background:linear-gradient(135deg,#eef3fb,var(--card))}.dash-card.c-new .dc-ic{background:#3b6fb0}
   .dash-card.c-pickup{background:linear-gradient(135deg,#f7eed8,var(--card))}.dash-card.c-pickup .dc-ic{background:var(--gold)}
@@ -3841,6 +3855,33 @@ function renderDashboard(){
     const up=v>0;
     return `<div class="dc-trend ${up?'tr-up':'tr-down'}">${up?'↑':'↓'} ${Math.abs(v)}% <span>к прошлому месяцу</span></div>`;
   };
+  // ── ВТОРОЙ РЯД КАРТОЧЕК ──
+  // 1) всего заказов за ВСЁ время (курьерские + почтовые)
+  const allOrdersTotal=orders.length;
+  const allCourier=orders.filter(o=>isCourierDelivery(o.delivery_id)).length;
+  const allMail=allOrdersTotal-allCourier;
+  // 2) всего забранных заявок за ВСЁ время
+  const allPickupsCollected=pickups.filter(p=>isCollectedStatus(p.status_id)).length;
+  // 3) заказы по городам за месяц (по городу забора)
+  const ordAstana=ordMonth.filter(o=>isAstana(o.pickup_city_id)).length;
+  const ordAlmaty=ordMonth.filter(o=>isAlmaty(o.pickup_city_id)).length;
+  // 4) топ-5 партнёров по заказам за месяц
+  const pkById={};pickups.forEach(p=>{pkById[p.id]=p;});
+  const partnerCnt={};
+  ordMonth.forEach(o=>{
+    let pid=o.partner_id;
+    if(!pid&&o.pickup_id&&pkById[o.pickup_id])pid=pkById[o.pickup_id].partner_id;
+    if(!pid)return;
+    partnerCnt[pid]=(partnerCnt[pid]||0)+1;
+  });
+  const topPartners=Object.entries(partnerCnt).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  // 5) топ-5 курьеров-заборщиков по собранным заявкам за месяц
+  const courCnt={};
+  pkMonth.filter(p=>isCollectedStatus(p.status_id)).forEach(p=>{
+    if(!p.courier_id)return;
+    courCnt[p.courier_id]=(courCnt[p.courier_id]||0)+1;
+  });
+  const topCouriers=Object.entries(courCnt).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
   $('main').innerHTML=`
     <div class="page-head dash-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div>
@@ -3857,6 +3898,21 @@ function renderDashboard(){
       <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Собрано заявок по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
       <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
+    </div>
+    <div class="dash-cards dash-cards-2">
+      <div class="dash-card c-total"><div class="dc-ic">🚀</div><div><div class="dc-v">${allOrdersTotal.toLocaleString('ru-RU')}</div><div class="dc-k">Доставлено заказов за всё время</div><div class="dc-extra">курьерских ${allCourier.toLocaleString('ru-RU')} · почтовых ${allMail.toLocaleString('ru-RU')}</div><div class="dc-period">Jyldam Logistics</div></div></div>
+      <div class="dash-card c-total2"><div class="dc-ic">✅</div><div><div class="dc-v">${allPickupsCollected.toLocaleString('ru-RU')}</div><div class="dc-k">Забрано заявок за всё время</div><div class="dc-extra">всего заявок ${pickups.length.toLocaleString('ru-RU')}</div><div class="dc-period">Jyldam Logistics</div></div></div>
+      <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Заказы по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAstana/30)))||'○'}</span><span class="dcity-v">${ordAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAlmaty/30)))||'○'}</span><span class="dcity-v">${ordAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-top"><div class="dc-top">
+        <div class="dc-top-h">🏆 Топ партнёров</div>
+        ${topPartners.length?topPartners.map(([pid,cnt],i)=>`<div class="dtop-row"><span class="dtop-i">${i+1}</span><span class="dtop-n">${esc(partnerName(pid))}</span><span class="dtop-v">${cnt}</span></div>`).join(''):'<div class="dtop-empty">Нет данных за месяц</div>'}
+        <div class="dc-period">${esc(periodLabel)}</div>
+      </div></div>
+      <div class="dash-card c-top"><div class="dc-top">
+        <div class="dc-top-h">🚚 Топ заборщиков</div>
+        ${topCouriers.length?topCouriers.map(([cid,cnt],i)=>`<div class="dtop-row"><span class="dtop-i">${i+1}</span><span class="dtop-n">${esc(courierName(cid))}</span><span class="dtop-v">${cnt}</span></div>`).join(''):'<div class="dtop-empty">Нет данных за месяц</div>'}
+        <div class="dc-period">${esc(periodLabel)}</div>
+      </div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Статистика по дням</h2><span class="count">${statRows.length}</span></div>
