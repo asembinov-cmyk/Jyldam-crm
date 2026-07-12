@@ -1595,7 +1595,10 @@ async function enterApp(){
   $('appShell').style.display='block';
   $('uName').textContent=S.me.full_name||S.me.email;
   const roleRow=S.me.role_id?S.roles.find(r=>r.id===S.me.role_id):null;
-  $('uRole').textContent=roleRow?roleRow.name:(ROLE_LABEL[S.me.role]||S.me.role||'—');
+  const roleTxt=roleRow?roleRow.name:(ROLE_LABEL[S.me.role]||S.me.role||'');
+  // не дублируем: если имя совпадает с ролью — роль не показываем
+  const nameTxt=(S.me.full_name||S.me.email||'').trim().toLowerCase();
+  $('uRole').textContent=(roleTxt&&roleTxt.trim().toLowerCase()===nameTxt)?'':roleTxt;
   $('main').innerHTML='<div class="loading">Загружаем данные…</div>';
   try{ await loadAll(); }catch(e){ console.error('loadAll',e); }
   try{ loadNav(); }catch(e){ console.error('loadNav',e); }
@@ -1840,7 +1843,6 @@ function buildNav(){
     const team=[];
     if(can('users','view'))team.push({k:'users',label:'Сотрудники',icon:'users'});
     if(can('directories','view'))team.push({k:'settings',label:'Справочники',icon:'settings'});
-    team.push({k:'tariffs',label:'Тарифы',icon:'tariffs',disabled:true});
     groups.push({title:'Команда и настройки',items:team});
   }else{
     // курьер: только свои разделы, без групп
@@ -1877,9 +1879,8 @@ function buildNav(){
   if(su){
     const nm=(S.me&&(S.me.full_name||S.me.email))||'—';
     const init=nm.trim().split(/\s+/).map(w=>w[0]||'').slice(0,2).join('').toUpperCase()||'?';
-    const role=isAdmin()?'Администратор':(isCourier()?'Курьер':'Менеджер');
     su.innerHTML=`<div class="su-ava" title="${esc(nm)}">${esc(init)}</div>
-      <div class="su-info"><div class="su-name">${esc(nm)}</div><div class="su-role"><span class="su-dot"></span>${esc(role)}</div></div>`;
+      <div class="su-info"><div class="su-name">${esc(nm)}</div><div class="su-role"><span class="su-dot"></span>Онлайн</div></div>`;
   }
   $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
     if(b.dataset.disabled){toast('Раздел в разработке');return;}
