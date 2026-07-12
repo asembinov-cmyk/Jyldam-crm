@@ -1945,15 +1945,34 @@ async function loadAiInsights(){
   if(box)box.innerHTML='<div class="nf-ai-load">🤖 Анализирую данные…</div>';
   try{
     const summary=aiBuildDataSummary();
-    const system='Ты — аналитик логистической компании. Найди в данных 3-5 ВАЖНЫХ наблюдений, требующих внимания руководителя: аномалии, падения, риски, возможности. Не пересказывай очевидное. Для каждого дай КОНКРЕТНУЮ рекомендацию. Верни СТРОГО JSON-массив без пояснений и без markdown: [{"icon":"эмодзи","title":"краткий вывод","action":"что сделать"}]. Пример: [{"icon":"📉","title":"Заказы партнёра Magnum упали на 34%","action":"Связаться с партнёром, выяснить причину"}]. Пиши по-русски, кратко. Только реальные выводы из данных, не выдумывай.';
+    const system='Ты — аналитик логистической компании. Найди 3-5 ВАЖНЫХ наблюдений для руководителя: аномалии, падения, риски, возможности. Для каждого — конкретная рекомендация.\nВерни ТОЛЬКО валидный JSON-массив, без markdown и пояснений:\n[{"icon":"📉","title":"краткий вывод","action":"что сделать"}]\nСтрого: title не длиннее 80 символов, action не длиннее 60 символов, максимум 5 элементов. По-русски. Только выводы из данных, не выдумывай.';
     const prompt=`Данные компании (JSON):\n${JSON.stringify(summary)}\n\nНайди важные наблюдения и дай рекомендации.`;
-    const r=await callAI({system,prompt,model:'claude-sonnet-5',max_tokens:1200});
+    const r=await callAI({system,prompt,model:'claude-sonnet-5',max_tokens:2000});
     if(r.error)throw new Error(r.error);
-    let txt=(r.text||'').trim().replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/```$/,'').trim();
-    const arr=JSON.parse(txt);
-    _aiInsights=Array.isArray(arr)?arr:[];
+    let txt=(r.text||'').trim();
+    txt=txt.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim();
+    let arr=null;
+    // 1) пробуем разобрать как есть
+    try{arr=JSON.parse(txt);}catch(e){
+      // 2) вырезаем массив из текста
+      const m=txt.match(/\[[\s\S]*\]/);
+      if(m){try{arr=JSON.parse(m[0]);}catch(e2){}}
+      // 3) спасаем обрезанный ответ: собираем целые объекты
+      if(!arr){
+        const objs=[];const re=/\{[^{}]*"title"[^{}]*\}/g;let mm;
+        while((mm=re.exec(txt))!==null){try{objs.push(JSON.parse(mm[0]));}catch(e3){}}
+        if(objs.length)arr=objs;
+      }
+    }
+    if(Array.isArray(arr)&&arr.length){
+      _aiInsights=arr.filter(x=>x&&x.title).slice(0,6);
+    }else if(txt){
+      _aiInsights=[{icon:'💡',title:'Анализ ИИ',action:txt.slice(0,600)}];
+    }else{
+      _aiInsights=[{icon:'ℹ️',title:'Нет выводов',action:'ИИ не нашёл значимых наблюдений'}];
+    }
   }catch(e){
-    _aiInsights=[{icon:'⚠️',title:'Не удалось получить выводы',action:String(e&&e.message||e).slice(0,120)}];
+    _aiInsights=[{icon:'⚠️',title:'Не удалось получить выводы',action:String(e&&e.message||e).slice(0,140)}];
   }
   _aiInsightsLoading=false;
   renderNotify();
