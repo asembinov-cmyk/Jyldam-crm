@@ -234,6 +234,33 @@
   .dtop-n{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dtop-v{font-weight:800;font-family:'Fraunces',serif}
   .dtop-empty{font-size:12px;color:var(--muted);padding:8px 0}
+  /* склад */
+  .wh-cities{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .wh-city{padding:9px 20px;border:1px solid var(--line);border-radius:10px;background:var(--card);
+    font:inherit;font-size:14px;font-weight:700;cursor:pointer;transition:.15s}
+  .wh-city:hover{border-color:var(--rust)}
+  .wh-city.active{background:var(--rust);color:#fff;border-color:var(--rust)}
+  .wh-toolbar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+  .wh-toolbar input{flex:1;min-width:200px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px}
+  .wh-stats{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .wh-stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 18px;display:flex;flex-direction:column;gap:3px;min-width:150px}
+  .wh-stat span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em}
+  .wh-stat b{font-size:22px;font-weight:800;font-family:'Fraunces',serif}
+  .wh-cat{font-size:11px;color:var(--muted);margin-top:2px}
+  .wh-barcode{font-family:monospace;font-size:13px;letter-spacing:.02em}
+  .wh-stock{font-weight:800;font-size:15px}
+  .wh-stock.wh-zero{color:var(--muted);font-weight:600}
+  .wh-stock-grid{display:flex;gap:10px;flex-wrap:wrap}
+  .wh-stock-inp{display:flex;flex-direction:column;gap:4px;flex:1;min-width:90px}
+  .wh-stock-inp span{font-size:12px;color:var(--muted)}
+  .wh-stock-inp input{padding:9px 11px;border:1px solid var(--line);border-radius:9px;font:inherit}
+  .wh-hint{font-size:13px;color:var(--muted);background:rgba(37,70,201,.06);padding:10px 12px;border-radius:10px;margin-bottom:10px;line-height:1.5}
+  .wh-label{border:2px dashed var(--line);border-radius:12px;padding:20px;text-align:center;background:#fff}
+  .wh-label-name{font-size:15px;font-weight:700;margin-bottom:12px}
+  .wh-label-bars{display:flex;justify-content:center;align-items:flex-end;height:52px;margin-bottom:8px}
+  .wh-label-code{font-family:monospace;font-size:16px;letter-spacing:3px;font-weight:700}
+  .wh-label-sku{font-size:12px;color:var(--muted);margin-top:4px}
+  @media print{body *{visibility:hidden}#whLabelPrint,#whLabelPrint *{visibility:visible}#whLabelPrint{position:fixed;top:20px;left:20px}}
   .dash-card .dc-period{font-size:10.5px;color:var(--muted);margin-top:6px;letter-spacing:.02em}
   .dash-card.c-new{background:linear-gradient(135deg,#eef3fb,var(--card))}.dash-card.c-new .dc-ic{background:#3b6fb0}
   .dash-card.c-pickup{background:linear-gradient(135deg,#f7eed8,var(--card))}.dash-card.c-pickup .dc-ic{background:var(--gold)}
@@ -1561,11 +1588,12 @@ async function loadAll(){
     dbList('calc_sales_norms',{}).catch(()=>[]),
     dbList('shipments',{}).catch(()=>[]),
     dbList('warehouses',{order:'name'}).catch(()=>[]),
+    dbList('products',{order:'name'}).catch(()=>[]),
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
-  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];
+  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем
   S.pickups=S.pickups||[];S.orders=S.orders||[];
@@ -1612,6 +1640,8 @@ async function refreshForTab(tab){
     }else if(tab==='users'){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
+    }else if(tab==='cash'){
+      try{S.products=await dbList('products',{order:'name'});}catch(e){}
     }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
     }else if(tab==='intercity'){
@@ -1881,6 +1911,7 @@ const ICONS={
   settings:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   tariffs:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 7l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   money:'<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M5 9v6M19 9v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  warehouse:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 21V8l9-5 9 5v13" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 21h18M7 21v-6h10v6M7 13h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   cash:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 9l2-4h14l2 4M3 9h18v9a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 13h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   calc:'<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 6h8M8 11h2M12 11h.01M15 11h1M8 15h2M12 15h.01M15 15v3M8 18h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   intercity:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 8l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 8v8l9 4 9-4V8" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 12v8" stroke="currentColor" stroke-width="1.7"/></svg>',
@@ -1927,7 +1958,7 @@ function buildNav(){
 
     // раздел «Деньги»
     const money=[];
-    if(canMod('cash'))money.push({k:'cash',label:'Касса',icon:'cash'});
+    if(canMod('cash'))money.push({k:'cash',label:'Склад',icon:'warehouse'});
     if(canMod('calc'))money.push({k:'calc',label:'Калькуляция',icon:'calc'});
     if(money.length)groups.push({title:'Деньги',items:money});
 
@@ -2371,12 +2402,173 @@ function render(){
   else if(S.tab==='intercity')renderIntercity();
 }
 
-/* ================= МОДУЛЬ: ДЕНЬГИ ================= */
-function renderCash(){
-  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+/* ================= МОДУЛЬ: СКЛАД ================= */
+// города склада (совпадают с названиями городов из справочника)
+const WAREHOUSE_CITIES=['Алматы','Астана','Шымкент'];
+let whCity='Алматы';           // выбранный город склада
+let whSub='products';          // подвкладка: products (товары) | assembly (сборка) | intake (приёмка)
+let whSearch='';
+
+// генерация штрих-кода (если у товара нет своего) — EAN-13-подобный из времени + счётчика
+function genBarcode(){
+  const base='2'+String(Date.now()).slice(-11); // 12 цифр, префикс 2 (внутренний диапазон)
+  // контрольная цифра EAN-13
+  let sum=0;for(let i=0;i<12;i++){sum+=parseInt(base[i],10)*(i%2?3:1);}
+  const check=(10-(sum%10))%10;
+  return base+check;
+}
+
+function renderCash(){ // ключ модуля остался 'cash', но это Склад
+  if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Касса</h1><p>Учёт денежных операций</p></div></div>
-    <div class="panel"><div class="empty"><div class="big">Раздел в разработке</div>Здесь будет касса: приход, расход, баланс.</div></div>`;
+    <div class="page-head"><div><h1>Склад</h1><p>Товары, сборка заказов и приёмка по городам</p></div></div>
+    <div class="wh-cities">
+      ${WAREHOUSE_CITIES.map(c=>`<button class="wh-city ${whCity===c?'active':''}" data-whcity="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div>
+    <div class="subtabs">
+      <button data-whsub="products" class="${whSub==='products'?'active':''}">📦 Товары</button>
+      <button data-whsub="assembly" class="${whSub==='assembly'?'active':''}">🔍 Сборка заказа</button>
+      <button data-whsub="intake" class="${whSub==='intake'?'active':''}">↩️ Приёмка невыкупа</button>
+    </div>
+    <div id="whContent"></div>`;
+  $('main').querySelectorAll('[data-whcity]').forEach(b=>b.onclick=()=>{whCity=b.dataset.whcity;renderCash();});
+  $('main').querySelectorAll('[data-whsub]').forEach(b=>b.onclick=()=>{whSub=b.dataset.whsub;renderCash();});
+  if(whSub==='products')renderWhProducts();
+  else if(whSub==='assembly')renderWhAssembly();
+  else renderWhIntake();
+}
+
+// остаток товара в текущем городе
+function productStock(p){
+  const st=(p.stock&&typeof p.stock==='object')?p.stock:{};
+  return parseInt(st[whCity]||0,10)||0;
+}
+
+function renderWhProducts(){
+  const all=(S.products||[]).filter(p=>{
+    if(!whSearch)return true;
+    const q=whSearch.toLowerCase();
+    return (p.name||'').toLowerCase().includes(q)||(p.barcode||'').includes(q)||(p.sku||'').toLowerCase().includes(q);
+  });
+  const totalSku=(S.products||[]).length;
+  const cityStock=(S.products||[]).reduce((s,p)=>s+productStock(p),0);
+  $('whContent').innerHTML=`
+    <div class="wh-toolbar">
+      <input id="whProdSearch" placeholder="🔍 Поиск: название, штрих-код, артикул…" value="${esc(whSearch)}">
+      <button class="btn primary" id="whAddProduct">＋ Товар</button>
+      <button class="btn ghost" id="whImport">⬆ Импорт списка</button>
+    </div>
+    <div class="wh-stats">
+      <div class="wh-stat"><span>Всего товаров</span><b>${totalSku}</b></div>
+      <div class="wh-stat"><span>Остаток в «${esc(whCity)}»</span><b>${cityStock}</b></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Товары</h2><span class="count">${all.length}</span></div>
+      <div class="table-scroll"><table class="resp-table"><thead><tr>
+        <th>Название</th><th>Штрих-код</th><th>Артикул</th><th>Остаток «${esc(whCity)}»</th><th></th>
+      </tr></thead><tbody>
+      ${all.length?all.map(p=>`<tr>
+        <td data-label="Название"><strong>${esc(p.name||'—')}</strong>${p.category?`<div class="wh-cat">${esc(p.category)}</div>`:''}</td>
+        <td data-label="Штрих-код"><span class="wh-barcode">${esc(p.barcode||'—')}</span></td>
+        <td data-label="Артикул">${esc(p.sku||'—')}</td>
+        <td data-label="Остаток"><span class="wh-stock ${productStock(p)>0?'':'wh-zero'}">${productStock(p)}</span></td>
+        <td data-label="" class="cell-actions"><div class="row-actions">
+          <button class="btn sm ghost" data-whedit="${p.id}">Изменить</button>
+          <button class="btn sm ghost" data-whlabel="${p.id}">🏷 Этикетка</button>
+        </div></td>
+      </tr>`).join(''):`<tr><td colspan="5"><div class="empty"><div class="big">Нет товаров</div>${whSearch?'Измените поиск.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
+      </tbody></table></div>
+    </div>`;
+  const s=$('whProdSearch');if(s)s.oninput=e=>{whSearch=e.target.value;const c=$('whContent');/*мягкая перерисовка только таблицы*/renderWhProducts();const s2=$('whProdSearch');if(s2){s2.focus();s2.setSelectionRange(s2.value.length,s2.value.length);}};
+  if($('whAddProduct'))$('whAddProduct').onclick=()=>productModal();
+  if($('whImport'))$('whImport').onclick=()=>productImportModal();
+  $('whContent').querySelectorAll('[data-whedit]').forEach(b=>b.onclick=()=>productModal(b.dataset.whedit));
+  $('whContent').querySelectorAll('[data-whlabel]').forEach(b=>b.onclick=()=>productLabelModal(b.dataset.whlabel));
+}
+
+// форма добавления/редактирования товара
+function productModal(id){
+  const p=id?(S.products||[]).find(x=>x.id===id):null;
+  const d=p||{};
+  const stock=(d.stock&&typeof d.stock==='object')?d.stock:{};
+  const body=`
+    <div class="form-grid">
+      <div class="field full"><label>Название товара <span style="color:var(--rust)">*</span></label><input id="p_name" value="${esc(d.name||'')}" placeholder="Напр. Кроссовки Nike Air Max 42"></div>
+      <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
+      <div class="field"><label>Артикул (SKU)</label><input id="p_sku" value="${esc(d.sku||'')}" placeholder="необязательно"></div>
+      <div class="field full"><label>Категория</label><input id="p_category" value="${esc(d.category||'')}" placeholder="необязательно"></div>
+      <div class="field full"><label>Остатки по городам</label>
+        <div class="wh-stock-grid">
+          ${WAREHOUSE_CITIES.map(c=>`<div class="wh-stock-inp"><span>${esc(c)}</span><input type="number" min="0" step="1" data-pstock="${esc(c)}" value="${stock[c]!=null?esc(stock[c]):''}" placeholder="0"></div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  showModal(id?'Изменить товар':'Новый товар',body,async()=>{
+    const name=val('p_name').trim();
+    if(!name){toast('Введите название');return false;}
+    let barcode=val('p_barcode').trim();
+    if(!barcode)barcode=genBarcode(); // генерируем, если пусто
+    const st={};
+    document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
+    const payload={name,barcode,sku:val('p_sku').trim()||null,category:val('p_category').trim()||null,stock:st};
+    let saved;
+    if(id){saved=await dbUpdate('products',id,payload);if(saved){const i=(S.products||[]).findIndex(x=>x.id===id);if(i>=0)Object.assign(S.products[i],saved);}}
+    else{saved=await dbInsert('products',payload);if(saved){if(!S.products)S.products=[];S.products.unshift(saved);}}
+    if(!saved){toast('Не удалось сохранить');return false;}
+    logAction(id?'update':'create','products',{entity_id:saved.id,entity_label:name});
+    toast(id?'Товар изменён':'Товар добавлен');renderCash();return true;
+  },{wide:true,clearBtn:id?null:undefined});
+}
+
+// этикетка со штрих-кодом (для печати)
+function productLabelModal(id){
+  const p=(S.products||[]).find(x=>x.id===id);if(!p)return;
+  const bc=p.barcode||'';
+  // простой рисунок штрих-кода полосками из цифр
+  const bars=bc.split('').map(d=>{const w=1+(parseInt(d,10)%3);return `<span style="display:inline-block;width:${w}px;height:52px;background:${parseInt(d,10)%2?'#000':'#000'};margin-right:1px"></span>`;}).join('');
+  const body=`
+    <div class="wh-label" id="whLabelPrint">
+      <div class="wh-label-name">${esc(p.name||'')}</div>
+      <div class="wh-label-bars">${bars}</div>
+      <div class="wh-label-code">${esc(bc)}</div>
+      ${p.sku?`<div class="wh-label-sku">Арт: ${esc(p.sku)}</div>`:''}
+    </div>
+    <div style="text-align:center;margin-top:14px"><button class="btn primary" onclick="window.print()">🖨 Печать</button></div>`;
+  showInfo('Этикетка товара',body);
+}
+
+// импорт списка товаров из CSV/вставленного текста
+function productImportModal(){
+  const body=`
+    <div class="wh-hint">Вставьте список товаров. Каждый товар с новой строки. Формат: <b>название;штрих-код;артикул;категория</b><br>Штрих-код, артикул и категория необязательны. Если штрих-кода нет — сгенерируется.</div>
+    <textarea id="whImportText" rows="10" placeholder="Кроссовки Nike;4870123456789;NK-42;Обувь&#10;Футболка белая M;;TS-M;Одежда&#10;Носки;;;"></textarea>
+    <div class="wh-hint">Товары добавятся на склад города «${esc(whCity)}» с остатком 0. Остатки проставите потом.</div>`;
+  showModal('Импорт товаров',body,async()=>{
+    const txt=(val('whImportText')||'').trim();
+    if(!txt){toast('Вставьте список');return false;}
+    const lines=txt.split('\n').map(l=>l.trim()).filter(Boolean);
+    let added=0;const batch=[];
+    for(const line of lines){
+      const [name,barcode,sku,category]=line.split(';').map(s=>(s||'').trim());
+      if(!name)continue;
+      batch.push({name,barcode:barcode||genBarcode(),sku:sku||null,category:category||null,stock:{}});
+    }
+    if(!batch.length){toast('Нет строк для импорта');return false;}
+    // вставляем пачками
+    for(const item of batch){
+      const saved=await dbInsert('products',item);
+      if(saved){if(!S.products)S.products=[];S.products.unshift(saved);added++;}
+    }
+    logAction('create','products',{entity_label:`импорт ${added} товаров`});
+    toast(`Добавлено товаров: ${added}`);renderCash();return true;
+  },{wide:true});
+}
+// Этап 3 и 4 — сделаем после обкатки товаров
+function renderWhAssembly(){
+  $('whContent').innerHTML='<div class="panel"><div class="empty"><div class="big">🔍 Сборка заказа</div>Следующий этап: пикаете штрих-код заказа → открывается окно с товарами, которые должны быть внутри → сканируете каждый товар → верный ✅, неверный ❌. Сделаем после того, как заполните товары и подключим состав заказов.</div></div>';
+}
+function renderWhIntake(){
+  $('whContent').innerHTML='<div class="panel"><div class="empty"><div class="big">↩️ Приёмка невыкупа</div>Следующий этап: курьер вернул невыкупленный заказ → пикаете заказ → товары автоматически возвращаются на остаток склада. Сделаем после сборки.</div></div>';
 }
 /* ================= МОДУЛЬ: ОТПРАВКИ МЕЖГОРОД ================= */
 // список типов транспорта
@@ -5835,7 +6027,7 @@ const MODULES=[
   ['courier','Курьерская доставка'],
   ['mail','Почтовая доставка'],
   ['intercity','Отправки межгород'],
-  ['cash','Касса'],
+  ['cash','Склад'],
   ['calc','Калькуляция'],
   ['partners','Партнёры'],
   ['history','История изменений'],
