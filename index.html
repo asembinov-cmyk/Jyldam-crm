@@ -1544,15 +1544,15 @@ if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeSidebar;
 
 /* ---------- ENTER APP: load all reference data ---------- */
 async function loadAll(){
-  const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips,pickups,orders]=await Promise.all([
+  // ЛЁГКОЕ ЯДРО: справочники (мелкие таблицы) — грузятся быстро, интерфейс сразу готов
+  const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips]=await Promise.all([
     dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),dbList('couriers',{order:'fio'}),
     dbList('order_couriers',{order:'fio'}),dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),
     dbList('partners',{order:'name'}),dbList('statuses',{order:'created_at',asc:true}),dbList('order_statuses',{order:'created_at',asc:true}),dbList('delivery_types',{order:'created_at',asc:true}),
     dbList('courier_cities',{order:'name'}),dbList('post_ips',{order:'name'}),
-    dbList('pickups',{order:'created_at',asc:false}),dbList('orders',{order:'created_at',asc:false}),
   ]);
-  Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips,pickups,orders});
-  // остальное грузим ПАРАЛЛЕЛЬНО (было по очереди — тормозило вход)
+  Object.assign(S,{cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips});
+  // нормативы и склады — тоже лёгкие, параллельно
   const tail=await Promise.all([
     can('users','view')?dbList('profiles',{order:'created_at',asc:true}):Promise.resolve(null),
     dbList('calc_settings',{}).catch(()=>[]),
@@ -1566,6 +1566,17 @@ async function loadAll(){
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
   S.shipments=tail[5]||[];S.warehouses=tail[6]||[];
+  // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк) грузим ПАРАЛЛЕЛЬНО с ядром,
+  // но вход их НЕ ждёт — стартуем загрузку и продолжаем
+  S.pickups=S.pickups||[];S.orders=S.orders||[];
+  S._heavyLoading=Promise.all([
+    dbList('pickups',{order:'created_at',asc:false}),
+    dbList('orders',{order:'created_at',asc:false}),
+  ]).then(([pickups,orders])=>{
+    S.pickups=pickups;S.orders=orders;S._heavyLoaded=true;
+    // перерисуем текущий экран, когда тяжёлые данные пришли
+    try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav();}catch(e){}
+  }).catch(e=>{console.error('heavy load',e);});
 }
 
 // Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
@@ -3791,6 +3802,11 @@ function aiAssistantModal(){
 }
 
 function renderDashboard(){
+  // заказы ещё догружаются в фоне — показываем аккуратный лоадер вместо нулей
+  if((!S.orders||!S.orders.length)&&S._heavyLoading&&!S._heavyLoaded){
+    $('main').innerHTML='<div class="page-head"><div><h1>Добро пожаловать 👋</h1></div></div><div class="loading" style="padding:60px">Загружаем заказы…</div>';
+    return;
+  }
   const orders=S.orders||[];
   const pickups=S.pickups||[];
   // классификация по названию статуса
@@ -4038,6 +4054,10 @@ function visiblePickups(){
   return S.pickups;
 }
 function renderPickups(){
+  if((!S.pickups||!S.pickups.length)&&S._heavyLoading&&!S._heavyLoaded){
+    $('main').innerHTML='<div class="page-head"><div><h1>Заявки на забор</h1></div></div><div class="loading" style="padding:60px">Загружаем заявки…</div>';
+    return;
+  }
   pickupsPage=1; // при полной перерисовке начинаем с первой страницы
   const list=filteredPickups();
   const totalOrders=list.reduce((s,p)=>s+(+p.orders||0),0);
