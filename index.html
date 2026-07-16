@@ -268,6 +268,29 @@
   .wh-op.wh-op-out{background:rgba(192,57,43,.10)}
   .wh-moves-tbl .log-when b{display:block;font-size:13px}
   .wh-moves-tbl .log-when{font-size:12px;color:var(--muted)}
+  /* сборка/приёмка */
+  .asm-scan{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+  .asm-scan-label{font-size:16px;font-weight:700;margin-bottom:12px}
+  .asm-scan-row{display:flex;gap:10px;margin-bottom:8px}
+  .asm-scan-row input{flex:1;padding:14px 16px;border:2px solid var(--rust);border-radius:10px;font:inherit;font-size:16px}
+  .asm-progress{align-self:center;font-weight:800;font-size:18px;font-family:'Fraunces',serif;padding:0 10px}
+  .asm-items{padding:6px 0}
+  .asm-item{display:flex;align-items:center;gap:13px;padding:13px 18px;border-bottom:1px solid var(--line)}
+  .asm-item.asm-ok{background:rgba(46,125,50,.06)}
+  .asm-item-ico{font-size:22px;flex:none}
+  .asm-item-body{flex:1;min-width:0}
+  .asm-item-name{font-size:15px;font-weight:700}
+  .asm-item-bc{font-family:monospace;font-size:12px;color:var(--muted)}
+  .asm-item-qty{font-weight:800;font-size:16px;font-family:'Fraunces',serif}
+  .asm-foot{padding:16px 18px}
+  .asm-foot .btn{width:100%;padding:14px;font-size:16px}
+  .asm-fb{padding:12px 18px;font-size:15px;font-weight:700;text-align:center}
+  .asm-fb-ok{background:rgba(46,125,50,.12);color:#2e7d32}
+  .asm-fb-err{background:rgba(192,57,43,.12);color:#c0392b}
+  .asm-fb-warn{background:rgba(230,145,30,.14);color:#b5651d}
+  .oi-row{display:flex;gap:8px;margin-bottom:8px}
+  .oi-row .oi-product{flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font:inherit}
+  .oi-row .oi-qty{padding:9px 11px;border:1px solid var(--line);border-radius:9px;font:inherit}
   .dash-card .dc-period{font-size:10.5px;color:var(--muted);margin-top:6px;letter-spacing:.02em}
   .dash-card.c-new{background:linear-gradient(135deg,#eef3fb,var(--card))}.dash-card.c-new .dc-ic{background:#3b6fb0}
   .dash-card.c-pickup{background:linear-gradient(135deg,#f7eed8,var(--card))}.dash-card.c-pickup .dc-ic{background:var(--gold)}
@@ -1598,11 +1621,12 @@ async function loadAll(){
     dbList('products',{order:'name'}).catch(()=>[]),
     dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
     dbList('wh_moves',{order:'created_at',asc:false}).catch(()=>[]),
+    dbList('wh_order_items',{}).catch(()=>[]),
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
-  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];
+  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем
   S.pickups=S.pickups||[];S.orders=S.orders||[];
@@ -1650,7 +1674,7 @@ async function refreshForTab(tab){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
     }else if(tab==='cash'){
-      try{const [pr,wp,wm]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;}catch(e){}
+      try{const [pr,wp,wm,oi]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false}),dbList('wh_order_items',{})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;S.wh_order_items=oi;}catch(e){}
     }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
     }else if(tab==='intercity'){
@@ -2591,11 +2615,214 @@ function productImportModal(){
   },{wide:true});
 }
 // Этап 3 и 4 — сделаем после обкатки товаров
+/* ── ЭТАП 3: СБОРКА ЗАКАЗА СО СКАНИРОВАНИЕМ ── */
+// состав заказа хранится в wh_order_items: {order_code, product_id, qty}
+// пока состав вводится вручную; позже придёт из KET
+let _asmOrder=null;      // текущий собираемый заказ {code, items:[{product_id,qty,scanned}]}
 function renderWhAssembly(){
-  $('whContent').innerHTML='<div class="panel"><div class="empty"><div class="big">🔍 Сборка заказа</div>Следующий этап: пикаете штрих-код заказа → открывается окно с товарами, которые должны быть внутри → сканируете каждый товар → верный ✅, неверный ❌. Сделаем после того, как заполните товары и подключим состав заказов.</div></div>';
+  $('whContent').innerHTML=`
+    <div class="asm-scan">
+      <div class="asm-scan-label">🔍 Отсканируйте или введите код заказа</div>
+      <div class="asm-scan-row">
+        <input id="asmOrderInput" placeholder="Код заказа / трек…" autocomplete="off">
+        <button class="btn primary" id="asmOpen">Открыть</button>
+      </div>
+      <div class="hint">Наведите сканер и пикните штрих-код заказа, или введите код вручную и нажмите «Открыть».</div>
+    </div>
+    <div id="asmBody"></div>`;
+  const open=()=>{
+    const code=($('asmOrderInput')||{}).value?.trim();
+    if(!code)return;
+    startAssembly(code);
+  };
+  if($('asmOpen'))$('asmOpen').onclick=open;
+  if($('asmOrderInput')){
+    $('asmOrderInput').focus();
+    // сканер-пистолет вводит код и жмёт Enter — ловим Enter
+    $('asmOrderInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();open();}};
+  }
+  if(_asmOrder)drawAssembly();
 }
+
+// находим заказ по коду/треку и его состав
+function startAssembly(code){
+  const order=(S.orders||[]).find(o=>String(o.code||'')===code||String(o.track||'')===code||String(o.id).slice(0,8)===code);
+  const items=(S.wh_order_items||[]).filter(it=>it.order_code===code||(order&&it.order_code===String(order.code)));
+  if(!items.length){
+    // состава нет — предложим ввести вручную
+    $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Состав заказа не задан</div>
+      Для заказа «${esc(code)}» не указано, какие товары внутри. Пока состав вводится вручную (позже придёт из KET).
+      <div style="margin-top:14px"><button class="btn primary" id="asmSetItems">Указать состав заказа</button></div></div></div>`;
+    if($('asmSetItems'))$('asmSetItems').onclick=()=>orderItemsModal(code,order);
+    return;
+  }
+  _asmOrder={code,order,items:items.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
+  drawAssembly();
+}
+
+function drawAssembly(){
+  if(!_asmOrder)return;
+  const pn=id=>{const p=(S.products||[]).find(x=>x.id===id);return p?p.name:'—';};
+  const pbc=id=>{const p=(S.products||[]).find(x=>x.id===id);return p?p.barcode:'';};
+  const allDone=_asmOrder.items.every(it=>it.scanned>=it.qty);
+  $('asmBody').innerHTML=`
+    <div class="panel">
+      <div class="panel-head"><h2>Сборка заказа ${esc(_asmOrder.code)}</h2>
+        <button class="btn ghost sm" id="asmCancel" style="margin-left:auto">Отменить</button></div>
+      <div class="asm-scan-row" style="padding:14px 18px">
+        <input id="asmItemInput" placeholder="Пикните штрих-код товара…" autocomplete="off">
+        <span class="asm-progress">${_asmOrder.items.reduce((s,it)=>s+it.scanned,0)} / ${_asmOrder.items.reduce((s,it)=>s+it.qty,0)}</span>
+      </div>
+      <div id="asmFeedback"></div>
+      <div class="asm-items">
+        ${_asmOrder.items.map(it=>{
+          const done=it.scanned>=it.qty;
+          return `<div class="asm-item ${done?'asm-ok':''}">
+            <div class="asm-item-ico">${done?'✅':'⬜'}</div>
+            <div class="asm-item-body"><div class="asm-item-name">${esc(pn(it.product_id))}</div><div class="asm-item-bc">${esc(pbc(it.product_id))}</div></div>
+            <div class="asm-item-qty">${it.scanned} / ${it.qty}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="asm-foot">
+        <button class="btn primary" id="asmFinish" ${allDone?'':'disabled'}>${allDone?'✅ Завершить сборку':'Отсканируйте все товары'}</button>
+      </div>
+    </div>`;
+  const inp=$('asmItemInput');
+  if(inp){inp.focus();inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();scanItem(inp.value.trim());inp.value='';}};}
+  if($('asmCancel'))$('asmCancel').onclick=()=>{_asmOrder=null;renderWhAssembly();};
+  if($('asmFinish'))$('asmFinish').onclick=()=>finishAssembly();
+}
+
+function scanItem(code){
+  if(!code||!_asmOrder)return;
+  const p=(S.products||[]).find(x=>String(x.barcode||'')===code);
+  const fb=$('asmFeedback');
+  if(!p){flashFeedback(fb,'❌ Товар не найден','err');return;}
+  const it=_asmOrder.items.find(i=>i.product_id===p.id);
+  if(!it){flashFeedback(fb,`❌ «${p.name}» не в этом заказе`,'err');return;}
+  if(it.scanned>=it.qty){flashFeedback(fb,`⚠️ «${p.name}» уже собран полностью`,'warn');return;}
+  it.scanned++;
+  flashFeedback(fb,`✅ ${p.name} (${it.scanned}/${it.qty})`,'ok');
+  drawAssembly();
+}
+function flashFeedback(el,msg,kind){
+  if(!el)return;
+  el.innerHTML=`<div class="asm-fb asm-fb-${kind}">${esc(msg)}</div>`;
+  // звук: короткий бип (ok — высокий, err — низкий)
+  try{const ctx=new (window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=kind==='ok'?880:220;g.gain.value=0.1;o.start();setTimeout(()=>{o.stop();ctx.close();},kind==='ok'?90:200);}catch(e){}
+}
+async function finishAssembly(){
+  if(!_asmOrder)return;
+  // списываем товары со склада (расход — отгрузка) и пишем движения
+  for(const it of _asmOrder.items){
+    const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
+    const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
+    const before=parseInt(stock[whCity]||0,10)||0;
+    const after=Math.max(0,before-it.qty);
+    stock[whCity]=after;
+    const move={product_id:it.product_id,city:whCity,op:'out_courier',qty:it.qty,balance_after:after,
+      target:`Заказ ${_asmOrder.code}`,comment:'Сборка заказа',user_id:(S.me&&S.me.id)||null,user_name:(S.me&&(S.me.full_name||S.me.email))||'—'};
+    const sm=await dbInsert('wh_moves',move);if(sm){if(!S.wh_moves)S.wh_moves=[];S.wh_moves.unshift(sm);}
+    const sp=await dbUpdate('products',it.product_id,{stock});if(sp){const i=S.products.findIndex(x=>x.id===it.product_id);if(i>=0)S.products[i].stock=stock;}
+  }
+  logAction('create','wh_moves',{entity_label:`Собран заказ ${_asmOrder.code}`});
+  toast(`Заказ ${_asmOrder.code} собран ✅`);
+  _asmOrder=null;renderWhAssembly();
+}
+
+// ручной ввод состава заказа (пока нет интеграции с KET)
+function orderItemsModal(code,order){
+  const products=[...(S.products||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  let rows=[{product_id:'',qty:1}];
+  const existing=(S.wh_order_items||[]).filter(it=>it.order_code===code);
+  if(existing.length)rows=existing.map(it=>({product_id:it.product_id,qty:it.qty||1}));
+  const rowHtml=(r,i)=>`<div class="oi-row" data-oirow="${i}">
+    <select class="oi-product" data-i="${i}"><option value="">— товар —</option>${products.map(p=>`<option value="${p.id}" ${r.product_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+    <input type="number" min="1" step="1" class="oi-qty" data-i="${i}" value="${r.qty}" style="width:80px">
+    <button class="btn sm danger oi-del" data-i="${i}">✕</button>
+  </div>`;
+  const body=`
+    <div class="hint" style="margin-bottom:10px">Заказ «${esc(code)}». Укажите товары, которые должны быть внутри. Потом сборщик отсканирует их.</div>
+    <div id="oiRows">${rows.map(rowHtml).join('')}</div>
+    <button class="btn ghost sm" id="oiAdd" style="margin-top:8px">＋ Добавить товар</button>`;
+  showModal('Состав заказа',body,async()=>{
+    const rws=[...document.querySelectorAll('[data-oirow]')].map(el=>{
+      const i=el.dataset.oirow;
+      const pid=el.querySelector('.oi-product').value;
+      const q=parseInt(el.querySelector('.oi-qty').value,10)||1;
+      return {product_id:pid,qty:q};
+    }).filter(r=>r.product_id);
+    if(!rws.length){toast('Добавьте хотя бы один товар');return false;}
+    // удаляем старый состав и пишем новый
+    for(const it of existing){await dbDelete('wh_order_items',it.id).catch(()=>{});}
+    S.wh_order_items=(S.wh_order_items||[]).filter(it=>it.order_code!==code);
+    for(const r of rws){
+      const saved=await dbInsert('wh_order_items',{order_code:code,product_id:r.product_id,qty:r.qty});
+      if(saved){S.wh_order_items.push(saved);}
+    }
+    toast('Состав сохранён');startAssembly(code);return true;
+  },{wide:true});
+  setTimeout(()=>{
+    const bind=()=>{
+      document.querySelectorAll('.oi-del').forEach(b=>b.onclick=()=>{b.closest('[data-oirow]').remove();});
+    };
+    bind();
+    if($('oiAdd'))$('oiAdd').onclick=()=>{
+      const wrap=$('oiRows');const i=Date.now();
+      const div=document.createElement('div');div.innerHTML=rowHtml({product_id:'',qty:1},i);
+      wrap.appendChild(div.firstElementChild);bind();
+    };
+  },50);
+}
+
+/* ── ЭТАП 4: ПРИЁМКА НЕВЫКУПА ── */
+let _intakeOrder=null;
 function renderWhIntake(){
-  $('whContent').innerHTML='<div class="panel"><div class="empty"><div class="big">↩️ Приёмка невыкупа</div>Следующий этап: курьер вернул невыкупленный заказ → пикаете заказ → товары автоматически возвращаются на остаток склада. Сделаем после сборки.</div></div>';
+  $('whContent').innerHTML=`
+    <div class="asm-scan">
+      <div class="asm-scan-label">↩️ Приёмка возврата (невыкуп)</div>
+      <div class="asm-scan-row">
+        <input id="intakeInput" placeholder="Код возвращённого заказа…" autocomplete="off">
+        <button class="btn primary" id="intakeOpen">Открыть</button>
+      </div>
+      <div class="hint">Курьер вернул невыкупленный заказ — пикните его код, товары вернутся на склад города «${esc(whCity)}».</div>
+    </div>
+    <div id="intakeBody"></div>`;
+  const open=()=>{const code=($('intakeInput')||{}).value?.trim();if(!code)return;startIntake(code);};
+  if($('intakeOpen'))$('intakeOpen').onclick=open;
+  if($('intakeInput')){$('intakeInput').focus();$('intakeInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();open();}};}
+}
+function startIntake(code){
+  const items=(S.wh_order_items||[]).filter(it=>it.order_code===code);
+  if(!items.length){
+    $('intakeBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Состав заказа не найден</div>Для «${esc(code)}» не задан состав — нечего возвращать. Укажите состав в сборке.</div></div>`;
+    return;
+  }
+  const pn=id=>{const p=(S.products||[]).find(x=>x.id===id);return p?p.name:'—';};
+  $('intakeBody').innerHTML=`
+    <div class="panel">
+      <div class="panel-head"><h2>Возврат заказа ${esc(code)}</h2></div>
+      <div class="asm-items">
+        ${items.map(it=>`<div class="asm-item"><div class="asm-item-ico">↩️</div>
+          <div class="asm-item-body"><div class="asm-item-name">${esc(pn(it.product_id))}</div></div>
+          <div class="asm-item-qty">+${it.qty||1}</div></div>`).join('')}
+      </div>
+      <div class="asm-foot"><button class="btn primary" id="intakeConfirm">✅ Принять возврат на склад</button></div>
+    </div>`;
+  if($('intakeConfirm'))$('intakeConfirm').onclick=async()=>{
+    for(const it of items){
+      const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
+      const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
+      const before=parseInt(stock[whCity]||0,10)||0;const after=before+(it.qty||1);stock[whCity]=after;
+      const move={product_id:it.product_id,city:whCity,op:'return',qty:it.qty||1,balance_after:after,
+        target:`Возврат заказа ${code}`,comment:'Приёмка невыкупа',user_id:(S.me&&S.me.id)||null,user_name:(S.me&&(S.me.full_name||S.me.email))||'—'};
+      const sm=await dbInsert('wh_moves',move);if(sm){if(!S.wh_moves)S.wh_moves=[];S.wh_moves.unshift(sm);}
+      const sp=await dbUpdate('products',it.product_id,{stock});if(sp){const i=S.products.findIndex(x=>x.id===it.product_id);if(i>=0)S.products[i].stock=stock;}
+    }
+    logAction('create','wh_moves',{entity_label:`Приёмка возврата ${code}`});
+    toast(`Возврат ${code} принят ✅`);renderWhIntake();
+  };
 }
 
 /* ── ДВИЖЕНИЯ ТОВАРОВ (журнал операций, как в системе Money) ── */
