@@ -1783,6 +1783,24 @@ function can(mod,act){
   const m=S.myPerms[mod];
   return !!(m&&m[act]);
 }
+// проверка доступа к модулю меню. Если для модуля заданы явные права — используем их,
+// иначе фолбэк на базовое право (обратная совместимость со старыми ролями).
+function canMod(key){
+  if(!S.myPerms)return false;
+  // если админ — всё доступно
+  if(isAdminBase())return true;
+  // явное право на модуль (новые модули). settings хранится как directories
+  const permKey=key==='settings'?'directories':key;
+  if(S.myPerms[permKey]&&typeof S.myPerms[permKey].view!=='undefined')return !!S.myPerms[permKey].view;
+  // фолбэк: старая привязка модулей к базовым правам
+  const fb={dashboard:'orders',pickups:'pickups',orders:'orders',courier:'orders',mail:'orders',
+    intercity:null,cash:null,calc:null,partners:'directories',history:null,notify:'orders',
+    users:'users',settings:'directories'};
+  const base=fb[key];
+  if(base===null)return isAdminBase(); // модули, что были только для админа
+  if(base)return can(base,'view');
+  return false;
+}
 // базовый тип роли — для серверной логики и правила "вижу только своё"
 const isAdminBase=()=>S.myBaseType==='admin';
 const isCourierBase=()=>S.myBaseType==='courier';
@@ -1896,38 +1914,35 @@ function buildNav(){
   if(!courier){
     // Дашборд (только staff/admin)
     const main=[];
-    main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
-    if(can('pickups','view'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
-    if(can('orders','view'))main.push({k:'orders',label:'Заказы',icon:'orders'});
-    groups.push({title:'Основное',items:main});
+    if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
+    if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
+    if(canMod('orders'))main.push({k:'orders',label:'Заказы',icon:'orders'});
+    if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];
-    if(can('orders','view'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
-    if(can('orders','view'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
-    if(isAdmin())delivery.push({k:'intercity',label:'Отправки межгород',icon:'intercity'});
+    if(canMod('courier'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
+    if(canMod('mail'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
+    if(canMod('intercity'))delivery.push({k:'intercity',label:'Отправки межгород',icon:'intercity'});
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
 
-    // раздел «Деньги» — только админ
-    if(isAdmin()){
-      const money=[];
-      money.push({k:'cash',label:'Касса',icon:'cash'});
-      money.push({k:'calc',label:'Калькуляция',icon:'calc'});
-      groups.push({title:'Деньги',items:money});
-    }
+    // раздел «Деньги»
+    const money=[];
+    if(canMod('cash'))money.push({k:'cash',label:'Касса',icon:'cash'});
+    if(canMod('calc'))money.push({k:'calc',label:'Калькуляция',icon:'calc'});
+    if(money.length)groups.push({title:'Деньги',items:money});
 
-    // неактивные разделы-заготовки (из референса)
     const partnerItems=[];
-    if(can('directories','view'))partnerItems.push({k:'partners',label:'Партнёры',icon:'partners'});
+    if(canMod('partners'))partnerItems.push({k:'partners',label:'Партнёры',icon:'partners'});
     if(partnerItems.length)groups.push({title:'Партнёры',items:partnerItems});
     const histItems=[];
-    if(isStaff())histItems.push({k:'history',label:'История изменений',icon:'history'}); // менеджеры и админ
-    histItems.push({k:'notify',label:'Центр контроля',icon:'bell'});
-    groups.push({title:'История',items:histItems});
+    if(canMod('history'))histItems.push({k:'history',label:'История изменений',icon:'history'});
+    if(canMod('notify'))histItems.push({k:'notify',label:'Центр контроля',icon:'bell'});
+    if(histItems.length)groups.push({title:'История',items:histItems});
 
     const team=[];
-    if(can('users','view'))team.push({k:'users',label:'Сотрудники',icon:'users'});
-    if(can('directories','view'))team.push({k:'settings',label:'Настройки',icon:'settings'});
-    groups.push({title:'Команда и настройки',items:team});
+    if(canMod('users'))team.push({k:'users',label:'Сотрудники',icon:'users'});
+    if(canMod('settings'))team.push({k:'settings',label:'Настройки',icon:'settings'});
+    if(team.length)groups.push({title:'Команда и настройки',items:team});
   }else{
     // курьер: только свои разделы, без групп
     const items=[];
@@ -5813,7 +5828,21 @@ function warehouseModal(id){const c=id?S.warehouses.find(x=>x.id===id):{name:''}
       toast('Сохранено');renderSettings();return true;});}
 
 /* ================= МОДУЛЬ: ПОЛЬЗОВАТЕЛИ И РОЛИ ================= */
-const MODULES=[['pickups','Заявки'],['orders','Заказы'],['directories','Справочники'],['users','Пользователи']];
+const MODULES=[
+  ['dashboard','Дашборд'],
+  ['pickups','Заявки на забор'],
+  ['orders','Заказы'],
+  ['courier','Курьерская доставка'],
+  ['mail','Почтовая доставка'],
+  ['intercity','Отправки межгород'],
+  ['cash','Касса'],
+  ['calc','Калькуляция'],
+  ['partners','Партнёры'],
+  ['history','История изменений'],
+  ['notify','Центр контроля'],
+  ['directories','Настройки (справочники)'],
+  ['users','Сотрудники'],
+];
 const ACTIONS=[['view','Просмотр'],['create','Создание'],['edit','Редактирование'],['delete','Удаление']];
 let usersSub='staff'; // staff | roles
 
@@ -6018,7 +6047,7 @@ function renderRoles(){
   $('usersContent').innerHTML=`<div class="panel">
     <div class="panel-head"><h2>Роли</h2><span class="count">${rows.length}</span>
       ${can('users','create')?`<button class="btn primary sm" id="addRole" style="margin-left:auto">＋ Добавить роль</button>`:''}</div>
-    <div class="table-scroll"><table><thead><tr><th>Роль</th><th>Базовый тип</th><th>Заявки</th><th>Заказы</th><th>Справочники</th><th>Пользователи</th><th></th></tr></thead>
+    <div class="table-scroll"><table><thead><tr><th>Роль</th><th>Тип</th>${MODULES.map(([m,lbl])=>`<th style="font-size:11px">${esc(lbl)}</th>`).join('')}<th></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
       <td><strong>${esc(r.name)}</strong></td>
       <td><span class="pill ${r.base_type==='admin'?'gold':r.base_type==='courier'?'':'moss'}">${baseLabel[r.base_type]||r.base_type}</span></td>
