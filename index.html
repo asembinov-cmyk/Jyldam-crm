@@ -2408,6 +2408,7 @@ const WAREHOUSE_CITIES=['Алматы','Астана','Шымкент'];
 let whCity='Алматы';           // выбранный город склада
 let whSub='products';          // подвкладка: products (товары) | assembly (сборка) | intake (приёмка)
 let whSearch='';
+let whPartner='';              // фильтр по партнёру (пусто = все)
 
 // генерация штрих-кода (если у товара нет своего) — EAN-13-подобный из времени + счётчика
 function genBarcode(){
@@ -2446,29 +2447,33 @@ function productStock(p){
 
 function renderWhProducts(){
   const all=(S.products||[]).filter(p=>{
+    if(whPartner&&p.partner_id!==whPartner)return false;
     if(!whSearch)return true;
     const q=whSearch.toLowerCase();
     return (p.name||'').toLowerCase().includes(q)||(p.barcode||'').includes(q)||(p.sku||'').toLowerCase().includes(q);
   });
   const totalSku=(S.products||[]).length;
-  const cityStock=(S.products||[]).reduce((s,p)=>s+productStock(p),0);
+  const cityStock=all.reduce((s,p)=>s+productStock(p),0);
+  const partnersWithProducts=[...new Set((S.products||[]).map(p=>p.partner_id).filter(Boolean))];
   $('whContent').innerHTML=`
     <div class="wh-toolbar">
       <input id="whProdSearch" placeholder="🔍 Поиск: название, штрих-код, артикул…" value="${esc(whSearch)}">
+      <select id="whPartnerFilter"><option value="">Все партнёры</option>${partnersWithProducts.map(pid=>`<option value="${pid}" ${whPartner===pid?'selected':''}>${esc(partnerName(pid))}</option>`).join('')}</select>
       <button class="btn primary" id="whAddProduct">＋ Товар</button>
       <button class="btn ghost" id="whImport">⬆ Импорт списка</button>
     </div>
     <div class="wh-stats">
-      <div class="wh-stat"><span>Всего товаров</span><b>${totalSku}</b></div>
+      <div class="wh-stat"><span>Товаров${whPartner?' у партнёра':''}</span><b>${all.length}</b></div>
       <div class="wh-stat"><span>Остаток в «${esc(whCity)}»</span><b>${cityStock}</b></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Товары</h2><span class="count">${all.length}</span></div>
       <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>Название</th><th>Штрих-код</th><th>Артикул</th><th>Остаток «${esc(whCity)}»</th><th></th>
+        <th>Название</th><th>Партнёр</th><th>Штрих-код</th><th>Артикул</th><th>Остаток «${esc(whCity)}»</th><th></th>
       </tr></thead><tbody>
       ${all.length?all.map(p=>`<tr>
         <td data-label="Название"><strong>${esc(p.name||'—')}</strong>${p.category?`<div class="wh-cat">${esc(p.category)}</div>`:''}</td>
+        <td data-label="Партнёр">${p.partner_id?esc(partnerName(p.partner_id)):'<span class="wh-cat">—</span>'}</td>
         <td data-label="Штрих-код"><span class="wh-barcode">${esc(p.barcode||'—')}</span></td>
         <td data-label="Артикул">${esc(p.sku||'—')}</td>
         <td data-label="Остаток"><span class="wh-stock ${productStock(p)>0?'':'wh-zero'}">${productStock(p)}</span></td>
@@ -2476,10 +2481,11 @@ function renderWhProducts(){
           <button class="btn sm ghost" data-whedit="${p.id}">Изменить</button>
           <button class="btn sm ghost" data-whlabel="${p.id}">🏷 Этикетка</button>
         </div></td>
-      </tr>`).join(''):`<tr><td colspan="5"><div class="empty"><div class="big">Нет товаров</div>${whSearch?'Измените поиск.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
+      </tr>`).join(''):`<tr><td colspan="6"><div class="empty"><div class="big">Нет товаров</div>${whSearch||whPartner?'Измените фильтры.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
-  const s=$('whProdSearch');if(s)s.oninput=e=>{whSearch=e.target.value;const c=$('whContent');/*мягкая перерисовка только таблицы*/renderWhProducts();const s2=$('whProdSearch');if(s2){s2.focus();s2.setSelectionRange(s2.value.length,s2.value.length);}};
+  const s=$('whProdSearch');if(s)s.oninput=e=>{whSearch=e.target.value;renderWhProducts();const s2=$('whProdSearch');if(s2){s2.focus();s2.setSelectionRange(s2.value.length,s2.value.length);}};
+  if($('whPartnerFilter'))$('whPartnerFilter').onchange=e=>{whPartner=e.target.value;renderWhProducts();};
   if($('whAddProduct'))$('whAddProduct').onclick=()=>productModal();
   if($('whImport'))$('whImport').onclick=()=>productImportModal();
   $('whContent').querySelectorAll('[data-whedit]').forEach(b=>b.onclick=()=>productModal(b.dataset.whedit));
@@ -2494,6 +2500,8 @@ function productModal(id){
   const body=`
     <div class="form-grid">
       <div class="field full"><label>Название товара <span style="color:var(--rust)">*</span></label><input id="p_name" value="${esc(d.name||'')}" placeholder="Напр. Кроссовки Nike Air Max 42"></div>
+      <div class="field full"><label>Партнёр <span style="color:var(--rust)">*</span></label>
+        <select id="p_partner"><option value="">— выберите партнёра —</option>${(S.partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${d.partner_id===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
       <div class="field"><label>Артикул (SKU)</label><input id="p_sku" value="${esc(d.sku||'')}" placeholder="необязательно"></div>
       <div class="field full"><label>Категория</label><input id="p_category" value="${esc(d.category||'')}" placeholder="необязательно"></div>
@@ -2506,11 +2514,13 @@ function productModal(id){
   showModal(id?'Изменить товар':'Новый товар',body,async()=>{
     const name=val('p_name').trim();
     if(!name){toast('Введите название');return false;}
+    const partner_id=val('p_partner')||null;
+    if(!partner_id){toast('Выберите партнёра');return false;}
     let barcode=val('p_barcode').trim();
     if(!barcode)barcode=genBarcode(); // генерируем, если пусто
     const st={};
     document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
-    const payload={name,barcode,sku:val('p_sku').trim()||null,category:val('p_category').trim()||null,stock:st};
+    const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,category:val('p_category').trim()||null,stock:st};
     let saved;
     if(id){saved=await dbUpdate('products',id,payload);if(saved){const i=(S.products||[]).findIndex(x=>x.id===id);if(i>=0)Object.assign(S.products[i],saved);}}
     else{saved=await dbInsert('products',payload);if(saved){if(!S.products)S.products=[];S.products.unshift(saved);}}
@@ -2541,9 +2551,13 @@ function productLabelModal(id){
 function productImportModal(){
   const body=`
     <div class="wh-hint">Вставьте список товаров. Каждый товар с новой строки. Формат: <b>название;штрих-код;артикул;категория</b><br>Штрих-код, артикул и категория необязательны. Если штрих-кода нет — сгенерируется.</div>
-    <textarea id="whImportText" rows="10" placeholder="Кроссовки Nike;4870123456789;NK-42;Обувь&#10;Футболка белая M;;TS-M;Одежда&#10;Носки;;;"></textarea>
-    <div class="wh-hint">Товары добавятся на склад города «${esc(whCity)}» с остатком 0. Остатки проставите потом.</div>`;
+    <div class="field full"><label>Партнёр (для всех импортируемых товаров) <span style="color:var(--rust)">*</span></label>
+      <select id="whImportPartner"><option value="">— выберите партнёра —</option>${(S.partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${whPartner===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select></div>
+    <textarea id="whImportText" rows="9" placeholder="Кроссовки Nike;4870123456789;NK-42;Обувь&#10;Футболка белая M;;TS-M;Одежда&#10;Носки;;;"></textarea>
+    <div class="wh-hint">Товары добавятся с остатком 0. Остатки проставите потом при редактировании.</div>`;
   showModal('Импорт товаров',body,async()=>{
+    const partner_id=val('whImportPartner')||null;
+    if(!partner_id){toast('Выберите партнёра');return false;}
     const txt=(val('whImportText')||'').trim();
     if(!txt){toast('Вставьте список');return false;}
     const lines=txt.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -2551,10 +2565,9 @@ function productImportModal(){
     for(const line of lines){
       const [name,barcode,sku,category]=line.split(';').map(s=>(s||'').trim());
       if(!name)continue;
-      batch.push({name,barcode:barcode||genBarcode(),sku:sku||null,category:category||null,stock:{}});
+      batch.push({name,partner_id,barcode:barcode||genBarcode(),sku:sku||null,category:category||null,stock:{}});
     }
     if(!batch.length){toast('Нет строк для импорта');return false;}
-    // вставляем пачками
     for(const item of batch){
       const saved=await dbInsert('products',item);
       if(saved){if(!S.products)S.products=[];S.products.unshift(saved);added++;}
