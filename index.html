@@ -261,6 +261,13 @@
   .wh-label-code{font-family:monospace;font-size:16px;letter-spacing:3px;font-weight:700}
   .wh-label-sku{font-size:12px;color:var(--muted);margin-top:4px}
   @media print{body *{visibility:hidden}#whLabelPrint,#whLabelPrint *{visibility:visible}#whLabelPrint{position:fixed;top:20px;left:20px}}
+  .wh-op{font-size:12px;font-weight:700;padding:3px 9px;border-radius:8px;background:var(--paper);white-space:nowrap}
+  .wh-op-in{color:#2e7d32}
+  .wh-op-out{color:#c0392b}
+  .wh-op.wh-op-in{background:rgba(46,125,50,.10)}
+  .wh-op.wh-op-out{background:rgba(192,57,43,.10)}
+  .wh-moves-tbl .log-when b{display:block;font-size:13px}
+  .wh-moves-tbl .log-when{font-size:12px;color:var(--muted)}
   .dash-card .dc-period{font-size:10.5px;color:var(--muted);margin-top:6px;letter-spacing:.02em}
   .dash-card.c-new{background:linear-gradient(135deg,#eef3fb,var(--card))}.dash-card.c-new .dc-ic{background:#3b6fb0}
   .dash-card.c-pickup{background:linear-gradient(135deg,#f7eed8,var(--card))}.dash-card.c-pickup .dc-ic{background:var(--gold)}
@@ -1590,11 +1597,12 @@ async function loadAll(){
     dbList('warehouses',{order:'name'}).catch(()=>[]),
     dbList('products',{order:'name'}).catch(()=>[]),
     dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
+    dbList('wh_moves',{order:'created_at',asc:false}).catch(()=>[]),
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
-  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];
+  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем
   S.pickups=S.pickups||[];S.orders=S.orders||[];
@@ -1642,7 +1650,7 @@ async function refreshForTab(tab){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
     }else if(tab==='cash'){
-      try{const [pr,wp]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'})]);S.products=pr;S.warehouse_partners=wp;}catch(e){}
+      try{const [pr,wp,wm]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;}catch(e){}
     }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
     }else if(tab==='intercity'){
@@ -2429,6 +2437,7 @@ function renderCash(){ // ключ модуля остался 'cash', но эт
     </div>
     <div class="subtabs">
       <button data-whsub="products" class="${whSub==='products'?'active':''}">📦 Товары</button>
+      <button data-whsub="moves" class="${whSub==='moves'?'active':''}">📊 Движения</button>
       <button data-whsub="assembly" class="${whSub==='assembly'?'active':''}">🔍 Сборка заказа</button>
       <button data-whsub="intake" class="${whSub==='intake'?'active':''}">↩️ Приёмка невыкупа</button>
     </div>
@@ -2436,6 +2445,7 @@ function renderCash(){ // ключ модуля остался 'cash', но эт
   $('main').querySelectorAll('[data-whcity]').forEach(b=>b.onclick=()=>{whCity=b.dataset.whcity;renderCash();});
   $('main').querySelectorAll('[data-whsub]').forEach(b=>b.onclick=()=>{whSub=b.dataset.whsub;renderCash();});
   if(whSub==='products')renderWhProducts();
+  else if(whSub==='moves')renderWhMoves();
   else if(whSub==='assembly')renderWhAssembly();
   else renderWhIntake();
 }
@@ -2586,6 +2596,148 @@ function renderWhAssembly(){
 }
 function renderWhIntake(){
   $('whContent').innerHTML='<div class="panel"><div class="empty"><div class="big">↩️ Приёмка невыкупа</div>Следующий этап: курьер вернул невыкупленный заказ → пикаете заказ → товары автоматически возвращаются на остаток склада. Сделаем после сборки.</div></div>';
+}
+
+/* ── ДВИЖЕНИЯ ТОВАРОВ (журнал операций, как в системе Money) ── */
+// типы операций: приход (+) и расход (−)
+const WH_MOVE_TYPES=[
+  {k:'in_stock',   label:'Приход на склад',  dir:+1},
+  {k:'out_mail',   label:'Расход почты',     dir:-1},
+  {k:'out_courier',label:'Отгрузка курьера', dir:-1},
+  {k:'to_city',    label:'Отправка в город', dir:-1},
+  {k:'return',     label:'Возврат',          dir:+1},
+  {k:'defect',     label:'Брак / списание',  dir:-1},
+  {k:'correct',    label:'Корректировка',    dir:0},
+];
+function whMoveType(k){return WH_MOVE_TYPES.find(t=>t.k===k)||{label:k,dir:0};}
+let whMoveFilter={product:'',type:'',partner:'',from:'',to:''};
+let whMovesPage=1;const WH_MOVES_PER=50;
+
+function renderWhMoves(){
+  const all=[...(S.wh_moves||[])]
+    .filter(m=>m.city===whCity) // движения выбранного города
+    .sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  // фильтры
+  const rows=all.filter(m=>{
+    if(whMoveFilter.product&&m.product_id!==whMoveFilter.product)return false;
+    if(whMoveFilter.type&&m.op!==whMoveFilter.type)return false;
+    if(whMoveFilter.partner){const p=(S.products||[]).find(x=>x.id===m.product_id);if(!p||p.partner_id!==whMoveFilter.partner)return false;}
+    if(whMoveFilter.from&&(m.created_at||'').slice(0,10)<whMoveFilter.from)return false;
+    if(whMoveFilter.to&&(m.created_at||'').slice(0,10)>whMoveFilter.to)return false;
+    return true;
+  });
+  const productName=id=>{const p=(S.products||[]).find(x=>x.id===id);return p?p.name:'—';};
+  const productPartner=id=>{const p=(S.products||[]).find(x=>x.id===id);return p&&p.partner_id?whPartnerName(p.partner_id):'—';};
+  // товары/партнёры для фильтров
+  const usedProducts=[...new Set(all.map(m=>m.product_id))];
+  const usedPartners=[...new Set(all.map(m=>{const p=(S.products||[]).find(x=>x.id===m.product_id);return p&&p.partner_id;}).filter(Boolean))];
+  // пагинация
+  const pages=Math.max(1,Math.ceil(rows.length/WH_MOVES_PER));
+  if(whMovesPage>pages)whMovesPage=1;
+  const pageRows=rows.slice((whMovesPage-1)*WH_MOVES_PER,whMovesPage*WH_MOVES_PER);
+  const fmtT=s=>{const t=fmtLogTime?fmtLogTime(s):{date:(s||'').slice(0,10),time:(s||'').slice(11,16)};return t;};
+  $('whContent').innerHTML=`
+    <div class="wh-toolbar">
+      <button class="btn primary" id="whAddMove">＋ Операция</button>
+      <span class="hint" style="align-self:center">Движения товаров в городе «${esc(whCity)}»</span>
+    </div>
+    <div class="ic-filters">
+      <select id="wmfType"><option value="">Все операции</option>${WH_MOVE_TYPES.map(t=>`<option value="${t.k}" ${whMoveFilter.type===t.k?'selected':''}>${esc(t.label)}</option>`).join('')}</select>
+      <select id="wmfPartner"><option value="">Все партнёры</option>${usedPartners.map(pid=>`<option value="${pid}" ${whMoveFilter.partner===pid?'selected':''}>${esc(whPartnerName(pid))}</option>`).join('')}</select>
+      <select id="wmfProduct"><option value="">Все товары</option>${usedProducts.map(pid=>`<option value="${pid}" ${whMoveFilter.product===pid?'selected':''}>${esc(productName(pid))}</option>`).join('')}</select>
+      <input type="date" id="wmfFrom" value="${esc(whMoveFilter.from)}" title="С даты">
+      <input type="date" id="wmfTo" value="${esc(whMoveFilter.to)}" title="По дату">
+      ${(whMoveFilter.product||whMoveFilter.type||whMoveFilter.partner||whMoveFilter.from||whMoveFilter.to)?'<button class="btn ghost sm" id="wmfClear">Сбросить</button>':''}
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Журнал движений</h2><span class="count">${rows.length}</span></div>
+      <div class="table-scroll"><table class="resp-table wh-moves-tbl"><thead><tr>
+        <th>Дата и время</th><th>Партнёр</th><th>Товар</th><th>Операция</th><th>Кол-во</th><th>Остаток</th><th>Получатель</th><th>Сотрудник</th>
+      </tr></thead><tbody>
+      ${pageRows.length?pageRows.map(m=>{
+        const t=whMoveType(m.op);const tt=fmtT(m.created_at);
+        return `<tr>
+          <td data-label="Дата и время"><div class="log-when"><b>${esc(tt.date)}</b>${esc(tt.time)}</div></td>
+          <td data-label="Партнёр">${esc(productPartner(m.product_id))}</td>
+          <td data-label="Товар"><strong>${esc(productName(m.product_id))}</strong></td>
+          <td data-label="Операция"><span class="wh-op ${t.dir>0?'wh-op-in':t.dir<0?'wh-op-out':''}">${esc(t.label)}</span></td>
+          <td data-label="Кол-во"><span class="${t.dir>0?'wh-op-in':t.dir<0?'wh-op-out':''}">${t.dir>0?'+':t.dir<0?'−':''}${Math.abs(m.qty||0)}</span></td>
+          <td data-label="Остаток"><b>${m.balance_after!=null?m.balance_after:'—'}</b></td>
+          <td data-label="Получатель">${esc(m.target||'—')}</td>
+          <td data-label="Сотрудник">${esc(m.user_name||'—')}</td>
+        </tr>`;
+      }).join(''):`<tr><td colspan="8"><div class="empty"><div class="big">Нет движений</div>${rows.length===0&&all.length?'Измените фильтры.':'Создайте первую операцию прихода товара.'}</div></td></tr>`}
+      </tbody></table></div>
+      ${pages>1?`<div class="hist-pager">
+        <span class="hp-info">Показаны ${(whMovesPage-1)*WH_MOVES_PER+1}–${Math.min(whMovesPage*WH_MOVES_PER,rows.length)} из ${rows.length}</span>
+        <div class="hp-btns">
+          <button class="btn sm ghost" id="wmPrev" ${whMovesPage<=1?'disabled':''}>‹ Назад</button>
+          <span class="hp-page">Стр. ${whMovesPage} / ${pages}</span>
+          <button class="btn sm ghost" id="wmNext" ${whMovesPage>=pages?'disabled':''}>Вперёд ›</button>
+        </div>
+      </div>`:''}
+    </div>`;
+  if($('whAddMove'))$('whAddMove').onclick=()=>whMoveModal();
+  if($('wmfType'))$('wmfType').onchange=e=>{whMoveFilter.type=e.target.value;whMovesPage=1;renderWhMoves();};
+  if($('wmfPartner'))$('wmfPartner').onchange=e=>{whMoveFilter.partner=e.target.value;whMovesPage=1;renderWhMoves();};
+  if($('wmfProduct'))$('wmfProduct').onchange=e=>{whMoveFilter.product=e.target.value;whMovesPage=1;renderWhMoves();};
+  if($('wmfFrom'))$('wmfFrom').onchange=e=>{whMoveFilter.from=e.target.value;whMovesPage=1;renderWhMoves();};
+  if($('wmfTo'))$('wmfTo').onchange=e=>{whMoveFilter.to=e.target.value;whMovesPage=1;renderWhMoves();};
+  if($('wmfClear'))$('wmfClear').onclick=()=>{whMoveFilter={product:'',type:'',partner:'',from:'',to:''};whMovesPage=1;renderWhMoves();};
+  if($('wmPrev'))$('wmPrev').onclick=()=>{if(whMovesPage>1){whMovesPage--;renderWhMoves();}};
+  if($('wmNext'))$('wmNext').onclick=()=>{if(whMovesPage<pages){whMovesPage++;renderWhMoves();}};
+}
+
+// форма создания складской операции
+function whMoveModal(){
+  const products=[...(S.products||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  if(!products.length){showInfo('Нет товаров','Сначала добавьте товары в разделе «Товары».');return;}
+  const body=`
+    <div class="form-grid">
+      <div class="field"><label>Тип операции <span style="color:var(--rust)">*</span></label>
+        <select id="wm_op">${WH_MOVE_TYPES.map(t=>`<option value="${t.k}">${esc(t.label)} ${t.dir>0?'(+)':t.dir<0?'(−)':''}</option>`).join('')}</select></div>
+      <div class="field"><label>Город</label><input value="${esc(whCity)}" disabled></div>
+      <div class="field full"><label>Товар <span style="color:var(--rust)">*</span></label>
+        <select id="wm_product"><option value="">— выберите товар —</option>${products.map(p=>`<option value="${p.id}">${esc(p.name)}${p.partner_id?' · '+esc(whPartnerName(p.partner_id)):''} (остаток: ${(p.stock&&p.stock[whCity])||0})</option>`).join('')}</select></div>
+      <div class="field"><label>Количество <span style="color:var(--rust)">*</span></label><input type="number" min="1" step="1" id="wm_qty" placeholder="0"></div>
+      <div class="field"><label>Получатель / город назначения</label><input id="wm_target" placeholder="напр. Алматы, ФИО клиента"></div>
+      <div class="field full"><label>Комментарий</label><input id="wm_comment" placeholder="необязательно"></div>
+    </div>
+    <div class="hint" style="margin-top:8px">Остаток пересчитается автоматически. Операция зафиксирует вас и время.</div>`;
+  showModal('Складская операция',body,async()=>{
+    const op=val('wm_op');const product_id=val('wm_product');
+    const qty=parseInt(val('wm_qty'),10)||0;
+    if(!product_id){toast('Выберите товар');return false;}
+    if(qty<=0){toast('Введите количество');return false;}
+    const p=(S.products||[]).find(x=>x.id===product_id);if(!p){toast('Товар не найден');return false;}
+    const t=whMoveType(op);
+    const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
+    const before=parseInt(stock[whCity]||0,10)||0;
+    let after=before;
+    if(t.dir>0)after=before+qty;
+    else if(t.dir<0){
+      if(before-qty<0){toast(`Недостаточно на складе: есть ${before}, нужно ${qty}`);return false;}
+      after=before-qty;
+    }else after=before; // корректировка — сюда можно расширить
+    stock[whCity]=after;
+    // сохраняем движение
+    const move={
+      product_id,city:whCity,op,qty,
+      balance_after:after,
+      target:val('wm_target').trim()||null,
+      comment:val('wm_comment').trim()||null,
+      user_id:(S.me&&S.me.id)||null,
+      user_name:(S.me&&(S.me.full_name||S.me.email))||'—',
+    };
+    const savedMove=await dbInsert('wh_moves',move);
+    if(!savedMove){toast('Не удалось сохранить операцию');return false;}
+    // обновляем остаток товара
+    const savedProd=await dbUpdate('products',product_id,{stock});
+    if(savedProd){const i=(S.products||[]).findIndex(x=>x.id===product_id);if(i>=0)S.products[i].stock=stock;}
+    if(!S.wh_moves)S.wh_moves=[];S.wh_moves.unshift(savedMove);
+    logAction('create','wh_moves',{entity_id:savedMove.id,entity_label:`${t.label}: ${p.name} ×${qty}`});
+    toast('Операция проведена');renderWhMoves();return true;
+  },{wide:true});
 }
 /* ================= МОДУЛЬ: ОТПРАВКИ МЕЖГОРОД ================= */
 // список типов транспорта
