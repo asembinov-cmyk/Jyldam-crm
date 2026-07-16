@@ -1589,11 +1589,12 @@ async function loadAll(){
     dbList('shipments',{}).catch(()=>[]),
     dbList('warehouses',{order:'name'}).catch(()=>[]),
     dbList('products',{order:'name'}).catch(()=>[]),
+    dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
-  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];
+  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем
   S.pickups=S.pickups||[];S.orders=S.orders||[];
@@ -1623,11 +1624,11 @@ async function refreshForTab(tab){
       ]);
       S.orders=orders;S.pickups=pickups;
     }else if(tab==='partners'){
-      const [partners,cities,districts,sales,processors]=await Promise.all([
+      const [partners,cities,districts,sales,processors,whp]=await Promise.all([
         dbList('partners',{order:'name'}),dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),
-        dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),
+        dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
       ]);
-      Object.assign(S,{partners,cities,districts,sales,processors});
+      Object.assign(S,{partners,cities,districts,sales,processors});S.warehouse_partners=whp||[];
     }else if(tab==='settings'){
       // справочники: тянем всё, что показывается
       const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips]=await Promise.all([
@@ -1641,7 +1642,7 @@ async function refreshForTab(tab){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
     }else if(tab==='cash'){
-      try{S.products=await dbList('products',{order:'name'});}catch(e){}
+      try{const [pr,wp]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'})]);S.products=pr;S.warehouse_partners=wp;}catch(e){}
     }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
     }else if(tab==='intercity'){
@@ -2444,6 +2445,8 @@ function productStock(p){
   const st=(p.stock&&typeof p.stock==='object')?p.stock:{};
   return parseInt(st[whCity]||0,10)||0;
 }
+// имя складского партнёра
+function whPartnerName(id){return ((S.warehouse_partners||[]).find(x=>x.id===id)||{}).name||'—';}
 
 function renderWhProducts(){
   const all=(S.products||[]).filter(p=>{
@@ -2458,7 +2461,7 @@ function renderWhProducts(){
   $('whContent').innerHTML=`
     <div class="wh-toolbar">
       <input id="whProdSearch" placeholder="🔍 Поиск: название, штрих-код, артикул…" value="${esc(whSearch)}">
-      <select id="whPartnerFilter"><option value="">Все партнёры</option>${partnersWithProducts.map(pid=>`<option value="${pid}" ${whPartner===pid?'selected':''}>${esc(partnerName(pid))}</option>`).join('')}</select>
+      <select id="whPartnerFilter"><option value="">Все партнёры</option>${partnersWithProducts.map(pid=>`<option value="${pid}" ${whPartner===pid?'selected':''}>${esc(whPartnerName(pid))}</option>`).join('')}</select>
       <button class="btn primary" id="whAddProduct">＋ Товар</button>
       <button class="btn ghost" id="whImport">⬆ Импорт списка</button>
     </div>
@@ -2473,7 +2476,7 @@ function renderWhProducts(){
       </tr></thead><tbody>
       ${all.length?all.map(p=>`<tr>
         <td data-label="Название"><strong>${esc(p.name||'—')}</strong>${p.category?`<div class="wh-cat">${esc(p.category)}</div>`:''}</td>
-        <td data-label="Партнёр">${p.partner_id?esc(partnerName(p.partner_id)):'<span class="wh-cat">—</span>'}</td>
+        <td data-label="Партнёр">${p.partner_id?esc(whPartnerName(p.partner_id)):'<span class="wh-cat">—</span>'}</td>
         <td data-label="Штрих-код"><span class="wh-barcode">${esc(p.barcode||'—')}</span></td>
         <td data-label="Артикул">${esc(p.sku||'—')}</td>
         <td data-label="Остаток"><span class="wh-stock ${productStock(p)>0?'':'wh-zero'}">${productStock(p)}</span></td>
@@ -2500,8 +2503,9 @@ function productModal(id){
   const body=`
     <div class="form-grid">
       <div class="field full"><label>Название товара <span style="color:var(--rust)">*</span></label><input id="p_name" value="${esc(d.name||'')}" placeholder="Напр. Кроссовки Nike Air Max 42"></div>
-      <div class="field full"><label>Партнёр <span style="color:var(--rust)">*</span></label>
-        <select id="p_partner"><option value="">— выберите партнёра —</option>${(S.partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${d.partner_id===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select></div>
+      <div class="field full"><label>Партнёр склада <span style="color:var(--rust)">*</span></label>
+        <select id="p_partner"><option value="">— выберите партнёра склада —</option>${(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${d.partner_id===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select>
+        ${(!S.warehouse_partners||!S.warehouse_partners.length)?'<span class="hint" style="color:var(--rust)">Сначала добавьте партнёров склада в разделе Партнёры → Партнёры склада</span>':''}</div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
       <div class="field"><label>Артикул (SKU)</label><input id="p_sku" value="${esc(d.sku||'')}" placeholder="необязательно"></div>
       <div class="field full"><label>Категория</label><input id="p_category" value="${esc(d.category||'')}" placeholder="необязательно"></div>
@@ -2551,8 +2555,8 @@ function productLabelModal(id){
 function productImportModal(){
   const body=`
     <div class="wh-hint">Вставьте список товаров. Каждый товар с новой строки. Формат: <b>название;штрих-код;артикул;категория</b><br>Штрих-код, артикул и категория необязательны. Если штрих-кода нет — сгенерируется.</div>
-    <div class="field full"><label>Партнёр (для всех импортируемых товаров) <span style="color:var(--rust)">*</span></label>
-      <select id="whImportPartner"><option value="">— выберите партнёра —</option>${(S.partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${whPartner===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select></div>
+    <div class="field full"><label>Партнёр склада (для всех импортируемых товаров) <span style="color:var(--rust)">*</span></label>
+      <select id="whImportPartner"><option value="">— выберите партнёра склада —</option>${(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${whPartner===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select></div>
     <textarea id="whImportText" rows="9" placeholder="Кроссовки Nike;4870123456789;NK-42;Обувь&#10;Футболка белая M;;TS-M;Одежда&#10;Носки;;;"></textarea>
     <div class="wh-hint">Товары добавятся с остатком 0. Остатки проставите потом при редактировании.</div>`;
   showModal('Импорт товаров',body,async()=>{
@@ -5646,11 +5650,66 @@ function renderSettings(){
   (map[S.dir]||dirCities)();
 }
 // отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
+let partnersTab='delivery'; // delivery | warehouse
 function renderPartnersPage(){
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Партнёры</h1><p>Магазины-партнёры: данные, тарифы и доступ в кабинет</p></div></div>
+    <div class="page-head"><div><h1>Партнёры</h1><p>Партнёры доставки и партнёры склада</p></div></div>
+    <div class="subtabs">
+      <button data-ptab="delivery" class="${partnersTab==='delivery'?'active':''}">🚚 Партнёры доставки</button>
+      <button data-ptab="warehouse" class="${partnersTab==='warehouse'?'active':''}">📦 Партнёры склада</button>
+    </div>
     <div id="dirContent"></div>`;
-  dirPartners();
+  $('main').querySelectorAll('[data-ptab]').forEach(b=>b.onclick=()=>{partnersTab=b.dataset.ptab;renderPartnersPage();});
+  if(partnersTab==='delivery')dirPartners();
+  else renderWhPartners();
+}
+
+// справочник партнёров склада (отдельная сущность)
+function renderWhPartners(){
+  const arr=[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const canEd=can('directories','create');
+  $('dirContent').innerHTML=`<div class="panel">
+    <div class="panel-head"><h2>Партнёры склада</h2><span class="count">${arr.length}</span>
+      ${canEd?`<button class="btn primary sm" id="whpAdd" style="margin-left:auto">＋ Добавить</button>`:''}</div>
+    <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Название</th><th>Контакт</th><th>Телефон</th><th>Комментарий</th><th></th>
+    </tr></thead><tbody>
+    ${arr.length?arr.map(p=>`<tr>
+      <td data-label="Название"><strong>${esc(p.name||'—')}</strong></td>
+      <td data-label="Контакт">${esc(p.contact||'—')}</td>
+      <td data-label="Телефон">${esc(p.phone||'—')}</td>
+      <td data-label="Комментарий">${esc(p.comment||'—')}</td>
+      <td data-label="" class="cell-actions">${can('directories','edit')||can('directories','delete')?`<div class="row-actions">
+        ${can('directories','edit')?`<button class="btn sm ghost" data-whpe="${p.id}">Изм.</button>`:''}
+        ${can('directories','delete')?`<button class="btn sm danger" data-whpd="${p.id}">✕</button>`:''}
+      </div>`:''}</td>
+    </tr>`).join(''):`<tr><td colspan="5"><div class="empty"><div class="big">Нет партнёров склада</div>Добавьте бутики/магазины, чьи товары хранятся на складе.</div></td></tr>`}
+    </tbody></table></div></div>`;
+  if($('whpAdd'))$('whpAdd').onclick=()=>whPartnerModal();
+  $('dirContent').querySelectorAll('[data-whpe]').forEach(b=>b.onclick=()=>whPartnerModal(b.dataset.whpe));
+  $('dirContent').querySelectorAll('[data-whpd]').forEach(b=>b.onclick=async()=>{
+    const p=(S.warehouse_partners||[]).find(x=>x.id===b.dataset.whpd);
+    if(!confirm(`Удалить «${p&&p.name||'партнёра'}»?`))return;
+    if(await dbDelete('warehouse_partners',b.dataset.whpd)){S.warehouse_partners=S.warehouse_partners.filter(x=>x.id!==b.dataset.whpd);toast('Удалено');renderPartnersPage();}
+  });
+}
+function whPartnerModal(id){
+  const p=id?(S.warehouse_partners||[]).find(x=>x.id===id):null;const d=p||{};
+  const body=`<div class="form-grid">
+    <div class="field full"><label>Название <span style="color:var(--rust)">*</span></label><input id="whp_name" value="${esc(d.name||'')}" placeholder="Напр. Бутик Viterro"></div>
+    <div class="field"><label>Контактное лицо</label><input id="whp_contact" value="${esc(d.contact||'')}"></div>
+    <div class="field"><label>Телефон</label><input id="whp_phone" value="${esc(d.phone||'')}"></div>
+    <div class="field full"><label>Комментарий</label><input id="whp_comment" value="${esc(d.comment||'')}"></div>
+  </div>`;
+  showModal(id?'Изменить партнёра склада':'Новый партнёр склада',body,async()=>{
+    const name=val('whp_name').trim();if(!name){toast('Введите название');return false;}
+    const payload={name,contact:val('whp_contact').trim()||null,phone:val('whp_phone').trim()||null,comment:val('whp_comment').trim()||null};
+    let saved;
+    if(id){saved=await dbUpdate('warehouse_partners',id,payload);if(saved){const i=S.warehouse_partners.findIndex(x=>x.id===id);if(i>=0)Object.assign(S.warehouse_partners[i],saved);}}
+    else{saved=await dbInsert('warehouse_partners',payload);if(saved){if(!S.warehouse_partners)S.warehouse_partners=[];S.warehouse_partners.unshift(saved);}}
+    if(!saved){toast('Не удалось сохранить');return false;}
+    toast(id?'Изменено':'Добавлено');renderPartnersPage();return true;
+  });
 }
 function dirShell(title,count,onAdd,tableHtml){
   $('dirContent').innerHTML=`<div class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span class="count">${count}</span>
