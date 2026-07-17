@@ -3791,7 +3791,12 @@ function showInfo(title,bodyHtml,opts){return showModal(title,bodyHtml,null,Obje
   // кабинет партнёра по QR-ссылке: ?p=НОМЕР
   const urlp=new URLSearchParams(location.search);
   const partnerCode=urlp.get('p');
-  if(partnerCode){try{await openPartnerCabinet(partnerCode);}catch(e){console.error('partner cab',e);document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif">Ошибка загрузки кабинета<br><br><small style="color:#888;word-break:break-word">'+String(e&&e.message||e)+'</small></div>';}return;}
+  if(partnerCode){
+    // сразу прячем логин-экран, чтобы он не мелькал, пока грузится кабинет
+    const ls=$('loginScreen');if(ls)ls.style.display='none';
+    const as=$('appShell');if(as)as.style.display='none';
+    try{await openPartnerCabinet(partnerCode);}catch(e){console.error('partner cab',e);document.body.innerHTML='<div style="padding:40px;text-align:center;font-family:sans-serif">Ошибка загрузки кабинета</div>';}return;
+  }
   try{
     const {data}=await sb.auth.getSession();
     if(data&&data.session){await loadMe(data.session);await enterApp();}
@@ -3819,7 +3824,7 @@ async function openPartnerCabinet(code){
   _partnerQR=String(code||'').trim();
   const r=await callPartnerCabinet('init');
   if(r.error||!r.partner){
-    document.body.innerHTML=`<div class="pcab-err">Кабинет не найден.<br><small>Проверьте ссылку или QR-код.</small><br><br><small style="color:#aaa;word-break:break-word">qr=[${esc(_partnerQR)}] ответ: ${esc(JSON.stringify(r).slice(0,300))}</small></div>`;
+    document.body.innerHTML=`<div class="pcab-err">Кабинет не найден.<br><small>Проверьте ссылку или QR-код.</small></div>`;
     return;
   }
   // справочники из ответа функции
