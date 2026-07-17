@@ -1099,6 +1099,7 @@
 const SUPABASE_URL='https://tdexhspesodslwgbxojw.supabase.co';
 const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkZXhoc3Blc29kc2x3Z2J4b2p3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMTcxOTMsImV4cCI6MjA5Nzc5MzE5M30.QojVMQAWzINufmqdI5nEL-gX_UsIZV8Nq48-3Fn6YoE';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
+let _partnerQR=''; // текущий QR-код партнёра (кабинет по ?p=)
 
 const $=id=>document.getElementById(id);
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -3799,8 +3800,7 @@ function showInfo(title,bodyHtml,opts){return showModal(title,bodyHtml,null,Obje
 })();
 
 /* ================= КАБИНЕТ ПАРТНЁРА (вход по QR-ссылке ?p=НОМЕР) ================= */
-// текущий QR-код партнёра (используется во всех вызовах кабинета)
-let _partnerQR='';
+// (переменная _partnerQR объявлена в начале скрипта)
 // единое окно партнёра в базу — через Edge Function partner-cabinet
 async function callPartnerCabinet(action,payload){
   try{
