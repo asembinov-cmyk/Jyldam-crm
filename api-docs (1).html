@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Документация API — Jyldam Logistics</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Spline+Sans:wght@400;500;600;700&display=swap');
+  /* ── ПАЛИТРА CRM Jyldam (совпадает 1:1) ── */
+  :root{
+    --ink:#16213a;--paper:#eef2f9;--card:#ffffff;--line:#dde3ee;
+    --rust:#2546c9;--rust-dk:#1c37a0;--gold:#c08a2d;--muted:#6b7488;
+    --shadow:0 1px 0 rgba(20,30,60,.04),0 8px 24px -16px rgba(20,30,60,.30);
+    --sidebar:linear-gradient(180deg,#161d2f 0%,#111726 100%);
+    --ok:#2f7d46;--ok-bg:#e6f4ea;--warn:#9a5b00;--warn-bg:#fdf1dd;--err:#c0392b;--err-bg:#fce8e6;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    /* ── АДРЕС API — единственное место для замены на красивый домен ── */
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(160deg,#eef3fb 0%,#f7f9fc 55%,#e9eef7 100%);
+    color:var(--ink);font-family:'Spline Sans',system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--rust)}a:hover{opacity:.85}
+  code{font-family:var(--mono);font-size:.9em}
+  h1,h2,h3{font-family:'Fraunces',serif;letter-spacing:-.01em}
+
+  .topbar{background:#fff;border-bottom:1px solid var(--line)}
+  .topbar-in{max-width:1060px;margin:0 auto;padding:15px 22px;display:flex;align-items:center;gap:12px}
+  .brand-name{font-family:'Fraunces',serif;font-weight:900;font-size:20px;line-height:1;letter-spacing:-.02em}
+  .brand-name small{display:block;font-family:'Spline Sans';font-size:9.5px;font-weight:600;letter-spacing:.16em;color:var(--muted);text-transform:uppercase;margin-top:3px}
+
+  .hero{background:var(--sidebar);color:#fff}
+  .hero-in{max-width:1060px;margin:0 auto;padding:48px 22px 42px}
+  .tag{display:inline-block;font-family:'Spline Sans';font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    background:linear-gradient(135deg,var(--rust),var(--gold));padding:5px 12px;border-radius:999px;margin-bottom:16px}
+  .hero h1{margin:0 0 12px;font-size:30px;font-weight:900;line-height:1.15}
+  .hero p{margin:0 0 7px;color:#c7d0e6;max-width:660px;font-size:14.5px}
+  .ep-box{margin-top:24px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:16px 18px}
+  .ep-box .lbl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#98a3c4;margin-bottom:7px}
+  .ep-box code{font-size:14px;color:#eef2ff;word-break:break-all}
+  .ep-note{margin-top:10px;font-size:12px;color:#98a3c4}
+
+  .wrap{max-width:1060px;margin:0 auto;padding:36px 22px 70px;display:grid;grid-template-columns:200px 1fr;gap:36px}
+  nav.toc{position:sticky;top:22px;align-self:start;max-height:calc(100vh - 44px);overflow:auto}
+  nav.toc a{display:block;padding:7px 12px;border-radius:9px;color:var(--muted);font-size:13px;font-weight:500;text-decoration:none}
+  nav.toc a:hover{background:#e7edf8;color:var(--ink)}
+  main{min-width:0}
+
+  section{margin-bottom:34px;scroll-margin-top:22px}
+  section h2{font-size:21px;font-weight:600;margin:0 0 12px}
+  section h3{font-size:14px;font-weight:600;margin:18px 0 7px;font-family:'Spline Sans'}
+  section p{margin:0 0 11px;color:#2b3648;font-size:14.5px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:14px;box-shadow:var(--shadow)}
+
+  ol.check{counter-reset:c;list-style:none;padding:0;margin:0}
+  ol.check li{counter-increment:c;position:relative;padding:10px 0 10px 40px;border-bottom:1px solid var(--line);font-size:14px}
+  ol.check li:last-child{border-bottom:0}
+  ol.check li::before{content:counter(c);position:absolute;left:0;top:9px;width:27px;height:27px;
+    background:linear-gradient(135deg,var(--rust),var(--rust-dk));color:#fff;border-radius:8px;display:grid;place-items:center;font-size:12.5px;font-weight:700;font-family:'Spline Sans'}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  td code{background:#eef2fb;padding:2px 6px;border-radius:6px;color:var(--rust-dk)}
+  .req{display:inline-block;font-size:9.5px;font-weight:800;color:var(--err);background:var(--err-bg);padding:2px 7px;border-radius:6px;letter-spacing:.03em}
+  .opt{display:inline-block;font-size:9.5px;font-weight:700;color:var(--muted);background:#eef2f6;padding:2px 7px;border-radius:6px}
+
+  pre{background:#111726;color:#d7e0f5;border-radius:12px;padding:16px 18px;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.7;margin:0 0 11px}
+  pre .k{color:#7fd1ff}pre .s{color:#a5e6b0}pre .c{color:#6b7a99}
+
+  .badge{display:inline-block;font-family:var(--mono);font-size:11.5px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .b-post{background:#e8ecff;color:var(--rust-dk)}.b-ok{background:var(--ok-bg);color:var(--ok)}.b-err{background:var(--err-bg);color:var(--err)}
+
+  .note{border-left:3px solid var(--rust);background:#eaeffb;padding:11px 15px;border-radius:0 10px 10px 0;margin:0 0 13px;font-size:13.5px}
+  .note.warn{border-color:var(--gold);background:var(--warn-bg)}
+
+  footer{background:#fff;border-top:1px solid var(--line)}
+  footer .f-in{max-width:1060px;margin:0 auto;padding:22px;color:var(--muted);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+
+  @media(max-width:760px){
+    .wrap{grid-template-columns:1fr;gap:18px}
+    nav.toc{position:static;max-height:none;display:flex;flex-wrap:wrap;gap:4px;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff}
+    nav.toc a{font-size:12px;padding:5px 9px}
+    .hero h1{font-size:24px}
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand-name">JYLDAM<small>Logistics · API</small></div>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="hero-in">
+    <span class="tag">REST · JSON</span>
+    <h1>Приём заказов в Jyldam Logistics</h1>
+    <p>Подключите интернет-магазин, CRM или 1С и отправляйте заказы напрямую к нам. Ниже — полный протокол: авторизация, поля, ответы, примеры и типичные ошибки.</p>
+    <p>Интеграция работает по схеме <strong>сервер → сервер</strong>. Ключ доступа не должен попадать в браузер покупателя.</p>
+    <div class="ep-box">
+      <div class="lbl">Эндпоинт создания заказа · только POST</div>
+      <code id="ep">https://tdexhspesodslwgbxojw.supabase.co/functions/v1/receive-order</code>
+      <div class="ep-note">Тело запроса — JSON (или form-urlencoded с полем <code>data</code>). Кодировка UTF-8.</div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <nav class="toc">
+    <a href="#overview">Обзор</a>
+    <a href="#checklist">Чек-лист подключения</a>
+    <a href="#auth">Авторизация</a>
+    <a href="#fields">Поля запроса</a>
+    <a href="#offer">Формат состава</a>
+    <a href="#response">Ответ сервера</a>
+    <a href="#examples">Примеры</a>
+    <a href="#idem">Повторы и обновления</a>
+    <a href="#errors">Ошибки</a>
+    <a href="#security">Безопасность</a>
+  </nav>
+
+  <main>
+    <section id="overview">
+      <h2>Обзор</h2>
+      <div class="card">
+        <p>Заказ создаётся одним запросом <span class="badge b-post">POST</span> на эндпоинт выше. Тело — JSON с данными получателя и составом заказа. Для доступа нужен ключ, который выдаёт менеджер Jyldam Logistics.</p>
+        <p style="margin:0">Ответ всегда приходит в формате JSON в обёртке <code>result</code>.</p>
+      </div>
+    </section>
+
+    <section id="checklist">
+      <h2>Чек-лист подключения партнёра</h2>
+      <div class="card">
+        <ol class="check">
+          <li>Получить у менеджера Jyldam Logistics <strong>ключ доступа</strong> и убедиться, что карточка партнёра активна.</li>
+          <li>Реализовать вызов <strong>только со своего сервера</strong> (бэкенд магазина, CRM, 1С) — не из браузера покупателя.</li>
+          <li>Передавать ключ в поле <code>secret</code> (в теле запроса) или в заголовке <code>X-Api-Token</code>.</li>
+          <li>Отправлять обязательные поля: <strong>телефон, страна, состав заказа</strong>; желательно — <code>order_id</code> для защиты от дублей.</li>
+          <li>Обрабатывать ответ: успех <code>success: TRUE</code> с полем <code>id</code>, при ошибке <code>success: FALSE</code> с текстом.</li>
+          <li>Сохранять возвращаемый <code>id</code> — это внутренний номер заказа в Jyldam Logistics для сверки.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="auth">
+      <h2>Авторизация</h2>
+      <div class="card">
+        <p>Каждый запрос должен содержать секретный ключ, выданный вам Jyldam Logistics. Ключ передаётся <strong>в теле</strong> запроса (поле <code>secret</code>) — либо, по желанию, в заголовке <code>X-Api-Token</code>.</p>
+        <p>Без верного ключа запрос отклоняется:</p>
+        <pre><span class="c">// ответ при неверном ключе</span>
+{ <span class="k">"result"</span>: { <span class="k">"success"</span>: <span class="s">"FALSE"</span>, <span class="k">"message"</span>: <span class="s">"Incorrect hash"</span> } }</pre>
+        <div class="note warn">Ключ выдаётся индивидуально каждому партнёру. Не передавайте его третьим лицам и не размещайте в коде, доступном покупателю.</div>
+      </div>
+    </section>
+
+    <section id="fields">
+      <h2>Поля запроса</h2>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table>
+          <thead><tr><th>Поле</th><th>Тип</th><th>Описание</th></tr></thead>
+          <tbody>
+            <tr><td><code>secret</code></td><td><span class="req">обяз.</span></td><td>Секретный ключ, выданный Jyldam Logistics</td></tr>
+            <tr><td><code>phone</code></td><td><span class="req">обяз.</span></td><td>Телефон клиента в формате <code>77XXXXXXXXX</code></td></tr>
+            <tr><td><code>offer</code></td><td><span class="req">обяз.</span></td><td>Состав заказа (см. раздел «Формат состава»)</td></tr>
+            <tr><td><code>country</code></td><td><span class="req">обяз.</span></td><td>Код страны ISO 3166-1 alpha-2, строчными: <code>kz</code></td></tr>
+            <tr><td><code>order_id</code></td><td><span class="opt">реком.</span></td><td>ID заказа в вашей системе. Нужен для синхронизации и защиты от дублей</td></tr>
+            <tr><td><code>name</code></td><td><span class="opt">необяз.</span></td><td>ФИО клиента</td></tr>
+            <tr><td><code>addr</code></td><td><span class="opt">необяз.</span></td><td>Полный адрес: область, район, населённый пункт, улица, дом</td></tr>
+            <tr><td><code>city</code></td><td><span class="opt">необяз.</span></td><td>Населённый пункт доставки</td></tr>
+            <tr><td><code>index</code></td><td><span class="opt">необяз.</span></td><td>Почтовый индекс</td></tr>
+            <tr><td><code>price</code></td><td><span class="opt">необяз.</span></td><td>Стоимость товара</td></tr>
+            <tr><td><code>total_price</code></td><td><span class="opt">необяз.</span></td><td>Итоговая стоимость (если не указана — берётся <code>price</code>)</td></tr>
+            <tr><td><code>status</code></td><td><span class="opt">необяз.</span></td><td>Статус подтверждения (числовой код)</td></tr>
+            <tr><td><code>send_status</code></td><td><span class="opt">необяз.</span></td><td>Статус доставки (числовой код)</td></tr>
+            <tr><td><code>status_kz</code></td><td><span class="opt">необяз.</span></td><td>Статус посылки (числовой код)</td></tr>
+            <tr><td><code>kz_code</code></td><td><span class="opt">необяз.</span></td><td>Трек-код (если заказ идёт почтой)</td></tr>
+            <tr><td><code>date_delivery</code></td><td><span class="opt">необяз.</span></td><td>Желаемая дата доставки, <code>YYYY-MM-DD</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="offer">
+      <h2>Формат состава заказа</h2>
+      <div class="card">
+        <p>Поле <code>offer</code> — строка вида <code>{тех.название} - {количество}</code>. Несколько товаров разделяются запятой:</p>
+        <pre>brutalin - 2, oko_plus - 1</pre>
+        <h3>Требования к тех.названию товара</h3>
+        <p style="margin:0 0 6px">— только латиница и цифры;<br>— без пробелов и спецсимволов;<br>— тех.названия согласовываются с менеджером заранее и должны совпадать с кодами товаров на складе Jyldam.</p>
+        <div class="note">Если тех.название не совпадёт с товаром на складе, заказ всё равно примется, но будет помечен как «требует привязки» — оператор сопоставит товар вручную.</div>
+      </div>
+    </section>
+
+    <section id="response">
+      <h2>Ответ сервера</h2>
+      <div class="card">
+        <h3><span class="badge b-ok">Успех</span></h3>
+        <pre>{ <span class="k">"result"</span>: {
+    <span class="k">"success"</span>: <span class="s">"TRUE"</span>,
+    <span class="k">"message"</span>: <span class="s">"200 OK"</span>,
+    <span class="k">"id"</span>: <span class="s">"a1b2c3d4-…"</span>
+} }</pre>
+        <p><code>id</code> — идентификатор заказа в Jyldam Logistics. Сохраните его для сверки.</p>
+        <h3><span class="badge b-err">Ошибка</span></h3>
+        <pre>{ <span class="k">"result"</span>: { <span class="k">"success"</span>: <span class="s">"FALSE"</span>, <span class="k">"message"</span>: <span class="s">"phone is required"</span> } }</pre>
+      </div>
+    </section>
+
+    <section id="examples">
+      <h2>Примеры</h2>
+      <div class="card">
+        <h3>PHP (cURL)</h3>
+        <pre><span class="k">$secret</span> = <span class="s">"ВАШ_КЛЮЧ"</span>; <span class="c">// выдаётся Jyldam Logistics</span>
+
+<span class="k">$data</span> = [
+    <span class="s">"secret"</span>      => <span class="k">$secret</span>,
+    <span class="s">"phone"</span>       => <span class="s">"77017777777"</span>,
+    <span class="s">"country"</span>     => <span class="s">"kz"</span>,
+    <span class="s">"offer"</span>       => <span class="s">"brutalin - 2, oko_plus - 1"</span>,
+    <span class="s">"order_id"</span>    => <span class="s">"123321"</span>,
+    <span class="s">"name"</span>        => <span class="s">"Иван Иванов"</span>,
+    <span class="s">"addr"</span>        => <span class="s">"Алматинская обл., Карасайский р-н, Шамалган, Курмангалиева 45"</span>,
+    <span class="s">"city"</span>        => <span class="s">"Алматы"</span>,
+    <span class="s">"price"</span>       => <span class="s">"6400"</span>,
+];
+
+<span class="k">$ch</span> = curl_init();
+curl_setopt(<span class="k">$ch</span>, CURLOPT_URL, <span class="s">"https://tdexhspesodslwgbxojw.supabase.co/functions/v1/receive-order"</span>);
+curl_setopt(<span class="k">$ch</span>, CURLOPT_RETURNTRANSFER, <span class="s">1</span>);
+curl_setopt(<span class="k">$ch</span>, CURLOPT_POST, <span class="s">true</span>);
+curl_setopt(<span class="k">$ch</span>, CURLOPT_POSTFIELDS, [<span class="s">"data"</span> => json_encode(<span class="k">$data</span>)]);
+<span class="k">$result</span> = curl_exec(<span class="k">$ch</span>);</pre>
+
+        <h3>curl (JSON)</h3>
+        <pre>curl -X POST \
+  <span class="s">"https://tdexhspesodslwgbxojw.supabase.co/functions/v1/receive-order"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{
+    "secret": "ВАШ_КЛЮЧ",
+    "phone": "77017777777",
+    "country": "kz",
+    "offer": "brutalin - 2",
+    "order_id": "123321",
+    "name": "Иван Иванов",
+    "city": "Алматы",
+    "price": "6400"
+  }'</span></pre>
+      </div>
+    </section>
+
+    <section id="idem">
+      <h2>Повторы и обновления</h2>
+      <div class="card">
+        <p>Если прислать заказ с тем же <code>order_id</code>, что и ранее, заказ <strong>не дублируется</strong> — его данные обновляются, а <code>id</code> в ответе остаётся прежним.</p>
+        <p style="margin:0">Так можно присылать обновления по уже переданному заказу: изменившиеся статусы (<code>send_status</code>, <code>status_kz</code>) или трек-код (<code>kz_code</code>).</p>
+      </div>
+    </section>
+
+    <section id="errors">
+      <h2>Типичные ошибки</h2>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table>
+          <thead><tr><th>message</th><th>Причина</th></tr></thead>
+          <tbody>
+            <tr><td><code>Incorrect hash</code></td><td>Неверный или отсутствующий ключ <code>secret</code></td></tr>
+            <tr><td><code>phone is required</code></td><td>Не передан телефон клиента</td></tr>
+            <tr><td><code>offer is required</code></td><td>Не передан состав заказа</td></tr>
+            <tr><td><code>country is required</code></td><td>Не передан код страны</td></tr>
+            <tr><td><code>Malformed request body</code></td><td>Тело запроса не является корректным JSON</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="security">
+      <h2>Безопасность</h2>
+      <div class="card">
+        <p>— Вызывайте API <strong>только со своего сервера</strong>. Ключ не должен попадать в код страницы, доступной покупателю.</p>
+        <p>— Передавайте данные по HTTPS.</p>
+        <p style="margin:0">— При подозрении на утечку ключа сообщите менеджеру Jyldam Logistics — вам выдадут новый.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <div class="f-in">
+    <span>© Jyldam Logistics — Документация API приёма заказов</span>
+    <span>Вопросы по подключению — вашему менеджеру Jyldam Logistics</span>
+  </div>
+</footer>
+
+</body>
+</html>
