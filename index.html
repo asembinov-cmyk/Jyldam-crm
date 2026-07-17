@@ -2283,6 +2283,8 @@ function renderNotify(){
       </div>
     </div>`:''}
 
+    ${isStaff()?duplicatesPanelHtml():''}
+
     ${highlights.length?`
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-head"><h2>✨ Необычное</h2><span class="count">${highlights.length}</span></div>
@@ -2312,6 +2314,7 @@ function renderNotify(){
     </div>`;
   if($('nfEvToggle'))$('nfEvToggle').onclick=()=>{_nfEventsOpen=!_nfEventsOpen;renderNotify();};
   if($('nfAiRun'))$('nfAiRun').onclick=()=>loadAiInsights();
+  bindDuplicatesPanel();
   // переходы по клику на задачу
   $('main').querySelectorAll('[data-nfgo]').forEach(el=>el.onclick=()=>{
     const tab=el.dataset.nfgo;
@@ -2542,7 +2545,6 @@ function productModal(id){
         ${(!S.warehouse_partners||!S.warehouse_partners.length)?'<span class="hint" style="color:var(--rust)">Сначала добавьте партнёров склада в разделе Партнёры → Партнёры склада</span>':''}</div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
       <div class="field"><label>Артикул (SKU)</label><input id="p_sku" value="${esc(d.sku||'')}" placeholder="необязательно"></div>
-      <div class="field"><label>Код KET (ket_sku)</label><input id="p_ketsku" value="${esc(d.ket_sku||'')}" placeholder="тех. название из KET, напр. brutalin"></div>
       <div class="field full"><label>Категория</label><input id="p_category" value="${esc(d.category||'')}" placeholder="необязательно"></div>
       <div class="field full"><label>Остатки по городам</label>
         <div class="wh-stock-grid">
@@ -2559,7 +2561,7 @@ function productModal(id){
     if(!barcode)barcode=genBarcode(); // генерируем, если пусто
     const st={};
     document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
-    const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,ket_sku:val('p_ketsku').trim()||null,category:val('p_category').trim()||null,stock:st};
+    const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,category:val('p_category').trim()||null,stock:st};
     let saved;
     if(id){saved=await dbUpdate('products',id,payload);if(saved){const i=(S.products||[]).findIndex(x=>x.id===id);if(i>=0)Object.assign(S.products[i],saved);}}
     else{saved=await dbInsert('products',payload);if(saved){if(!S.products)S.products=[];S.products.unshift(saved);}}
@@ -5312,7 +5314,6 @@ function renderOrders(mode){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
       ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button><button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
-    ${ordersTabsHtml()}
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -5455,7 +5456,6 @@ function renderOrders(mode){
   if($('oftoday'))$('oftoday').onclick=()=>{const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   drawOrders();
-  bindOrdersTabs();
 }
 // число заказов с заполненным телефоном клиента
 function ordersWithPhone(list){return list.filter(o=>(o.phone||'').toString().replace(/\D/g,'').length>=10).length;}
@@ -5881,7 +5881,16 @@ function orderModal(id,readonly){
       }
       if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
         await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:buildChanges(before,o)});}
-      else{const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);
+      else{
+        // ── проверка на возможный дубль (только при создании нового заказа) ──
+        const dupWarn=await checkOrderDuplicate(row.phone,row.client);
+        if(dupWarn){
+          const proceed=await confirmDuplicate(dupWarn);
+          // пишем факт попытки в историю независимо от решения
+          logAction('dup_check','orders',{entity_label:orderLabel(row),meta:{matched:dupWarn.matchedCode,manager:dupWarn.managerName,decision:proceed?'created':'cancelled'}});
+          if(!proceed)return false; // менеджер передумал — не создаём
+        }
+        const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);
         await logAction('create','orders',{entity_id:u.id,entity_label:orderLabel(u)});}
       toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
     },{readonly:ro,wide:true});
@@ -6750,165 +6759,194 @@ function roleModal(id){
 }
 
 /* ============================================================
-   ЧАСТЬ 3 — ЗАКАЗЫ ИЗ KET (входящие). Изолированный модуль.
+   ПОИСК ДУБЛЕЙ ЗАКАЗОВ (только «Заказы заборов», не KET)
+   Правила:
+   - тот же телефон + похожее ФИО + < 7 дней  → показать предупреждение при создании
+   - тот же телефон, но >= 7 дней ИЛИ другое ФИО → «повторный клиент» (не мешаем)
+   Ничего не блокируем жёстко — показываем и даём решить, факт пишем в историю.
    ============================================================ */
-let ordersTab='own';
-function ordersTabsHtml(){
-  if(!isAdmin())return '';
-  return `<div class="ord-tabs" style="display:flex;gap:8px;margin:0 0 14px">
-    <button class="btn ${ordersTab==='own'?'primary':'ghost'} sm" id="ordTabOwn">Заказы заборов</button>
-    <button class="btn ${ordersTab==='ket'?'primary':'ghost'} sm" id="ordTabKet">Заказы КЕТ</button>
-  </div>`;
-}
-function bindOrdersTabs(){
-  if($('ordTabOwn'))$('ordTabOwn').onclick=()=>{ordersTab='own';renderOrders(ordersMode);};
-  if($('ordTabKet'))$('ordTabKet').onclick=()=>{ordersTab='ket';renderInboundOrders();};
-}
-async function loadInbound(){
-  try{
-    const [orders,items,partners]=await Promise.all([
-      dbList('inbound_orders',{order:'created_at',asc:false}),
-      dbList('inbound_order_items',{}),
-      dbList('inbound_partners',{order:'partner_name'}).catch(()=>[]),
-    ]);
-    S.inbound_orders=orders||[];S.inbound_items=items||[];S.inbound_partners=partners||[];
-  }catch(e){S.inbound_orders=[];S.inbound_items=[];S.inbound_partners=[];}
-}
-const KET_SEND_STATUS={'0':'Отправлен','4':'Отказ','5':'Оплачен','6':'На отправку','7':'Отклонено'};
-const KET_STATUS_KZ={'0':'Обработка','1':'Отложенная','2':'На доставку','4':'Упакован на почте','5':'Заберёт','6':'Упакован','7':'Хранение','8':'Упакован принят','10':'Груз вручён','11':'Груз в дороге','13':'Получен','16':'Проверен','17':'Свежий'};
-function ketSendLabel(s){return s==null||s===''?'—':(KET_SEND_STATUS[String(s)]||('код '+s));}
-function ketKzLabel(s){return s==null||s===''?'—':(KET_STATUS_KZ[String(s)]||('код '+s));}
-async function renderInboundOrders(){
-  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
-  ordersTab='ket';
-  $('main').innerHTML='<div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>'+ordersTabsHtml()+'<div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
-  bindOrdersTabs();
-  await loadInbound();
-  drawInboundOrders();
-}
-function inboundItemsFor(orderId){return (S.inbound_items||[]).filter(it=>it.inbound_order_id===orderId);}
-function inboundPartnerName(id){return ((S.inbound_partners||[]).find(p=>p.id===id)||{}).partner_name||'—';}
-function drawInboundOrders(){
-  const list=S.inbound_orders||[];
-  const unmatched=list.filter(o=>o.match_status==='unmatched').length;
-  const written=list.filter(o=>o.stock_written).length;
-  $('main').innerHTML=`
-    <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>
-    ${ordersTabsHtml()}
-    <div class="stats stats-4">
-      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
-      <div class="stat"><div class="k">Требуют привязки</div><div class="v" style="${unmatched?'color:var(--rust)':''}">${unmatched}</div></div>
-      <div class="stat"><div class="k">Склад списан</div><div class="v">${written}</div></div>
-      <div class="stat"><div class="k">Партнёров</div><div class="v">${(S.inbound_partners||[]).length}</div></div>
-    </div>
-    <div class="panel">
-      <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${list.length}</span></div>
-      <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Состав</th>
-        <th>Статус KET</th><th>Привязка</th><th>Склад</th><th>Дата</th><th></th>
-      </tr></thead><tbody>
-      ${list.length?list.map(o=>{
-        const items=inboundItemsFor(o.id);
-        const compo=items.map(it=>`${esc(it.ket_sku||'?')}×${it.qty}${it.matched?'':' <span style="color:var(--rust)">⚠</span>'}`).join(', ')||'—';
-        const matchBadge=o.match_status==='matched'?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">✓ привязан</span>':(o.match_status==='unmatched'?'<span class="ket-badge" style="background:#fce8e6;color:#c5221f">⚠ требует привязки</span>':'<span class="wh-cat">—</span>');
-        const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
-        return `<tr>
-          <td data-label="Внеш. ID"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
-          <td data-label="Клиент">${esc(o.client||'—')}</td>
-          <td data-label="Телефон">${esc(o.phone||'—')}</td>
-          <td data-label="Город">${esc(o.city||'—')}</td>
-          <td data-label="Состав">${compo}</td>
-          <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div></td>
-          <td data-label="Привязка">${matchBadge}</td>
-          <td data-label="Склад">${stockBadge}</td>
-          <td data-label="Дата">${esc(fmtDate(o.created_at))}</td>
-          <td data-label="" class="cell-actions"><div class="row-actions">
-            <button class="btn sm ghost" data-inbview="${o.id}">Открыть</button>
-            ${o.match_status==='unmatched'?`<button class="btn sm" data-inbmatch="${o.id}">Привязать</button>`:''}
-            ${(!o.stock_written&&String(o.send_status)==='0'&&o.match_status==='matched')?`<button class="btn sm" data-inbstock="${o.id}">Списать склад</button>`:''}
-          </div></td>
-        </tr>`;
-      }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Пока нет заказов из KET</div>Заказы появятся здесь, когда KET начнёт их присылать.</div></td></tr>`}
-      </tbody></table></div>
-    </div>`;
-  bindOrdersTabs();
-  $('main').querySelectorAll('[data-inbview]').forEach(b=>b.onclick=()=>inboundOrderModal(b.dataset.inbview));
-  $('main').querySelectorAll('[data-inbmatch]').forEach(b=>b.onclick=()=>inboundMatchModal(b.dataset.inbmatch));
-  $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
-}
-function inboundOrderModal(id){
-  const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
-  const items=inboundItemsFor(id);
-  const body=`<div style="display:grid;gap:8px;font-size:14px">
-    <div><b>Внешний ID:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
-    <div><b>Партнёр:</b> ${esc(inboundPartnerName(o.inbound_partner_id))}</div>
-    <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
-    <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
-    <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
-    <div><b>Сумма:</b> ${o.price!=null?esc(o.price):'—'} ${o.total_price!=null&&o.total_price!==o.price?('(итого '+esc(o.total_price)+')'):''}</div>
-    <div><b>Статус доставки:</b> ${esc(ketSendLabel(o.send_status))} · <b>Посылка:</b> ${esc(ketKzLabel(o.status_kz))}</div>
-    ${o.kz_code?`<div><b>Трек:</b> ${esc(o.kz_code)}</div>`:''}
-    <div style="margin-top:6px"><b>Состав:</b></div>
-    <div style="display:grid;gap:4px">
-      ${items.length?items.map(it=>`<div style="padding:6px 10px;border:1px solid var(--line);border-radius:8px">${esc(it.ket_sku||'?')} × ${it.qty} ${it.matched?'<span style="color:#1a7f37">— привязан</span>':'<span style="color:var(--rust)">— товар не найден на складе</span>'}</div>`).join(''):'<div class="wh-cat">Состав не разобран</div>'}
-    </div>
-    <div style="margin-top:6px"><b>Склад:</b> ${o.stock_written?('списан '+esc(fmtDate(o.stock_written_at))):'не списан'}</div>
-  </div>`;
-  showInfo('Заказ КЕТ '+esc(o.external_id||''),body,{wide:true});
-}
-function inboundMatchModal(id){
-  const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
-  const items=inboundItemsFor(id).filter(it=>!it.matched);
-  const products=[...(S.products||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const rows=items.map((it)=>`<div class="oi-row" data-mrow="${it.id}">
-    <div style="flex:0 0 auto;min-width:120px"><b>${esc(it.ket_sku||'?')}</b> ×${it.qty}</div>
-    <select class="oi-product" data-mprod="${it.id}"><option value="">— выберите товар склада —</option>
-      ${products.map(p=>`<option value="${p.id}">${esc(p.name)}${p.ket_sku?(' ['+esc(p.ket_sku)+']'):''}</option>`).join('')}</select>
-  </div>`).join('');
-  const body=`<div class="hint" style="margin-bottom:10px">Сопоставьте коды KET с товарами склада. После привязки код <b>ket_sku</b> сохранится в товаре — следующие заказы с этим кодом привяжутся автоматически.</div>${rows||'<div class="wh-cat">Все позиции уже привязаны.</div>'}`;
-  showModal('Привязка товаров — '+esc(o.external_id||''),body,async()=>{
-    let done=0;
-    for(const it of items){
-      const sel=document.querySelector(`[data-mprod="${it.id}"]`);
-      const productId=sel?sel.value:'';
-      if(!productId)continue;
-      await dbUpdate('inbound_order_items',it.id,{product_id:productId,matched:true});
-      const prod=(S.products||[]).find(p=>p.id===productId);
-      if(prod&&it.ket_sku&&prod.ket_sku!==it.ket_sku){await dbUpdate('products',productId,{ket_sku:it.ket_sku});prod.ket_sku=it.ket_sku;}
-      done++;
-    }
-    if(!done){toast('Ничего не выбрано');return false;}
-    await loadInbound();
-    const stillUnmatched=inboundItemsFor(id).some(it=>!it.matched);
-    await dbUpdate('inbound_orders',id,{match_status:stillUnmatched?'unmatched':'matched'});
-    await loadInbound();
-    toast(`Привязано позиций: ${done}`);
-    drawInboundOrders();
-    return true;
-  },{wide:true});
-}
-async function inboundWriteStock(orderId){
-  const o=(S.inbound_orders||[]).find(x=>x.id===orderId);if(!o)return false;
-  if(o.stock_written){toast('Склад по этому заказу уже списан');return false;}
-  if(String(o.send_status)!=='0'){toast('Списание только при статусе «Отправлен»');return false;}
-  const items=inboundItemsFor(orderId);
-  if(!items.length||items.some(it=>!it.matched||!it.product_id)){toast('Сначала привяжите все товары');return false;}
-  const city=((S.inbound_partners||[]).find(p=>p.id===o.inbound_partner_id)||{}).city||'Алматы';
-  for(const it of items){
-    const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
-    const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
-    const before=parseInt(stock[city]||0,10)||0;
-    const after=Math.max(0,before-it.qty);
-    stock[city]=after;
-    await dbInsert('wh_moves',{product_id:it.product_id,city,op:'out_courier',qty:it.qty,balance_after:after,target:`KET заказ ${o.external_id}`,comment:'Списание по заказу KET',user_id:(S.me&&S.me.id)||null,user_name:(S.me&&(S.me.full_name||S.me.email))||'—'});
-    await dbUpdate('products',it.product_id,{stock});
-    const idx=(S.products||[]).findIndex(x=>x.id===it.product_id);if(idx>=0)S.products[idx].stock=stock;
+const DUP_WINDOW_DAYS=7;
+
+// нормализация телефона: только цифры, последние 10 (без кода страны)
+function normPhone(p){const d=String(p||'').replace(/\D/g,'');return d.slice(-10);}
+// нормализация ФИО: нижний регистр, схлопнуть пробелы
+function normFio(s){return String(s||'').toLowerCase().replace(/\s+/g,' ').trim();}
+// первое слово имени (для сравнения «Асель» ≈ «Асель Жумабаева»)
+function firstWord(s){return normFio(s).split(' ')[0]||'';}
+// расстояние Левенштейна (для «похоже»: опечатки, разные написания)
+function levenshtein(a,b){
+  a=a||'';b=b||'';const m=a.length,n=b.length;
+  if(!m)return n;if(!n)return m;
+  const dp=Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);
+  for(let j=0;j<=n;j++)dp[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){
+    const c=a[i-1]===b[j-1]?0:1;
+    dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+c);
   }
-  await dbUpdate('inbound_orders',orderId,{stock_written:true,stock_written_at:new Date().toISOString()});
-  await loadInbound();
-  toast('Склад списан по заказу '+o.external_id);
-  drawInboundOrders();
-  return true;
+  return dp[m][n];
+}
+// «похожи ли ФИО»: совпадает первое слово, или строки близки (Левенштейн <= 2)
+function fioSimilar(a,b){
+  const fa=firstWord(a),fb=firstWord(b);
+  if(!fa||!fb)return false;
+  if(fa===fb)return true;
+  return levenshtein(fa,fb)<=2; // «асель» ≈ «асел»
+}
+// разница в днях между датами создания
+function daysBetween(a,b){
+  const da=new Date(a),db=new Date(b);
+  return Math.abs((da-db)/(1000*60*60*24));
+}
+function salesNameSafe(id){try{return salesName(id);}catch(e){return '—';}}
+
+/* проверка при СОЗДАНИИ: вернёт объект-предупреждение или null.
+   Ищет по всем заказам заборов совпадение телефона.
+   Дубль (показываем) = телефон совпал + ФИО похоже + < DUP_WINDOW_DAYS дней. */
+async function checkOrderDuplicate(phone,client){
+  const np=normPhone(phone);
+  if(np.length<10)return null;
+  const now=new Date().toISOString();
+  const matches=(S.orders||[]).filter(o=>{
+    if(o.ket_id&&!o.code)return false; // на всякий случай не трогаем чисто-KET
+    return normPhone(o.phone)===np;
+  });
+  if(!matches.length)return null;
+  // ищем самый «подозрительный»: похожее ФИО и свежий
+  for(const o of matches){
+    const recent=daysBetween(now,o.created_at||now)<DUP_WINDOW_DAYS;
+    const sim=fioSimilar(o.client,client);
+    if(recent&&sim){
+      return {
+        matchedCode:o.code||String(o.id).slice(0,8),
+        matchedId:o.id,
+        managerName:salesNameSafe(o.sales_id),
+        client:o.client||'',
+        days:Math.round(daysBetween(now,o.created_at||now)),
+        kind:'dup',
+      };
+    }
+  }
+  return null; // телефон совпал, но давно или другое имя — это повторный клиент, не мешаем
+}
+
+/* модалка подтверждения при создании дубля.
+   Возвращает Promise<boolean>: true = всё равно создать, false = отмена.
+   showModal не поддерживает кастомные кнопки/onCancel, поэтому:
+   - «Сохранить» (onSave) → resolve(true)
+   - закрытие крестиком/мимо/Escape → ловим через MutationObserver → resolve(false) */
+function confirmDuplicate(w){
+  return new Promise(resolve=>{
+    let decided=false;
+    const body=`
+      <div style="display:grid;gap:10px;font-size:14px">
+        <div style="padding:12px 14px;background:#fff4e5;border:1px solid #f0c27a;border-radius:10px">
+          ⚠️ <b>Похоже на дубль.</b> Заказ с таким телефоном уже создан:
+        </div>
+        <div style="padding:10px 14px;border:1px solid var(--line);border-radius:10px">
+          <div><b>Заказ:</b> ${esc(w.matchedCode)}</div>
+          <div><b>Клиент:</b> ${esc(w.client||'—')}</div>
+          <div><b>Менеджер:</b> ${esc(w.managerName||'—')}</div>
+          <div><b>Создан:</b> ${w.days===0?'сегодня':(w.days+' дн. назад')}</div>
+        </div>
+        <div class="wh-cat">Если это тот же заказ — закройте окно (Отмена). Если клиент действительно заказал ещё раз — нажмите «Сохранить», заказ будет создан.</div>
+      </div>`;
+    const ov=showModal('Возможный дубль заказа',body,async()=>{decided=true;resolve(true);return true;},{wide:true});
+    // если окно закрылось без «Сохранить» — это отмена
+    const obs=new MutationObserver(()=>{
+      if(!document.body.contains(ov)){obs.disconnect();if(!decided)resolve(false);}
+    });
+    obs.observe(document.body,{childList:true});
+  });
+}
+
+/* ── БЛОК В ЦЕНТРЕ КОНТРОЛЯ: группировка дублей по телефону ── */
+// возвращает массив групп: [{phone, orders:[...], hasDup:bool}]
+function findDuplicateGroups(){
+  const byPhone={};
+  (S.orders||[]).forEach(o=>{
+    const np=normPhone(o.phone);
+    if(np.length<10)return;
+    (byPhone[np]=byPhone[np]||[]).push(o);
+  });
+  const groups=[];
+  Object.keys(byPhone).forEach(np=>{
+    const arr=byPhone[np];
+    if(arr.length<2)return; // не дубль, если один
+    // сортируем по дате
+    arr.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+    // есть ли «настоящий» дубль внутри группы (похожее фио + <7 дней между какими-то двумя)
+    let hasDup=false;
+    for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){
+      if(fioSimilar(arr[i].client,arr[j].client)&&daysBetween(arr[i].created_at||0,arr[j].created_at||0)<DUP_WINDOW_DAYS){hasDup=true;}
+    }
+    groups.push({phone:np,orders:arr,hasDup});
+  });
+  // дубли — вверх
+  groups.sort((a,b)=>(b.hasDup?1:0)-(a.hasDup?1:0));
+  return groups;
+}
+
+// рендер HTML блока дублей (вставляется в Центр контроля)
+function duplicatesPanelHtml(){
+  const groups=findDuplicateGroups();
+  const dupCount=groups.filter(g=>g.hasDup).length;
+  const rows=groups.slice(0,50).map(g=>{
+    const items=g.orders.map(o=>`<div style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <b>${esc(o.code||String(o.id).slice(0,8))}</b>
+        <span>${esc(o.client||'—')}</span>
+        <span class="wh-cat">${esc(salesNameSafe(o.sales_id))}</span>
+        <span class="wh-cat">${esc(fmtDate(o.created_at))}</span>
+      </div>`).join('');
+    return `<div class="nf-issue nf-i-${g.hasDup?'crit':'info'}" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="nf-i-ico">${g.hasDup?'🔴':'🔁'}</div>
+        <div class="nf-i-body"><div class="nf-i-title">Телефон …${esc(g.phone.slice(-7))} — ${g.orders.length} заказа ${g.hasDup?'<span style="color:#c5221f">(возможный дубль)</span>':'<span class="wh-cat">(повторный клиент)</span>'}</div></div>
+      </div>
+      <div style="display:grid;gap:4px;padding-left:34px">${items}</div>
+    </div>`;
+  }).join('');
+  return `
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>🔁 Возможные дубли</h2><span class="count">${dupCount} / ${groups.length}</span>
+        <button class="btn ai-btn sm" id="dupAiRun" style="margin-left:auto">🤖 Проверить дубли через ИИ</button>
+      </div>
+      <div id="dupAiBox"></div>
+      ${groups.length?rows:'<div class="empty" style="padding:24px"><div class="big">✅ Дублей не найдено</div>Заказов с повторяющимися телефонами нет.</div>'}
+    </div>`;
+}
+
+// навесить кнопку ИИ (вызывается после рендера Центра контроля)
+function bindDuplicatesPanel(){
+  if($('dupAiRun'))$('dupAiRun').onclick=()=>runDuplicatesAI();
+}
+
+// ИИ-проверка дублей: отдаём модели список групп, где телефоны/имена ПОХОЖИ, но не точны
+async function runDuplicatesAI(){
+  const box=$('dupAiBox');if(box)box.innerHTML='<div class="nf-ai-empty">🤖 ИИ анализирует…</div>';
+  // собираем компактный срез заказов для анализа (телефон, фио, менеджер, дата)
+  const data=(S.orders||[]).slice(0,400).map(o=>({
+    code:o.code||String(o.id).slice(0,8),
+    phone:normPhone(o.phone),
+    fio:o.client||'',
+    manager:salesNameSafe(o.sales_id),
+    date:(o.created_at||'').slice(0,10),
+  }));
+  const system='Ты помощник по выявлению дублей заказов в логистической CRM. Дубль — это когда один и тот же заказ создан дважды (возможно, чтобы менеджер получил двойную оплату). Ищи не только точные совпадения, но и хитрые: переставленные/изменённые на 1 цифры в телефоне, разные написания того же имени, один клиент за короткий срок. НЕ считай дублем законные повторные заказы (тот же клиент через 2+ недели). Отвечай ТОЛЬКО JSON-массивом без markdown: [{"icon":"🔴","title":"краткое описание","action":"какие заказы и почему подозрительны, укажи коды и менеджера"}]. Максимум 8 записей, самые подозрительные.';
+  const prompt='Заказы (код, телефон, фио, менеджер, дата):\n'+JSON.stringify(data);
+  try{
+    const r=await callAI({system,prompt,model:'claude-sonnet-5',max_tokens:2000});
+    if(r.error)throw new Error(r.error);
+    let txt=(r.text||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim();
+    let arr=null;
+    try{arr=JSON.parse(txt);}catch(e){const m=txt.match(/\[[\s\S]*\]/);if(m){try{arr=JSON.parse(m[0]);}catch(e2){}}}
+    if(!Array.isArray(arr))arr=txt?[{icon:'💡',title:'Анализ ИИ',action:txt.slice(0,600)}]:[];
+    if(box)box.innerHTML=arr.filter(x=>x&&x.title).slice(0,8).map(x=>`
+      <div class="nf-ai-item"><div class="nf-ai-ico">${esc(x.icon||'🔴')}</div>
+        <div class="nf-ai-body"><div class="nf-ai-title">${esc(x.title||'')}</div>${x.action?`<div class="nf-ai-act">→ ${esc(x.action)}</div>`:''}</div>
+      </div>`).join('')||'<div class="nf-ai-empty">ИИ не нашёл подозрительных дублей.</div>';
+  }catch(e){
+    if(box)box.innerHTML='<div class="nf-ai-empty">⚠️ Не удалось выполнить анализ: '+esc(String(e&&e.message||e).slice(0,140))+'</div>';
+  }
 }
 
 </script>
