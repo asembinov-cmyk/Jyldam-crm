@@ -3816,10 +3816,10 @@ async function callPartnerCabinet(action,payload){
 }
 async function openPartnerCabinet(code){
   hideSplash();
-  _partnerQR=String(code).trim();
+  _partnerQR=String(code||'').trim();
   const r=await callPartnerCabinet('init');
   if(r.error||!r.partner){
-    document.body.innerHTML=`<div class="pcab-err">Кабинет не найден.<br><small>Проверьте ссылку или QR-код.</small></div>`;
+    document.body.innerHTML=`<div class="pcab-err">Кабинет не найден.<br><small>Проверьте ссылку или QR-код.</small><br><br><small style="color:#aaa;word-break:break-word">qr=[${esc(_partnerQR)}] ответ: ${esc(JSON.stringify(r).slice(0,300))}</small></div>`;
     return;
   }
   // справочники из ответа функции
