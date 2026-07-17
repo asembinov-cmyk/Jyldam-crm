@@ -2008,6 +2008,7 @@ function buildNav(){
     const team=[];
     if(canMod('users'))team.push({k:'users',label:'Сотрудники',icon:'users'});
     if(canMod('settings'))team.push({k:'settings',label:'Настройки',icon:'settings'});
+    if(isAdmin())team.push({k:'apidocs',label:'Документация API',icon:'history',href:'api-docs.html'});
     if(team.length)groups.push({title:'Команда и настройки',items:team});
   }else{
     // курьер: только свои разделы, без групп
@@ -2017,7 +2018,7 @@ function buildNav(){
     groups.push({title:'',items});
   }
   // собрать список активных ключей для проверки текущей вкладки
-  const activeKeys=[];groups.forEach(g=>g.items.forEach(it=>{if(!it.disabled)activeKeys.push(it.k);}));
+  const activeKeys=[];groups.forEach(g=>g.items.forEach(it=>{if(!it.disabled&&!it.href)activeKeys.push(it.k);}));
   if(!activeKeys.length)activeKeys.push('none');
   if(!activeKeys.includes(S.tab))S.tab=activeKeys[0];
 
@@ -2037,7 +2038,11 @@ function buildNav(){
       if(it.k==='notify'){
         try{const c=notifyIssues().filter(i=>i.lvl==='crit').length;if(c)badge=`<span class="nav-badge nb-crit">${c}</span>`;}catch(e){}
       }
-      html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
+      if(it.href){
+        html+=`<a href="${esc(it.href)}" target="_blank" rel="noopener" class="${cls}" style="--nav-col:${col};text-decoration:none" title="${esc(it.label)} — откроется в новой вкладке">${ICONS[it.icon]||''}<span>${esc(it.label)}</span><span style="margin-left:auto;font-size:11px;opacity:.5">↗</span></a>`;
+      }else{
+        html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
+      }
     });
   });
   $('navTabs').innerHTML=html;
