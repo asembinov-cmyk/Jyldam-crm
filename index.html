@@ -3806,7 +3806,7 @@ async function callPartnerCabinet(action,payload){
   try{
     const res=await fetch(`${SUPABASE_URL}/functions/v1/partner-cabinet`,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON,'Authorization':'Bearer '+SUPABASE_ANON},
       body:JSON.stringify(Object.assign({action,qr_code:_partnerQR},payload||{})),
     });
     const out=await res.json().catch(()=>({}));
