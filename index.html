@@ -158,15 +158,15 @@
   .sidebar-logout{margin-top:12px;flex:none;width:100%;justify-content:center;
     color:#ff8f7a;border-color:rgba(255,143,122,.3);background:transparent}
   .sidebar-logout:hover{background:#c0392b;color:#fff;border-color:#c0392b}
-  .side-nav button{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;
+  .side-nav button,.side-nav a{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;text-decoration:none;
     border:1px solid transparent;background:transparent;color:rgba(255,255,255,.62);padding:10px 13px;border-radius:10px;
     transition:background .16s,color .16s,transform .16s;display:flex;align-items:center;gap:11px;position:relative}
-  .side-nav button:hover{color:#fff;background:rgba(255,255,255,.07);transform:translateX(2px)}
+  .side-nav button:hover,.side-nav a:hover{color:#fff;background:rgba(255,255,255,.07);transform:translateX(2px)}
   /* активный пункт — заливка в цвете группы */
-  .side-nav button.active{color:#fff;background:var(--nav-col,#2546c9);border-color:transparent;
+  .side-nav button.active,.side-nav a.active{color:#fff;background:var(--nav-col,#2546c9);border-color:transparent;
     box-shadow:0 3px 12px -2px var(--nav-col,#2546c9)}
-  .side-nav button.active svg{color:#fff}
-  .side-nav button svg{width:19px;height:19px;flex:none;opacity:.9}
+  .side-nav button.active svg,.side-nav a.active svg{color:#fff}
+  .side-nav button svg,.side-nav a svg{width:19px;height:19px;flex:none;opacity:.9}
   .side-nav button.disabled{opacity:.32;cursor:default}
   .side-nav button.disabled:hover{background:transparent;color:rgba(255,255,255,.62);transform:none}
   .side-nav .nav-group{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
@@ -193,8 +193,8 @@
   .nav-collapse-btn:hover{background:var(--rust);color:#fff;border-color:var(--rust);transform:scale(1.08)}
   /* свёрнутое меню: только иконки */
   body.nav-collapsed .sidebar{width:66px;flex:0 0 66px;padding:16px 9px}
-  body.nav-collapsed .side-nav button span:not(.nav-badge){display:none}
-  body.nav-collapsed .side-nav button{justify-content:center;padding:11px 0}
+  body.nav-collapsed .side-nav button span:not(.nav-badge),body.nav-collapsed .side-nav a span:not(.nav-badge){display:none}
+  body.nav-collapsed .side-nav button,body.nav-collapsed .side-nav a{justify-content:center;padding:11px 0}
   body.nav-collapsed .side-nav .nav-group{font-size:0;padding:12px 0 5px;justify-content:center}
   body.nav-collapsed .ng-dot{width:18px;height:3px;border-radius:2px}
   body.nav-collapsed .sidebar-logout{font-size:0;padding:9px 0}
@@ -820,7 +820,7 @@
       border-color:transparent;justify-content:flex-start;color:rgba(255,255,255,.62)}
     .side-nav button:hover{color:#fff;background:rgba(255,255,255,.07)}
     .side-nav button.active{background:var(--nav-col,#2546c9);color:#fff;border-color:transparent}
-    .side-nav button.active svg{color:#fff}
+    .side-nav button.active svg,.side-nav a.active svg{color:#fff}
     .side-nav .nav-group{color:rgba(255,255,255,.38)}
     .sidebar-logout{margin-top:14px;width:100%;flex:0 0 auto;border-radius:10px;
       color:#ff8f7a;border-color:rgba(255,143,122,.3);background:transparent}
@@ -2039,7 +2039,7 @@ function buildNav(){
         try{const c=notifyIssues().filter(i=>i.lvl==='crit').length;if(c)badge=`<span class="nav-badge nb-crit">${c}</span>`;}catch(e){}
       }
       if(it.href){
-        html+=`<a href="${esc(it.href)}" target="_blank" rel="noopener" class="${cls}" style="--nav-col:${col};text-decoration:none" title="${esc(it.label)} — откроется в новой вкладке">${ICONS[it.icon]||''}<span>${esc(it.label)}</span><span style="margin-left:auto;font-size:11px;opacity:.5">↗</span></a>`;
+        html+=`<a href="${esc(it.href)}" target="_blank" rel="noopener" data-tab="${it.k}" class="${cls}" style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span></a>`;
       }else{
         html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
       }
@@ -2054,7 +2054,7 @@ function buildNav(){
     su.innerHTML=`<div class="su-ava" title="${esc(nm)}">${esc(init)}</div>
       <div class="su-info"><div class="su-name">${esc(nm)}</div><div class="su-role"><span class="su-dot"></span>Онлайн</div></div>`;
   }
-  $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
+  $('navTabs').querySelectorAll('button[data-tab]').forEach(b=>b.onclick=async()=>{
     if(b.dataset.disabled){toast('Раздел в разработке');return;}
     S.tab=b.dataset.tab;saveNav();buildNav();closeSidebar();
     render(); // мгновенно рисуем из уже загруженных данных
