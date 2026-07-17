@@ -1972,6 +1972,8 @@ function pickupsTodayActive(){
   }).length;
 }
 function buildNav(){
+  // восстановить свёрнутые группы меню из localStorage (один раз)
+  if(!window._navCollapsed){try{window._navCollapsed=JSON.parse(localStorage.getItem('navCollapsed')||'{}');}catch(e){window._navCollapsed={};}}
   const courier=isCourierBase();
   // структура: группы и пункты. active:false — нарисован, но неактивен
   const groups=[];
@@ -1993,7 +1995,7 @@ function buildNav(){
     const money=[];
     if(canMod('cash'))money.push({k:'cash',label:'Склад',icon:'warehouse'});
     if(canMod('calc'))money.push({k:'calc',label:'Калькуляция',icon:'calc'});
-    if(money.length)groups.push({title:'Деньги',items:money});
+    if(money.length)groups.push({title:'Деньги/Склад',items:money});
 
     const partnerItems=[];
     if(canMod('partners'))partnerItems.push({k:'partners',label:'Партнёры',icon:'partners'});
@@ -2022,7 +2024,9 @@ function buildNav(){
   let html='';
   groups.forEach(g=>{
     const col=NAV_COLORS[g.title]||'#6b7280';
-    if(g.title)html+=`<div class="nav-group"><span class="ng-dot" style="background:${col}"></span>${esc(g.title)}</div>`;
+    const collapsed=!!(window._navCollapsed&&window._navCollapsed[g.title]);
+    if(g.title)html+=`<div class="nav-group nav-group-toggle" data-navgroup="${esc(g.title)}" style="cursor:pointer" title="Свернуть/развернуть"><span class="ng-dot" style="background:${col}"></span>${esc(g.title)}<span style="margin-left:auto;font-size:11px;opacity:.6">${collapsed?'▸':'▾'}</span></div>`;
+    if(collapsed)return; // группа свёрнута — пункты не рисуем
     g.items.forEach(it=>{
       const cls=[it.disabled?'disabled':'',S.tab===it.k?'active':''].filter(Boolean).join(' ');
       // бейджи: заявки на сегодня (в работе) и срочные задачи в центре контроля
@@ -2051,6 +2055,14 @@ function buildNav(){
     render(); // мгновенно рисуем из уже загруженных данных
     const myTab=S.tab;
     refreshForTab(myTab).then(()=>{if(S.tab===myTab)render();}).catch(()=>{}); // свежие данные в фоне
+  });
+  // сворачивание/разворачивание групп меню по клику на заголовок
+  $('navTabs').querySelectorAll('[data-navgroup]').forEach(h=>h.onclick=()=>{
+    window._navCollapsed=window._navCollapsed||{};
+    const t=h.dataset.navgroup;
+    window._navCollapsed[t]=!window._navCollapsed[t];
+    try{localStorage.setItem('navCollapsed',JSON.stringify(window._navCollapsed));}catch(e){}
+    buildNav();
   });
   buildBottomNav();
 }
@@ -6907,16 +6919,27 @@ function duplicatesPanelHtml(){
   }).join('');
   return `
     <div class="panel" style="margin-bottom:18px">
-      <div class="panel-head"><h2>🔁 Возможные дубли</h2><span class="count">${dupCount} / ${groups.length}</span>
-        <button class="btn ai-btn sm" id="dupAiRun" style="margin-left:auto">🤖 Проверить дубли через ИИ</button>
+      <div class="panel-head nf-collapse-head" id="dupToggle" style="cursor:pointer">
+        <h2>🔁 Возможные дубли</h2><span class="count">${dupCount} / ${groups.length}</span>
+        <span class="nf-collapse-ico" style="margin-left:6px">${window._dupOpen?'▴':'▾'}</span>
       </div>
-      <div id="dupAiBox"></div>
-      ${groups.length?rows:'<div class="empty" style="padding:24px"><div class="big">✅ Дублей не найдено</div>Заказов с повторяющимися телефонами нет.</div>'}
+      <div id="dupBody" style="${window._dupOpen?'':'display:none'}">
+        <div style="padding:0 0 10px;display:flex;justify-content:flex-end">
+          <button class="btn ai-btn sm" id="dupAiRun">🤖 Проверить дубли через ИИ</button>
+        </div>
+        <div id="dupAiBox"></div>
+        ${groups.length?rows:'<div class="empty" style="padding:24px"><div class="big">✅ Дублей не найдено</div>Заказов с повторяющимися телефонами нет.</div>'}
+      </div>
     </div>`;
 }
 
 // навесить кнопку ИИ (вызывается после рендера Центра контроля)
 function bindDuplicatesPanel(){
+  if($('dupToggle'))$('dupToggle').onclick=()=>{
+    window._dupOpen=!window._dupOpen;
+    const b=$('dupBody');if(b)b.style.display=window._dupOpen?'':'none';
+    const ic=$('dupToggle').querySelector('.nf-collapse-ico');if(ic)ic.textContent=window._dupOpen?'▴':'▾';
+  };
   if($('dupAiRun'))$('dupAiRun').onclick=()=>runDuplicatesAI();
   document.querySelectorAll('[data-duporder]').forEach(el=>el.onclick=()=>{
     try{orderModal(el.dataset.duporder,!can('orders','edit'));}catch(e){}
