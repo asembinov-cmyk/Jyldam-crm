@@ -2459,6 +2459,15 @@ function render(){
 /* ================= МОДУЛЬ: СКЛАД ================= */
 // города склада (совпадают с названиями городов из справочника)
 const WAREHOUSE_CITIES=['Алматы','Астана','Шымкент'];
+// приводим произвольное написание города из заказа к одному из складов
+function normalizeWhCity(raw){
+  const s=String(raw||'').trim().toLowerCase();
+  if(!s)return 'Алматы';
+  if(s.includes('алмат')||s.includes('almat'))return 'Алматы';
+  if(s.includes('астан')||s.includes('astana')||s.includes('нур-султан')||s.includes('нур султан')||s.includes('nur'))return 'Астана';
+  if(s.includes('шымк')||s.includes('чимк')||s.includes('shym')||s.includes('chim'))return 'Шымкент';
+  return 'Алматы';
+}
 let whCity='Алматы';           // выбранный город склада
 let whSub='products';          // подвкладка: products (товары) | assembly (сборка) | intake (приёмка)
 let whSearch='';
@@ -7106,7 +7115,8 @@ async function inboundWriteStock(orderId){
   if(String(o.send_status)!=='0'){toast('Списание только при статусе «Отправлен»');return false;}
   const items=inboundItemsFor(orderId);
   if(!items.length||items.some(it=>!it.matched||!it.product_id)){toast('Сначала привяжите все товары');return false;}
-  const city=((S.inbound_partners||[]).find(p=>p.id===o.inbound_partner_id)||{}).city||'Алматы';
+  const partnerCity=((S.inbound_partners||[]).find(p=>p.id===o.inbound_partner_id)||{}).city;
+  const city=normalizeWhCity(o.city||partnerCity||'Алматы');
   for(const it of items){
     const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
     const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
