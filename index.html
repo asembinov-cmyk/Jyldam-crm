@@ -158,15 +158,15 @@
   .sidebar-logout{margin-top:12px;flex:none;width:100%;justify-content:center;
     color:#ff8f7a;border-color:rgba(255,143,122,.3);background:transparent}
   .sidebar-logout:hover{background:#c0392b;color:#fff;border-color:#c0392b}
-  .side-nav button{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;
+  .side-nav button,.side-nav a{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;text-decoration:none;
     border:1px solid transparent;background:transparent;color:rgba(255,255,255,.62);padding:10px 13px;border-radius:10px;
     transition:background .16s,color .16s,transform .16s;display:flex;align-items:center;gap:11px;position:relative}
-  .side-nav button:hover{color:#fff;background:rgba(255,255,255,.07);transform:translateX(2px)}
+  .side-nav button:hover,.side-nav a:hover{color:#fff;background:rgba(255,255,255,.07);transform:translateX(2px)}
   /* активный пункт — заливка в цвете группы */
-  .side-nav button.active{color:#fff;background:var(--nav-col,#2546c9);border-color:transparent;
+  .side-nav button.active,.side-nav a.active{color:#fff;background:var(--nav-col,#2546c9);border-color:transparent;
     box-shadow:0 3px 12px -2px var(--nav-col,#2546c9)}
   .side-nav button.active svg{color:#fff}
-  .side-nav button svg{width:19px;height:19px;flex:none;opacity:.9}
+  .side-nav button svg,.side-nav a svg{width:19px;height:19px;flex:none;opacity:.9}
   .side-nav button.disabled{opacity:.32;cursor:default}
   .side-nav button.disabled:hover{background:transparent;color:rgba(255,255,255,.62);transform:none}
   .side-nav .nav-group{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
@@ -2008,6 +2008,7 @@ function buildNav(){
     const team=[];
     if(canMod('users'))team.push({k:'users',label:'Сотрудники',icon:'users'});
     if(canMod('settings'))team.push({k:'settings',label:'Настройки',icon:'settings'});
+    if(isAdmin())team.push({k:'apidocs',label:'Документация API',icon:'history',href:'api-docs.html'});
     if(team.length)groups.push({title:'Команда и настройки',items:team});
   }else{
     // курьер: только свои разделы, без групп
@@ -2017,7 +2018,7 @@ function buildNav(){
     groups.push({title:'',items});
   }
   // собрать список активных ключей для проверки текущей вкладки
-  const activeKeys=[];groups.forEach(g=>g.items.forEach(it=>{if(!it.disabled)activeKeys.push(it.k);}));
+  const activeKeys=[];groups.forEach(g=>g.items.forEach(it=>{if(!it.disabled&&!it.href)activeKeys.push(it.k);}));
   if(!activeKeys.length)activeKeys.push('none');
   if(!activeKeys.includes(S.tab))S.tab=activeKeys[0];
 
@@ -2037,7 +2038,11 @@ function buildNav(){
       if(it.k==='notify'){
         try{const c=notifyIssues().filter(i=>i.lvl==='crit').length;if(c)badge=`<span class="nav-badge nb-crit">${c}</span>`;}catch(e){}
       }
-      html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
+      if(it.href){
+        html+=`<a href="${esc(it.href)}" target="_blank" rel="noopener" class="${cls}" style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span></a>`;
+      }else{
+        html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
+      }
     });
   });
   $('navTabs').innerHTML=html;
@@ -2049,7 +2054,7 @@ function buildNav(){
     su.innerHTML=`<div class="su-ava" title="${esc(nm)}">${esc(init)}</div>
       <div class="su-info"><div class="su-name">${esc(nm)}</div><div class="su-role"><span class="su-dot"></span>Онлайн</div></div>`;
   }
-  $('navTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{
+  $('navTabs').querySelectorAll('button[data-tab]').forEach(b=>b.onclick=async()=>{
     if(b.dataset.disabled){toast('Раздел в разработке');return;}
     S.tab=b.dataset.tab;saveNav();buildNav();closeSidebar();
     render(); // мгновенно рисуем из уже загруженных данных
@@ -2557,6 +2562,7 @@ function productModal(id){
         ${(!S.warehouse_partners||!S.warehouse_partners.length)?'<span class="hint" style="color:var(--rust)">Сначала добавьте партнёров склада в разделе Партнёры → Партнёры склада</span>':''}</div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
       <div class="field"><label>Артикул (SKU)</label><input id="p_sku" value="${esc(d.sku||'')}" placeholder="необязательно"></div>
+      <div class="field"><label>Код KET (ket_sku)</label><input id="p_ketsku" value="${esc(d.ket_sku||'')}" placeholder="тех. название из KET, напр. brutalin"></div>
       <div class="field full"><label>Категория</label><input id="p_category" value="${esc(d.category||'')}" placeholder="необязательно"></div>
       <div class="field full"><label>Остатки по городам</label>
         <div class="wh-stock-grid">
@@ -2573,7 +2579,7 @@ function productModal(id){
     if(!barcode)barcode=genBarcode(); // генерируем, если пусто
     const st={};
     document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
-    const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,category:val('p_category').trim()||null,stock:st};
+    const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,ket_sku:val('p_ketsku').trim()||null,category:val('p_category').trim()||null,stock:st};
     let saved;
     if(id){saved=await dbUpdate('products',id,payload);if(saved){const i=(S.products||[]).findIndex(x=>x.id===id);if(i>=0)Object.assign(S.products[i],saved);}}
     else{saved=await dbInsert('products',payload);if(saved){if(!S.products)S.products=[];S.products.unshift(saved);}}
@@ -5301,6 +5307,7 @@ function renderOrders(mode){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
       ${can('orders','create')?`<div class="head-actions">${isStaff()?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button><button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}<button class="btn primary" id="newOrder">＋ Создать заказ</button></div>`:''}</div>
+    ${ordersTabsHtml()}
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -5443,6 +5450,7 @@ function renderOrders(mode){
   if($('oftoday'))$('oftoday').onclick=()=>{const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   drawOrders();
+  bindOrdersTabs();
 }
 // число заказов с заполненным телефоном клиента
 function ordersWithPhone(list){return list.filter(o=>(o.phone||'').toString().replace(/\D/g,'').length>=10).length;}
@@ -6948,6 +6956,167 @@ async function runDuplicatesAI(){
   }catch(e){
     if(box)box.innerHTML='<div class="nf-ai-empty">⚠️ Не удалось выполнить анализ: '+esc(String(e&&e.message||e).slice(0,140))+'</div>';
   }
+}
+
+
+/* ============ ЧАСТЬ 3 — ЗАКАЗЫ ИЗ KET (входящие) ============ */
+let ordersTab='own';
+function ordersTabsHtml(){
+  if(!isAdmin())return '';
+  return `<div class="ord-tabs" style="display:flex;gap:8px;margin:0 0 14px">
+    <button class="btn ${ordersTab==='own'?'primary':'ghost'} sm" id="ordTabOwn">Заказы заборов</button>
+    <button class="btn ${ordersTab==='ket'?'primary':'ghost'} sm" id="ordTabKet">Заказы КЕТ</button>
+  </div>`;
+}
+function bindOrdersTabs(){
+  if($('ordTabOwn'))$('ordTabOwn').onclick=()=>{ordersTab='own';renderOrders(ordersMode);};
+  if($('ordTabKet'))$('ordTabKet').onclick=()=>{ordersTab='ket';renderInboundOrders();};
+}
+async function loadInbound(){
+  try{
+    const [orders,items,partners]=await Promise.all([
+      dbList('inbound_orders',{order:'created_at',asc:false}),
+      dbList('inbound_order_items',{}),
+      dbList('inbound_partners',{order:'partner_name'}).catch(()=>[]),
+    ]);
+    S.inbound_orders=orders||[];S.inbound_items=items||[];S.inbound_partners=partners||[];
+  }catch(e){S.inbound_orders=[];S.inbound_items=[];S.inbound_partners=[];}
+}
+const KET_SEND_STATUS={'0':'Отправлен','4':'Отказ','5':'Оплачен','6':'На отправку','7':'Отклонено'};
+const KET_STATUS_KZ={'0':'Обработка','1':'Отложенная','2':'На доставку','4':'Упакован на почте','5':'Заберёт','6':'Упакован','7':'Хранение','8':'Упакован принят','10':'Груз вручён','11':'Груз в дороге','13':'Получен','16':'Проверен','17':'Свежий'};
+function ketSendLabel(s){return s==null||s===''?'—':(KET_SEND_STATUS[String(s)]||('код '+s));}
+function ketKzLabel(s){return s==null||s===''?'—':(KET_STATUS_KZ[String(s)]||('код '+s));}
+async function renderInboundOrders(){
+  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  ordersTab='ket';
+  $('main').innerHTML='<div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>'+ordersTabsHtml()+'<div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
+  bindOrdersTabs();
+  await loadInbound();
+  drawInboundOrders();
+}
+function inboundItemsFor(orderId){return (S.inbound_items||[]).filter(it=>it.inbound_order_id===orderId);}
+function inboundPartnerName(id){return ((S.inbound_partners||[]).find(p=>p.id===id)||{}).partner_name||'—';}
+function drawInboundOrders(){
+  const list=S.inbound_orders||[];
+  const unmatched=list.filter(o=>o.match_status==='unmatched').length;
+  const written=list.filter(o=>o.stock_written).length;
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>
+    ${ordersTabsHtml()}
+    <div class="stats stats-4">
+      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
+      <div class="stat"><div class="k">Требуют привязки</div><div class="v" style="${unmatched?'color:var(--rust)':''}">${unmatched}</div></div>
+      <div class="stat"><div class="k">Склад списан</div><div class="v">${written}</div></div>
+      <div class="stat"><div class="k">Партнёров</div><div class="v">${(S.inbound_partners||[]).length}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${list.length}</span></div>
+      <div class="table-scroll"><table class="resp-table"><thead><tr>
+        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Состав</th>
+        <th>Статус KET</th><th>Привязка</th><th>Склад</th><th>Дата</th><th></th>
+      </tr></thead><tbody>
+      ${list.length?list.map(o=>{
+        const items=inboundItemsFor(o.id);
+        const compo=items.map(it=>`${esc(it.ket_sku||'?')}×${it.qty}${it.matched?'':' <span style="color:var(--rust)">⚠</span>'}`).join(', ')||'—';
+        const matchBadge=o.match_status==='matched'?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">✓ привязан</span>':(o.match_status==='unmatched'?'<span class="ket-badge" style="background:#fce8e6;color:#c5221f">⚠ требует привязки</span>':'<span class="wh-cat">—</span>');
+        const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
+        return `<tr>
+          <td data-label="Внеш. ID"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
+          <td data-label="Клиент">${esc(o.client||'—')}</td>
+          <td data-label="Телефон">${esc(o.phone||'—')}</td>
+          <td data-label="Город">${esc(o.city||'—')}</td>
+          <td data-label="Состав">${compo}</td>
+          <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div></td>
+          <td data-label="Привязка">${matchBadge}</td>
+          <td data-label="Склад">${stockBadge}</td>
+          <td data-label="Дата">${esc(fmtDate(o.created_at))}</td>
+          <td data-label="" class="cell-actions"><div class="row-actions">
+            <button class="btn sm ghost" data-inbview="${o.id}">Открыть</button>
+            ${o.match_status==='unmatched'?`<button class="btn sm" data-inbmatch="${o.id}">Привязать</button>`:''}
+            ${(!o.stock_written&&String(o.send_status)==='0'&&o.match_status==='matched')?`<button class="btn sm" data-inbstock="${o.id}">Списать склад</button>`:''}
+          </div></td>
+        </tr>`;
+      }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Пока нет заказов из KET</div>Заказы появятся здесь, когда KET начнёт их присылать.</div></td></tr>`}
+      </tbody></table></div>
+    </div>`;
+  bindOrdersTabs();
+  $('main').querySelectorAll('[data-inbview]').forEach(b=>b.onclick=()=>inboundOrderModal(b.dataset.inbview));
+  $('main').querySelectorAll('[data-inbmatch]').forEach(b=>b.onclick=()=>inboundMatchModal(b.dataset.inbmatch));
+  $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
+}
+function inboundOrderModal(id){
+  const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
+  const items=inboundItemsFor(id);
+  const body=`<div style="display:grid;gap:8px;font-size:14px">
+    <div><b>Внешний ID:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
+    <div><b>Партнёр:</b> ${esc(inboundPartnerName(o.inbound_partner_id))}</div>
+    <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
+    <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
+    <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
+    <div><b>Сумма:</b> ${o.price!=null?esc(o.price):'—'} ${o.total_price!=null&&o.total_price!==o.price?('(итого '+esc(o.total_price)+')'):''}</div>
+    <div><b>Статус доставки:</b> ${esc(ketSendLabel(o.send_status))} · <b>Посылка:</b> ${esc(ketKzLabel(o.status_kz))}</div>
+    ${o.kz_code?`<div><b>Трек:</b> ${esc(o.kz_code)}</div>`:''}
+    <div style="margin-top:6px"><b>Состав:</b></div>
+    <div style="display:grid;gap:4px">
+      ${items.length?items.map(it=>`<div style="padding:6px 10px;border:1px solid var(--line);border-radius:8px">${esc(it.ket_sku||'?')} × ${it.qty} ${it.matched?'<span style="color:#1a7f37">— привязан</span>':'<span style="color:var(--rust)">— товар не найден на складе</span>'}</div>`).join(''):'<div class="wh-cat">Состав не разобран</div>'}
+    </div>
+    <div style="margin-top:6px"><b>Склад:</b> ${o.stock_written?('списан '+esc(fmtDate(o.stock_written_at))):'не списан'}</div>
+  </div>`;
+  showInfo('Заказ КЕТ '+esc(o.external_id||''),body,{wide:true});
+}
+function inboundMatchModal(id){
+  const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
+  const items=inboundItemsFor(id).filter(it=>!it.matched);
+  const products=[...(S.products||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const rows=items.map((it)=>`<div class="oi-row" data-mrow="${it.id}">
+    <div style="flex:0 0 auto;min-width:120px"><b>${esc(it.ket_sku||'?')}</b> ×${it.qty}</div>
+    <select class="oi-product" data-mprod="${it.id}"><option value="">— выберите товар склада —</option>
+      ${products.map(p=>`<option value="${p.id}">${esc(p.name)}${p.ket_sku?(' ['+esc(p.ket_sku)+']'):''}</option>`).join('')}</select>
+  </div>`).join('');
+  const body=`<div class="hint" style="margin-bottom:10px">Сопоставьте коды KET с товарами склада. После привязки код <b>ket_sku</b> сохранится в товаре — следующие заказы с этим кодом привяжутся автоматически.</div>${rows||'<div class="wh-cat">Все позиции уже привязаны.</div>'}`;
+  showModal('Привязка товаров — '+esc(o.external_id||''),body,async()=>{
+    let done=0;
+    for(const it of items){
+      const sel=document.querySelector(`[data-mprod="${it.id}"]`);
+      const productId=sel?sel.value:'';
+      if(!productId)continue;
+      await dbUpdate('inbound_order_items',it.id,{product_id:productId,matched:true});
+      const prod=(S.products||[]).find(p=>p.id===productId);
+      if(prod&&it.ket_sku&&prod.ket_sku!==it.ket_sku){await dbUpdate('products',productId,{ket_sku:it.ket_sku});prod.ket_sku=it.ket_sku;}
+      done++;
+    }
+    if(!done){toast('Ничего не выбрано');return false;}
+    await loadInbound();
+    const stillUnmatched=inboundItemsFor(id).some(it=>!it.matched);
+    await dbUpdate('inbound_orders',id,{match_status:stillUnmatched?'unmatched':'matched'});
+    await loadInbound();
+    toast(`Привязано позиций: ${done}`);
+    drawInboundOrders();
+    return true;
+  },{wide:true});
+}
+async function inboundWriteStock(orderId){
+  const o=(S.inbound_orders||[]).find(x=>x.id===orderId);if(!o)return false;
+  if(o.stock_written){toast('Склад по этому заказу уже списан');return false;}
+  if(String(o.send_status)!=='0'){toast('Списание только при статусе «Отправлен»');return false;}
+  const items=inboundItemsFor(orderId);
+  if(!items.length||items.some(it=>!it.matched||!it.product_id)){toast('Сначала привяжите все товары');return false;}
+  const city=((S.inbound_partners||[]).find(p=>p.id===o.inbound_partner_id)||{}).city||'Алматы';
+  for(const it of items){
+    const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
+    const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
+    const before=parseInt(stock[city]||0,10)||0;
+    const after=Math.max(0,before-it.qty);
+    stock[city]=after;
+    await dbInsert('wh_moves',{product_id:it.product_id,city,op:'out_courier',qty:it.qty,balance_after:after,target:`KET заказ ${o.external_id}`,comment:'Списание по заказу KET',user_id:(S.me&&S.me.id)||null,user_name:(S.me&&(S.me.full_name||S.me.email))||'—'});
+    await dbUpdate('products',it.product_id,{stock});
+    const idx=(S.products||[]).findIndex(x=>x.id===it.product_id);if(idx>=0)S.products[idx].stock=stock;
+  }
+  await dbUpdate('inbound_orders',orderId,{stock_written:true,stock_written_at:new Date().toISOString()});
+  await loadInbound();
+  toast('Склад списан по заказу '+o.external_id);
+  drawInboundOrders();
+  return true;
 }
 
 </script>
