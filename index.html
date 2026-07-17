@@ -6891,7 +6891,7 @@ function duplicatesPanelHtml(){
   const groups=findDuplicateGroups();
   const dupCount=groups.filter(g=>g.hasDup).length;
   const rows=groups.slice(0,50).map(g=>{
-    const items=g.orders.map(o=>`<div style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    const items=g.orders.map(o=>`<div data-duporder="${o.id}" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;cursor:pointer" title="Открыть карточку заказа">
         <b>${esc(o.code||String(o.id).slice(0,8))}</b>
         <span>${esc(o.client||'—')}</span>
         <span class="wh-cat">${esc(salesNameSafe(o.sales_id))}</span>
@@ -6918,6 +6918,9 @@ function duplicatesPanelHtml(){
 // навесить кнопку ИИ (вызывается после рендера Центра контроля)
 function bindDuplicatesPanel(){
   if($('dupAiRun'))$('dupAiRun').onclick=()=>runDuplicatesAI();
+  document.querySelectorAll('[data-duporder]').forEach(el=>el.onclick=()=>{
+    try{orderModal(el.dataset.duporder,!can('orders','edit'));}catch(e){}
+  });
 }
 
 // ИИ-проверка дублей: отдаём модели список групп, где телефоны/имена ПОХОЖИ, но не точны
