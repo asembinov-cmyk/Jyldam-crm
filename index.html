@@ -7022,10 +7022,33 @@ async function renderInboundOrders(){
 }
 function inboundItemsFor(orderId){return (S.inbound_items||[]).filter(it=>it.inbound_order_id===orderId);}
 function inboundPartnerName(id){return ((S.inbound_partners||[]).find(p=>p.id===id)||{}).partner_name||'—';}
+// тип доставки входящего заказа KET: явного поля нет, определяем по признаку —
+// если указан почтовый индекс, считаем почтовой доставкой, иначе курьерской
+function inboundDeliveryType(o){return o.index?'mail':'courier';}
+function inboundDeliveryLabel(o){return inboundDeliveryType(o)==='mail'?'Почтовая':'Курьерская';}
+let inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};
+function filteredInbound(){
+  const q=inbFilter.q.toLowerCase().trim();
+  return (S.inbound_orders||[]).filter(o=>{
+    if(inbFilter.partner&&o.inbound_partner_id!==inbFilter.partner)return false;
+    if(inbFilter.delivery&&inboundDeliveryType(o)!==inbFilter.delivery)return false;
+    if(inbFilter.status&&String(o.send_status||'')!==inbFilter.status)return false;
+    const cd=(o.created_at||'').slice(0,10);
+    if(inbFilter.dateFrom&&(!cd||cd<inbFilter.dateFrom))return false;
+    if(inbFilter.dateTo&&(!cd||cd>inbFilter.dateTo))return false;
+    if(q){
+      const hay=[o.external_id,o.client,o.phone,phoneDisplay(o.phone)].join(' ').toLowerCase();
+      if(!hay.includes(q))return false;
+    }
+    return true;
+  }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+}
 function drawInboundOrders(){
   const list=S.inbound_orders||[];
+  const rows=filteredInbound();
   const unmatched=list.filter(o=>o.match_status==='unmatched').length;
   const written=list.filter(o=>o.stock_written).length;
+  const anyFilter=inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.dateFrom||inbFilter.dateTo;
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>
     ${ordersTabsHtml()}
@@ -7036,12 +7059,26 @@ function drawInboundOrders(){
       <div class="stat"><div class="k">Партнёров</div><div class="v">${(S.inbound_partners||[]).length}</div></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${list.length}</span></div>
+      <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(rows.length+' / '+list.length):list.length}</span></div>
+      <div class="filters">
+        <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон…" value="${esc(inbFilter.q)}">
+        <select id="inbpartner"><option value="">Все партнёры</option>${(S.inbound_partners||[]).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.partner_name||'—')}</option>`).join('')}</select>
+        <select id="inbdelivery"><option value="">Все типы доставки</option>
+          <option value="courier" ${inbFilter.delivery==='courier'?'selected':''}>Курьерская</option>
+          <option value="mail" ${inbFilter.delivery==='mail'?'selected':''}>Почтовая</option></select>
+        <select id="inbstatus"><option value="">Все статусы</option>${Object.entries(KET_SEND_STATUS).map(([code,label])=>`<option value="${code}" ${inbFilter.status===code?'selected':''}>${esc(label)}</option>`).join('')}</select>
+      </div>
+      <div class="filters filters-dates">
+        <span class="fdate-lbl">Дата прихода заказа:</span>
+        <input type="date" id="inbdatefrom" value="${esc(inbFilter.dateFrom)}" title="С даты">
+        <input type="date" id="inbdateto" value="${esc(inbFilter.dateTo)}" title="По дату">
+        ${anyFilter?`<button class="btn ghost sm" id="inbclear" style="align-self:flex-end">Сбросить фильтры</button>`:''}
+      </div>
       <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Состав</th>
+        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Доставка</th><th>Партнёр</th><th>Состав</th>
         <th>Статус KET</th><th>Привязка</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
-      ${list.length?list.map(o=>{
+      ${rows.length?rows.map(o=>{
         const items=inboundItemsFor(o.id);
         const compo=items.map(it=>`${esc(it.ket_sku||'?')}×${it.qty}${it.matched?'':' <span style="color:var(--rust)">⚠</span>'}`).join(', ')||'—';
         const matchBadge=o.match_status==='matched'?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">✓ привязан</span>':(o.match_status==='unmatched'?'<span class="ket-badge" style="background:#fce8e6;color:#c5221f">⚠ требует привязки</span>':'<span class="wh-cat">—</span>');
@@ -7051,6 +7088,8 @@ function drawInboundOrders(){
           <td data-label="Клиент">${esc(o.client||'—')}</td>
           <td data-label="Телефон">${esc(o.phone||'—')}</td>
           <td data-label="Город">${esc(o.city||'—')}</td>
+          <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
+          <td data-label="Партнёр">${esc(inboundPartnerName(o.inbound_partner_id))}</td>
           <td data-label="Состав">${compo}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div></td>
           <td data-label="Привязка">${matchBadge}</td>
@@ -7062,13 +7101,25 @@ function drawInboundOrders(){
             ${(!o.stock_written&&String(o.send_status)==='0'&&o.match_status==='matched')?`<button class="btn sm" data-inbstock="${o.id}">Списать склад</button>`:''}
           </div></td>
         </tr>`;
-      }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Пока нет заказов из KET</div>Заказы появятся здесь, когда KET начнёт их присылать.</div></td></tr>`}
+      }).join(''):`<tr><td colspan="12"><div class="empty"><div class="big">${list.length?'Ничего не найдено':'Пока нет заказов из KET'}</div>${list.length?'Измените фильтры.':'Заказы появятся здесь, когда KET начнёт их присылать.'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
   bindOrdersTabs();
   $('main').querySelectorAll('[data-inbview]').forEach(b=>b.onclick=()=>inboundOrderModal(b.dataset.inbview));
   $('main').querySelectorAll('[data-inbmatch]').forEach(b=>b.onclick=()=>inboundMatchModal(b.dataset.inbmatch));
   $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
+  const redraw=()=>{
+    const active=document.activeElement;const fid=active&&active.id;const pos=active&&active.selectionStart;
+    drawInboundOrders();
+    if(fid){const el=$(fid);if(el){el.focus();try{el.setSelectionRange(pos,pos);}catch(e){}}}
+  };
+  if($('inbq'))$('inbq').oninput=e=>{inbFilter.q=e.target.value;redraw();};
+  if($('inbpartner'))$('inbpartner').onchange=e=>{inbFilter.partner=e.target.value;redraw();};
+  if($('inbdelivery'))$('inbdelivery').onchange=e=>{inbFilter.delivery=e.target.value;redraw();};
+  if($('inbstatus'))$('inbstatus').onchange=e=>{inbFilter.status=e.target.value;redraw();};
+  if($('inbdatefrom'))$('inbdatefrom').onchange=e=>{inbFilter.dateFrom=e.target.value;redraw();};
+  if($('inbdateto'))$('inbdateto').onchange=e=>{inbFilter.dateTo=e.target.value;redraw();};
+  if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};drawInboundOrders();};
 }
 function inboundOrderModal(id){
   const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
