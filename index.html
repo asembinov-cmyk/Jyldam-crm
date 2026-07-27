@@ -844,8 +844,8 @@
     .resp-table{border:0}
     .resp-table thead{display:none}
     .resp-table,.resp-table tbody,.resp-table tr,.resp-table td{display:block;width:100%}
-    .table-scroll{overflow-x:visible}
-    /* грид статистики дашборда — оставляем горизонтальную прокрутку */
+    .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* грид статистики дашборда — прокрутка (дублирует правило выше для явности) */
     .dash-stat-scroll{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
     .dash-stat-scroll .dash-stat{min-width:560px}
     .resp-table tr{
