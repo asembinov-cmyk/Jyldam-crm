@@ -4461,8 +4461,10 @@ function renderDashboard(){
     const d=(p.pickup_date||'').slice(0,7);
     if(d===_selMonth&&p.courier_id)_activeCourierIds.add(p.courier_id);
   });
+  const HIDDEN_COURIERS=/дукенбаев|сембинов/i; // скрыты на дашборде по запросу
   const courierList=[...(S.couriers||[])]
     .filter(c=>_activeCourierIds.has(c.id))   // без заявок за месяц — не показываем (тестовые/неактивные)
+    .filter(c=>!HIDDEN_COURIERS.test(c.fio||''))
     .sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
   // собираем все даты (по дате создания заказов и заявок)
   const dateSet=new Set();
@@ -4575,6 +4577,8 @@ function renderDashboard(){
   const courCnt={};
   pkMonth.filter(p=>isCollectedStatus(p.status_id)).forEach(p=>{
     if(!p.courier_id)return;
+    const _c=S.couriers.find(x=>x.id===p.courier_id);
+    if(_c&&HIDDEN_COURIERS.test(_c.fio||''))return; // скрыты на дашборде
     courCnt[p.courier_id]=(courCnt[p.courier_id]||0)+1;
   });
   const topCouriers=Object.entries(courCnt).sort((a,b)=>b[1]-a[1]).slice(0,5);
