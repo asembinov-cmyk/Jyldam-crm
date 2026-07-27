@@ -4661,6 +4661,13 @@ function renderDashboard(){
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
 // локальная сегодняшняя дата YYYY-MM-DD (с учётом часового пояса, без сдвига в UTC)
 function localToday(){const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
+// дата по умолчанию для новой заявки на забор: после 18:00 предлагаем уже завтрашний день
+function defaultPickupDate(){
+  const d=new Date();
+  if(d.getHours()>=18)d.setDate(d.getDate()+1);
+  const off=d.getTimezoneOffset();
+  return new Date(d.getTime()-off*60000).toISOString().slice(0,10);
+}
 let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:localToday(),dateTo:localToday()};
 let pickupsPage=1; // текущая страница пагинации заявок
 let pickupsPerPage=50; // заявок на страницу
@@ -5053,7 +5060,7 @@ function readPickupForm(){
 }
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
-  const today=new Date().toISOString().slice(0,10);
+  const today=defaultPickupDate();
   const base=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',give_packets:false,give_invoices:false,status_id:(S.statuses[0]?S.statuses[0].id:'')};
   const ro=readonly||!can("pickups","edit");
   // если есть несохранённый черновик для этой заявки — подставляем его (только при редактировании)
