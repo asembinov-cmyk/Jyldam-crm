@@ -2670,10 +2670,10 @@ function renderWhAssembly(){
       <div class="hint">Наведите сканер и пикните штрих-код заказа, или введите код вручную и нажмите «Открыть».</div>
     </div>
     <div id="asmBody"></div>`;
-  const open=()=>{
+  const open=async()=>{
     const code=($('asmOrderInput')||{}).value?.trim();
     if(!code)return;
-    startAssembly(code);
+    await startAssembly(code);
   };
   if($('asmOpen'))$('asmOpen').onclick=open;
   if($('asmOrderInput')){
@@ -2685,19 +2685,37 @@ function renderWhAssembly(){
 }
 
 // находим заказ по коду/треку и его состав
-function startAssembly(code){
+async function startAssembly(code){
+  // 1) собственные заказы (созданы из заявок на забор, состав вводится вручную через "Указать состав заказа")
   const order=(S.orders||[]).find(o=>String(o.code||'')===code||String(o.track||'')===code||String(o.id).slice(0,8)===code);
   const items=(S.wh_order_items||[]).filter(it=>it.order_code===code||(order&&it.order_code===String(order.code)));
-  if(!items.length){
-    // состава нет — предложим ввести вручную
-    $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Состав заказа не задан</div>
-      Для заказа «${esc(code)}» не указано, какие товары внутри. Пока состав вводится вручную (позже придёт из KET).
-      <div style="margin-top:14px"><button class="btn primary" id="asmSetItems">Указать состав заказа</button></div></div></div>`;
-    if($('asmSetItems'))$('asmSetItems').onclick=()=>orderItemsModal(code,order);
+  if(items.length){
+    _asmOrder={kind:'own',code,order,items:items.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
+    drawAssembly();
     return;
   }
-  _asmOrder={code,order,items:items.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
-  drawAssembly();
+  // 2) заказы из интеграции KET (Заказы → Заказы КЕТ) — состав уже привязан к товарам там
+  if(!S.inbound_orders||!S.inbound_orders.length){try{await loadInbound();}catch(e){}}
+  const inb=(S.inbound_orders||[]).find(o=>String(o.external_id||'')===code||String(o.id).slice(0,8)===code);
+  if(inb){
+    if(inb.stock_written){
+      $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Заказ уже собран</div>Склад по заказу КЕТ «${esc(code)}» уже был списан ранее (в разделе «Заказы КЕТ»).</div></div>`;
+      return;
+    }
+    const inbItems=inboundItemsFor(inb.id);
+    if(!inbItems.length||inbItems.some(it=>!it.matched||!it.product_id)){
+      $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Товары ещё не привязаны</div>Это заказ из KET, но не все позиции привязаны к товарам склада. Откройте «Заказы → Заказы КЕТ», найдите заказ «${esc(code)}» и нажмите «Привязать».</div></div>`;
+      return;
+    }
+    _asmOrder={kind:'ket',code,inboundId:inb.id,items:inbItems.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
+    drawAssembly();
+    return;
+  }
+  // 3) нигде не нашли — предложим ввести состав вручную (старое поведение)
+  $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Состав заказа не задан</div>
+    Для заказа «${esc(code)}» не указано, какие товары внутри. Пока состав вводится вручную.
+    <div style="margin-top:14px"><button class="btn primary" id="asmSetItems">Указать состав заказа</button></div></div></div>`;
+  if($('asmSetItems'))$('asmSetItems').onclick=()=>orderItemsModal(code,order);
 }
 
 function drawAssembly(){
@@ -2707,7 +2725,7 @@ function drawAssembly(){
   const allDone=_asmOrder.items.every(it=>it.scanned>=it.qty);
   $('asmBody').innerHTML=`
     <div class="panel">
-      <div class="panel-head"><h2>Сборка заказа ${esc(_asmOrder.code)}</h2>
+      <div class="panel-head"><h2>Сборка заказа ${esc(_asmOrder.code)}${_asmOrder.kind==='ket'?' <span class="ket-badge" style="font-size:11px;vertical-align:middle">KET</span>':''}</h2>
         <button class="btn ghost sm" id="asmCancel" style="margin-left:auto">Отменить</button></div>
       <div class="asm-scan-row" style="padding:14px 18px">
         <input id="asmItemInput" placeholder="Пикните штрих-код товара…" autocomplete="off">
@@ -2767,6 +2785,13 @@ async function finishAssembly(){
     const sp=await dbUpdate('products',it.product_id,{stock});if(sp){const i=S.products.findIndex(x=>x.id===it.product_id);if(i>=0)S.products[i].stock=stock;}
   }
   logAction('create','wh_moves',{entity_label:`Собран заказ ${_asmOrder.code}`});
+  // если это заказ из интеграции KET — помечаем его как списанный, чтобы не списать склад повторно в «Заказы КЕТ»
+  if(_asmOrder.kind==='ket'&&_asmOrder.inboundId){
+    const upd={stock_written:true,stock_written_at:new Date().toISOString()};
+    await dbUpdate('inbound_orders',_asmOrder.inboundId,upd);
+    const inb=(S.inbound_orders||[]).find(x=>x.id===_asmOrder.inboundId);
+    if(inb)Object.assign(inb,upd);
+  }
   toast(`Заказ ${_asmOrder.code} собран ✅`);
   _asmOrder=null;renderWhAssembly();
 }
