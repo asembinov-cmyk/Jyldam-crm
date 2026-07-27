@@ -5954,6 +5954,8 @@ function orderModal(id,readonly){
         const apply=()=>{
           main.style.transform=`scale(${zoom}) translate(${panX}px,${panY}px) rotate(${rot}deg)`;
           main.style.cursor=zoom>1?'grab':'zoom-in';
+          // пока фото увеличено — забираем жест себе (иначе палец скроллит модалку, а не двигает фото)
+          main.style.touchAction=zoom>1?'none':'pan-y';
         };
         const rotBy=d=>{rot=(rot+d)%360;apply();};
         const bL=pc.querySelector('#orotL'), bR=pc.querySelector('#orotR');
@@ -5979,6 +5981,22 @@ function orderModal(id,readonly){
         };
         main.onmouseup=()=>{if(dragging){dragging=false;main.style.cursor='grab';}};
         main.onmouseleave=()=>{if(dragging){dragging=false;main.style.cursor='grab';}};
+        // ── то же самое пальцем (мобильные): без этого свайп по увеличенному фото просто скроллил модалку ──
+        main.addEventListener('touchstart',e=>{
+          if(zoom<=1)return; // не увеличено — пусть страница/модалка скроллится как обычно
+          const t=e.touches[0];if(!t)return;
+          dragging=true;moved=false;sx=t.clientX;sy=t.clientY;spx=panX;spy=panY;
+        },{passive:true});
+        main.addEventListener('touchmove',e=>{
+          if(!dragging)return;
+          const t=e.touches[0];if(!t)return;
+          panX=spx+(t.clientX-sx)/zoom;panY=spy+(t.clientY-sy)/zoom;
+          if(Math.abs(t.clientX-sx)>3||Math.abs(t.clientY-sy)>3)moved=true;
+          apply();
+          e.preventDefault(); // блокируем скролл модалки, пока таскаем увеличенное фото
+        },{passive:false});
+        main.addEventListener('touchend',()=>{dragging=false;});
+        main.addEventListener('touchcancel',()=>{dragging=false;});
       }
       // ИИ-распознавание данных получателя с фото
       const aiBtn=pc.querySelector('#oAiRecognize');
