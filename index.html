@@ -5210,7 +5210,7 @@ function pickupModal(id,readonly){
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:''};
+let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:'',callStatus:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -5444,6 +5444,13 @@ function renderOrders(mode){
           <option value="yes" ${of.paidBySender==='yes'?'selected':''}>Оплачено отправителем</option>
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
+        ${ordersMode==='mail'?`<select id="ofcallstatus" title="Статус обзвона клиента">
+          <option value="">Статус обзвона: все</option>
+          <option value="none" ${of.callStatus==='none'?'selected':''}>Не установлен</option>
+          <option value="Недозвон" ${of.callStatus==='Недозвон'?'selected':''}>Недозвон</option>
+          <option value="Прозвонен" ${of.callStatus==='Прозвонен'?'selected':''}>Прозвонен</option>
+          <option value="Изменен" ${of.callStatus==='Изменен'?'selected':''}>Изменен</option>
+        </select>`:''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
           <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
@@ -5539,6 +5546,7 @@ function renderOrders(mode){
   };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
   if($('ofpaid'))$('ofpaid').onchange=e=>{of.paidBySender=e.target.value;drawOrdersReset();};
+  if($('ofcallstatus'))$('ofcallstatus').onchange=e=>{of.callStatus=e.target.value;drawOrdersReset();};
   if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
   if($('ofdestcity'))$('ofdestcity').onchange=e=>{of.destCity=e.target.value;drawOrdersReset();};
   if($('ofsales'))$('ofsales').onchange=e=>{of.sales=e.target.value;drawOrdersReset();};
@@ -5600,6 +5608,11 @@ function filteredOrders(){
     }
     // фильтр по городу забора
     if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
+    // фильтр по статусу обзвона (актуален для почтовых заказов)
+    if(of.callStatus){
+      if(of.callStatus==='none'){if(o.call_status)return false;}
+      else if(o.call_status!==of.callStatus)return false;
+    }
     if(of.destCity&&o.courier_city_id!==of.destCity)return false;
     if(of.sales&&o.sales_id!==of.sales)return false;
     // фильтр по оплате отправителем
@@ -5678,7 +5691,7 @@ function drawOrders(){
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>${ordersMode==='mail'?'Статус обзвона':'Дата доставки'}</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th><th>Город</th>${staff?'<th>Менеджер</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
+    <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}${staff&&ordersMode!=='mail'?'<th>Менеджер</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
@@ -5702,8 +5715,8 @@ function drawOrders(){
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
-      <td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>
-      ${staff?`<td data-label="Менеджер">${o.sales_id?esc(salesName(o.sales_id)):'<span style="color:var(--muted)">—</span>'}</td>`:''}
+      ${ordersMode!=='mail'?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
+      ${staff&&ordersMode!=='mail'?`<td data-label="Менеджер">${o.sales_id?esc(salesName(o.sales_id)):'<span style="color:var(--muted)">—</span>'}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
       <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
