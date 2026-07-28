@@ -3399,6 +3399,7 @@ const CALC_FIELDS=[
   {key:'freight',   label:'Доставка груза (за заказ)',    kind:'fixed', hint:'Междугородняя перевозка (курьер по городу — 0)'},
   {key:'admin_courier', label:'ЗП Администратор курьера (за заказ)', kind:'fixed', hint:'Фиксированная ставка за заказ'},
   {key:'fund_logist',  label:'Фонд ЗП логистов (в месяц)',   kind:'fund', hint:'Делится на кол-во заказов за месяц'},
+  {key:'fund_pickers', label:'Фонд ЗП заборщиков (в месяц)', kind:'fund', hint:'Делится на кол-во заказов за месяц (курьер+почта)'},
 ];
 // сотрудники с окладом (делится на заказы месяца) + ставкой за заказ
 const CALC_SALARY_FIELDS=[
@@ -3645,21 +3646,6 @@ function renderCalcNorms(type){
           <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="min_profit" value="${cs.min_profit!=null&&cs.min_profit!==''?esc(cs.min_profit):''}" placeholder="0"> ₸</div>
         </div>
       </div>`;
-  // блок «Оплата заборщикам» (нужен на обеих вкладках)
-  const pickersBlock=`
-    <div class="panel calc-panel" style="margin-bottom:18px">
-      <h3 class="calc-h">Оплата заборщикам (за заказ)</h3>
-      <p class="calc-note">Персональная ставка каждому заборщику за один забранный заказ.</p>
-      <div class="calc-city-head" style="grid-template-columns:1fr 130px"><span>Заборщик</span><span>Оплата (₸)</span></div>
-      ${(S.couriers||[]).map(c=>{
-        const all=S.calcCourierNorms||[];const row=all.find(x=>x.courier_id===c.id&&x.period===P)||all.find(x=>x.courier_id===c.id&&!x.period);
-        const v=row&&row.pay!=null&&row.pay!==''?row.pay:'';
-        return `<div class="calc-city-row" data-courpay="${c.id}" style="grid-template-columns:1fr 130px">
-          <span class="ccr-name">${esc(c.fio)}</span>
-          <input type="number" min="0" step="0.01" data-cpay="${c.id}" value="${esc(v)}" placeholder="0">
-        </div>`;
-      }).join('')}
-    </div>`;
   let html;
   if(type==='mail'){
     // ПОЧТОВАЯ вкладка: почтовые расходы + фонды + заборщики
@@ -3674,8 +3660,7 @@ function renderCalcNorms(type){
         </div>`).join('')}
       </div>
       ${fundsBlock}
-    </div>
-    ${pickersBlock}`;
+    </div>`;
   }else{
     // КУРЬЕРСКАЯ вкладка: общие расходы + фонды + компактные города + заборщики
     html=`
@@ -3690,8 +3675,7 @@ function renderCalcNorms(type){
       <h3 class="calc-h">Нормативы по городам</h3>
       <p class="calc-note">Курьер и доставка груза по городам. Пусто = берётся общий норматив. Показаны города, где задана ставка; остальные — по кнопке.</p>
       ${compactCityNorms(cities,cityNorm)}
-    </div>
-    ${pickersBlock}`;
+    </div>`;
   }
   $('calcContent').innerHTML=periodBar+html+
     `<div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>`;
@@ -3745,17 +3729,6 @@ async function saveCalcSettings(){
       const payload={city_id:cid,period:P,courier:courierV===''?null:parseFloat(courierV)||0,freight:freightV===''?null:parseFloat(freightV)||0};
       if(existing){const u=await dbUpdate('calc_city_norms',existing.id,payload);if(u)Object.assign(existing,u);}
       else{const u=await dbInsert('calc_city_norms',payload);if(u){if(!S.calcCityNorms)S.calcCityNorms=[];S.calcCityNorms.push(u);}}
-    }
-    // ставки заборщиков за период
-    const payRows=document.querySelectorAll('[data-courpay]');
-    for(const el of payRows){
-      const cid=el.dataset.courpay;
-      const v=el.querySelector(`[data-cpay="${cid}"]`).value.trim();
-      const existing=(S.calcCourierNorms||[]).find(r=>r.courier_id===cid&&r.period===P);
-      if(v===''&&!existing)continue;
-      const payload={courier_id:cid,period:P,pay:v===''?0:parseFloat(v)||0};
-      if(existing){const u=await dbUpdate('calc_courier_norms',existing.id,payload);if(u)Object.assign(existing,u);}
-      else{const u=await dbInsert('calc_courier_norms',payload);if(u){if(!S.calcCourierNorms)S.calcCourierNorms=[];S.calcCourierNorms.push(u);}}
     }
     // ставки менеджеров продаж за период
     const salesRows=document.querySelectorAll('[data-salespay]');
