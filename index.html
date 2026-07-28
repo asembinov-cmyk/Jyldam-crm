@@ -7123,6 +7123,8 @@ function inboundDeliveryLabel(o){return inboundDeliveryType(o)==='mail'?'Поч�
 let inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};
 let inbPage=1;      // текущая страница пагинации заказов КЕТ
 let inbPerPage=50;  // заказов КЕТ на страницу
+const inbSelected=new Set(); // id выбранных заказов КЕТ (для массовых действий, живёт между страницами)
+let inbSelectAll=false;      // отмечены ли «все на всех страницах»
 function filteredInbound(){
   const q=inbFilter.q.toLowerCase().trim();
   return (S.inbound_orders||[]).filter(o=>{
@@ -7152,6 +7154,8 @@ function drawInboundOrders(){
   const startIdx=(inbPage-1)*inbPerPage;
   const rows=allRows.slice(startIdx,startIdx+inbPerPage);
   const admin=isAdmin();
+  if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
+  const colCount=11+(admin?1:0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>
     ${ordersTabsHtml()}
@@ -7162,7 +7166,8 @@ function drawInboundOrders(){
       <div class="stat"><div class="k">Магазинов</div><div class="v">${new Set(list.flatMap(inboundOrderShopIds)).size}</div></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(allRows.length+' / '+list.length):list.length}</span></div>
+      <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(allRows.length+' / '+list.length):list.length}</span>
+        ${admin&&inbSelected.size?`<button class="btn danger sm" id="inbDelSel" style="margin-left:auto">✕ Удалить выбранные (${inbSelected.size})</button>`:''}</div>
       <div class="filters">
         <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон…" value="${esc(inbFilter.q)}">
         <select id="inbpartner"><option value="">Все магазины</option>${[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.name||'—')}</option>`).join('')}</select>
@@ -7178,22 +7183,21 @@ function drawInboundOrders(){
         ${anyFilter?`<button class="btn ghost sm" id="inbclear" style="align-self:flex-end">Сбросить фильтры</button>`:''}
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
-        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Доставка</th><th>Магазин</th><th>Состав</th>
+        ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
+        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Доставка</th><th>Магазин</th>
         <th>Статус KET</th><th>Привязка</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
-        const items=inboundItemsFor(o.id);
-        const compo=items.map(it=>`${esc(it.ket_sku||'?')}×${it.qty}${it.matched?'':' <span style="color:var(--rust)">⚠</span>'}`).join(', ')||'—';
         const matchBadge=o.match_status==='matched'?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">✓ привязан</span>':(o.match_status==='unmatched'?'<span class="ket-badge" style="background:#fce8e6;color:#c5221f">⚠ требует привязки</span>':'<span class="wh-cat">—</span>');
         const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
-        return `<tr>
+        return `<tr data-inbrow="${o.id}" style="cursor:pointer">
+          ${admin?`<td onclick="event.stopPropagation()"><input type="checkbox" class="inbChk" data-inbchk="${o.id}" ${inbSelected.has(o.id)?'checked':''}></td>`:''}
           <td data-label="Внеш. ID"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
           <td data-label="Клиент">${esc(o.client||'—')}</td>
           <td data-label="Телефон">${esc(o.phone||'—')}</td>
           <td data-label="Город">${esc(o.city||'—')}</td>
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
           <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
-          <td data-label="Состав">${compo}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div></td>
           <td data-label="Привязка">${matchBadge}</td>
           <td data-label="Склад">${stockBadge}</td>
@@ -7205,7 +7209,7 @@ function drawInboundOrders(){
             ${admin?`<button class="btn sm danger" data-inbdel="${o.id}">Удалить</button>`:''}
           </div></td>
         </tr>`;
-      }).join(''):`<tr><td colspan="12"><div class="empty"><div class="big">${list.length?'Ничего не найдено':'Пока нет заказов из KET'}</div>${list.length?'Измените фильтры.':'Заказы появятся здесь, когда KET начнёт их присылать.'}</div></td></tr>`}
+      }).join(''):`<tr><td colspan="${colCount}"><div class="empty"><div class="big">${list.length?'Ничего не найдено':'Пока нет заказов из KET'}</div>${list.length?'Измените фильтры.':'Заказы появятся здесь, когда KET начнёт их присылать.'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
   bindOrdersTabs();
@@ -7213,10 +7217,31 @@ function drawInboundOrders(){
   $('main').querySelectorAll('[data-inbmatch]').forEach(b=>b.onclick=()=>inboundMatchModal(b.dataset.inbmatch));
   $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
   $('main').querySelectorAll('[data-inbdel]').forEach(b=>b.onclick=()=>delInboundOrder(b.dataset.inbdel));
+  // двойной клик по строке — открыть карточку заказа (одиночный клик по кнопкам/чекбоксу не мешает)
+  $('main').querySelectorAll('[data-inbrow]').forEach(tr=>tr.ondblclick=e=>{
+    if(e.target.closest('button,input,select,a'))return;
+    inboundOrderModal(tr.dataset.inbrow);
+  });
+  if(admin){
+    $('main').querySelectorAll('.inbChk').forEach(c=>c.onchange=()=>{
+      const id=c.dataset.inbchk;
+      if(c.checked)inbSelected.add(id);else{inbSelected.delete(id);inbSelectAll=false;}
+      updateInbAllChk(allRows);
+    });
+    const chkAll=$('inbChkAll');
+    if(chkAll)chkAll.onchange=e=>{
+      if(e.target.checked){inbSelectAll=true;allRows.forEach(o=>inbSelected.add(o.id));}
+      else{inbSelectAll=false;allRows.forEach(o=>inbSelected.delete(o.id));}
+      drawInboundOrders();
+    };
+    updateInbAllChk(allRows);
+    if($('inbDelSel'))$('inbDelSel').onclick=()=>delInboundOrdersBulk();
+  }
   renderInboundPager(allRows.length,totalPages,startIdx,rows.length);
   const redraw=()=>{
     const active=document.activeElement;const fid=active&&active.id;const pos=active&&active.selectionStart;
     inbPage=1; // при смене фильтра — на первую страницу
+    inbSelectAll=false;
     drawInboundOrders();
     if(fid){const el=$(fid);if(el){el.focus();try{el.setSelectionRange(pos,pos);}catch(e){}}}
   };
@@ -7226,7 +7251,7 @@ function drawInboundOrders(){
   if($('inbstatus'))$('inbstatus').onchange=e=>{inbFilter.status=e.target.value;redraw();};
   if($('inbdatefrom'))$('inbdatefrom').onchange=e=>{inbFilter.dateFrom=e.target.value;redraw();};
   if($('inbdateto'))$('inbdateto').onchange=e=>{inbFilter.dateTo=e.target.value;redraw();};
-  if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};inbPage=1;drawInboundOrders();};
+  if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};inbPage=1;inbSelectAll=false;drawInboundOrders();};
 }
 // плавающая панель пагинации для «Заказы КЕТ» (тот же вид, что у заказов/заявок)
 function removeInboundPager(){const ex=$('inboundPager');if(ex)ex.remove();
@@ -7277,6 +7302,14 @@ function renderInboundPager(total,totalPages,startIdx,shownCount){
   });
 }
 // удаление заказа КЕТ — доступно только администратору
+// синхронизирует чекбокс «выбрать все» в шапке таблицы с фактическим выбором на текущей странице/фильтре
+function updateInbAllChk(allRows){
+  const chk=$('inbChkAll');if(!chk)return;
+  const total=allRows.length;
+  const selected=allRows.filter(o=>inbSelected.has(o.id)).length;
+  chk.checked=total>0&&selected===total;
+  chk.indeterminate=selected>0&&selected<total;
+}
 async function delInboundOrder(id){
   if(!isAdmin()){toast('Удалять заказы КЕТ может только администратор');return;}
   const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
@@ -7287,8 +7320,32 @@ async function delInboundOrder(id){
   if(!ok){toast('Не удалось удалить заказ');return;}
   S.inbound_items=(S.inbound_items||[]).filter(it=>it.inbound_order_id!==id);
   S.inbound_orders=(S.inbound_orders||[]).filter(x=>x.id!==id);
+  inbSelected.delete(id);
   logAction('delete','inbound_orders',{entity_id:id,entity_label:o.external_id||id});
   toast('Заказ КЕТ удалён');
+  drawInboundOrders();
+}
+// массовое удаление отмеченных галочками заказов КЕТ — только администратор
+async function delInboundOrdersBulk(){
+  if(!isAdmin())return;
+  const ids=[...inbSelected];
+  if(!ids.length)return;
+  if(!confirm(`Удалить выбранные заказы КЕТ (${ids.length} шт.)?\n\nЭто действие нельзя отменить.`))return;
+  let ok=0,fail=0;
+  for(const id of ids){
+    const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)continue;
+    const items=inboundItemsFor(id);
+    for(const it of items){await dbDelete('inbound_order_items',it.id).catch(()=>{});}
+    const done=await dbDelete('inbound_orders',id);
+    if(done){
+      S.inbound_items=(S.inbound_items||[]).filter(it=>it.inbound_order_id!==id);
+      S.inbound_orders=(S.inbound_orders||[]).filter(x=>x.id!==id);
+      logAction('delete','inbound_orders',{entity_id:id,entity_label:o.external_id||id});
+      ok++;
+    }else fail++;
+  }
+  inbSelected.clear();inbSelectAll=false;
+  toast(`Удалено заказов: ${ok}${fail?(', с ошибкой: '+fail):''}`);
   drawInboundOrders();
 }
 function inboundOrderModal(id){
