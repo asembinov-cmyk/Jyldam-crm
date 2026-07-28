@@ -3395,10 +3395,9 @@ const CALC_FIELDS=[
   {key:'gofra',     label:'Гофра (за заказ)',             kind:'fixed', hint:'Стоимость гофры'},
   {key:'blank',     label:'Бланк (за заказ)',             kind:'fixed', hint:'Печать транспортной наклейки'},
   {key:'sms',       label:'SMS (за заказ)',               kind:'fixed', hint:'Стоимость SMS-уведомлений'},
-  {key:'driver',    label:'Водитель (за заказ)',          kind:'fixed', hint:'Перевозка склад ↔ сортировка'},
   {key:'freight',   label:'Доставка груза (за заказ)',    kind:'fixed', hint:'Междугородняя перевозка (курьер по городу — 0)'},
   {key:'admin_courier', label:'ЗП Администратор курьера (за заказ)', kind:'fixed', hint:'Фиксированная ставка за заказ'},
-  {key:'fund_logist',  label:'Фонд ЗП логистов (в месяц)',   kind:'fund', hint:'Делится на кол-во заказов за месяц'},
+  {key:'fund_logist',  label:'Фонд ЗП Менеджера заказов',   kind:'fund', hint:'Делится на кол-во заказов за месяц'},
   {key:'fund_pickers', label:'Фонд ЗП заборщиков (в месяц)', kind:'fund', hint:'Делится на кол-во заказов за месяц (курьер+почта)'},
 ];
 // сотрудники с окладом (делится на заказы месяца) + ставкой за заказ
@@ -3411,7 +3410,6 @@ const CALC_POST_FIELDS=[
   {key:'post_gofra',  label:'Гофра (за заказ)',          hint:'Гофра для почтового заказа'},
   {key:'post_blank',  label:'Бланк (за заказ)',          hint:'Печать наклейки'},
   {key:'post_sms',    label:'SMS (за заказ)',            hint:'SMS-уведомления'},
-  {key:'post_driver', label:'Водитель (за заказ)',       hint:'Перевозка склад ↔ сортировка'},
   {key:'post_freight',label:'Доставка почтой (за заказ)',hint:'Стоимость отправки почтой'},
 ];
 // настройки калькуляции для периода: сначала ищем строку месяца, иначе дефолтную (без периода)
@@ -3640,11 +3638,6 @@ function renderCalcNorms(type){
             <input type="number" min="0" step="0.01" data-sper="${sm.id}" value="${perV?esc(perV):''}" placeholder="0">
           </div>`;
         }).join('')}
-        <h3 class="calc-h" style="margin-top:18px">Контроль прибыли</h3>
-        <div class="calc-norm-row">
-          <div class="cn-label">Минимальная прибыль<span class="cn-hint">Ниже — жёлтая индикация</span></div>
-          <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="min_profit" value="${cs.min_profit!=null&&cs.min_profit!==''?esc(cs.min_profit):''}" placeholder="0"> ₸</div>
-        </div>
       </div>`;
   let html;
   if(type==='mail'){
