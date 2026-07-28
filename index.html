@@ -2551,6 +2551,7 @@ function renderWhProducts(){
       <select id="whPartnerFilter"><option value="">Все партнёры</option>${partnersWithProducts.map(pid=>`<option value="${pid}" ${whPartner===pid?'selected':''}>${esc(whPartnerName(pid))}</option>`).join('')}</select>
       <button class="btn primary" id="whAddProduct">＋ Товар</button>
       <button class="btn ghost" id="whImport">⬆ Импорт списка</button>
+      <button class="btn ghost" id="whImportKet">⬆ Импорт тех.названий KET</button>
     </div>
     <div class="wh-stats">
       <div class="wh-stat"><span>Товаров${whPartner?' у партнёра':''}</span><b>${all.length}</b></div>
@@ -2578,6 +2579,7 @@ function renderWhProducts(){
   if($('whPartnerFilter'))$('whPartnerFilter').onchange=e=>{whPartner=e.target.value;renderWhProducts();};
   if($('whAddProduct'))$('whAddProduct').onclick=()=>productModal();
   if($('whImport'))$('whImport').onclick=()=>productImportModal();
+  if($('whImportKet'))$('whImportKet').onclick=()=>productImportKetModal();
   $('whContent').querySelectorAll('[data-whedit]').forEach(b=>b.onclick=()=>productModal(b.dataset.whedit));
   $('whContent').querySelectorAll('[data-whlabel]').forEach(b=>b.onclick=()=>productLabelModal(b.dataset.whlabel));
 }
@@ -2676,6 +2678,70 @@ function productImportModal(){
     toast(`Добавлено товаров: ${added}`);renderCash();return true;
   },{wide:true});
 }
+// импорт тех.названий KET (напр. выгрузка «Общие данные»): строка = тех.название;описание;партнёр(менеджер)
+// у одного описания может быть несколько строк с разными тех.названиями — они автоматически
+// объединяются в один товар (ket_sku через запятую). Партнёр сопоставляется по названию (без учёта регистра).
+// Если товар с таким названием ИЛИ с таким тех.названием уже существует — новые коды добавляются к нему,
+// а не создаётся дубль.
+function productImportKetModal(){
+  const body=`
+    <div class="wh-hint">Вставьте строки в формате <b>тех.название;описание товара;партнёр (менеджер)</b> — по одной на строку.
+      Партнёр ищется по названию среди уже заведённых «Партнёров склада» (регистр не важен).
+      Если у одного описания несколько строк с разными тех.названиями — они объединятся в один товар.
+      Уже существующие товары (по названию или по уже привязанному тех.названию) не дублируются — новые коды просто добавятся к ним.</div>
+    <textarea id="whImportKetText" rows="10" placeholder="146;Ketoform;VECTOR&#10;146H;Ketoform;VECTOR&#10;janamen_for_man;Janamen for man;JanaMen"></textarea>`;
+  showModal('Импорт тех.названий KET',body,async()=>{
+    const txt=(val('whImportKetText')||'').trim();
+    if(!txt){toast('Вставьте список');return false;}
+    const rows=txt.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{
+      const parts=(line.includes('\t')?line.split('\t'):line.split(';')).map(s=>(s||'').trim());
+      return {tech:parts[0]||'',desc:parts[1]||'',mgr:parts[2]||''};
+    }).filter(r=>r.tech&&r.desc);
+    if(!rows.length){toast('Нет строк для импорта');return false;}
+    // группировка по нормализованному описанию — объединяем тех.названия одного товара
+    const groups=new Map(); // descNorm -> {desc,mgr,codes:[]}
+    rows.forEach(r=>{
+      const key=r.desc.toLowerCase().replace(/\s+/g,' ').trim();
+      if(!groups.has(key))groups.set(key,{desc:r.desc,mgr:r.mgr,codes:[]});
+      const g=groups.get(key);
+      if(!g.codes.some(c=>normKetSku(c)===normKetSku(r.tech)))g.codes.push(r.tech);
+    });
+    // индекс уже привязанных кодов по всем товарам (чтобы не плодить дубли)
+    const codeIndex=new Map(); // normCode -> product
+    (S.products||[]).forEach(p=>productKetSkuList(p).forEach(c=>codeIndex.set(normKetSku(c),p)));
+    const nameIndex=new Map(); // normName -> product
+    (S.products||[]).forEach(p=>nameIndex.set((p.name||'').toLowerCase().trim(),p));
+    const partnerByName=new Map();
+    (S.warehouse_partners||[]).forEach(pt=>partnerByName.set((pt.name||'').toLowerCase().trim(),pt.id));
+    let created=0,updated=0,noPartner=0;const noPartnerNames=new Set();
+    for(const g of groups.values()){
+      // существующий товар: сперва по совпадению тех.кода, иначе по точному названию
+      let existing=null;
+      for(const c of g.codes){const p=codeIndex.get(normKetSku(c));if(p){existing=p;break;}}
+      if(!existing)existing=nameIndex.get(g.desc.toLowerCase().trim())||null;
+      if(existing){
+        let merged=existing.ket_sku||'';
+        g.codes.forEach(c=>{merged=mergeKetSku(merged,c);});
+        if(merged!==(existing.ket_sku||'')){
+          const upd=await dbUpdate('products',existing.id,{ket_sku:merged});
+          if(upd){Object.assign(existing,upd);updated++;}
+        }
+        continue;
+      }
+      const partner_id=partnerByName.get((g.mgr||'').toLowerCase().trim())||null;
+      if(!partner_id){noPartner++;noPartnerNames.add(g.mgr||'(пусто)');continue;}
+      const payload={name:g.desc,partner_id,barcode:genBarcode(),sku:null,category:null,stock:{},ket_sku:g.codes.join(', ')};
+      const saved=await dbInsert('products',payload);
+      if(saved){if(!S.products)S.products=[];S.products.unshift(saved);nameIndex.set(g.desc.toLowerCase().trim(),saved);g.codes.forEach(c=>codeIndex.set(normKetSku(c),saved));created++;}
+    }
+    logAction('create','products',{entity_label:`импорт KET: создано ${created}, обновлено ${updated}`});
+    if(!S.inbound_orders){try{await loadInbound();}catch(e){}}else{try{await autoMatchInboundItems();}catch(e){}}
+    let msg=`Создано товаров: ${created}, обновлено (добавлены коды): ${updated}`;
+    if(noPartner)msg+=`. Пропущено без партнёра: ${noPartner} (${[...noPartnerNames].join(', ')})`;
+    toast(msg);renderCash();return true;
+  },{wide:true});
+}
+
 // Этап 3 и 4 — сделаем после обкатки товаров
 /* ── ЭТАП 3: СБОРКА ЗАКАЗА СО СКАНИРОВАНИЕМ ── */
 // состав заказа хранится в wh_order_items: {order_code, product_id, qty}
