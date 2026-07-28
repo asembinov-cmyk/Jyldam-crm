@@ -5623,7 +5623,7 @@ function exportOrdersToExcel(){
     const row={
       'ID':o.code||'',
       'Дата забора':o.pickup_date?fmtDate(o.pickup_date):'',
-      'Статус обзвона':o.call_status||'',
+      'Дата доставки / Статус обзвона':isCourierDelivery(o.delivery_id)?(o.deliver_date?fmtDate(o.deliver_date):''):(o.call_status||''),
       'Отправитель':o.sender||'',
       'ФИО клиента':o.client||'',
       'Телефон':o.phone?phoneDisplay(o.phone):'',
@@ -5677,7 +5677,7 @@ function drawOrders(){
   // если включён режим «выбраны все» — добавляем id текущей страницы в выбор
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Статус обзвона</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>${ordersMode==='mail'?'Статус обзвона':'Дата доставки'}</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th>${staff?'<th>Менеджер</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
@@ -5690,12 +5690,14 @@ function drawOrders(){
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?`<small class="cell-time">создан ${esc(fmtDateTime(o.created_at))}</small>`:''}</td>
-      <td data-label="Статус обзвона" onclick="event.stopPropagation()"><select class="status-pick" data-ocall="${o.id}" style="border-color:${callStatusColor(o.call_status)}">
+      <td data-label="${isCourierDelivery(o.delivery_id)?'Дата доставки':'Статус обзвона'}" ${isCourierDelivery(o.delivery_id)?'':'onclick="event.stopPropagation()"'}>${isCourierDelivery(o.delivery_id)
+        ?(o.deliver_date?esc(fmtDate(o.deliver_date)):'—')
+        :`<select class="status-pick" data-ocall="${o.id}" style="border-color:${callStatusColor(o.call_status)}">
         <option value="">— нет —</option>
         <option value="Недозвон" ${o.call_status==='Недозвон'?'selected':''}>Недозвон</option>
         <option value="Прозвонен" ${o.call_status==='Прозвонен'?'selected':''}>Прозвонен</option>
         <option value="Изменен" ${o.call_status==='Изменен'?'selected':''}>Изменен</option>
-      </select></td>
+      </select>`}</td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
