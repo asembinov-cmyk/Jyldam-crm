@@ -1199,7 +1199,7 @@ const FIELD_LABEL={
   code:'Код',client:'ФИО клиента',phone:'Телефон',address:'Адрес',sender:'Отправитель',
   delivery_id:'Тип доставки',courier_city_id:'Город (курьер.)',city_id:'Город',pickup_city_id:'Город забора',status_id:'Статус',
   order_status_id:'Статус',weight:'Вес',qty:'Кол-во',index:'Индекс',track:'Трек-код',order_sum:'Сумма заказа',
-  cost:'Стоимость доставки',pay_date:'Дата оплаты',deliver_date:'Дата доставки',pickup_date:'Дата забора',
+  cost:'Стоимость доставки',pay_date:'Дата оплаты',deliver_date:'Дата доставки',pickup_date:'Дата забора',call_status:'Статус обзвона',
   post_ip_id:'ИП для Почты',order_courier_id:'Курьер по заказам',courier_id:'Курьер',sales_id:'Менеджер продаж',
   processor_id:'Обработчик',district_id:'Район',name:'Наименование',fio:'ФИО',orders:'Кол-во заказов',
   full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
@@ -1830,6 +1830,13 @@ function statusBadge(id){const s=statusObj(id);if(!s)return '<span style="color:
 const orderStatusObj=id=>S.orderStatuses.find(s=>s.id===id)||null;
 function orderStatusBadge(id){const s=orderStatusObj(id);if(!s)return '<span style="color:var(--muted)">—</span>';
   return `<span class="pill" style="color:${s.color};background:${s.color}1a;border-color:${s.color}55">${esc(s.name)}</span>`;}
+// статус обзвона клиента (Недозвон / Прозвонен / Изменен) — цвет для плашки в гриде заказов
+function callStatusColor(v){
+  if(v==='Недозвон')return '#c0392b';
+  if(v==='Прозвонен')return '#2e7d32';
+  if(v==='Изменен')return '#c08a2d';
+  return 'var(--line)';
+}
 // статус заказа по умолчанию — «Получено от отправителя» (первый в списке)
 function defaultOrderStatusId(){
   const byName=S.orderStatuses.find(s=>/получено от отправител/i.test(s.name||''));
@@ -5616,7 +5623,7 @@ function exportOrdersToExcel(){
     const row={
       'ID':o.code||'',
       'Дата забора':o.pickup_date?fmtDate(o.pickup_date):'',
-      'Дата доставки':o.deliver_date?fmtDate(o.deliver_date):'',
+      'Статус обзвона':o.call_status||'',
       'Отправитель':o.sender||'',
       'ФИО клиента':o.client||'',
       'Телефон':o.phone?phoneDisplay(o.phone):'',
@@ -5670,7 +5677,7 @@ function drawOrders(){
   // если включён режим «выбраны все» — добавляем id текущей страницы в выбор
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Статус обзвона</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th><th>Город</th>${staff?'<th>Менеджер</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
@@ -5683,7 +5690,12 @@ function drawOrders(){
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?`<small class="cell-time">создан ${esc(fmtDateTime(o.created_at))}</small>`:''}</td>
-      <td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>
+      <td data-label="Статус обзвона" onclick="event.stopPropagation()"><select class="status-pick" data-ocall="${o.id}" style="border-color:${callStatusColor(o.call_status)}">
+        <option value="">— нет —</option>
+        <option value="Недозвон" ${o.call_status==='Недозвон'?'selected':''}>Недозвон</option>
+        <option value="Прозвонен" ${o.call_status==='Прозвонен'?'selected':''}>Прозвонен</option>
+        <option value="Изменен" ${o.call_status==='Изменен'?'selected':''}>Изменен</option>
+      </select></td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
@@ -5728,6 +5740,15 @@ function drawOrders(){
       const badge=sel.parentElement.querySelector('.status-badge');
       if(badge){badge.textContent=o.status_id?(so.name||'—'):'— нет —';badge.style.color=so.color||'var(--muted)';badge.style.background=so.color?(so.color+'1a'):'transparent';badge.style.borderColor=so.color||'var(--line)';}
       toast('Статус обновлён');}});
+  // статус обзвона клиента (Недозвон / Прозвонен / Изменен)
+  el.querySelectorAll('[data-ocall]').forEach(sel=>sel.onchange=async()=>{
+    const o=S.orders.find(x=>x.id===sel.dataset.ocall);if(!o)return;
+    const oldV=o.call_status;
+    const u=await dbUpdate('orders',o.id,{call_status:sel.value||null});
+    if(u){o.call_status=u.call_status;
+      sel.style.borderColor=callStatusColor(o.call_status);
+      logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[{field:'call_status',label:'Статус обзвона',old:oldV||'—',new:o.call_status||'—'}]});
+      toast('Статус обзвона обновлён');}});
   // отдельные чекбоксы строк — обновляют множество выбранных
   el.querySelectorAll('.ketChk').forEach(c=>c.onchange=()=>{
     const id=c.dataset.ketchk;
@@ -5934,7 +5955,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Менеджер по продажам</label><select id="o_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Обработчик</label><select id="o_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
-      <div class="field"><label>Дата доставки</label><input type="date" id="o_deliver" min="${localToday()}" value="${esc(d.deliver_date||'')}" ${dis}></div>
+      <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Дата доставки</label><input type="date" id="o_deliver" min="${localToday()}" value="${esc(d.deliver_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Комментарий</label><textarea id="o_comment" rows="7" style="font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%;resize:vertical" ${dis}>${esc(d.comment||'')}</textarea></div>
     </div>
@@ -6101,10 +6122,11 @@ function orderModal(id,readonly){
         else{se.disabled=false;se.value=paidChk.dataset.prevsum||'';sumTouched=(se.value!=='');}
       };
     }
-    // показать/скрыть поля, относящиеся только к почтовой доставке
+    // показать/скрыть поля, относящиеся только к почтовой/только к курьерской доставке
     const toggleMailFields=()=>{
       const courier=isCourierDelivery($('o_delivery').value);
       document.querySelectorAll('.mail-only').forEach(el=>el.style.display=courier?'none':'');
+      document.querySelectorAll('.courier-only').forEach(el=>el.style.display=courier?'':'none');
     };
     const ds=$('o_delivery');ds.onchange=()=>{
       const f=$('cityField');
