@@ -2478,7 +2478,8 @@ function normalizeWhCity(raw){
   return 'Алматы';
 }
 let whCity='Алматы';           // выбранный город склада
-let whSub='products';          // подвкладка: products (товары) | assembly (сборка) | intake (приёмка)
+let whSub='products';          // подвкладка: products (товары) | assembly_courier/assembly_mail (сборка) | intake (приёмка)
+let whAssemblyType='courier';  // тип текущей сборки: courier | mail
 let whSearch='';
 let whPartner='';              // фильтр по партнёру (пусто = все)
 
@@ -2493,15 +2494,19 @@ function genBarcode(){
 
 function renderCash(){ // ключ модуля остался 'cash', но это Склад
   if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  // на почтовой сборке город — только Алматы/Астана (в Шымкенте почтовой сборки нет)
+  const cityList=whSub==='assembly_mail'?WAREHOUSE_CITIES.filter(c=>c!=='Шымкент'):WAREHOUSE_CITIES;
+  if(whSub==='assembly_mail'&&!cityList.includes(whCity))whCity=cityList[0];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Склад</h1><p>Товары, сборка заказов и приёмка по городам</p></div></div>
     <div class="wh-cities">
-      ${WAREHOUSE_CITIES.map(c=>`<button class="wh-city ${whCity===c?'active':''}" data-whcity="${esc(c)}">${esc(c)}</button>`).join('')}
+      ${cityList.map(c=>`<button class="wh-city ${whCity===c?'active':''}" data-whcity="${esc(c)}">${esc(c)}</button>`).join('')}
     </div>
     <div class="subtabs">
       <button data-whsub="products" class="${whSub==='products'?'active':''}">📦 Товары</button>
       <button data-whsub="moves" class="${whSub==='moves'?'active':''}">📊 Движения</button>
-      <button data-whsub="assembly" class="${whSub==='assembly'?'active':''}">🔍 Сборка заказа</button>
+      <button data-whsub="assembly_courier" class="${whSub==='assembly_courier'?'active':''}">🚚 Сборка · курьер</button>
+      <button data-whsub="assembly_mail" class="${whSub==='assembly_mail'?'active':''}">✉️ Сборка · почта</button>
       <button data-whsub="intake" class="${whSub==='intake'?'active':''}">↩️ Приёмка невыкупа</button>
     </div>
     <div id="whContent"></div>`;
@@ -2509,7 +2514,8 @@ function renderCash(){ // ключ модуля остался 'cash', но эт
   $('main').querySelectorAll('[data-whsub]').forEach(b=>b.onclick=()=>{whSub=b.dataset.whsub;renderCash();});
   if(whSub==='products')renderWhProducts();
   else if(whSub==='moves')renderWhMoves();
-  else if(whSub==='assembly')renderWhAssembly();
+  else if(whSub==='assembly_courier')renderWhAssembly('courier');
+  else if(whSub==='assembly_mail')renderWhAssembly('mail');
   else renderWhIntake();
 }
 
@@ -2659,21 +2665,25 @@ function productImportModal(){
 // состав заказа хранится в wh_order_items: {order_code, product_id, qty}
 // пока состав вводится вручную; позже придёт из KET
 let _asmOrder=null;      // текущий собираемый заказ {code, items:[{product_id,qty,scanned}]}
-function renderWhAssembly(){
+function renderWhAssembly(asmType){
+  whAssemblyType=asmType||whAssemblyType||'courier';
+  // если переключились на другую вкладку сборки — незавершённую сборку другого типа не показываем
+  if(_asmOrder&&_asmOrder.assemblyType!==whAssemblyType)_asmOrder=null;
+  const label=whAssemblyType==='mail'?'Почтовая':'Курьерская';
   $('whContent').innerHTML=`
     <div class="asm-scan">
-      <div class="asm-scan-label">🔍 Отсканируйте или введите код заказа</div>
+      <div class="asm-scan-label">🔍 ${esc(label)} сборка — отсканируйте или введите код заказа</div>
       <div class="asm-scan-row">
         <input id="asmOrderInput" placeholder="Код заказа / трек…" autocomplete="off">
         <button class="btn primary" id="asmOpen">Открыть</button>
       </div>
-      <div class="hint">Наведите сканер и пикните штрих-код заказа, или введите код вручную и нажмите «Открыть».</div>
+      <div class="hint">Наведите сканер и пикните штрих-код заказа, или введите код вручную и нажмите «Открыть». Если заказ окажется ${whAssemblyType==='mail'?'курьерским':'почтовым'} — подскажем открыть другую вкладку.</div>
     </div>
     <div id="asmBody"></div>`;
   const open=async()=>{
     const code=($('asmOrderInput')||{}).value?.trim();
     if(!code)return;
-    await startAssembly(code);
+    await startAssembly(code,whAssemblyType);
   };
   if($('asmOpen'))$('asmOpen').onclick=open;
   if($('asmOrderInput')){
@@ -2683,14 +2693,26 @@ function renderWhAssembly(){
   }
   if(_asmOrder)drawAssembly();
 }
+// сообщение, когда введённый заказ относится к другому типу доставки (не той вкладке)
+function asmWrongTabHtml(code,actualType){
+  const otherLabel=actualType==='mail'?'Почтовая':'Курьерская';
+  const otherWord=actualType==='mail'?'почтовый':'курьерский';
+  return `<div class="panel"><div class="empty"><div class="big">Не та вкладка сборки</div>
+    Заказ «${esc(code)}» — ${otherWord}. Откройте вкладку «${otherLabel} сборка», чтобы собрать его.</div></div>`;
+}
 
 // находим заказ по коду/треку и его состав
-async function startAssembly(code){
+async function startAssembly(code,asmType){
+  asmType=asmType||whAssemblyType||'courier';
   // 1) собственные заказы (созданы из заявок на забор, состав вводится вручную через "Указать состав заказа")
   const order=(S.orders||[]).find(o=>String(o.code||'')===code||String(o.track||'')===code||String(o.id).slice(0,8)===code);
+  if(order&&order.delivery_id){
+    const ownType=isCourierDelivery(order.delivery_id)?'courier':'mail';
+    if(ownType!==asmType){$('asmBody').innerHTML=asmWrongTabHtml(code,ownType);return;}
+  }
   const items=(S.wh_order_items||[]).filter(it=>it.order_code===code||(order&&it.order_code===String(order.code)));
   if(items.length){
-    _asmOrder={kind:'own',code,order,items:items.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
+    _asmOrder={kind:'own',assemblyType:asmType,code,order,items:items.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
     drawAssembly();
     return;
   }
@@ -2698,6 +2720,8 @@ async function startAssembly(code){
   if(!S.inbound_orders||!S.inbound_orders.length){try{await loadInbound();}catch(e){}}
   const inb=(S.inbound_orders||[]).find(o=>String(o.external_id||'')===code||String(o.id).slice(0,8)===code);
   if(inb){
+    const inbType=inboundDeliveryType(inb);
+    if(inbType!==asmType){$('asmBody').innerHTML=asmWrongTabHtml(code,inbType);return;}
     if(inb.stock_written){
       $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Заказ уже собран</div>Склад по заказу КЕТ «${esc(code)}» уже был списан ранее (в разделе «Заказы КЕТ»).</div></div>`;
       return;
@@ -2707,7 +2731,7 @@ async function startAssembly(code){
       $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Товары ещё не привязаны</div>Это заказ из KET, но не все позиции привязаны к товарам склада. Откройте «Заказы → Заказы КЕТ», найдите заказ «${esc(code)}» и нажмите «Привязать».</div></div>`;
       return;
     }
-    _asmOrder={kind:'ket',code,inboundId:inb.id,items:inbItems.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
+    _asmOrder={kind:'ket',assemblyType:asmType,code,inboundId:inb.id,items:inbItems.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
     drawAssembly();
     return;
   }
@@ -2725,7 +2749,9 @@ function drawAssembly(){
   const allDone=_asmOrder.items.every(it=>it.scanned>=it.qty);
   $('asmBody').innerHTML=`
     <div class="panel">
-      <div class="panel-head"><h2>Сборка заказа ${esc(_asmOrder.code)}${_asmOrder.kind==='ket'?' <span class="ket-badge" style="font-size:11px;vertical-align:middle">KET</span>':''}</h2>
+      <div class="panel-head"><h2>Сборка заказа ${esc(_asmOrder.code)}
+        <span class="pill ${_asmOrder.assemblyType==='mail'?'gold':'moss'}">${_asmOrder.assemblyType==='mail'?'Почта':'Курьер'}</span>
+        ${_asmOrder.kind==='ket'?' <span class="ket-badge" style="font-size:11px;vertical-align:middle">KET</span>':''}</h2>
         <button class="btn ghost sm" id="asmCancel" style="margin-left:auto">Отменить</button></div>
       <div class="asm-scan-row" style="padding:14px 18px">
         <input id="asmItemInput" placeholder="Пикните штрих-код товара…" autocomplete="off">
