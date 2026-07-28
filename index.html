@@ -2588,7 +2588,7 @@ function productModal(id){
         ${(!S.warehouse_partners||!S.warehouse_partners.length)?'<span class="hint" style="color:var(--rust)">Сначала добавьте партнёров склада в разделе Партнёры → Партнёры склада</span>':''}</div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
       <div class="field"><label>Артикул (SKU)</label><input id="p_sku" value="${esc(d.sku||'')}" placeholder="необязательно"></div>
-      <div class="field"><label>Код KET (ket_sku)</label><input id="p_ketsku" value="${esc(d.ket_sku||'')}" placeholder="тех. название из KET, напр. brutalin"></div>
+      <div class="field"><label>Коды KET (ket_sku)</label><input id="p_ketsku" value="${esc(d.ket_sku||'')}" placeholder="напр. brutalin, brutalin2, brutalin-m"><span class="hint">Если у товара несколько тех-названий в KET (разные листинги) — перечислите через запятую.</span></div>
       <div class="field full"><label>Категория</label><input id="p_category" value="${esc(d.category||'')}" placeholder="необязательно"></div>
       <div class="field full"><label>Остатки по городам</label>
         <div class="wh-stock-grid">
@@ -2611,6 +2611,14 @@ function productModal(id){
     else{saved=await dbInsert('products',payload);if(saved){if(!S.products)S.products=[];S.products.unshift(saved);}}
     if(!saved){toast('Не удалось сохранить');return false;}
     logAction(id?'update':'create','products',{entity_id:saved.id,entity_label:name});
+    // если указан код KET — сразу подтягиваем ещё не привязанные заказы КЕТ с таким же кодом
+    if(payload.ket_sku){
+      let matchedCount=0;
+      if(!S.inbound_orders){try{await loadInbound();}catch(e){}} // loadInbound сам выполнит автопривязку
+      else matchedCount=await autoMatchInboundItems();
+      if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
+      if(typeof ordersTab!=='undefined'&&ordersTab==='ket'&&typeof drawInboundOrders==='function')drawInboundOrders();
+    }
     toast(id?'Товар изменён':'Товар добавлен');renderCash();return true;
   },{wide:true,clearBtn:id?null:undefined});
 }
@@ -7076,6 +7084,52 @@ function bindOrdersTabs(){
   if($('ordTabOwn'))$('ordTabOwn').onclick=()=>{ordersTab='own';renderOrders(ordersMode);};
   if($('ordTabKet'))$('ordTabKet').onclick=()=>{ordersTab='ket';renderInboundOrders();};
 }
+// сравнение технических названий (ket_sku) без учёта регистра и лишних пробелов
+function normKetSku(s){return String(s||'').trim().toLowerCase();}
+// у одного товара может быть НЕСКОЛЬКО тех-названий KET (разные листинги одного и того же товара) —
+// храним их в одном текстовом поле ket_sku через запятую/точку с запятой/перенос строки
+function productKetSkuList(p){
+  return String((p&&p.ket_sku)||'').split(/[,;\n]+/).map(s=>s.trim()).filter(Boolean);
+}
+// добавляет новый код к уже сохранённым у товара кодам, без дублей и без потери старых значений
+function mergeKetSku(existing,newCode){
+  if(!newCode)return existing||'';
+  const list=productKetSkuList({ket_sku:existing});
+  const norm=normKetSku(newCode);
+  if(list.some(c=>normKetSku(c)===norm))return existing||''; // такой код уже есть
+  list.push(newCode.trim());
+  return list.join(', ');
+}
+// автоматическая привязка ещё не привязанных позиций заказов КЕТ к товарам —
+// по совпадению технического названия (ket_sku), который прописан в карточке товара.
+// Нужна, потому что первичная привязка на сервере срабатывает только в момент прихода заказа;
+// если тех-название прописали в товар ПОЗЖЕ — старые заказы сами не обновятся без этого прохода.
+async function autoMatchInboundItems(){
+  if(!S.inbound_items||!S.inbound_items.length||!S.products||!S.products.length)return 0;
+  const byKetSku=new Map();
+  S.products.forEach(p=>{productKetSkuList(p).forEach(code=>byKetSku.set(normKetSku(code),p));});
+  if(!byKetSku.size)return 0;
+  let matchedCount=0;
+  const touchedOrders=new Set();
+  for(const it of S.inbound_items){
+    if(it.matched&&it.product_id)continue; // уже привязан
+    if(!it.ket_sku)continue;
+    const prod=byKetSku.get(normKetSku(it.ket_sku));
+    if(!prod)continue;
+    const upd=await dbUpdate('inbound_order_items',it.id,{product_id:prod.id,matched:true});
+    if(upd){Object.assign(it,upd);matchedCount++;touchedOrders.add(it.inbound_order_id);}
+  }
+  // если у заказа теперь все позиции привязаны — снимаем пометку "требует привязки"
+  for(const orderId of touchedOrders){
+    const stillUnmatched=inboundItemsFor(orderId).some(x=>!x.matched||!x.product_id);
+    const order=(S.inbound_orders||[]).find(x=>x.id===orderId);
+    if(order&&!stillUnmatched&&order.match_status!=='matched'){
+      const upd=await dbUpdate('inbound_orders',orderId,{match_status:'matched'});
+      if(upd)Object.assign(order,upd);
+    }
+  }
+  return matchedCount;
+}
 async function loadInbound(){
   try{
     const [orders,items,partners]=await Promise.all([
@@ -7084,6 +7138,7 @@ async function loadInbound(){
       dbList('inbound_partners',{order:'partner_name'}).catch(()=>[]),
     ]);
     S.inbound_orders=orders||[];S.inbound_items=items||[];S.inbound_partners=partners||[];
+    await autoMatchInboundItems(); // подтягиваем всё, что уже можно привязать по сохранённым тех-названиям
   }catch(e){S.inbound_orders=[];S.inbound_items=[];S.inbound_partners=[];}
 }
 const KET_SEND_STATUS={'0':'Отправлен','4':'Отказ','5':'Оплачен','6':'На отправку','7':'Отклонено'};
@@ -7377,7 +7432,7 @@ function inboundMatchModal(id){
     <select class="oi-product" data-mprod="${it.id}"><option value="">— выберите товар склада —</option>
       ${products.map(p=>`<option value="${p.id}">${esc(p.name)}${p.ket_sku?(' ['+esc(p.ket_sku)+']'):''}</option>`).join('')}</select>
   </div>`).join('');
-  const body=`<div class="hint" style="margin-bottom:10px">Сопоставьте коды KET с товарами склада. После привязки код <b>ket_sku</b> сохранится в товаре — следующие заказы с этим кодом привяжутся автоматически.</div>${rows||'<div class="wh-cat">Все позиции уже привязаны.</div>'}`;
+  const body=`<div class="hint" style="margin-bottom:10px">Сопоставьте коды KET с товарами склада. Код <b>ket_sku</b> добавится к товару (старые тех-названия не потеряются) — следующие заказы с любым из сохранённых кодов привяжутся автоматически.</div>${rows||'<div class="wh-cat">Все позиции уже привязаны.</div>'}`;
   showModal('Привязка товаров — '+esc(o.external_id||''),body,async()=>{
     let done=0;
     for(const it of items){
@@ -7386,7 +7441,10 @@ function inboundMatchModal(id){
       if(!productId)continue;
       await dbUpdate('inbound_order_items',it.id,{product_id:productId,matched:true});
       const prod=(S.products||[]).find(p=>p.id===productId);
-      if(prod&&it.ket_sku&&prod.ket_sku!==it.ket_sku){await dbUpdate('products',productId,{ket_sku:it.ket_sku});prod.ket_sku=it.ket_sku;}
+      if(prod&&it.ket_sku){
+        const merged=mergeKetSku(prod.ket_sku,it.ket_sku);
+        if(merged!==(prod.ket_sku||'')){await dbUpdate('products',productId,{ket_sku:merged});prod.ket_sku=merged;}
+      }
       done++;
     }
     if(!done){toast('Ничего не выбрано');return false;}
