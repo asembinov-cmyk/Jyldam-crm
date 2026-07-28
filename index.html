@@ -7099,6 +7099,22 @@ async function renderInboundOrders(){
 }
 function inboundItemsFor(orderId){return (S.inbound_items||[]).filter(it=>it.inbound_order_id===orderId);}
 function inboundPartnerName(id){return ((S.inbound_partners||[]).find(p=>p.id===id)||{}).partner_name||'—';}
+// магазин (партнёр склада), которому принадлежит заказ КЕТ — определяем через привязанные товары
+// (в самом заказе от KET магазин не передаётся, только состав по кодам ket_sku)
+function inboundOrderShopIds(o){
+  const ids=new Set();
+  inboundItemsFor(o.id).forEach(it=>{
+    if(!it.matched||!it.product_id)return;
+    const p=(S.products||[]).find(x=>x.id===it.product_id);
+    if(p&&p.partner_id)ids.add(p.partner_id);
+  });
+  return [...ids];
+}
+function inboundOrderShopLabel(o){
+  const ids=inboundOrderShopIds(o);
+  if(!ids.length)return inboundItemsFor(o.id).length?'ещё не привязан':'—';
+  return ids.map(whPartnerName).join(', ');
+}
 // тип доставки входящего заказа KET: явного поля нет, определяем по признаку —
 // если указан почтовый индекс, считаем почтовой доставкой, иначе курьерской
 function inboundDeliveryType(o){return o.index?'mail':'courier';}
@@ -7107,7 +7123,7 @@ let inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};
 function filteredInbound(){
   const q=inbFilter.q.toLowerCase().trim();
   return (S.inbound_orders||[]).filter(o=>{
-    if(inbFilter.partner&&o.inbound_partner_id!==inbFilter.partner)return false;
+    if(inbFilter.partner&&!inboundOrderShopIds(o).includes(inbFilter.partner))return false;
     if(inbFilter.delivery&&inboundDeliveryType(o)!==inbFilter.delivery)return false;
     if(inbFilter.status&&String(o.send_status||'')!==inbFilter.status)return false;
     const cd=(o.created_at||'').slice(0,10);
@@ -7133,13 +7149,13 @@ function drawInboundOrders(){
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Требуют привязки</div><div class="v" style="${unmatched?'color:var(--rust)':''}">${unmatched}</div></div>
       <div class="stat"><div class="k">Склад списан</div><div class="v">${written}</div></div>
-      <div class="stat"><div class="k">Партнёров</div><div class="v">${(S.inbound_partners||[]).length}</div></div>
+      <div class="stat"><div class="k">Магазинов</div><div class="v">${new Set(list.flatMap(inboundOrderShopIds)).size}</div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(rows.length+' / '+list.length):list.length}</span></div>
       <div class="filters">
         <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон…" value="${esc(inbFilter.q)}">
-        <select id="inbpartner"><option value="">Все партнёры</option>${(S.inbound_partners||[]).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.partner_name||'—')}</option>`).join('')}</select>
+        <select id="inbpartner"><option value="">Все магазины</option>${[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.name||'—')}</option>`).join('')}</select>
         <select id="inbdelivery"><option value="">Все типы доставки</option>
           <option value="courier" ${inbFilter.delivery==='courier'?'selected':''}>Курьерская</option>
           <option value="mail" ${inbFilter.delivery==='mail'?'selected':''}>Почтовая</option></select>
@@ -7152,7 +7168,7 @@ function drawInboundOrders(){
         ${anyFilter?`<button class="btn ghost sm" id="inbclear" style="align-self:flex-end">Сбросить фильтры</button>`:''}
       </div>
       <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Доставка</th><th>Партнёр</th><th>Состав</th>
+        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Доставка</th><th>Магазин</th><th>Состав</th>
         <th>Статус KET</th><th>Привязка</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
@@ -7166,7 +7182,7 @@ function drawInboundOrders(){
           <td data-label="Телефон">${esc(o.phone||'—')}</td>
           <td data-label="Город">${esc(o.city||'—')}</td>
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
-          <td data-label="Партнёр">${esc(inboundPartnerName(o.inbound_partner_id))}</td>
+          <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
           <td data-label="Состав">${compo}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div></td>
           <td data-label="Привязка">${matchBadge}</td>
@@ -7203,7 +7219,7 @@ function inboundOrderModal(id){
   const items=inboundItemsFor(id);
   const body=`<div style="display:grid;gap:8px;font-size:14px">
     <div><b>Внешний ID:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
-    <div><b>Партнёр:</b> ${esc(inboundPartnerName(o.inbound_partner_id))}</div>
+    <div><b>Магазин:</b> ${esc(inboundOrderShopLabel(o))}</div>
     <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
     <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
     <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
