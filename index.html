@@ -3582,7 +3582,7 @@ function calcPeriodStr(p){p=p||calcNormPeriod;return `${p.year}-${String(p.month
 // период месяца заказа (по дате забора) в формате YYYY-MM
 function orderPeriodStr(o){return (o.pickup_date||o.created_at||'').slice(0,7);}
 function renderCalc(){
-  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  if(!canMod('calc')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Калькуляция</h1><p>Себестоимость, прибыль и заработок по заказам</p></div></div>
     <div class="subtabs">
