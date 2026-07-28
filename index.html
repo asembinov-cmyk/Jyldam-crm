@@ -2452,6 +2452,7 @@ function render(){
   if(typeof removeOrdersPager==='function')removeOrdersPager(); // снять плавающую панель пагинации
   if(typeof removePickupsPager==='function')removePickupsPager();
   if(typeof removeInboundPager==='function')removeInboundPager();
+  if(typeof removeWhProductsPager==='function')removeWhProductsPager();
   if(S.tab==='dashboard')renderDashboard();
   else if(S.tab==='pickups')renderPickups();
   else if(S.tab==='orders'){
@@ -2490,6 +2491,8 @@ let whSub='products';          // подвкладка: products (товары) 
 let whAssemblyType='courier';  // тип текущей сборки: courier | mail
 let whSearch='';
 let whPartner='';              // фильтр по партнёру (пусто = все)
+let whProdPage=1;              // текущая страница списка товаров
+let whProdPerPage=50;          // товаров на страницу
 
 // генерация штрих-кода (если у товара нет своего) — EAN-13-подобный из времени + счётчика
 function genBarcode(){
@@ -2502,6 +2505,7 @@ function genBarcode(){
 
 function renderCash(){ // ключ модуля остался 'cash', но это Склад
   if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  if(typeof removeWhProductsPager==='function')removeWhProductsPager();
   // на почтовой сборке город — только Алматы/Астана (в Шымкенте почтовой сборки нет)
   const cityList=whSub==='assembly_mail'?WAREHOUSE_CITIES.filter(c=>c!=='Шымкент'):WAREHOUSE_CITIES;
   if(whSub==='assembly_mail'&&!cityList.includes(whCity))whCity=cityList[0];
@@ -2545,6 +2549,10 @@ function renderWhProducts(){
   const totalSku=(S.products||[]).length;
   const cityStock=all.reduce((s,p)=>s+productStock(p),0);
   const partnersWithProducts=[...new Set((S.products||[]).map(p=>p.partner_id).filter(Boolean))];
+  const totalPages=Math.max(1,Math.ceil(all.length/whProdPerPage));
+  if(whProdPage>totalPages)whProdPage=totalPages;
+  const startIdx=(whProdPage-1)*whProdPerPage;
+  const pageRows=all.slice(startIdx,startIdx+whProdPerPage);
   $('whContent').innerHTML=`
     <div class="wh-toolbar">
       <input id="whProdSearch" placeholder="🔍 Поиск: название, штрих-код, артикул…" value="${esc(whSearch)}">
@@ -2559,10 +2567,10 @@ function renderWhProducts(){
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Товары</h2><span class="count">${all.length}</span></div>
-      <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <div class="table-scroll"><table class="resp-table" id="whProdTable"><thead><tr>
         <th>Название</th><th>Партнёр</th><th>Штрих-код</th><th>Артикул</th><th>Остаток «${esc(whCity)}»</th><th></th>
       </tr></thead><tbody>
-      ${all.length?all.map(p=>`<tr>
+      ${pageRows.length?pageRows.map(p=>`<tr data-whrow="${p.id}">
         <td data-label="Название"><strong>${esc(p.name||'—')}</strong>${p.category?`<div class="wh-cat">${esc(p.category)}</div>`:''}</td>
         <td data-label="Партнёр">${p.partner_id?esc(whPartnerName(p.partner_id)):'<span class="wh-cat">—</span>'}</td>
         <td data-label="Штрих-код"><span class="wh-barcode">${esc(p.barcode||'—')}</span></td>
@@ -2575,13 +2583,66 @@ function renderWhProducts(){
       </tr>`).join(''):`<tr><td colspan="6"><div class="empty"><div class="big">Нет товаров</div>${whSearch||whPartner?'Измените фильтры.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
-  const s=$('whProdSearch');if(s)s.oninput=e=>{whSearch=e.target.value;renderWhProducts();const s2=$('whProdSearch');if(s2){s2.focus();s2.setSelectionRange(s2.value.length,s2.value.length);}};
-  if($('whPartnerFilter'))$('whPartnerFilter').onchange=e=>{whPartner=e.target.value;renderWhProducts();};
+  const s=$('whProdSearch');if(s)s.oninput=e=>{whSearch=e.target.value;whProdPage=1;renderWhProducts();const s2=$('whProdSearch');if(s2){s2.focus();s2.setSelectionRange(s2.value.length,s2.value.length);}};
+  if($('whPartnerFilter'))$('whPartnerFilter').onchange=e=>{whPartner=e.target.value;whProdPage=1;renderWhProducts();};
   if($('whAddProduct'))$('whAddProduct').onclick=()=>productModal();
   if($('whImport'))$('whImport').onclick=()=>productImportModal();
   if($('whImportKet'))$('whImportKet').onclick=()=>productImportKetModal();
   $('whContent').querySelectorAll('[data-whedit]').forEach(b=>b.onclick=()=>productModal(b.dataset.whedit));
   $('whContent').querySelectorAll('[data-whlabel]').forEach(b=>b.onclick=()=>productLabelModal(b.dataset.whlabel));
+  $('whContent').querySelectorAll('[data-whrow]').forEach(tr=>tr.ondblclick=e=>{
+    if(e.target.closest('button,a,input,select'))return;
+    productModal(tr.dataset.whrow);
+  });
+  renderWhProductsPager(all.length,totalPages,startIdx,pageRows.length);
+}
+// плавающая панель пагинации для списка товаров (тот же вид, что у заказов/заявок/КЕТ)
+function removeWhProductsPager(){const ex=$('whProdPager');if(ex)ex.remove();
+  const m=$('main');if(m&&!$('ordersPager')&&!$('pickupsPager')&&!$('inboundPager'))m.classList.remove('has-pager');}
+function renderWhProductsPager(total,totalPages,startIdx,shownCount){
+  removeWhProductsPager();
+  if(!total)return;
+  const from=startIdx+1, to=startIdx+shownCount;
+  const bar=document.createElement('div');
+  bar.id='whProdPager';bar.className='orders-pager';
+  {const m=$('main');if(m)m.classList.add('has-pager');}
+  bar.innerHTML=`
+    <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
+    <div class="op-perpage">
+      <span>На странице:</span>
+      <div class="op-pp-wrap">
+        <button class="op-btn op-pp-btn" id="whProdPerPageBtn">${whProdPerPage} ▾</button>
+        <div class="op-pp-menu" id="whProdPerPageMenu" style="display:none">
+          ${ORDERS_PAGE_SIZES.map(s=>`<button class="op-pp-item ${s===whProdPerPage?'active':''}" data-whprodpp="${s}">${s}</button>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="op-nav">
+      <button class="op-btn" data-whprodpage="first" ${whProdPage<=1?'disabled':''} title="В начало">«</button>
+      <button class="op-btn" data-whprodpage="prev" ${whProdPage<=1?'disabled':''}>‹ Назад</button>
+      <span class="op-page">Стр. ${whProdPage} / ${totalPages}</span>
+      <button class="op-btn" data-whprodpage="next" ${whProdPage>=totalPages?'disabled':''}>Вперёд ›</button>
+      <button class="op-btn" data-whprodpage="last" ${whProdPage>=totalPages?'disabled':''} title="В конец">»</button>
+    </div>`;
+  document.body.appendChild(bar);
+  const ppBtn=bar.querySelector('#whProdPerPageBtn'), ppMenu=bar.querySelector('#whProdPerPageMenu');
+  if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
+  bar.querySelectorAll('[data-whprodpp]').forEach(b=>b.onclick=()=>{
+    whProdPerPage=parseInt(b.dataset.whprodpp,10)||50;whProdPage=1;renderWhProducts();
+    const t=$('whProdTable');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+  document.addEventListener('click',function closeWhProdPP(ev){
+    if(ppMenu&&!ppMenu.contains(ev.target)&&ev.target!==ppBtn){ppMenu.style.display='none';}
+  },{once:true});
+  bar.querySelectorAll('[data-whprodpage]').forEach(b=>b.onclick=()=>{
+    const a=b.dataset.whprodpage;
+    if(a==='first')whProdPage=1;
+    else if(a==='prev')whProdPage=Math.max(1,whProdPage-1);
+    else if(a==='next')whProdPage=Math.min(totalPages,whProdPage+1);
+    else if(a==='last')whProdPage=totalPages;
+    renderWhProducts();
+    const t=$('whProdTable');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+  });
 }
 
 // форма добавления/редактирования товара
@@ -2596,9 +2657,7 @@ function productModal(id){
         <select id="p_partner"><option value="">— выберите партнёра склада —</option>${(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${d.partner_id===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select>
         ${(!S.warehouse_partners||!S.warehouse_partners.length)?'<span class="hint" style="color:var(--rust)">Сначала добавьте партнёров склада в разделе Партнёры → Партнёры склада</span>':''}</div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
-      <div class="field"><label>Артикул (SKU)</label><input id="p_sku" value="${esc(d.sku||'')}" placeholder="необязательно"></div>
-      <div class="field"><label>Коды KET (ket_sku)</label><input id="p_ketsku" value="${esc(d.ket_sku||'')}" placeholder="напр. brutalin, brutalin2, brutalin-m"><span class="hint">Если у товара несколько тех-названий в KET (разные листинги) — перечислите через запятую.</span></div>
-      <div class="field full"><label>Категория</label><input id="p_category" value="${esc(d.category||'')}" placeholder="необязательно"></div>
+      <div class="field full"><label>Коды KET (ket_sku)</label><input id="p_ketsku" value="${esc(d.ket_sku||'')}" placeholder="напр. brutalin, brutalin2, brutalin-m"><span class="hint">Если у товара несколько тех-названий в KET (разные листинги) — перечислите через запятую.</span></div>
       <div class="field full"><label>Остатки по городам</label>
         <div class="wh-stock-grid">
           ${WAREHOUSE_CITIES.map(c=>`<div class="wh-stock-inp"><span>${esc(c)}</span><input type="number" min="0" step="1" data-pstock="${esc(c)}" value="${stock[c]!=null?esc(stock[c]):''}" placeholder="0"></div>`).join('')}
@@ -2614,7 +2673,7 @@ function productModal(id){
     if(!barcode)barcode=genBarcode(); // генерируем, если пусто
     const st={};
     document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
-    const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,ket_sku:val('p_ketsku').trim()||null,category:val('p_category').trim()||null,stock:st};
+    const payload={name,partner_id,barcode,sku:d.sku||null,ket_sku:val('p_ketsku').trim()||null,category:d.category||null,stock:st};
     let saved;
     if(id){saved=await dbUpdate('products',id,payload);if(saved){const i=(S.products||[]).findIndex(x=>x.id===id);if(i>=0)Object.assign(S.products[i],saved);}}
     else{saved=await dbInsert('products',payload);if(saved){if(!S.products)S.products=[];S.products.unshift(saved);}}
@@ -4928,7 +4987,7 @@ function drawPickups(){
 // сброс пагинации заявок на первую страницу (при смене фильтров)
 function drawPickupsReset(){pickupsPage=1;pickupsMobileLimit=MOBILE_STEP;drawPickups();}
 // плавающая панель пагинации заявок
-function removePickupsPager(){const ex=$('pickupsPager');if(ex)ex.remove();const m=$('main');if(m&&!$('ordersPager')&&!$('inboundPager'))m.classList.remove('has-pager');}
+function removePickupsPager(){const ex=$('pickupsPager');if(ex)ex.remove();const m=$('main');if(m&&!$('ordersPager')&&!$('inboundPager')&&!$('whProdPager'))m.classList.remove('has-pager');}
 function renderPickupsPager(total,totalPages,startIdx,shownCount){
   removePickupsPager();
   if(!total)return;
@@ -5834,7 +5893,7 @@ function updateKetAllChk(allRows){
   chk.indeterminate=selected>0&&selected<total;
 }
 // плавающая (закреплённая снизу) панель навигации по страницам заказов
-function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();const m=$('main');if(m&&!$('pickupsPager')&&!$('inboundPager'))m.classList.remove('has-pager');}
+function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();const m=$('main');if(m&&!$('pickupsPager')&&!$('inboundPager')&&!$('whProdPager'))m.classList.remove('has-pager');}
 function renderOrdersPager(total,totalPages,startIdx,shownCount){
   removeOrdersPager();
   if(!total)return;
@@ -7379,7 +7438,7 @@ function drawInboundOrders(){
 }
 // плавающая панель пагинации для «Заказы КЕТ» (тот же вид, что у заказов/заявок)
 function removeInboundPager(){const ex=$('inboundPager');if(ex)ex.remove();
-  const m=$('main');if(m&&!$('ordersPager')&&!$('pickupsPager'))m.classList.remove('has-pager');}
+  const m=$('main');if(m&&!$('ordersPager')&&!$('pickupsPager')&&!$('whProdPager'))m.classList.remove('has-pager');}
 function renderInboundPager(total,totalPages,startIdx,shownCount){
   removeInboundPager();
   if(!total)return;
