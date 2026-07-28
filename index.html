@@ -1177,6 +1177,15 @@ async function dbUpdate(table,id,row){
   if(AUTO_LOG_TABLES.has(table)){const ch=buildChanges(beforeCopy,data);if(ch.length)logAction('update',table,{entity_id:id,entity_label:recLabel(data),changes:ch});}
   return data;
 }
+// свежая загрузка одной записи мимо кэша S — используется перед записью складских операций/резервов,
+// чтобы уменьшить (не исключить полностью — это клиент без серверных транзакций) окно гонки при параллельной работе
+async function dbGetOne(table,id){
+  try{
+    const {data,error}=await sb.from(table).select('*').eq('id',id).single();
+    if(error){console.error('get',table,error);return null;}
+    return data;
+  }catch(e){console.error('dbGetOne',table,e&&e.message);return null;}
+}
 async function dbDelete(table,id){
   const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
   const lbl=before?recLabel(before):String(id);
@@ -1624,11 +1633,12 @@ async function loadAll(){
     dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
     dbList('wh_moves',{order:'created_at',asc:false}).catch(()=>[]),
     dbList('wh_order_items',{}).catch(()=>[]),
+    dbList('wh_reservations',{order:'created_at',asc:false}).catch(()=>[]),
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
-  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];
+  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];S.wh_reservations=tail[11]||[];
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем
   S.pickups=S.pickups||[];S.orders=S.orders||[];
@@ -1679,7 +1689,7 @@ async function refreshForTab(tab){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
     }else if(tab==='cash'){
-      try{const [pr,wp,wm,oi]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false}),dbList('wh_order_items',{})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;S.wh_order_items=oi;}catch(e){}
+      try{const [pr,wp,wm,oi,rv]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false}),dbList('wh_order_items',{}),dbList('wh_reservations',{order:'created_at',asc:false})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;S.wh_order_items=oi;S.wh_reservations=rv;}catch(e){}
     }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
     }else if(tab==='intercity'){
@@ -2536,15 +2546,40 @@ function productStock(p){
   const st=(p.stock&&typeof p.stock==='object')?p.stock:{};
   return parseInt(st[whCity]||0,10)||0;
 }
+// сумма активных резервов товара в указанном городе (по умолчанию — текущий выбранный город)
+function productReserved(productId,city){
+  city=city||whCity;
+  return (S.wh_reservations||[]).filter(r=>r.product_id===productId&&r.city===city&&r.status==='active')
+    .reduce((s,r)=>s+(parseInt(r.quantity,10)||0),0);
+}
+// доступно = факт − активный резерв (может уйти в минус, если резерв больше факта — это статус «Ошибка»)
+function productAvailable(p,city){
+  return productStock(p)-productReserved(p.id,city||whCity);
+}
+// ячейка хранения товара в текущем городе (jsonb по городам, как и stock)
+function productCell(p,city){
+  const c=(p.storage_cell&&typeof p.storage_cell==='object')?p.storage_cell:{};
+  return c[city||whCity]||'';
+}
 // имя складского партнёра
 function whPartnerName(id){return ((S.warehouse_partners||[]).find(x=>x.id===id)||{}).name||'—';}
 
+let whQuickFilter='all'; // all | stock | nostock | reserved | nocell
+let _whProdSearchTimer=null;
 function renderWhProducts(){
   const all=(S.products||[]).filter(p=>{
     if(whPartner&&p.partner_id!==whPartner)return false;
+    const avail=productAvailable(p);
+    const reserved=productReserved(p.id);
+    const cellVal=productCell(p);
+    if(whQuickFilter==='stock'&&productStock(p)<=0)return false;
+    if(whQuickFilter==='nostock'&&productStock(p)>0)return false;
+    if(whQuickFilter==='reserved'&&reserved<=0)return false;
+    if(whQuickFilter==='nocell'&&cellVal)return false;
     if(!whSearch)return true;
     const q=whSearch.toLowerCase();
-    return (p.name||'').toLowerCase().includes(q)||(p.barcode||'').includes(q)||(p.sku||'').toLowerCase().includes(q);
+    return (p.name||'').toLowerCase().includes(q)||(p.barcode||'').includes(q)||(p.sku||'').toLowerCase().includes(q)
+      ||(p.ket_sku||'').toLowerCase().includes(q)||whPartnerName(p.partner_id).toLowerCase().includes(q)||cellVal.toLowerCase().includes(q);
   });
   const totalSku=(S.products||[]).length;
   const cityStock=all.reduce((s,p)=>s+productStock(p),0);
@@ -2553,13 +2588,17 @@ function renderWhProducts(){
   if(whProdPage>totalPages)whProdPage=totalPages;
   const startIdx=(whProdPage-1)*whProdPerPage;
   const pageRows=all.slice(startIdx,startIdx+whProdPerPage);
+  const QUICK=[['all','Все'],['stock','С остатком'],['nostock','Без остатка'],['reserved','В резерве'],['nocell','Без ячейки']];
   $('whContent').innerHTML=`
     <div class="wh-toolbar">
-      <input id="whProdSearch" placeholder="🔍 Поиск: название, штрих-код, артикул…" value="${esc(whSearch)}">
+      <input id="whProdSearch" placeholder="🔍 Название, штрих-код, артикул, KET, партнёр, ячейка…" value="${esc(whSearch)}">
       <select id="whPartnerFilter"><option value="">Все партнёры</option>${partnersWithProducts.map(pid=>`<option value="${pid}" ${whPartner===pid?'selected':''}>${esc(whPartnerName(pid))}</option>`).join('')}</select>
-      <button class="btn primary" id="whAddProduct">＋ Товар</button>
+      ${(isAdmin()||can('cash','create'))?`<button class="btn primary" id="whAddProduct">＋ Товар</button>
       <button class="btn ghost" id="whImport">⬆ Импорт списка</button>
-      <button class="btn ghost" id="whImportKet">⬆ Импорт тех.названий KET</button>
+      <button class="btn ghost" id="whImportKet">⬆ Импорт тех.названий KET</button>`:''}
+    </div>
+    <div class="subtabs" style="margin-top:8px">
+      ${QUICK.map(([k,l])=>`<button data-whqf="${k}" class="${whQuickFilter===k?'active':''}">${esc(l)}</button>`).join('')}
     </div>
     <div class="wh-stats">
       <div class="wh-stat"><span>Товаров${whPartner?' у партнёра':''}</span><b>${all.length}</b></div>
@@ -2568,23 +2607,33 @@ function renderWhProducts(){
     <div class="panel">
       <div class="panel-head"><h2>Товары</h2><span class="count">${all.length}</span></div>
       <div class="table-scroll"><table class="resp-table" id="whProdTable"><thead><tr>
-        <th>Название</th><th>Партнёр</th><th>Штрих-код</th><th>Артикул</th><th>Остаток «${esc(whCity)}»</th><th></th>
+        <th>Название</th><th>Партнёр</th><th>Штрих-код</th><th>Артикул</th><th>Ячейка</th><th>Факт</th><th>Резерв</th><th>Доступно</th><th></th>
       </tr></thead><tbody>
-      ${pageRows.length?pageRows.map(p=>`<tr data-whrow="${p.id}">
+      ${pageRows.length?pageRows.map(p=>{
+        const reserved=productReserved(p.id);const avail=productAvailable(p);const cellVal=productCell(p);
+        return `<tr data-whrow="${p.id}">
         <td data-label="Название"><strong>${esc(p.name||'—')}</strong>${p.category?`<div class="wh-cat">${esc(p.category)}</div>`:''}</td>
         <td data-label="Партнёр">${p.partner_id?esc(whPartnerName(p.partner_id)):'<span class="wh-cat">—</span>'}</td>
         <td data-label="Штрих-код"><span class="wh-barcode">${esc(p.barcode||'—')}</span></td>
         <td data-label="Артикул">${esc(p.sku||'—')}</td>
-        <td data-label="Остаток"><span class="wh-stock ${productStock(p)>0?'':'wh-zero'}">${productStock(p)}</span></td>
+        <td data-label="Ячейка">${cellVal?esc(cellVal):'<span class="wh-cat">—</span>'}</td>
+        <td data-label="Факт"><span class="wh-stock ${productStock(p)>0?'':'wh-zero'}">${productStock(p)}</span></td>
+        <td data-label="Резерв">${reserved>0?'<span style="color:var(--rust)">'+reserved+'</span>':'0'}</td>
+        <td data-label="Доступно">${avail<0?'<b style="color:var(--rust)">'+avail+'</b>':avail}</td>
         <td data-label="" class="cell-actions"><div class="row-actions">
-          <button class="btn sm ghost" data-whedit="${p.id}">Изменить</button>
+          <button class="btn sm ghost" data-whedit="${p.id}">Открыть</button>
           <button class="btn sm ghost" data-whlabel="${p.id}">🏷 Этикетка</button>
         </div></td>
-      </tr>`).join(''):`<tr><td colspan="6"><div class="empty"><div class="big">Нет товаров</div>${whSearch||whPartner?'Измените фильтры.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
+      </tr>`;}).join(''):`<tr><td colspan="9"><div class="empty"><div class="big">Нет товаров</div>${whSearch||whPartner||whQuickFilter!=='all'?'Измените фильтры.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
-  const s=$('whProdSearch');if(s)s.oninput=e=>{whSearch=e.target.value;whProdPage=1;renderWhProducts();const s2=$('whProdSearch');if(s2){s2.focus();s2.setSelectionRange(s2.value.length,s2.value.length);}};
+  const s=$('whProdSearch');if(s)s.oninput=e=>{
+    const v=e.target.value;
+    clearTimeout(_whProdSearchTimer);
+    _whProdSearchTimer=setTimeout(()=>{whSearch=v;whProdPage=1;renderWhProducts();const s2=$('whProdSearch');if(s2){s2.focus();s2.setSelectionRange(s2.value.length,s2.value.length);}},350);
+  };
   if($('whPartnerFilter'))$('whPartnerFilter').onchange=e=>{whPartner=e.target.value;whProdPage=1;renderWhProducts();};
+  $('whContent').querySelectorAll('[data-whqf]').forEach(b=>b.onclick=()=>{whQuickFilter=b.dataset.whqf;whProdPage=1;renderWhProducts();});
   if($('whAddProduct'))$('whAddProduct').onclick=()=>productModal();
   if($('whImport'))$('whImport').onclick=()=>productImportModal();
   if($('whImportKet'))$('whImportKet').onclick=()=>productImportKetModal();
@@ -2647,9 +2696,13 @@ function renderWhProductsPager(total,totalPages,startIdx,shownCount){
 
 // форма добавления/редактирования товара
 function productModal(id){
+  if(id&&!isAdmin()&&!can('cash','edit')){toast('Нет прав на редактирование склада');return;}
+  if(!id&&!isAdmin()&&!can('cash','create')){toast('Нет прав на добавление товаров');return;}
   const p=id?(S.products||[]).find(x=>x.id===id):null;
   const d=p||{};
   const stock=(d.stock&&typeof d.stock==='object')?d.stock:{};
+  const cell=(d.storage_cell&&typeof d.storage_cell==='object')?d.storage_cell:{};
+  const canEditCell=isAdmin()||can('cash','edit');
   const body=`
     <div class="form-grid">
       <div class="field full"><label>Название товара <span style="color:var(--rust)">*</span></label><input id="p_name" value="${esc(d.name||'')}" placeholder="Напр. Кроссовки Nike Air Max 42"></div>
@@ -2658,11 +2711,36 @@ function productModal(id){
         ${(!S.warehouse_partners||!S.warehouse_partners.length)?'<span class="hint" style="color:var(--rust)">Сначала добавьте партнёров склада в разделе Партнёры → Партнёры склада</span>':''}</div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(d.barcode||'')}" placeholder="Оставьте пустым — сгенерируем"></div>
       <div class="field full"><label>Коды KET (ket_sku)</label><input id="p_ketsku" value="${esc(d.ket_sku||'')}" placeholder="напр. brutalin, brutalin2, brutalin-m"><span class="hint">Если у товара несколько тех-названий в KET (разные листинги) — перечислите через запятую.</span></div>
-      <div class="field full"><label>Остатки по городам</label>
+      ${id?`
+      <div class="field full"><label>Остатки, резерв и ячейки по городам</label>
+        <div class="table-scroll"><table class="resp-table wh-prod-city-tbl"><thead><tr>
+          <th>Город</th><th>Факт</th><th>Резерв</th><th>Доступно</th><th>Ячейка</th><th></th>
+        </tr></thead><tbody>
+        ${WAREHOUSE_CITIES.map(c=>{
+          const fact=parseInt(stock[c]||0,10)||0;
+          const reserved=productReserved(id,c);
+          const avail=fact-reserved;
+          return `<tr>
+            <td>${esc(c)}</td>
+            <td><b>${fact}</b></td>
+            <td>${reserved>0?'<span style="color:var(--rust)">'+reserved+'</span>':'0'}</td>
+            <td>${avail<0?'<b style="color:var(--rust)">'+avail+'</b>':avail}</td>
+            <td>${canEditCell?`<input data-pcell="${esc(c)}" value="${esc(cell[c]||'')}" placeholder="напр. A-04-03" style="width:110px">`:esc(cell[c]||'—')}</td>
+            <td><div class="row-actions">
+              <button type="button" class="btn sm ghost" data-wmquick="${esc(c)}">Скорректировать</button>
+              <button type="button" class="btn sm ghost" data-wrquick="${esc(c)}">Резерв</button>
+            </div></td>
+          </tr>`;
+        }).join('')}
+        </tbody></table></div>
+        <span class="hint">Остаток меняется только через складские операции (кнопка «Скорректировать» → журнал «Движения»). Ячейку можно менять здесь напрямую.</span>
+      </div>`:`
+      <div class="field full"><label>Начальные остатки по городам</label>
         <div class="wh-stock-grid">
-          ${WAREHOUSE_CITIES.map(c=>`<div class="wh-stock-inp"><span>${esc(c)}</span><input type="number" min="0" step="1" data-pstock="${esc(c)}" value="${stock[c]!=null?esc(stock[c]):''}" placeholder="0"></div>`).join('')}
+          ${WAREHOUSE_CITIES.map(c=>`<div class="wh-stock-inp"><span>${esc(c)}</span><input type="number" min="0" step="1" data-pstock="${esc(c)}" value="0" placeholder="0"></div>`).join('')}
         </div>
-      </div>
+        <span class="hint">Это стартовый остаток нового товара. Дальнейшие изменения — только через складские операции.</span>
+      </div>`}
     </div>`;
   showModal(id?'Изменить товар':'Новый товар',body,async()=>{
     const name=val('p_name').trim();
@@ -2671,9 +2749,18 @@ function productModal(id){
     if(!partner_id){toast('Выберите партнёра');return false;}
     let barcode=val('p_barcode').trim();
     if(!barcode)barcode=genBarcode(); // генерируем, если пусто
-    const st={};
-    document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
-    const payload={name,partner_id,barcode,sku:d.sku||null,ket_sku:val('p_ketsku').trim()||null,category:d.category||null,stock:st};
+    const payload={name,partner_id,barcode,sku:d.sku||null,ket_sku:val('p_ketsku').trim()||null,category:d.category||null};
+    if(id){
+      // существующий товар: остаток не трогаем (только через операции), ячейку — сохраняем как есть
+      const newCell=Object.assign({},cell);
+      document.querySelectorAll('[data-pcell]').forEach(el=>{const c=el.dataset.pcell;const v=el.value.trim();if(v)newCell[c]=v;else delete newCell[c];});
+      payload.storage_cell=newCell;
+    }else{
+      const st={};
+      document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
+      payload.stock=st;
+      payload.storage_cell={};
+    }
     let saved;
     if(id){saved=await dbUpdate('products',id,payload);if(saved){const i=(S.products||[]).findIndex(x=>x.id===id);if(i>=0)Object.assign(S.products[i],saved);}}
     else{saved=await dbInsert('products',payload);if(saved){if(!S.products)S.products=[];S.products.unshift(saved);}}
@@ -2689,6 +2776,14 @@ function productModal(id){
     }
     toast(id?'Товар изменён':'Товар добавлен');renderCash();return true;
   },{wide:true,clearBtn:id?null:undefined});
+  if(id){
+    document.querySelectorAll('[data-wmquick]').forEach(b=>b.onclick=()=>{
+      closeTopModal();whMoveModal(id,b.dataset.wmquick);
+    });
+    document.querySelectorAll('[data-wrquick]').forEach(b=>b.onclick=()=>{
+      closeTopModal();whReservationModal(id,b.dataset.wrquick);
+    });
+  }
 }
 
 // этикетка со штрих-кодом (для печати)
@@ -3097,7 +3192,7 @@ function renderWhMoves(){
   const fmtT=s=>{const t=fmtLogTime?fmtLogTime(s):{date:(s||'').slice(0,10),time:(s||'').slice(11,16)};return t;};
   $('whContent').innerHTML=`
     <div class="wh-toolbar">
-      <button class="btn primary" id="whAddMove">＋ Операция</button>
+      ${(isAdmin()||can('cash','create'))?'<button class="btn primary" id="whAddMove">＋ Операция</button>':''}
       <span class="hint" style="align-self:center">Движения товаров в городе «${esc(whCity)}»</span>
     </div>
     <div class="ic-filters">
@@ -3148,42 +3243,74 @@ function renderWhMoves(){
 }
 
 // форма создания складской операции
-function whMoveModal(){
+// форма создания складской операции.
+// presetProductId/presetCity — если открыта из карточки товара («Скорректировать»): товар и город
+// уже выбраны и не меняются.
+function whMoveModal(presetProductId,presetCity){
+  if(!isAdmin()&&!can('cash','create')){toast('Нет прав на складские операции');return;}
   const products=[...(S.products||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   if(!products.length){showInfo('Нет товаров','Сначала добавьте товары в разделе «Товары».');return;}
+  const city=presetCity||whCity;
+  const canSetFact=isAdmin()||can('cash','edit');
   const body=`
     <div class="form-grid">
       <div class="field"><label>Тип операции <span style="color:var(--rust)">*</span></label>
         <select id="wm_op">${WH_MOVE_TYPES.map(t=>`<option value="${t.k}">${esc(t.label)} ${t.dir>0?'(+)':t.dir<0?'(−)':''}</option>`).join('')}</select></div>
-      <div class="field"><label>Город</label><input value="${esc(whCity)}" disabled></div>
+      <div class="field"><label>Город</label><input value="${esc(city)}" disabled></div>
       <div class="field full"><label>Товар <span style="color:var(--rust)">*</span></label>
-        <select id="wm_product"><option value="">— выберите товар —</option>${products.map(p=>`<option value="${p.id}">${esc(p.name)}${p.partner_id?' · '+esc(whPartnerName(p.partner_id)):''} (остаток: ${(p.stock&&p.stock[whCity])||0})</option>`).join('')}</select></div>
+        <select id="wm_product" ${presetProductId?'disabled':''}>${presetProductId?'':'<option value="">— выберите товар —</option>'}${products.map(p=>`<option value="${p.id}" ${presetProductId===p.id?'selected':''}>${esc(p.name)}${p.partner_id?' · '+esc(whPartnerName(p.partner_id)):''} (остаток: ${(p.stock&&p.stock[city])||0})</option>`).join('')}</select>
+        ${presetProductId?`<input type="hidden" id="wm_product_fallback" value="${presetProductId}">`:''}</div>
+      <div class="field full" id="wm_correctModeWrap" style="display:none"><label>Способ корректировки <span style="color:var(--rust)">*</span></label>
+        <select id="wm_correctMode">
+          <option value="add">Добавить</option>
+          <option value="subtract">Уменьшить</option>
+          ${canSetFact?'<option value="set">Установить фактический остаток</option>':''}
+        </select></div>
       <div class="field"><label>Количество <span style="color:var(--rust)">*</span></label><input type="number" min="1" step="1" id="wm_qty" placeholder="0"></div>
       <div class="field"><label>Получатель / город назначения</label><input id="wm_target" placeholder="напр. Алматы, ФИО клиента"></div>
+      <div class="field full" id="wm_reasonWrap" style="display:none"><label>Причина <span style="color:var(--rust)">*</span></label><input id="wm_reason" placeholder="напр. пересчёт, недостача, ошибка приёмки"></div>
       <div class="field full"><label>Комментарий</label><input id="wm_comment" placeholder="необязательно"></div>
     </div>
     <div class="hint" style="margin-top:8px">Остаток пересчитается автоматически. Операция зафиксирует вас и время.</div>`;
   showModal('Складская операция',body,async()=>{
-    const op=val('wm_op');const product_id=val('wm_product');
+    const op=val('wm_op');
+    const product_id=presetProductId||val('wm_product');
     const qty=parseInt(val('wm_qty'),10)||0;
+    const isCorrect=op==='correct';
+    const correctMode=isCorrect?(val('wm_correctMode')||'add'):null;
     if(!product_id){toast('Выберите товар');return false;}
     if(qty<=0){toast('Введите количество');return false;}
-    const p=(S.products||[]).find(x=>x.id===product_id);if(!p){toast('Товар не найден');return false;}
+    if(isCorrect&&!val('wm_reason').trim()){toast('Укажите причину корректировки');return false;}
+    if(isCorrect&&!val('wm_comment').trim()){toast('Комментарий обязателен для ручной корректировки');return false;}
+    if(isCorrect&&correctMode==='set'&&!canSetFact){toast('Нет прав устанавливать фактический остаток');return false;}
+    // свежая загрузка товара мимо кэша — уменьшает (не исключает) окно гонки при параллельной работе
+    const freshP=await dbGetOne('products',product_id);
+    const p=freshP||(S.products||[]).find(x=>x.id===product_id);
+    if(!p){toast('Товар не найден');return false;}
     const t=whMoveType(op);
     const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
-    const before=parseInt(stock[whCity]||0,10)||0;
+    const before=parseInt(stock[city]||0,10)||0;
     let after=before;
-    if(t.dir>0)after=before+qty;
+    if(isCorrect){
+      if(correctMode==='set')after=qty;
+      else if(correctMode==='subtract'){
+        if(before-qty<0){toast(`Недостаточно на складе: есть ${before}, нужно ${qty}`);return false;}
+        after=before-qty;
+      }else after=before+qty; // add
+    }else if(t.dir>0)after=before+qty;
     else if(t.dir<0){
       if(before-qty<0){toast(`Недостаточно на складе: есть ${before}, нужно ${qty}`);return false;}
       after=before-qty;
-    }else after=before; // корректировка — сюда можно расширить
-    stock[whCity]=after;
+    }
+    if(after<0){toast('Остаток не может быть отрицательным');return false;}
+    stock[city]=after;
     // сохраняем движение
     const move={
-      product_id,city:whCity,op,qty,
+      product_id,city,op,qty,
+      balance_before:before,
       balance_after:after,
       target:val('wm_target').trim()||null,
+      reason:isCorrect?val('wm_reason').trim():null,
       comment:val('wm_comment').trim()||null,
       user_id:(S.me&&S.me.id)||null,
       user_name:(S.me&&(S.me.full_name||S.me.email))||'—',
@@ -3192,11 +3319,80 @@ function whMoveModal(){
     if(!savedMove){toast('Не удалось сохранить операцию');return false;}
     // обновляем остаток товара
     const savedProd=await dbUpdate('products',product_id,{stock});
-    if(savedProd){const i=(S.products||[]).findIndex(x=>x.id===product_id);if(i>=0)S.products[i].stock=stock;}
+    if(savedProd){const i=(S.products||[]).findIndex(x=>x.id===product_id);if(i>=0)Object.assign(S.products[i],savedProd);}
     if(!S.wh_moves)S.wh_moves=[];S.wh_moves.unshift(savedMove);
     logAction('create','wh_moves',{entity_id:savedMove.id,entity_label:`${t.label}: ${p.name} ×${qty}`});
-    toast('Операция проведена');renderWhMoves();return true;
+    toast('Операция проведена');renderCash();return true;
   },{wide:true});
+  const opSel=$('wm_op');
+  const syncCorrectFields=()=>{
+    const isCorrect=opSel.value==='correct';
+    $('wm_correctModeWrap').style.display=isCorrect?'':'none';
+    $('wm_reasonWrap').style.display=isCorrect?'':'none';
+  };
+  if(opSel){opSel.onchange=syncCorrectFields;syncCorrectFields();}
+}
+// модалка резервирования товара под заказ: создание нового резерва + список активных с возможностью отмены
+function whReservationModal(productId,city){
+  city=city||whCity;
+  const p=(S.products||[]).find(x=>x.id===productId);
+  if(!p){toast('Товар не найден');return;}
+  const active=(S.wh_reservations||[]).filter(r=>r.product_id===productId&&r.city===city&&r.status==='active');
+  const fmtWhen=ts=>{if(!ts)return'—';const d=new Date(ts);const q=n=>String(n).padStart(2,'0');return `${q(d.getDate())}.${q(d.getMonth()+1)}.${d.getFullYear()} ${q(d.getHours())}:${q(d.getMinutes())}`;};
+  const canCreate=isAdmin()||can('cash','create');
+  const body=`
+    <div class="hint">Товар: <b>${esc(p.name)}</b> · Город: <b>${esc(city)}</b> · Факт: <b>${productStock(p)}</b> · Уже в резерве: <b>${productReserved(productId,city)}</b> · Доступно: <b>${productAvailable(p,city)}</b></div>
+    ${canCreate?`
+    <div class="form-grid" style="margin-top:12px">
+      <div class="field"><label>Код заказа <span style="color:var(--rust)">*</span></label><input id="wr_order" placeholder="напр. KZ123456789"></div>
+      <div class="field"><label>Количество <span style="color:var(--rust)">*</span></label><input type="number" min="1" step="1" id="wr_qty" placeholder="0"></div>
+      <div class="field full"><label>Комментарий</label><input id="wr_comment" placeholder="необязательно"></div>
+    </div>
+    <button type="button" class="btn primary sm" id="wrCreateBtn" style="margin-top:8px">Создать резерв</button>`:'<div class="hint" style="color:var(--rust);margin-top:8px">Нет прав на создание резерва</div>'}
+    <h3 class="calc-h" style="margin-top:18px">Активные резервы в «${esc(city)}»</h3>
+    <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Заказ</th><th>Кол-во</th><th>Создан</th><th>Автор</th><th></th>
+    </tr></thead><tbody id="wrList">
+      ${active.length?active.map(r=>`<tr data-wrrow="${r.id}">
+        <td>${esc(r.order_code||'—')}</td><td>${r.quantity}</td><td>${fmtWhen(r.created_at)}</td><td>${esc(r.created_by_name||'—')}</td>
+        <td>${canCreate?`<button type="button" class="btn sm ghost" data-wrcancel="${r.id}">Отменить</button>`:''}</td>
+      </tr>`).join(''):'<tr><td colspan="5"><div class="empty">Нет активных резервов</div></td></tr>'}
+    </tbody></table></div>`;
+  const ov=showModal('Резерв товара',body,null,{readonly:true,closeLabel:'Закрыть'});
+  const refresh=()=>{closeTopModal();whReservationModal(productId,city);};
+  const createBtn=ov.querySelector('#wrCreateBtn');
+  if(createBtn)createBtn.onclick=async()=>{
+    createBtn.disabled=true;
+    try{
+      const order_code=val('wr_order').trim();
+      const qty=parseInt(val('wr_qty'),10)||0;
+      if(!order_code){toast('Укажите код заказа');return;}
+      if(qty<=0){toast('Введите количество');return;}
+      // свежая проверка остатка и суммы резервов прямо перед записью
+      const freshP=await dbGetOne('products',productId);
+      const factNow=freshP?parseInt((freshP.stock||{})[city]||0,10)||0:productStock(p);
+      const freshReserved=(await dbList('wh_reservations',{})).filter(r=>r.product_id===productId&&r.city===city&&r.status==='active').reduce((s,r)=>s+(parseInt(r.quantity,10)||0),0);
+      const availNow=factNow-freshReserved;
+      if(qty>availNow){toast(`Недостаточно доступного остатка: доступно ${availNow}, нужно ${qty}`);return;}
+      const row={product_id:productId,order_code,city,quantity:qty,status:'active',
+        created_by:(S.me&&S.me.id)||null,created_by_name:(S.me&&(S.me.full_name||S.me.email))||'—',
+        comment:val('wr_comment').trim()||null};
+      const saved=await dbInsert('wh_reservations',row);
+      if(!saved){toast('Не удалось создать резерв');return;}
+      if(!S.wh_reservations)S.wh_reservations=[];S.wh_reservations.unshift(saved);
+      logAction('create','wh_reservations',{entity_id:saved.id,entity_label:`Резерв: ${p.name} ×${qty} (заказ ${order_code})`});
+      toast('Резерв создан');refresh();
+    }finally{createBtn.disabled=false;}
+  };
+  ov.querySelectorAll('[data-wrcancel]').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    const rid=b.dataset.wrcancel;
+    const upd=await dbUpdate('wh_reservations',rid,{status:'cancelled',updated_at:new Date().toISOString()});
+    if(!upd){toast('Не удалось отменить резерв');b.disabled=false;return;}
+    const r=(S.wh_reservations||[]).find(x=>x.id===rid);if(r)Object.assign(r,upd);
+    logAction('update','wh_reservations',{entity_id:rid,entity_label:`Отмена резерва: ${p.name}`});
+    toast('Резерв отменён');refresh();
+  });
 }
 /* ================= МОДУЛЬ: ОТПРАВКИ МЕЖГОРОД ================= */
 // список типов транспорта
@@ -3959,6 +4155,8 @@ function showModal(title,bodyHtml,onSave,opts={}){
   return ov;
 }
 function showInfo(title,bodyHtml,opts){return showModal(title,bodyHtml,null,Object.assign({readonly:true},opts||{}));}
+// закрыть самую верхнюю открытую модалку (используется для перехода «карточка товара» → «операция/резерв»)
+function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.length)ovs[ovs.length-1].remove();}
 
 /* автологин / спец-кабинеты по ссылке */
 (async()=>{
