@@ -321,6 +321,8 @@
   .wh2-banner span{font-size:13px;color:var(--muted)}
   .wh2-soon{padding:70px 20px;text-align:center;color:var(--muted)}
   .wh2-soon .big{font-size:17px;font-weight:700;color:var(--ink);margin-bottom:6px}
+  .wh2-thumb{width:38px;height:38px;border-radius:9px;background:#eef0f4;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px}
+  .wh2-thumb img{width:100%;height:100%;object-fit:cover}
   .wh-hint{font-size:13px;color:var(--muted);background:rgba(37,70,201,.06);padding:10px 12px;border-radius:10px;margin-bottom:10px;line-height:1.5}
   .wh-label{border:2px dashed var(--line);border-radius:12px;padding:20px;text-align:center;background:#fff}
   .wh-label-name{font-size:15px;font-weight:700;margin-bottom:12px}
@@ -2579,6 +2581,31 @@ function genBarcode(){
   const check=(10-(sum%10))%10;
   return base+check;
 }
+// сжимает выбранный файл-картинку до маленького квадратного JPEG (data URL) — храним прямо в products.photo,
+// отдельное файловое хранилище (Supabase Storage) для этого не требуется
+function resizeImageToDataURL(file,maxSize){
+  maxSize=maxSize||300;
+  return new Promise((resolve,reject)=>{
+    if(!file||!file.type||!file.type.startsWith('image/')){reject(new Error('not an image'));return;}
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error('read error'));
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('image error'));
+      img.onload=()=>{
+        const side=Math.min(img.width,img.height);
+        const sx=(img.width-side)/2, sy=(img.height-side)/2;
+        const canvas=document.createElement('canvas');
+        canvas.width=maxSize;canvas.height=maxSize;
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(img,sx,sy,side,side,0,0,maxSize,maxSize);
+        resolve(canvas.toDataURL('image/jpeg',0.82));
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 const WH_TABS=[ // ключ, иконка, подпись, реализовано ли (false = «скоро», честная заглушка)
   ['overview','🏠','Обзор',true],
@@ -2586,18 +2613,15 @@ const WH_TABS=[ // ключ, иконка, подпись, реализован�
   ['receiving','📥','Приёмка',false],
   ['assembly','🚚','Сборка',true],
   ['returns','↩️','Возвраты',true],   // = существующая «Приёмка невыкупа»
-  ['transfers','🔀','Перемещения',false],
   ['stocktake','🧮','Инвентаризация',false],
   ['moves','📊','Движения',true],
-  ['cells','🗂️','Ячейки',false],
-  ['issues','⚠️','Проблемы',false],
 ];
 function whTabKeyFor(sub){ // внутренний whSub → ключ верхней вкладки (для подсветки активной)
   if(sub==='products')return'products';
   if(sub==='moves')return'moves';
   if(sub==='intake')return'returns';
   if(sub==='assembly_courier'||sub==='assembly_mail')return'assembly';
-  return sub; // overview / receiving / transfers / stocktake / cells / issues
+  return sub; // overview / receiving / stocktake
 }
 function renderCash(){ // ключ модуля остался 'cash', но это Склад
   if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
@@ -2612,8 +2636,6 @@ function renderCash(){ // ключ модуля остался 'cash', но эт
     <div class="wh2-headrow">
       <div class="wh2-hfields">
         <div class="wh2-hfield"><span>Город</span><select id="whCitySel">${cityList.map(c=>`<option value="${esc(c)}" ${whCity===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
-        <div class="wh2-hfield"><span>Склад</span><select disabled><option>Основной склад</option></select></div>
-        <div class="wh2-hfield"><span>Зона</span><select disabled><option>Все зоны</option></select></div>
       </div>
       <div class="wh2-hactions">
         <button class="btn ghost" id="whScanBtn">▥ Сканировать</button>
@@ -2798,11 +2820,12 @@ function renderWhProducts(){
     <div class="panel">
       <div class="panel-head"><h2>Товары</h2><span class="count">${all.length}</span></div>
       <div class="table-scroll"><table class="resp-table" id="whProdTable"><thead><tr>
-        <th>Название</th><th>Партнёр</th><th>Штрих-код</th><th>Артикул</th><th>Ячейка</th><th>Факт</th><th>Резерв</th><th>Доступно</th><th>Статус</th><th></th>
+        <th></th><th>Название</th><th>Партнёр</th><th>Штрих-код</th><th>Артикул</th><th>Ячейка</th><th>Факт</th><th>Резерв</th><th>Доступно</th><th>Статус</th><th></th>
       </tr></thead><tbody>
       ${pageRows.length?pageRows.map(p=>{
         const reserved=productReserved(p.id);const avail=productAvailable(p);const cellVal=productCell(p);const badge=productStatusBadge(p);
         return `<tr data-whrow="${p.id}">
+        <td data-label="" style="width:44px"><div class="wh2-thumb">${p.photo?`<img src="${p.photo}" alt="">`:'📦'}</div></td>
         <td data-label="Название"><strong>${esc(p.name||'—')}</strong>${p.category?`<div class="wh-cat">${esc(p.category)}</div>`:''}</td>
         <td data-label="Партнёр">${p.partner_id?esc(whPartnerName(p.partner_id)):'<span class="wh-cat">—</span>'}</td>
         <td data-label="Штрих-код"><span class="wh-barcode">${esc(p.barcode||'—')}</span></td>
@@ -2816,7 +2839,7 @@ function renderWhProducts(){
           <button class="btn sm ghost" data-whedit="${p.id}">Открыть</button>
           <button class="btn sm ghost" data-whlabel="${p.id}">🏷</button>
         </div></td>
-      </tr>`;}).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Нет товаров</div>${whSearch||whPartner||whQuickFilter!=='all'?'Измените фильтры.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
+      </tr>`;}).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет товаров</div>${whSearch||whPartner||whQuickFilter!=='all'?'Измените фильтры.':'Добавьте первый товар или импортируйте список.'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
   const s=$('whProdSearch');if(s)s.oninput=e=>{
@@ -2890,8 +2913,15 @@ function renderWhProductsPager(total,totalPages,startIdx,shownCount){
 // форма СОЗДАНИЯ нового товара (центрированное модальное окно — как раньше)
 function productModal(){
   if(!isAdmin()&&!can('cash','create')){toast('Нет прав на добавление товаров');return;}
+  let photoDataUrl=null;
   const body=`
     <div class="form-grid">
+      <div class="field full"><label>Фото товара</label>
+        <div style="display:flex;align-items:center;gap:14px">
+          <div id="p_photoPreview" style="width:64px;height:64px;border-radius:12px;background:#eef0f4;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;font-size:26px">📦</div>
+          <input type="file" id="p_photoFile" accept="image/*">
+        </div>
+      </div>
       <div class="field full"><label>Название товара <span style="color:var(--rust)">*</span></label><input id="p_name" placeholder="Напр. Кроссовки Nike Air Max 42"></div>
       <div class="field full"><label>Партнёр склада <span style="color:var(--rust)">*</span></label>
         <select id="p_partner"><option value="">— выберите партнёра склада —</option>${(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}">${esc(pt.name)}</option>`).join('')}</select>
@@ -2914,7 +2944,7 @@ function productModal(){
     if(!barcode)barcode=genBarcode();
     const st={};
     document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
-    const payload={name,partner_id,barcode,sku:null,ket_sku:val('p_ketsku').trim()||null,category:null,stock:st,storage_cell:{}};
+    const payload={name,partner_id,barcode,sku:null,ket_sku:val('p_ketsku').trim()||null,category:null,stock:st,storage_cell:{},photo:photoDataUrl};
     const saved=await dbInsert('products',payload);
     if(!saved){toast('Не удалось сохранить');return false;}
     if(!S.products)S.products=[];S.products.unshift(saved);
@@ -2928,6 +2958,12 @@ function productModal(){
     }
     toast('Товар добавлен');renderCash();return true;
   },{wide:true});
+  const pf=$('p_photoFile');
+  if(pf)pf.onchange=async()=>{
+    const f=pf.files&&pf.files[0];if(!f)return;
+    try{photoDataUrl=await resizeImageToDataURL(f,300);$('p_photoPreview').innerHTML=`<img src="${photoDataUrl}" style="width:100%;height:100%;object-fit:cover">`;}
+    catch(e){toast('Не удалось загрузить изображение');}
+  };
 }
 // боковая выезжающая панель товара (просмотр/редактирование существующего) — вкладки «Информация» / «Движения»
 function productPanel(id){
@@ -2950,11 +2986,21 @@ function productPanel(id){
   ov.querySelector('#wp_x').onclick=()=>ov.remove();
   document.addEventListener('keydown',function esc3(e){if(e.key==='Escape'){ov.remove();document.removeEventListener('keydown',esc3);}});
 
+  let panelPhotoDataUrl=p.photo||null;
   function infoHtml(){
     const stock=(p.stock&&typeof p.stock==='object')?p.stock:{};
     const cell=(p.storage_cell&&typeof p.storage_cell==='object')?p.storage_cell:{};
     return `
     <div class="form-grid">
+      <div class="field full"><label>Фото товара</label>
+        <div style="display:flex;align-items:center;gap:14px">
+          <div id="p_photoPreview" style="width:72px;height:72px;border-radius:12px;background:#eef0f4;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;font-size:28px">${panelPhotoDataUrl?`<img src="${panelPhotoDataUrl}" style="width:100%;height:100%;object-fit:cover">`:'📦'}</div>
+          ${canEdit?`<div style="display:flex;flex-direction:column;gap:6px">
+            <input type="file" id="p_photoFile" accept="image/*">
+            ${panelPhotoDataUrl?'<button type="button" class="btn sm ghost" id="p_photoRemove">Удалить фото</button>':''}
+          </div>`:''}
+        </div>
+      </div>
       <div class="field full"><label>Название товара <span style="color:var(--rust)">*</span></label><input id="p_name" value="${esc(p.name||'')}" ${canEdit?'':'disabled'}></div>
       <div class="field full"><label>Партнёр склада <span style="color:var(--rust)">*</span></label>
         <select id="p_partner" ${canEdit?'':'disabled'}>${(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${p.partner_id===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select></div>
@@ -3004,6 +3050,14 @@ function productPanel(id){
   function wireInfoActions(){
     document.querySelectorAll('[data-wmquick]').forEach(b=>b.onclick=()=>{ov.remove();whMoveModal(id,b.dataset.wmquick);});
     document.querySelectorAll('[data-wrquick]').forEach(b=>b.onclick=()=>{ov.remove();whReservationModal(id,b.dataset.wrquick);});
+    const pf=$('p_photoFile');
+    if(pf)pf.onchange=async()=>{
+      const f=pf.files&&pf.files[0];if(!f)return;
+      try{panelPhotoDataUrl=await resizeImageToDataURL(f,300);paint();}
+      catch(e){toast('Не удалось загрузить изображение');}
+    };
+    const pr=$('p_photoRemove');
+    if(pr)pr.onclick=()=>{panelPhotoDataUrl=null;paint();};
   }
   function paint(){
     ov.querySelectorAll('[data-wptab]').forEach(b=>b.classList.toggle('active',b.dataset.wptab===tab));
@@ -3023,7 +3077,7 @@ function productPanel(id){
           let barcode=val('p_barcode').trim();if(!barcode)barcode=genBarcode();
           const cellNow=(p.storage_cell&&typeof p.storage_cell==='object')?Object.assign({},p.storage_cell):{};
           document.querySelectorAll('[data-pcell]').forEach(el=>{const c=el.dataset.pcell;const v=el.value.trim();if(v)cellNow[c]=v;else delete cellNow[c];});
-          const payload={name,partner_id,barcode,ket_sku:val('p_ketsku').trim()||null,storage_cell:cellNow};
+          const payload={name,partner_id,barcode,ket_sku:val('p_ketsku').trim()||null,storage_cell:cellNow,photo:panelPhotoDataUrl};
           const saved=await dbUpdate('products',id,payload);
           if(!saved){toast('Не удалось сохранить');return;}
           Object.assign(p,saved);
