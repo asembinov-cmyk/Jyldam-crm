@@ -2368,11 +2368,7 @@ async function loadAiInsights(){
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const issues=notifyIssues();
-  const highlights=notifyHighlights();
-  const events=notifyEvents();
   const crit=issues.filter(i=>i.lvl==='crit').length;
-  const timeOf=s=>{const t=(s||'').slice(11,16);return t||'';};
-  const dayOf=s=>{const d=(s||'').slice(0,10);return d===localToday()?'сегодня':fmtDate(d);};
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Центр контроля</h1><p>${crit?`<span style="color:#c0392b;font-weight:700">${crit} срочных</span> · `:''}Задачи, выводы и важные изменения</p></div>
       <div class="head-actions"><button class="btn ghost" id="nfReload">⟳ Обновить</button></div>
@@ -2405,36 +2401,7 @@ function renderNotify(){
       </div>
     </div>`:''}
 
-    ${isStaff()?duplicatesPanelHtml():''}
-
-    ${highlights.length?`
-    <div class="panel" style="margin-bottom:18px">
-      <div class="panel-head"><h2>✨ Необычное</h2><span class="count">${highlights.length}</span></div>
-      ${highlights.map(h=>`
-        <div class="nf-issue nf-i-${h.lvl}">
-          <div class="nf-i-ico">${h.ico}</div>
-          <div class="nf-i-body"><div class="nf-i-title">${esc(h.title)}</div><div class="nf-i-desc">${esc(h.desc)}</div></div>
-        </div>`).join('')}
-    </div>`:''}
-
-    <div class="panel">
-      <div class="panel-head nf-collapse-head" id="nfEvToggle" style="cursor:pointer">
-        <h2>Лента событий</h2><span class="count">${events.length}</span>
-        <span class="nf-collapse-ico">${_nfEventsOpen?'▴':'▾'}</span>
-      </div>
-      <div id="nfEvBody" style="${_nfEventsOpen?'':'display:none'}">
-      ${events.length?events.map(a=>{
-        const r=NOTIFY_RULES[a.action]||{icon:'•',level:'info',verb:a.action};
-        const ent=FIELD_LABEL[a.entity]||a.entity||'';
-        return `<div class="nf-item nf-${r.level}">
-          <div class="nf-ico">${r.icon}</div>
-          <div class="nf-body"><div class="nf-line"><b>${esc(a.user_name||'—')}</b> ${esc(r.verb)} ${esc(ent.toLowerCase())} ${a.entity_label?`<span class="nf-obj">${esc(a.entity_label)}</span>`:''}</div></div>
-          <div class="nf-time">${esc(dayOf(a.created_at))} ${esc(timeOf(a.created_at))}</div>
-        </div>`;
-      }).join(''):'<div class="empty" style="padding:20px">Пока нет событий</div>'}
-      </div>
-    </div>`;
-  if($('nfEvToggle'))$('nfEvToggle').onclick=()=>{_nfEventsOpen=!_nfEventsOpen;renderNotify();};
+    ${isStaff()?duplicatesPanelHtml():''}`;
   if($('nfAiRun'))$('nfAiRun').onclick=()=>loadAiInsights();
   bindDuplicatesPanel();
   // переходы по клику на задачу
