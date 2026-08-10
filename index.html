@@ -1834,13 +1834,18 @@ function startRealtime(){
       .on('postgres_changes',{event:'*',schema:'public',table:'pickups'},payload=>applyRealtime('pickups',payload))
       // изменения заказов
       .on('postgres_changes',{event:'*',schema:'public',table:'orders'},payload=>applyRealtime('orders',payload))
+      // изменения статусов заказов КЕТ (send_status/status_kz/call_status) — приходят от вебхука KET
+      .on('postgres_changes',{event:'*',schema:'public',table:'inbound_orders'},payload=>applyRealtime('inbound_orders',payload))
       .subscribe();
   }catch(e){console.warn('realtime',e);}
 }
 // применяем изменение из базы к данным в памяти
+const RT_TABLE_ARR={pickups:'pickups',orders:'orders',inbound_orders:'inbound_orders'};
 function applyRealtime(table,payload){
   try{
-    const arr=table==='pickups'?(S.pickups||[]):(S.orders||[]);
+    const key=RT_TABLE_ARR[table]||table;
+    if(!S[key])S[key]=[];
+    const arr=S[key];
     const row=payload.new||payload.old;
     if(!row||!row.id)return;
     if(payload.eventType==='INSERT'){
