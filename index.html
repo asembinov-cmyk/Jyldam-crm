@@ -4057,7 +4057,14 @@ const CALC_POST_FIELDS=[
 // настройки калькуляции для периода: сначала ищем строку месяца, иначе дефолтную (без периода)
 function calcSettingsFor(period){
   const all=S.calcSettingsAll||[];
-  if(period){const m=all.find(r=>r.period===period);if(m)return m;}
+  if(period){
+    const exact=all.find(r=>r.period===period);
+    if(exact)return exact;
+    // записи за этот месяц ещё нет — нормативы должны автоматически переноситься из месяца в месяц,
+    // пока их явно не изменят и не сохранят, поэтому берём последнюю по времени запись СТРОГО ДО этого месяца
+    const prior=all.filter(r=>r.period&&r.period<period).sort((a,b)=>b.period.localeCompare(a.period))[0];
+    if(prior)return prior;
+  }
   // дефолт: строка без периода, иначе первая
   return all.find(r=>!r.period)||all[0]||{};
 }
@@ -4074,6 +4081,7 @@ function calcMinProfit(period){const cs=calcSettingsFor(period||calcPeriodStr())
 function calcCityNorm(cityId,key,period){
   const all=S.calcCityNorms||[];
   let row=period?all.find(r=>r.city_id===cityId&&r.period===period):null;
+  if(!row&&period)row=all.filter(r=>r.city_id===cityId&&r.period&&r.period<period).sort((a,b)=>b.period.localeCompare(a.period))[0];
   if(!row)row=all.find(r=>r.city_id===cityId&&!r.period)||all.find(r=>r.city_id===cityId);
   if(row&&row[key]!=null&&row[key]!=='')return parseFloat(row[key]);
   return calcNorm(key,period); // запасной — общий норматив периода
@@ -4083,6 +4091,7 @@ function calcCourierPay(courierId,period){
   if(!courierId)return 0;
   const all=S.calcCourierNorms||[];
   let row=period?all.find(r=>r.courier_id===courierId&&r.period===period):null;
+  if(!row&&period)row=all.filter(r=>r.courier_id===courierId&&r.period&&r.period<period).sort((a,b)=>b.period.localeCompare(a.period))[0];
   if(!row)row=all.find(r=>r.courier_id===courierId&&!r.period)||all.find(r=>r.courier_id===courierId);
   return row&&row.pay!=null&&row.pay!==''?parseFloat(row.pay):0;
 }
@@ -4091,6 +4100,7 @@ function calcSalesNorm(salesId,key,period){
   if(!salesId)return 0;
   const all=S.calcSalesNorms||[];
   let row=period?all.find(r=>r.sales_id===salesId&&r.period===period):null;
+  if(!row&&period)row=all.filter(r=>r.sales_id===salesId&&r.period&&r.period<period).sort((a,b)=>b.period.localeCompare(a.period))[0];
   if(!row)row=all.find(r=>r.sales_id===salesId&&!r.period)||all.find(r=>r.sales_id===salesId);
   return row&&row[key]!=null&&row[key]!==''?parseFloat(row[key]):0;
 }
@@ -4342,7 +4352,12 @@ function compactCityNorms(cities,cityNorm){
 async function saveCalcSettings(){
   const btn=$('calcSaveBtn');if(btn)btn.disabled=true;
   const P=calcPeriodStr(); // сохраняем в выбранный месяц
+  // стартуем с уже действующих для этого месяца значений (свои за этот месяц, либо унаследованные с прошлого) —
+  // иначе при ПЕРВОМ сохранении за новый месяц с одной вкладки (напр. «Курьерская») поля другой вкладки
+  // («Почтовая», фонды) и так далее обнулятся, т.к. их полей нет в DOM текущей вкладки
+  const base=calcSettingsFor(P)||{};
   const row={period:P};
+  Object.keys(base).forEach(k=>{if(k!=='id'&&k!=='period'&&k!=='created_at'&&k!=='updated_at')row[k]=base[k];});
   document.querySelectorAll('[data-calcnorm]').forEach(inp=>{
     const k=inp.dataset.calcnorm;const v=inp.value.trim();
     row[k]=v===''?0:parseFloat(v)||0;
