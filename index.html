@@ -7777,8 +7777,30 @@ async function loadInbound(){
     await autoMatchInboundItems(); // подтягиваем всё, что уже можно привязать по сохранённым тех-названиям
   }catch(e){S.inbound_orders=[];S.inbound_items=[];S.inbound_partners=[];}
 }
-const KET_SEND_STATUS={'0':'Отправлен','4':'Отказ','5':'Оплачен','6':'На отправку','7':'Отклонено'};
-const KET_STATUS_KZ={'0':'Обработка','1':'Отложенная','2':'На доставку','4':'Упакован на почте','5':'Заберёт','6':'Упакован','7':'Хранение','8':'Упакован принят','10':'Груз вручён','11':'Груз в дороге','13':'Получен','16':'Проверен','17':'Свежий'};
+// «звонковый» статус (statuses) — новое измерение, которого раньше не было в вебхуке KET.
+// Ожидаем, что придёт под каким-то полем в inbound_orders — уточнить у бэкенда точное имя поля,
+// когда его реально начнут присылать (см. пометку внизу файла/чат).
+const KET_CALL_STATUS={
+  '0':'Новая','1':'Подтверждён','2':'Отменён','3':'Перезвонить','4':'Недозвон','5':'Брак',
+  '6':'Уже получил заказ','7':'Чёрный список','8':'Заказано у конкурентов',
+  '10':'Недозвон (ночь)','11':'Предварительно подтверждён',
+};
+const KET_SEND_STATUS={
+  '0':'Отправлен','4':'Отказ','5':'Оплачен','6':'На отправку','7':'Отклонено',
+  '8':'Архив АБЦ','9':'Оплачена ТС (отказ)','10':'Полная предоплата','11':'Частичная предоплата',
+};
+const KET_STATUS_KZ={
+  '0':'Обработка','1':'Отложенная доставка','2':'На доставку','4':'Упакован на почте','5':'Заберёт',
+  '6':'Упакован','7':'Хранение','8':'Упакован принят','9':'Обратная доставка отправлена','10':'Груз вручён',
+  '11':'Груз в дороге','13':'Получен','14':'Нет товара','15':'Располовинен','16':'Проверен','17':'Свежий',
+  '18':'Автоответчик','19':'Перезвонить','20':'Сделать замену','21':'Возврат денег','22':'На контроль',
+  '23':'Упакован добавочный','24':'Частичный возврат','25':'Оплачена транспортировка','26':'Нет товара (свежий)',
+  '27':'Возврат на складе','28':'Дожим партнёрами','29':'Вручить подарок','30':'Получит почтой',
+  '40':'В работе у робота','41':'Отправить на Тастамат','42':'Передан в Тастамат','43':'Забронирован в Тастамат',
+  '44':'Вложена в Тастамат','45':'Выкуп из Тастамата','46':'Невыкуп из Тастамата','47':'Не вложена (Тастамат)',
+  '48':'Ожидает счёт',
+};
+function ketCallLabel(s){return s==null||s===''?'—':(KET_CALL_STATUS[String(s)]||('код '+s));}
 function ketSendLabel(s){return s==null||s===''?'—':(KET_SEND_STATUS[String(s)]||('код '+s));}
 function ketKzLabel(s){return s==null||s===''?'—':(KET_STATUS_KZ[String(s)]||('код '+s));}
 async function renderInboundOrders(){
@@ -7811,7 +7833,7 @@ function inboundOrderShopLabel(o){
 // если указан почтовый индекс, считаем почтовой доставкой, иначе курьерской
 function inboundDeliveryType(o){return o.index?'mail':'courier';}
 function inboundDeliveryLabel(o){return inboundDeliveryType(o)==='mail'?'Почтовая':'Курьерская';}
-let inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};
+let inbFilter={q:'',partner:'',delivery:'',status:'',callStatus:'',dateFrom:'',dateTo:''};
 let inbPage=1;      // текущая страница пагинации заказов КЕТ
 let inbPerPage=50;  // заказов КЕТ на страницу
 const inbSelected=new Set(); // id выбранных заказов КЕТ (для массовых действий, живёт между страницами)
@@ -7822,6 +7844,7 @@ function filteredInbound(){
     if(inbFilter.partner&&!inboundOrderShopIds(o).includes(inbFilter.partner))return false;
     if(inbFilter.delivery&&inboundDeliveryType(o)!==inbFilter.delivery)return false;
     if(inbFilter.status&&String(o.send_status||'')!==inbFilter.status)return false;
+    if(inbFilter.callStatus&&String(o.call_status||'')!==inbFilter.callStatus)return false;
     const cd=(o.created_at||'').slice(0,10);
     if(inbFilter.dateFrom&&(!cd||cd<inbFilter.dateFrom))return false;
     if(inbFilter.dateTo&&(!cd||cd>inbFilter.dateTo))return false;
@@ -7837,7 +7860,7 @@ function drawInboundOrders(){
   const allRows=filteredInbound();
   const unmatched=list.filter(o=>o.match_status==='unmatched').length;
   const written=list.filter(o=>o.stock_written).length;
-  const anyFilter=inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.dateFrom||inbFilter.dateTo;
+  const anyFilter=inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.callStatus||inbFilter.dateFrom||inbFilter.dateTo;
   // пагинация — как в «Заказах» и «Заявках на забор»
   const totalPages=Math.max(1,Math.ceil(allRows.length/inbPerPage));
   if(inbPage>totalPages)inbPage=totalPages;
@@ -7866,6 +7889,7 @@ function drawInboundOrders(){
           <option value="courier" ${inbFilter.delivery==='courier'?'selected':''}>Курьерская</option>
           <option value="mail" ${inbFilter.delivery==='mail'?'selected':''}>Почтовая</option></select>
         <select id="inbstatus"><option value="">Все статусы</option>${Object.entries(KET_SEND_STATUS).map(([code,label])=>`<option value="${code}" ${inbFilter.status===code?'selected':''}>${esc(label)}</option>`).join('')}</select>
+        <select id="inbcallstatus"><option value="">Все звонковые</option>${Object.entries(KET_CALL_STATUS).map(([code,label])=>`<option value="${code}" ${inbFilter.callStatus===code?'selected':''}>${esc(label)}</option>`).join('')}</select>
       </div>
       <div class="filters filters-dates">
         <span class="fdate-lbl">Дата прихода заказа:</span>
@@ -7889,7 +7913,7 @@ function drawInboundOrders(){
           <td data-label="Город">${esc(o.city||'—')}</td>
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
           <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
-          <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div></td>
+          <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
           <td data-label="Привязка">${matchBadge}</td>
           <td data-label="Склад">${stockBadge}</td>
           <td data-label="Дата">${esc(fmtDate(o.created_at))}</td>
@@ -7940,6 +7964,7 @@ function drawInboundOrders(){
   if($('inbpartner'))$('inbpartner').onchange=e=>{inbFilter.partner=e.target.value;redraw();};
   if($('inbdelivery'))$('inbdelivery').onchange=e=>{inbFilter.delivery=e.target.value;redraw();};
   if($('inbstatus'))$('inbstatus').onchange=e=>{inbFilter.status=e.target.value;redraw();};
+  if($('inbcallstatus'))$('inbcallstatus').onchange=e=>{inbFilter.callStatus=e.target.value;redraw();};
   if($('inbdatefrom'))$('inbdatefrom').onchange=e=>{inbFilter.dateFrom=e.target.value;redraw();};
   if($('inbdateto'))$('inbdateto').onchange=e=>{inbFilter.dateTo=e.target.value;redraw();};
   if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};inbPage=1;inbSelectAll=false;drawInboundOrders();};
@@ -8049,7 +8074,7 @@ function inboundOrderModal(id){
     <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
     <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
     <div><b>Сумма:</b> ${o.price!=null?esc(o.price):'—'} ${o.total_price!=null&&o.total_price!==o.price?('(итого '+esc(o.total_price)+')'):''}</div>
-    <div><b>Статус доставки:</b> ${esc(ketSendLabel(o.send_status))} · <b>Посылка:</b> ${esc(ketKzLabel(o.status_kz))}</div>
+    <div><b>Статус доставки:</b> ${esc(ketSendLabel(o.send_status))} · <b>Посылка:</b> ${esc(ketKzLabel(o.status_kz))}${o.call_status!=null?` · <b>Звонок:</b> ${esc(ketCallLabel(o.call_status))}`:''}</div>
     ${o.kz_code?`<div><b>Трек:</b> ${esc(o.kz_code)}</div>`:''}
     <div style="margin-top:6px"><b>Состав:</b></div>
     <div style="display:grid;gap:4px">
