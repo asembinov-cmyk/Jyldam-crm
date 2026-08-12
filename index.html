@@ -8098,28 +8098,30 @@ async function runInBatches(list,batchSize,worker){
   }
 }
 async function autoMatchInboundItems(){
-  if(!S.inbound_items||!S.inbound_items.length||!S.products||!S.products.length)return 0;
-  const byKetSku=new Map();
-  S.products.forEach(p=>{productKetSkuList(p).forEach(code=>byKetSku.set(normKetSku(code),p));});
-  if(!byKetSku.size)return 0;
+  if(!S.inbound_items||!S.inbound_items.length)return 0;
   let matchedCount=0;
-  const touchedOrders=new Set();
-  const toMatch=S.inbound_items.filter(it=>!(it.matched&&it.product_id)&&it.ket_sku&&byKetSku.has(normKetSku(it.ket_sku)));
-  if(!toMatch.length)return 0;
-  await runInBatches(toMatch,20,async it=>{
-    const prod=byKetSku.get(normKetSku(it.ket_sku));
-    const upd=await dbUpdate('inbound_order_items',it.id,{product_id:prod.id,matched:true});
-    if(upd){Object.assign(it,upd);matchedCount++;touchedOrders.add(it.inbound_order_id);}
+  if(S.products&&S.products.length){
+    const byKetSku=new Map();
+    S.products.forEach(p=>{productKetSkuList(p).forEach(code=>byKetSku.set(normKetSku(code),p));});
+    if(byKetSku.size){
+      const toMatch=S.inbound_items.filter(it=>!(it.matched&&it.product_id)&&it.ket_sku&&byKetSku.has(normKetSku(it.ket_sku)));
+      await runInBatches(toMatch,20,async it=>{
+        const prod=byKetSku.get(normKetSku(it.ket_sku));
+        const upd=await dbUpdate('inbound_order_items',it.id,{product_id:prod.id,matched:true});
+        if(upd){Object.assign(it,upd);matchedCount++;}
+      });
+    }
+  }
+  // сверяем ВСЕ заказы (не только тронутые в этом запуске) — иначе если позиции привязались, а флажок
+  // заказа по какой-то причине не обновился раньше, это расхождение никогда само не исправится:
+  // предыдущая версия выходила из функции раньше и не доходила до этой проверки, если новых совпадений не было.
+  const ordersToFlip=(S.inbound_orders||[]).filter(order=>{
+    if(order.match_status==='matched')return false;
+    const its=inboundItemsFor(order.id);
+    return its.length>0&&!its.some(x=>!x.matched||!x.product_id);
   });
-  // если у заказа теперь все позиции привязаны — снимаем пометку "требует привязки"
-  const ordersToFlip=[...touchedOrders].filter(orderId=>{
-    const stillUnmatched=inboundItemsFor(orderId).some(x=>!x.matched||!x.product_id);
-    const order=(S.inbound_orders||[]).find(x=>x.id===orderId);
-    return order&&!stillUnmatched&&order.match_status!=='matched';
-  });
-  await runInBatches(ordersToFlip,20,async orderId=>{
-    const order=(S.inbound_orders||[]).find(x=>x.id===orderId);
-    const upd=await dbUpdate('inbound_orders',orderId,{match_status:'matched'});
+  await runInBatches(ordersToFlip,20,async order=>{
+    const upd=await dbUpdate('inbound_orders',order.id,{match_status:'matched'});
     if(upd)Object.assign(order,upd);
   });
   return matchedCount;
