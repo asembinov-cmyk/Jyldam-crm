@@ -6376,6 +6376,30 @@ function drawFitText(page,text,x,y,maxWidth,font,size){
   while(s>6&&font.widthOfTextAtSize(text,s)>maxWidth)s-=0.5;
   page.drawText(text,{x,y,size:s,font});
 }
+// перенос длинного текста на несколько строк (по словам), друг под другом — вместо сжатия в одну строку.
+// yTop — Y самой верхней строки, дальше идём вниз. Если после maxLines текст не влез — последняя строка
+// сжимается по ширине (drawFitText), чтобы уж точно не выехать за пределы поля.
+function drawWrappedText(page,text,x,yTop,maxWidth,font,size,lineHeight,maxLines){
+  if(!text)return;
+  const words=String(text).split(/\s+/).filter(Boolean);
+  const lines=[];
+  let cur='',i=0;
+  while(i<words.length&&lines.length<maxLines-1){
+    const test=cur?cur+' '+words[i]:words[i];
+    if(font.widthOfTextAtSize(test,size)<=maxWidth){cur=test;i++;}
+    else if(cur){lines.push(cur);cur='';}
+    else{cur=words[i];i++;} // одно слово шире maxWidth — всё равно кладём, drawFitText сожмёт при отрисовке
+  }
+  if(cur)lines.push(cur);
+  // все оставшиеся (не поместившиеся) слова — в последнюю строку целиком, она сожмётся по ширине при отрисовке
+  const rest=words.slice(i).join(' ');
+  if(rest)lines.push(lines.length?lines.pop()+' '+rest:rest);
+  lines.slice(0,maxLines).forEach((line,idx)=>{
+    const y=yTop-idx*lineHeight;
+    if(idx===lines.length-1)drawFitText(page,line,x,y,maxWidth,font,size);
+    else page.drawText(line,{x,y,size,font});
+  });
+}
 // общая генерация PDF со бланками — принимает уже нормализованный список {client,address,phone,amount}
 async function generateMailLabelsPdf(items){
   if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
@@ -6398,8 +6422,8 @@ async function generateMailLabelsPdf(items){
     if(it.amount)page.drawText(Math.round(+it.amount).toLocaleString('ru-RU')+' тенге',{x:470,y:yOf(143.5),size:11,font:fontBold});
     // 3) Кому
     drawFitText(page,it.client||'',460,yOf(376),360,font,11);
-    // 4) Куда
-    drawFitText(page,it.address||'',460,yOf(440),360,font,11);
+    // 4) Куда — переносим на несколько строк (между «Куда» и «телефон №» достаточно места на 3 строки)
+    drawWrappedText(page,it.address||'',460,yOf(437),365,font,10.5,12,3);
     // 5) телефон (после "+")
     page.drawText((it.phone||'').replace(/^\+/,''),{x:468,y:yOf(478),size:11,font});
   }
