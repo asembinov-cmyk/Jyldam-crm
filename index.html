@@ -6503,6 +6503,36 @@ function exportOrdersToExcel(){
   XLSX.writeFile(wb,`Заказы_${modeName}_${today}.xlsx`);
   toast(`Выгружено заказов: ${rows.length}`);
 }
+// выгрузка заказов КЕТ в Excel — принимает уже готовый список (с учётом выбора галочкой/фильтра)
+function exportInboundToExcel(rows){
+  if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
+  if(!rows.length){toast('Нет заказов для выгрузки');return;}
+  const data=rows.map(o=>({
+    'Внешний ID':o.external_id||'',
+    'Источник':o.source||'',
+    'Клиент':o.client||'',
+    'Телефон':o.phone?phoneDisplay(o.phone):'',
+    'Город':o.city||'',
+    'Адрес':o.address||'',
+    'Тип доставки':inboundDeliveryLabel(o),
+    'Магазин':inboundOrderShopLabel(o),
+    'Сумма':o.price!=null?o.price:'',
+    'Статус отправки':ketSendLabel(o.send_status),
+    'Статус посылки':ketKzLabel(o.status_kz),
+    'Звонковый статус':o.call_status!=null?ketCallLabel(o.call_status):'',
+    'Привязка товара':o.match_status==='matched'?'привязан':'не привязан',
+    'Склад списан':o.stock_written?'да':'нет',
+    'Поступил':o.created_at?fmtDateTime(o.created_at):'',
+  }));
+  const ws=XLSX.utils.json_to_sheet(data);
+  const cols=Object.keys(data[0]||{});
+  ws['!cols']=cols.map(c=>({wch:c==='Адрес'?28:(c==='Клиент'||c==='Магазин'?20:14)}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Заказы КЕТ');
+  const today=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`Заказы_KET_${today}.xlsx`);
+  toast(`Выгружено заказов: ${rows.length}`);
+}
 function drawOrders(){
   const el=$('orderTable');const allRows=filteredOrders();
   // счётчик у «Список заказов» = число с учётом ВСЕХ фильтров (вкл. тип доставки, поиск)
@@ -8163,7 +8193,10 @@ function drawInboundOrders(){
   const colCount=11+(admin?1:0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
-      <button class="btn ghost sm" id="inbPrintLabels" style="margin-left:auto">🖨 Печать бланков (почта)</button></div>
+      <div class="head-actions" style="margin-left:auto">
+        <button class="btn btn-excel" id="inbExportXlsx">⬇ Выгрузить Excel</button>
+        <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
+      </div></div>
     ${ordersTabsHtml()}
     <div class="stats stats-4">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
@@ -8243,14 +8276,17 @@ function drawInboundOrders(){
     };
     updateInbAllChk(allRows);
     if($('inbDelSel'))$('inbDelSel').onclick=()=>delInboundOrdersBulk();
+  // список, с которым работают массовые действия: приоритет — отмеченные галочкой, иначе — весь текущий фильтр
+  const inboundActionList=()=>inbSelected.size?allRows.filter(o=>inbSelected.has(o.id)):filteredInbound();
   if($('inbPrintLabels'))$('inbPrintLabels').onclick=async()=>{
-    const mailOnly=filteredInbound().filter(o=>inboundDeliveryType(o)==='mail');
-    if(!mailOnly.length){toast('Нет почтовых заказов по текущим фильтрам');return;}
+    const mailOnly=inboundActionList().filter(o=>inboundDeliveryType(o)==='mail');
+    if(!mailOnly.length){toast(inbSelected.size?'Среди отмеченных нет почтовых заказов':'Нет почтовых заказов по текущим фильтрам');return;}
     const btn=$('inbPrintLabels');const origLabel=btn.textContent;btn.disabled=true;btn.textContent='Готовим PDF…';
     try{await printInboundMailLabelsPdf(mailOnly);}
     catch(e){console.error(e);toast('Не удалось сформировать бланки: '+(e&&e.message||e));}
     finally{btn.disabled=false;btn.textContent=origLabel;}
   };
+  if($('inbExportXlsx'))$('inbExportXlsx').onclick=()=>exportInboundToExcel(inboundActionList());
   }
   renderInboundPager(allRows.length,totalPages,startIdx,rows.length);
   const redraw=()=>{
