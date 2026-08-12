@@ -8091,6 +8091,12 @@ function mergeKetSku(existing,newCode){
 // по совпадению технического названия (ket_sku), который прописан в карточке товара.
 // Нужна, потому что первичная привязка на сервере срабатывает только в момент прихода заказа;
 // если тех-название прописали в товар ПОЗЖЕ — старые заказы сами не обновятся без этого прохода.
+// пачками по N параллельно — быстрее, чем строго по одному, но не создаёт сотен запросов одновременно
+async function runInBatches(list,batchSize,worker){
+  for(let i=0;i<list.length;i+=batchSize){
+    await Promise.all(list.slice(i,i+batchSize).map(worker));
+  }
+}
 async function autoMatchInboundItems(){
   if(!S.inbound_items||!S.inbound_items.length||!S.products||!S.products.length)return 0;
   const byKetSku=new Map();
@@ -8098,23 +8104,24 @@ async function autoMatchInboundItems(){
   if(!byKetSku.size)return 0;
   let matchedCount=0;
   const touchedOrders=new Set();
-  for(const it of S.inbound_items){
-    if(it.matched&&it.product_id)continue; // уже привязан
-    if(!it.ket_sku)continue;
+  const toMatch=S.inbound_items.filter(it=>!(it.matched&&it.product_id)&&it.ket_sku&&byKetSku.has(normKetSku(it.ket_sku)));
+  if(!toMatch.length)return 0;
+  await runInBatches(toMatch,20,async it=>{
     const prod=byKetSku.get(normKetSku(it.ket_sku));
-    if(!prod)continue;
     const upd=await dbUpdate('inbound_order_items',it.id,{product_id:prod.id,matched:true});
     if(upd){Object.assign(it,upd);matchedCount++;touchedOrders.add(it.inbound_order_id);}
-  }
+  });
   // если у заказа теперь все позиции привязаны — снимаем пометку "требует привязки"
-  for(const orderId of touchedOrders){
+  const ordersToFlip=[...touchedOrders].filter(orderId=>{
     const stillUnmatched=inboundItemsFor(orderId).some(x=>!x.matched||!x.product_id);
     const order=(S.inbound_orders||[]).find(x=>x.id===orderId);
-    if(order&&!stillUnmatched&&order.match_status!=='matched'){
-      const upd=await dbUpdate('inbound_orders',orderId,{match_status:'matched'});
-      if(upd)Object.assign(order,upd);
-    }
-  }
+    return order&&!stillUnmatched&&order.match_status!=='matched';
+  });
+  await runInBatches(ordersToFlip,20,async orderId=>{
+    const order=(S.inbound_orders||[]).find(x=>x.id===orderId);
+    const upd=await dbUpdate('inbound_orders',orderId,{match_status:'matched'});
+    if(upd)Object.assign(order,upd);
+  });
   return matchedCount;
 }
 async function loadInbound(){
@@ -8157,9 +8164,13 @@ function ketKzLabel(s){return s==null||s===''?'—':(KET_STATUS_KZ[String(s)]||(
 async function renderInboundOrders(){
   if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   ordersTab='ket';
-  $('main').innerHTML='<div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>'+ordersTabsHtml()+'<div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
-  bindOrdersTabs();
-  await loadInbound();
+  // грузим всю историю только один раз за сессию — дальше данные держит свежими Realtime (+ фоновый опрос раз в 30с).
+  // Без этого при большом и растущем количестве заказов КЕТ каждое открытие вкладки заново тянуло тысячи строк.
+  if(!S.inbound_orders){
+    $('main').innerHTML='<div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>'+ordersTabsHtml()+'<div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
+    bindOrdersTabs();
+    await loadInbound();
+  }
   drawInboundOrders();
 }
 function inboundItemsFor(orderId){return (S.inbound_items||[]).filter(it=>it.inbound_order_id===orderId);}
@@ -8276,6 +8287,7 @@ function drawInboundOrders(){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
+        <button class="btn ghost sm" id="inbRefresh" title="Заново загрузить все заказы КЕТ из базы">🔄 Обновить</button>
         <button class="btn btn-excel" id="inbExportXlsx">⬇ Выгрузить Excel</button>
         <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
         <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
@@ -8368,6 +8380,11 @@ function drawInboundOrders(){
     try{await printInboundMailLabelsPdf(mailOnly);}
     catch(e){console.error(e);toast('Не удалось сформировать бланки: '+(e&&e.message||e));}
     finally{btn.disabled=false;btn.textContent=origLabel;}
+  };
+  if($('inbRefresh'))$('inbRefresh').onclick=async()=>{
+    const btn=$('inbRefresh');btn.disabled=true;btn.textContent='Обновляем…';
+    try{await loadInbound();drawInboundOrders();toast('Обновлено');}
+    finally{btn.disabled=false;btn.textContent='🔄 Обновить';}
   };
   if($('inbExportXlsx'))$('inbExportXlsx').onclick=()=>exportInboundToExcel(inboundActionList());
   if($('inbPrintWaybills'))$('inbPrintWaybills').onclick=async()=>{
