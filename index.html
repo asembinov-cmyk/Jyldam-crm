@@ -8321,11 +8321,10 @@ function drawInboundOrders(){
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
-        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Доставка</th><th>Магазин</th>
-        <th>Статус KET</th><th>Привязка</th><th>Склад</th><th>Дата</th><th></th>
+        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
+        <th>Статус KET</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
-        const matchBadge=o.match_status==='matched'?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">✓ привязан</span>':(o.match_status==='unmatched'?'<span class="ket-badge" style="background:#fce8e6;color:#c5221f">⚠ требует привязки</span>':'<span class="wh-cat">—</span>');
         const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
         return `<tr data-inbrow="${o.id}" style="cursor:pointer">
           ${admin?`<td onclick="event.stopPropagation()"><input type="checkbox" class="inbChk" data-inbchk="${o.id}" ${inbSelected.has(o.id)?'checked':''}></td>`:''}
@@ -8333,15 +8332,13 @@ function drawInboundOrders(){
           <td data-label="Клиент">${esc(o.client||'—')}</td>
           <td data-label="Телефон">${esc(o.phone||'—')}</td>
           <td data-label="Город">${esc(o.city||'—')}</td>
+          <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
           <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
-          <td data-label="Привязка">${matchBadge}</td>
           <td data-label="Склад">${stockBadge}</td>
           <td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>
           <td data-label="" class="cell-actions"><div class="row-actions">
-            <button class="btn sm ghost" data-inbview="${o.id}">Открыть</button>
-            ${o.match_status==='unmatched'?`<button class="btn sm" data-inbmatch="${o.id}">Привязать</button>`:''}
             ${(!o.stock_written&&String(o.send_status)==='0'&&o.match_status==='matched')?`<button class="btn sm" data-inbstock="${o.id}">Списать склад</button>`:''}
             ${admin?`<button class="btn sm danger" data-inbdel="${o.id}">Удалить</button>`:''}
           </div></td>
@@ -8350,8 +8347,8 @@ function drawInboundOrders(){
       </tbody></table></div>
     </div>`;
   bindOrdersTabs();
-  $('main').querySelectorAll('[data-inbview]').forEach(b=>b.onclick=()=>inboundOrderModal(b.dataset.inbview));
-  $('main').querySelectorAll('[data-inbmatch]').forEach(b=>b.onclick=()=>inboundMatchModal(b.dataset.inbmatch));
+  $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
+  $('main').querySelectorAll('[data-inbdel]').forEach(b=>b.onclick=()=>delInboundOrder(b.dataset.inbdel));
   $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
   $('main').querySelectorAll('[data-inbdel]').forEach(b=>b.onclick=()=>delInboundOrder(b.dataset.inbdel));
   // двойной клик по строке — открыть карточку заказа (одиночный клик по кнопкам/чекбоксу не мешает)
@@ -8513,6 +8510,9 @@ async function delInboundOrdersBulk(){
 function inboundOrderModal(id){
   const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
   const items=inboundItemsFor(id);
+  const matchLine=o.match_status==='matched'
+    ?'<span style="color:#1a7f37">✓ привязан</span>'
+    :`<span style="color:var(--rust)">⚠ требует привязки</span> <button type="button" class="btn sm" id="inbModalMatch">Привязать</button>`;
   const body=`<div style="display:grid;gap:8px;font-size:14px">
     <div><b>Внешний ID:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
     <div><b>Поступил:</b> ${o.created_at?esc(fmtDateTime(o.created_at)):'—'}</div>
@@ -8520,16 +8520,20 @@ function inboundOrderModal(id){
     <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
     <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
     <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
+    <div><b>Вес:</b> ${o.weight?esc(o.weight)+' кг':'—'}</div>
     <div><b>Сумма:</b> ${o.price!=null?esc(o.price):'—'} ${o.total_price!=null&&o.total_price!==o.price?('(итого '+esc(o.total_price)+')'):''}</div>
     <div><b>Статус доставки:</b> ${esc(ketSendLabel(o.send_status))} · <b>Посылка:</b> ${esc(ketKzLabel(o.status_kz))}${o.call_status!=null?` · <b>Звонок:</b> ${esc(ketCallLabel(o.call_status))}`:''}</div>
     ${o.kz_code?`<div><b>Трек:</b> ${esc(o.kz_code)}</div>`:''}
+    <div><b>Привязка товаров:</b> ${matchLine}</div>
     <div style="margin-top:6px"><b>Состав:</b></div>
     <div style="display:grid;gap:4px">
       ${items.length?items.map(it=>`<div style="padding:6px 10px;border:1px solid var(--line);border-radius:8px">${esc(it.ket_sku||'?')} × ${it.qty} ${it.matched?'<span style="color:#1a7f37">— привязан</span>':'<span style="color:var(--rust)">— товар не найден на складе</span>'}</div>`).join(''):'<div class="wh-cat">Состав не разобран</div>'}
     </div>
     <div style="margin-top:6px"><b>Склад:</b> ${o.stock_written?('списан '+esc(fmtDate(o.stock_written_at))):'не списан'}</div>
   </div>`;
-  showInfo('Заказ КЕТ '+esc(o.external_id||''),body,{wide:true});
+  const ov=showInfo('Заказ КЕТ '+esc(o.external_id||''),body,{wide:true});
+  const mb=ov.querySelector('#inbModalMatch');
+  if(mb)mb.onclick=()=>{ov.remove();inboundMatchModal(id);};
 }
 function inboundMatchModal(id){
   const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
