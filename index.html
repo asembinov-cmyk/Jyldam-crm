@@ -8339,7 +8339,6 @@ function drawInboundOrders(){
           <td data-label="Склад">${stockBadge}</td>
           <td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>
           <td data-label="" class="cell-actions"><div class="row-actions">
-            ${(!o.stock_written&&String(o.send_status)==='0'&&o.match_status==='matched')?`<button class="btn sm" data-inbstock="${o.id}">Списать склад</button>`:''}
             ${admin?`<button class="btn sm danger" data-inbdel="${o.id}">Удалить</button>`:''}
           </div></td>
         </tr>`;
@@ -8347,9 +8346,6 @@ function drawInboundOrders(){
       </tbody></table></div>
     </div>`;
   bindOrdersTabs();
-  $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
-  $('main').querySelectorAll('[data-inbdel]').forEach(b=>b.onclick=()=>delInboundOrder(b.dataset.inbdel));
-  $('main').querySelectorAll('[data-inbstock]').forEach(b=>b.onclick=()=>inboundWriteStock(b.dataset.inbstock));
   $('main').querySelectorAll('[data-inbdel]').forEach(b=>b.onclick=()=>delInboundOrder(b.dataset.inbdel));
   // двойной клик по строке — открыть карточку заказа (одиночный клик по кнопкам/чекбоксу не мешает)
   $('main').querySelectorAll('[data-inbrow]').forEach(tr=>tr.ondblclick=e=>{
@@ -8568,30 +8564,6 @@ function inboundMatchModal(id){
     drawInboundOrders();
     return true;
   },{wide:true});
-}
-async function inboundWriteStock(orderId){
-  const o=(S.inbound_orders||[]).find(x=>x.id===orderId);if(!o)return false;
-  if(o.stock_written){toast('Склад по этому заказу уже списан');return false;}
-  if(String(o.send_status)!=='0'){toast('Списание только при статусе «Отправлен»');return false;}
-  const items=inboundItemsFor(orderId);
-  if(!items.length||items.some(it=>!it.matched||!it.product_id)){toast('Сначала привяжите все товары');return false;}
-  const partnerCity=((S.inbound_partners||[]).find(p=>p.id===o.inbound_partner_id)||{}).city;
-  const city=normalizeWhCity(o.city||partnerCity||'Алматы');
-  for(const it of items){
-    const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
-    const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
-    const before=parseInt(stock[city]||0,10)||0;
-    const after=Math.max(0,before-it.qty);
-    stock[city]=after;
-    await dbInsert('wh_moves',{product_id:it.product_id,city,op:'out_courier',qty:it.qty,balance_after:after,target:`KET заказ ${o.external_id}`,comment:'Списание по заказу KET',user_id:(S.me&&S.me.id)||null,user_name:(S.me&&(S.me.full_name||S.me.email))||'—'});
-    await dbUpdate('products',it.product_id,{stock});
-    const idx=(S.products||[]).findIndex(x=>x.id===it.product_id);if(idx>=0)S.products[idx].stock=stock;
-  }
-  await dbUpdate('inbound_orders',orderId,{stock_written:true,stock_written_at:new Date().toISOString()});
-  await loadInbound();
-  toast('Склад списан по заказу '+o.external_id);
-  drawInboundOrders();
-  return true;
 }
 
 </script>
