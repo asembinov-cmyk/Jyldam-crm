@@ -7860,6 +7860,58 @@ function filteredInbound(){
     return true;
   }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
 }
+// таблица кодов справочника для документации (переиспользует те же константы, что и сам код —
+// значит расхождений между документацией и реальными справочниками быть не может)
+function ketDocsStatusTable(dict){
+  return `<table class="resp-table" style="margin:8px 0"><thead><tr><th style="width:60px">Код</th><th>Значение</th></tr></thead><tbody>
+    ${Object.entries(dict).map(([code,label])=>`<tr><td><code>${esc(code)}</code></td><td>${esc(label)}</td></tr>`).join('')}
+  </tbody></table>`;
+}
+function ketDocsModal(){
+  const body=`
+  <div style="max-height:70vh;overflow-y:auto;line-height:1.55">
+    <p class="hint">Актуально на: август 2026. Как CRM принимает, хранит и обрабатывает данные, полученные от KET.</p>
+
+    <h3 class="calc-h">1. Общая схема</h3>
+    <p>Заказы попадают в CRM через серверную часть — <b>Edge Function «receive-order»</b> (Supabase), которая принимает вебхук от KET и пишет данные в две таблицы: <code>inbound_orders</code> (сам заказ) и <code>inbound_order_items</code> (состав заказа).</p>
+    <p class="hint" style="color:var(--rust)">⚠️ Код самой Edge Function фронтенд CRM не видит и не редактирует. Всё, что касается приёма вебхука на бэкенде, нужно сверять отдельно с тем, кто вёл «receive-order».</p>
+
+    <h3 class="calc-h">2. Таблица inbound_orders</h3>
+    <p>Ключевые поля: <code>external_id</code> (номер заказа в KET), <code>client</code>, <code>phone</code>, <code>city</code>, <code>index</code> (по нему определяется тип доставки), <code>send_status</code>, <code>status_kz</code>, <code>call_status</code> (новое, см. п.4), <code>match_status</code>, <code>stock_written</code>, <code>raw</code> (сырой JSON от KET).</p>
+    <p><b>Магазин (партнёр)</b>, которому принадлежит заказ, в самом заказе от KET не передаётся — вычисляется через привязанные товары: позиция состава → <code>product_id</code> → у товара есть <code>partner_id</code>. Если ни одна позиция не привязана — «ещё не привязан».</p>
+
+    <h3 class="calc-h">3. Поле raw (сырой payload)</h3>
+    <p>Проверено через SQL — в <code>raw</code> есть только: <code>addr, city, name, index, offer, phone, price, secret, country, order_id, total_price</code>. Идентификатора магазина там нет.</p>
+
+    <h3 class="calc-h">4. Справочники статусов</h3>
+    <p>У заказа KET <b>три независимых измерения статуса</b> — не связаны друг с другом, обновляются независимо.</p>
+
+    <h4 style="margin:14px 0 4px">4.1 «Звонковый» статус — <code>call_status</code> <span style="color:var(--rust)">(НОВОЕ, с августа 2026)</span></h4>
+    <p class="hint" style="color:var(--rust)">⚠️ Требует действий от бэкенда: 1) выполнить <code>alter table inbound_orders add column if not exists call_status integer;</code> 2) Edge Function должна записывать сюда значение, которое KET присылает под именем <code>status</code> (или другим — сверить с реальным телом вебхука).</p>
+    ${ketDocsStatusTable(KET_CALL_STATUS)}
+    <p class="hint">Код 9 в присланном списке отсутствовал — уточнить у KET, не пропущен ли.</p>
+
+    <h4 style="margin:14px 0 4px">4.2 Статус отправки — <code>send_status</code></h4>
+    ${ketDocsStatusTable(KET_SEND_STATUS)}
+
+    <h4 style="margin:14px 0 4px">4.3 Статус посылки — <code>status_kz</code></h4>
+    ${ketDocsStatusTable(KET_STATUS_KZ)}
+
+    <h3 class="calc-h">5. Определение типа доставки</h3>
+    <p>Явного поля от KET нет. Определяется по наличию почтового индекса: если заполнен <code>index</code> → почтовая, иначе — курьерская.</p>
+
+    <h3 class="calc-h">6. Привязка товаров (ket_sku)</h3>
+    <p>У позиции состава есть <code>ket_sku</code> (тех-название KET) и <code>qty</code>. У товара в справочнике «Товары» поле <code>ket_sku</code> может содержать несколько кодов через запятую (один товар = несколько тех-названий/листингов). Автопривязка запускается при каждой загрузке «Заказов КЕТ» и при сохранении товара с новым кодом. Когда у заказа привязаны все позиции — статус заказа автоматически становится «matched».</p>
+
+    <h3 class="calc-h">7. Обновление в реальном времени</h3>
+    <p>С августа 2026 таблица <code>inbound_orders</code> подключена к Supabase Realtime — изменения применяются во всех открытых сессиях CRM мгновенно. Плюс фоновая подстраховка — обновление раз в 30 секунд.</p>
+    <p class="hint" style="color:var(--rust)">⚠️ Это реально работает как «онлайн», только если запись в базе меняется при смене статуса у KET: либо KET шлёт вебхук на каждое изменение и «receive-order» делает UPDATE существующей строки (не только INSERT), либо нужна отдельная фоновая задача на бэкенде, которая сама периодически опрашивает статус.</p>
+
+    <h3 class="calc-h">8. Известные ограничения</h3>
+    <p>Полный жизненный цикл статуса невыкупа для вечерней сверки с курьерами — не реализован, только базовые справочники и отображение. Нет доступа к коду Edge Function «receive-order» — все выводы о её поведении сделаны по тому, какие поля читает и ожидает фронтенд.</p>
+  </div>`;
+  showInfo('Документация: интеграция с KET',body,{wide:true});
+}
 function drawInboundOrders(){
   const list=S.inbound_orders||[];
   const allRows=filteredInbound();
@@ -7876,7 +7928,8 @@ function drawInboundOrders(){
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
   const colCount=11+(admin?1:0);
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>
+    <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
+      <button class="btn ghost sm" id="inbDocsBtn" style="margin-left:auto">ℹ️ Документация по интеграции</button></div>
     ${ordersTabsHtml()}
     <div class="stats stats-4">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
@@ -7956,6 +8009,7 @@ function drawInboundOrders(){
     };
     updateInbAllChk(allRows);
     if($('inbDelSel'))$('inbDelSel').onclick=()=>delInboundOrdersBulk();
+  if($('inbDocsBtn'))$('inbDocsBtn').onclick=()=>ketDocsModal();
   }
   renderInboundPager(allRows.length,totalPages,startIdx,rows.length);
   const redraw=()=>{
