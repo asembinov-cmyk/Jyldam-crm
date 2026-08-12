@@ -1054,9 +1054,12 @@
     .orders-pager .op-perpage{font-size:12px}
     /* контент с пагинацией: освобождаем место снизу, чтобы карточки не прятались под панелью */
     .content.has-pager{padding-bottom:150px}
+    .content.has-pager .panel:last-of-type{margin-bottom:130px}
   }
   /* десктоп: тоже небольшой запас снизу при пагинации */
   .content.has-pager{padding-bottom:96px}
+  /* и у самой таблицы — иначе плавающая панель перекрывает строки уже на первом экране, а не только в самом низу списка */
+  .content.has-pager .panel:last-of-type{margin-bottom:76px}
 </style>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://unpkg.com/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
@@ -6373,8 +6376,9 @@ function drawFitText(page,text,x,y,maxWidth,font,size){
   while(s>6&&font.widthOfTextAtSize(text,s)>maxWidth)s-=0.5;
   page.drawText(text,{x,y,size:s,font});
 }
-async function printMailLabelsPdf(orders){
-  if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return;}
+// общая генерация PDF со бланками — принимает уже нормализованный список {client,address,phone,amount}
+async function generateMailLabelsPdf(items){
+  if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
   const {PDFDocument,rgb}=PDFLib;
   const assets=await loadMailLabelAssets();
   const templateDoc=await PDFDocument.load(assets.templateBytes);
@@ -6382,7 +6386,7 @@ async function printMailLabelsPdf(orders){
   outDoc.registerFontkit(window.fontkit);
   const font=await outDoc.embedFont(assets.regularBytes,{subset:true});
   const fontBold=await outDoc.embedFont(assets.boldBytes,{subset:true});
-  for(const o of orders){
+  for(const it of items){
     const [page]=await outDoc.copyPages(templateDoc,[0]);
     outDoc.addPage(page);
     const {height:h}=page.getSize();
@@ -6391,24 +6395,47 @@ async function printMailLabelsPdf(orders){
     page.drawRectangle({x:90,y:h-158,width:260,height:16,color:rgb(1,1,1)});
     // 2) первая строка "0 (ноль тенге...)" — сумма заказа
     page.drawRectangle({x:465,y:h-146,width:150,height:15,color:rgb(1,1,1)});
-    const amount=(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0);
-    if(amount)page.drawText(Math.round(+amount).toLocaleString('ru-RU')+' тенге',{x:470,y:yOf(143.5),size:11,font:fontBold});
+    if(it.amount)page.drawText(Math.round(+it.amount).toLocaleString('ru-RU')+' тенге',{x:470,y:yOf(143.5),size:11,font:fontBold});
     // 3) Кому
-    drawFitText(page,o.client||'',460,yOf(376),360,font,11);
+    drawFitText(page,it.client||'',460,yOf(376),360,font,11);
     // 4) Куда
-    drawFitText(page,o.address||'',460,yOf(440),360,font,11);
+    drawFitText(page,it.address||'',460,yOf(440),360,font,11);
     // 5) телефон (после "+")
-    const phoneTxt=(typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||'')).replace(/^\+/,'');
-    page.drawText(phoneTxt,{x:468,y:yOf(478),size:11,font});
+    page.drawText((it.phone||'').replace(/^\+/,''),{x:468,y:yOf(478),size:11,font});
   }
-  const bytes=await outDoc.save();
+  return await outDoc.save();
+}
+async function openOrDownloadPdf(bytes,filename){
   const blob=new Blob([bytes],{type:'application/pdf'});
   const url=URL.createObjectURL(blob);
   const win=window.open(url,'_blank');
   if(!win){ // всплывающие окна заблокированы браузером — скачиваем файлом вместо открытия вкладки
-    const a=document.createElement('a');a.href=url;a.download='Бланки_почта.pdf';a.click();
+    const a=document.createElement('a');a.href=url;a.download=filename;a.click();
   }
   setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
+// бланки для «своих» заказов (Заказы → Почтовая доставка)
+async function printMailLabelsPdf(orders){
+  const items=orders.map(o=>({
+    client:o.client,address:o.address,
+    phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
+    amount:(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0),
+  }));
+  const bytes=await generateMailLabelsPdf(items);
+  if(!bytes)return;
+  await openOrDownloadPdf(bytes,'Бланки_почта.pdf');
+  toast(`Готово: бланков ${orders.length}`);
+}
+// бланки для входящих заказов КЕТ (Заказы → Заказы КЕТ)
+async function printInboundMailLabelsPdf(orders){
+  const items=orders.map(o=>({
+    client:o.client,address:o.address,
+    phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
+    amount:o.price!=null?o.price:(o.total_price!=null?o.total_price:0),
+  }));
+  const bytes=await generateMailLabelsPdf(items);
+  if(!bytes)return;
+  await openOrDownloadPdf(bytes,'Бланки_KET_почта.pdf');
   toast(`Готово: бланков ${orders.length}`);
 }
 
@@ -8112,7 +8139,7 @@ function drawInboundOrders(){
   const colCount=11+(admin?1:0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
-      <button class="btn ghost sm" id="inbDocsBtn" style="margin-left:auto">ℹ️ Документация по интеграции</button></div>
+      <button class="btn ghost sm" id="inbPrintLabels" style="margin-left:auto">🖨 Печать бланков (почта)</button></div>
     ${ordersTabsHtml()}
     <div class="stats stats-4">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
@@ -8192,7 +8219,14 @@ function drawInboundOrders(){
     };
     updateInbAllChk(allRows);
     if($('inbDelSel'))$('inbDelSel').onclick=()=>delInboundOrdersBulk();
-  if($('inbDocsBtn'))$('inbDocsBtn').onclick=()=>ketDocsModal();
+  if($('inbPrintLabels'))$('inbPrintLabels').onclick=async()=>{
+    const mailOnly=filteredInbound().filter(o=>inboundDeliveryType(o)==='mail');
+    if(!mailOnly.length){toast('Нет почтовых заказов по текущим фильтрам');return;}
+    const btn=$('inbPrintLabels');const origLabel=btn.textContent;btn.disabled=true;btn.textContent='Готовим PDF…';
+    try{await printInboundMailLabelsPdf(mailOnly);}
+    catch(e){console.error(e);toast('Не удалось сформировать бланки: '+(e&&e.message||e));}
+    finally{btn.disabled=false;btn.textContent=origLabel;}
+  };
   }
   renderInboundPager(allRows.length,totalPages,startIdx,rows.length);
   const redraw=()=>{
