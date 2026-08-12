@@ -760,7 +760,9 @@
   .pcab-item-s{font-size:13px;color:var(--muted)}
   /* заполнение заказов партнёром */
   .pfill-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:4px}
-  .pfill-h{font-family:'Fraunces',serif;font-weight:600;font-size:16px;margin-bottom:8px}
+  .pfill-h{font-family:'Fraunces',serif;font-weight:600;font-size:16px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .pfill-print{border:none;border-radius:9px;background:var(--rust);color:#fff;font-weight:600;cursor:pointer;font-size:12.5px;padding:6px 12px;white-space:nowrap}
+  .pfill-note{font-size:12.5px;color:var(--muted);background:#faf0dc;border-radius:9px;padding:8px 10px;margin-bottom:10px}
   .pfill-l{font-size:12px;font-weight:600;color:var(--muted);margin-top:8px}
   .pfill-card input{font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:100%}
   .pfill-card input:focus{outline:2px solid rgba(37,70,201,.25);border-color:var(--rust)}
@@ -822,6 +824,12 @@
   .pom-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px}
   .pom-head b{font-family:'Fraunces',serif;font-size:16px}
   .pom-sub{font-size:13px;color:var(--muted);margin-bottom:10px}
+  .pom-track{font-size:13px;font-family:monospace;background:#eef0f4;border-radius:8px;padding:6px 10px;margin-bottom:10px;display:inline-block}
+  .pom-track-empty{background:#fdf3e3;color:#8a6d1f;font-family:inherit}
+  .pom-scan{margin-bottom:14px}
+  .pom-scan input{width:100%;padding:11px 14px;border:2px solid var(--rust);border-radius:10px;font:inherit;font-size:15px}
+  .pom-order.pom-found{outline:3px solid var(--moss);outline-offset:2px;animation:pomFlash 1.4s ease}
+  @keyframes pomFlash{0%{background:#e9f6ec}100%{background:var(--paper)}}
   .pom-paid{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;font-weight:600;color:var(--ink);cursor:pointer}
   .pom-paid input{width:18px;height:18px;accent-color:var(--rust);cursor:pointer}
   .pom-paidorder{color:var(--moss)}
@@ -4783,10 +4791,12 @@ function partnerOrderFieldsHtml(o,i){
   // почтовый, если у заказа выбран не-курьерский тип доставки
   const isMail=o.delivery_id?!isCourierDelivery(o.delivery_id):false;
   return `<div class="pfill-card" data-ord="${o.id}">
-    <div class="pfill-h">${i!=null?('Заказ '+(i+1)+' · '):''}#${esc(o.code)}</div>
-    <label class="pfill-l">Штрих-код</label>
+    <div class="pfill-h">${i!=null?('Заказ '+(i+1)+' · '):''}#${esc(o.code)}
+      <button type="button" class="pfill-print" data-printlbl="${o.id}">🖨 Этикетка на пакет</button></div>
+    <div class="pfill-note">Распечатайте и приклейте на пакет ДО того, как отдадите его курьеру — это единственный способ отличить одинаковые запечатанные пакеты друг от друга.</div>
+    <label class="pfill-l">Штрих-код (если на пакете уже есть свой — отсканируйте)</label>
     <div class="pfill-track">
-      <input id="trk_${o.id}" value="${esc(o.track||'')}" placeholder="Отсканируйте штрих-код">
+      <input id="trk_${o.id}" value="${esc(o.track||'')}" placeholder="Необязательно, если клеите нашу этикетку">
       <button type="button" class="pfill-scan" data-scan="${o.id}">📷 Скан</button>
     </div>
     <label class="pfill-l">Тип доставки</label>
@@ -4816,6 +4826,23 @@ function partnerToggleCourier(oid){
   const mail=$('mail_'+oid);const cour=$('cour_chk_'+oid);
   if(mail&&cour)mail.checked=!cour.checked;
   partnerToggleMail(oid);
+}
+// печать этикетки заказа для партнёра — код заказа крупно + штрихкод-полоски, наклеить на пакет ДО отдачи курьеру.
+// Это и есть тот самый идентификатор, по которому курьер потом отличит одинаковые запечатанные пакеты друг от друга.
+function printPartnerOrderLabel(o,partner){
+  if(!o)return;
+  const code=String(o.code||'');
+  const bars=code.split('').map(d=>{const w=(2.3+(parseInt(d,10)%3)*1.5).toFixed(2);return `<span style="display:inline-block;width:${w}mm;height:100%;background:#000;margin-right:0.4mm"></span>`;}).join('');
+  const body=`
+    <div class="wh-label" id="whLabelPrint" style="height:44mm">
+      <div class="wh-label-name">${esc(partner&&partner.name||'')}</div>
+      <div class="wh-label-bars">${bars}</div>
+      <div class="wh-label-code" style="font-size:5.5mm">${esc(code)}</div>
+      <div class="wh-label-sku">Заказ · наклеить на пакет</div>
+    </div>
+    <div class="hint" style="text-align:center;margin-top:8px">Размер этикетки: 58×40 мм. Приклейте на пакет ДО передачи курьеру — курьер отличает одинаковые пакеты именно по этому коду.</div>
+    <div style="text-align:center;margin-top:10px"><button class="btn primary" onclick="window.print()">🖨 Печать</button></div>`;
+  showInfo(`Этикетка заказа #${esc(code)}`,body);
 }
 // собрать значения полей одного заказа для сохранения
 function partnerCollectFields(o){
@@ -4853,6 +4880,9 @@ function partnerFillOrders(partner,orders){
     wrap.querySelectorAll('[data-courchk]').forEach(c=>c.onchange=()=>partnerToggleCourier(c.dataset.courchk));
     wrap.querySelectorAll('[data-scan]').forEach(b=>{
       b.onclick=()=>startScan(code=>{const inp=$('trk_'+b.dataset.scan);if(inp)inp.value=code;});
+    });
+    wrap.querySelectorAll('[data-printlbl]').forEach(b=>{
+      b.onclick=()=>printPartnerOrderLabel(orders.find(x=>x.id===b.dataset.printlbl),partner);
     });
     const rb=$('reloadDirs');
     if(rb)rb.onclick=async()=>{rb.textContent='Загрузка…';rb.disabled=true;await loadPartnerDirs();renderCards();};
@@ -4898,6 +4928,8 @@ function partnerEditOrder(partner,orderId){
     </div>
   </div>`;
   $('pfill').innerHTML=partnerOrderFieldsHtml(o,null);
+  // печать этикетки доступна всегда, даже после того, как курьер забрал заказ
+  $('pfill').querySelectorAll('[data-printlbl]').forEach(b=>{b.onclick=()=>printPartnerOrderLabel(o,partner);});
   // если забран — блокируем все поля
   if(collected){
     $('pfill').querySelectorAll('input,select,button.pfill-scan').forEach(el=>el.disabled=true);
@@ -5872,14 +5904,16 @@ async function pickupOrdersModal(pickupId){
   const renderBody=()=>{
     const list=S.orders.filter(o=>o.pickup_id===pickupId);
     const wantNow=parseInt(p.orders||'0',10)||0;
-    const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+    const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
       <div style="color:var(--muted);font-size:14px">Создано <b>${list.length}</b>${wantNow?` из ${wantNow}`:''} заказ(ов) по магазину «${esc(p.name)}»</div>
       <button class="btn sm primary" id="pom_create">＋ Создать ещё заказ</button>
-    </div>`;
+    </div>
+    ${list.some(o=>o.track)?`<div class="pom-scan"><input id="pom_scan_input" placeholder="📷 Отсканируйте штрих-код посылки, чтобы найти её заказ…" autocomplete="off"></div>`:''}`;
     if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Создать ещё заказ».</div>`;
-    const cards=list.map((o,i)=>`<div class="pom-order">
+    const cards=list.map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
       <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
+      ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:'<div class="pom-track pom-track-empty">⚠ Штрих-код не привязан партнёром</div>'}
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${isStaff()?`
       <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.paid_by_sender?'disabled':''}></div>
@@ -5902,6 +5936,21 @@ async function pickupOrdersModal(pickupId){
   setTimeout(()=>{
     const wrap=document.querySelector('.overlay:last-child');if(!wrap)return;
     const bind=()=>{
+      // сканер: ищем карточку по трек-коду (в первую очередь) или по коду заказа, подсвечиваем и прокручиваем к ней
+      const scanInp=wrap.querySelector('#pom_scan_input');
+      if(scanInp){
+        scanInp.oninput=()=>{
+          const q=scanInp.value.trim().toLowerCase();
+          if(!q)return;
+          const card=wrap.querySelector(`[data-pomtrack="${q}"]`)||wrap.querySelector(`[data-pomcode="${q}"]`);
+          if(card){
+            wrap.querySelectorAll('.pom-found').forEach(c=>c.classList.remove('pom-found'));
+            card.classList.add('pom-found');
+            card.scrollIntoView({behavior:'smooth',block:'center'});
+            scanInp.value='';
+          }
+        };
+      }
       wrap.querySelectorAll('[data-pomphotos]').forEach(box=>{
         const o=S.orders.find(x=>x.id===box.dataset.pomphotos);if(!o)return;
         const redraw=()=>{box.innerHTML=photoBlockHtml(o,canEditPhoto);bindPhotoBlock(box,o,redraw,'orders');};
