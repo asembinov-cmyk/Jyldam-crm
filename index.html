@@ -5119,18 +5119,6 @@ function renderDashboard(){
     if(o.partner_id){const p=S.partners.find(x=>x.id===o.partner_id);if(p&&p.city_id)return p.city_id;}
     return null;
   };
-  // список курьеров-заборщиков (для колонок): только те, у кого есть заявки в выбранном месяце
-  const _selMonth=`${dashPeriod.year}-${String(dashPeriod.month+1).padStart(2,'0')}`;
-  const _activeCourierIds=new Set();
-  (pickups||[]).forEach(p=>{
-    const d=(p.pickup_date||'').slice(0,7);
-    if(d===_selMonth&&p.courier_id)_activeCourierIds.add(p.courier_id);
-  });
-  const HIDDEN_COURIERS=/дукенбаев|сембинов/i; // скрыты на дашборде по запросу
-  const courierList=[...(S.couriers||[])]
-    .filter(c=>_activeCourierIds.has(c.id))   // без заявок за месяц — не показываем (тестовые/неактивные)
-    .filter(c=>!HIDDEN_COURIERS.test(c.fio||''))
-    .sort((a,b)=>(a.fio||'').localeCompare(b.fio||''));
   // собираем все даты (по дате создания заказов и заявок)
   const dateSet=new Set();
   orders.forEach(o=>{const dt=(o.created_at||'').slice(0,10);if(dt)dateSet.add(dt);});
@@ -5155,16 +5143,10 @@ function renderDashboard(){
     const pkCollected=collectedPickups.length;  // из них собрано (забрал посылки)
     const pkAlmaty=collectedPickups.filter(p=>isAlmaty(p.city_id)).length;
     const pkAstana=collectedPickups.filter(p=>isAstana(p.city_id)).length;
-    // по курьерам-заборщикам: {собрал, всего назначено} в этот день
-    const byCourier=courierList.map(c=>{
-      const assigned=dayPickups.filter(p=>p.courier_id===c.id).length;       // всего назначено курьеру
-      const got=collectedPickups.filter(p=>p.courier_id===c.id).length;       // из них собрано
-      return {got,assigned};
-    });
     // курьерская / почтовая доставка (по типу доставки заказа)
     const courierDel=dayOrders.filter(o=>isCourierDelivery(o.delivery_id)).length;
     const mailDel=dayOrders.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length;
-    return {dt,ordTotal,ordAlmaty,ordAstana,pkTotal,pkCollected,pkAlmaty,pkAstana,byCourier,courierDel,mailDel};
+    return {dt,ordTotal,ordAlmaty,ordAstana,pkTotal,pkCollected,pkAlmaty,pkAstana,courierDel,mailDel};
   });
 
   // ── ДАННЫЕ ДЛЯ ВЕРХНИХ КАРТОЧЕК (за выбранный месяц) ──
@@ -5286,22 +5268,19 @@ function renderDashboard(){
           <th rowspan="2">Дата</th>
           <th colspan="3" class="grp grp-ord">Кол-во заказов</th>
           <th colspan="3" class="grp grp-pk">Заборы (собрано / всего)</th>
-          ${courierList.length?`<th colspan="${courierList.length}" class="grp grp-cour">Курьеры-заборщики (заявок)</th>`:''}
           <th colspan="2" class="grp grp-del">Доставка</th>
         </tr>
         <tr>
           <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
           <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
-          ${courierList.map(c=>`<th class="cour-col" title="${esc(c.fio)}">${esc((c.fio||'').split(' ')[0])}<small class="cour-city">${esc(c.city_id?cityName(c.city_id):'—')}</small></th>`).join('')}
           <th>Курьерская</th><th>Почтовая</th>
         </tr></thead>
         <tbody>${statRows.length?statRows.map(r=>`<tr>
           <td class="d-date"><b>${esc(fmtDate(r.dt))}</b></td>
           <td class="num"><b>${r.ordTotal}</b></td><td class="num c-alm">${r.ordAlmaty||'—'}</td><td class="num c-ast">${r.ordAstana||'—'}</td>
           <td class="num"><b>${r.pkCollected}</b><small style="color:var(--muted)"> / ${r.pkTotal}</small></td><td class="num c-alm">${r.pkAlmaty||'—'}</td><td class="num c-ast">${r.pkAstana||'—'}</td>
-          ${r.byCourier.map(c=>`<td class="num cour-col">${c.assigned?`<b>${c.got}</b><small style="color:var(--muted)"> / ${c.assigned}</small>`:'—'}</td>`).join('')}
           <td class="num">${r.courierDel||'—'}</td><td class="num">${r.mailDel||'—'}</td>
-        </tr>`).join(''):`<tr><td colspan="${8+courierList.length}" style="text-align:center;color:var(--muted);padding:30px">Пока нет данных</td></tr>`}</tbody>
+        </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">Пока нет данных</td></tr>`}</tbody>
         ${statRows.length?`<tfoot><tr class="dash-total">
           <td>Итого</td>
           <td class="num"><b>${statRows.reduce((s,r)=>s+r.ordTotal,0)}</b></td>
@@ -5310,7 +5289,6 @@ function renderDashboard(){
           <td class="num"><b>${statRows.reduce((s,r)=>s+r.pkCollected,0)}</b><small style="color:var(--muted)"> / ${statRows.reduce((s,r)=>s+r.pkTotal,0)}</small></td>
           <td class="num c-alm">${statRows.reduce((s,r)=>s+r.pkAlmaty,0)}</td>
           <td class="num c-ast">${statRows.reduce((s,r)=>s+r.pkAstana,0)}</td>
-          ${courierList.map((c,i)=>{const got=statRows.reduce((s,r)=>s+r.byCourier[i].got,0);const asg=statRows.reduce((s,r)=>s+r.byCourier[i].assigned,0);return `<td class="num cour-col">${asg?`<b>${got}</b><small style="color:var(--muted)"> / ${asg}</small>`:'—'}</td>`;}).join('')}
           <td class="num">${statRows.reduce((s,r)=>s+r.courierDel,0)}</td>
           <td class="num">${statRows.reduce((s,r)=>s+r.mailDel,0)}</td>
         </tr></tfoot>`:''}
