@@ -5253,6 +5253,7 @@ function renderDashboard(){
   });
   const topPartners=Object.entries(partnerCnt).sort((a,b)=>b[1]-a[1]).slice(0,5);
   // 5) топ-5 курьеров-заборщиков по собранным заявкам за месяц
+  const HIDDEN_COURIERS=/дукенбаев|сембинов/i; // скрыты на дашборде по запросу
   const courCnt={};
   pkMonth.filter(p=>isCollectedStatus(p.status_id)).forEach(p=>{
     if(!p.courier_id)return;
