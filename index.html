@@ -6463,6 +6463,88 @@ async function printInboundMailLabelsPdf(orders){
   toast(`Готово: бланков ${orders.length}`);
 }
 
+// товарная накладная для курьерских заказов КЕТ — рисуем с нуля (не поверх шаблона), формат A5-подобный,
+// одна накладная на страницу. Правки по запросу: после товара — магазин/партнёр (не «КС-3»), без номера
+// курьера, шапка — «Jyldam Logistics».
+async function generateWaybillsPdf(items){
+  if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
+  const {PDFDocument,rgb}=PDFLib;
+  const assets=await loadMailLabelAssets(); // тот же кэш шрифтов с кириллицей, шаблон бланка тут не нужен
+  const outDoc=await PDFDocument.create();
+  outDoc.registerFontkit(window.fontkit);
+  const font=await outDoc.embedFont(assets.regularBytes,{subset:true});
+  const fontBold=await outDoc.embedFont(assets.boldBytes,{subset:true});
+  const W=420,H=595; // примерно A5
+  for(const it of items){
+    const page=outDoc.addPage([W,H]);
+    let y=H-40;
+    const line=(dy)=>{y-=dy;};
+    // шапка
+    page.drawText('Jyldam Logistics',{x:32,y,size:18,font:fontBold});
+    line(30);
+    page.drawLine({start:{x:32,y:y+6},end:{x:W-32,y:y+6},thickness:0.7,color:rgb(.7,.7,.7)});
+    line(20);
+    page.drawText(`Товарная накладная № ${it.orderNo}`,{x:32,y,size:12,font:fontBold});
+    line(24);
+    page.drawText('Курьерская служба',{x:32,y,size:9,font,color:rgb(.45,.45,.45)});
+    drawFitText(page,'Jyldam Logistics',180,y,W-32-180,fontBold,10);
+    line(18);
+    page.drawText('Покупатель',{x:32,y,size:9,font,color:rgb(.45,.45,.45)});
+    drawFitText(page,it.client||'—',180,y,W-32-180,font,10);
+    line(18);
+    page.drawText('Телефон',{x:32,y,size:9,font,color:rgb(.45,.45,.45)});
+    drawFitText(page,it.phone||'—',180,y,W-32-180,font,10);
+    line(18);
+    page.drawText('Адрес',{x:32,y,size:9,font,color:rgb(.45,.45,.45)});
+    drawWrappedText(page,it.address||'—',180,y,W-32-180,font,9.5,12,3);
+    // оцениваем, на сколько строк перенёсся адрес (максимум 3), чтобы правильно сдвинуть таблицу ниже
+    const addrLines=Math.min(3,Math.max(1,Math.ceil((it.address||'').length/40)));
+    line(10+addrLines*12);
+    // таблица товаров
+    const tableTop=y;
+    page.drawRectangle({x:32,y:tableTop-20,width:W-64,height:20,color:rgb(.94,.94,.94)});
+    page.drawText('№ заказа',{x:36,y:tableTop-14,size:8.5,font:fontBold});
+    page.drawText(`Товар (${it.shop||'—'})`,{x:110,y:tableTop-14,size:8.5,font:fontBold});
+    page.drawText('Сумма',{x:W-90,y:tableTop-14,size:8.5,font:fontBold});
+    let ty=tableTop-34;
+    page.drawText(it.orderNo,{x:36,y:ty,size:9,font});
+    const compLines=(it.composition&&it.composition.length?it.composition:['—']);
+    compLines.forEach((cl,idx)=>{
+      drawFitText(page,cl,110,ty-idx*13,W-90-110-8,font,8.5);
+    });
+    page.drawText(it.amountText||'0 тг.',{x:W-90,y:ty,size:9,font});
+    const tableBottom=ty-Math.max(1,compLines.length)*13-6;
+    page.drawRectangle({x:32,y:tableBottom,width:W-64,height:tableTop-tableBottom,borderColor:rgb(.75,.75,.75),borderWidth:0.7});
+    y=tableBottom-30;
+    page.drawText('Отпустил _____________________',{x:32,y,size:9,font});
+    page.drawText('Получил _____________________',{x:W/2+10,y,size:9,font});
+  }
+  return await outDoc.save();
+}
+async function printInboundWaybillsPdf(orders){
+  const items=orders.map(o=>{
+    const its=inboundItemsFor(o.id);
+    const composition=its.map(it=>{
+      const p=it.product_id?(S.products||[]).find(x=>x.id===it.product_id):null;
+      return `${p?p.name:(it.ket_sku||'?')} — ${it.qty} шт.`;
+    });
+    const amount=o.price!=null?o.price:(o.total_price!=null?o.total_price:0);
+    return{
+      orderNo:o.external_id||String(o.id).slice(0,8),
+      client:o.client||'',
+      phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
+      address:[o.address,o.city].filter(Boolean).join(', '),
+      shop:inboundOrderShopLabel(o),
+      composition,
+      amountText:(amount?Math.round(+amount).toLocaleString('ru-RU'):'0')+' тг.',
+    };
+  });
+  const bytes=await generateWaybillsPdf(items);
+  if(!bytes)return;
+  await openOrDownloadPdf(bytes,'Накладные_KET_курьер.pdf');
+  toast(`Готово: накладных ${orders.length}`);
+}
+
 function exportOrdersToExcel(){
   if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
   const rows=filteredOrders(); // те же данные и фильтры, что в гриде
@@ -8195,6 +8277,7 @@ function drawInboundOrders(){
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
         <button class="btn btn-excel" id="inbExportXlsx">⬇ Выгрузить Excel</button>
+        <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
         <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
       </div></div>
     ${ordersTabsHtml()}
@@ -8287,6 +8370,14 @@ function drawInboundOrders(){
     finally{btn.disabled=false;btn.textContent=origLabel;}
   };
   if($('inbExportXlsx'))$('inbExportXlsx').onclick=()=>exportInboundToExcel(inboundActionList());
+  if($('inbPrintWaybills'))$('inbPrintWaybills').onclick=async()=>{
+    const courierOnly=inboundActionList().filter(o=>inboundDeliveryType(o)==='courier');
+    if(!courierOnly.length){toast(inbSelected.size?'Среди отмеченных нет курьерских заказов':'Нет курьерских заказов по текущим фильтрам');return;}
+    const btn=$('inbPrintWaybills');const origLabel=btn.textContent;btn.disabled=true;btn.textContent='Готовим PDF…';
+    try{await printInboundWaybillsPdf(courierOnly);}
+    catch(e){console.error(e);toast('Не удалось сформировать накладные: '+(e&&e.message||e));}
+    finally{btn.disabled=false;btn.textContent=origLabel;}
+  };
   }
   renderInboundPager(allRows.length,totalPages,startIdx,rows.length);
   const redraw=()=>{
