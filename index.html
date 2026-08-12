@@ -8002,7 +8002,7 @@ function drawInboundOrders(){
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
           <td data-label="Привязка">${matchBadge}</td>
           <td data-label="Склад">${stockBadge}</td>
-          <td data-label="Дата">${esc(fmtDate(o.created_at))}</td>
+          <td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>
           <td data-label="" class="cell-actions"><div class="row-actions">
             <button class="btn sm ghost" data-inbview="${o.id}">Открыть</button>
             ${o.match_status==='unmatched'?`<button class="btn sm" data-inbmatch="${o.id}">Привязать</button>`:''}
@@ -8156,6 +8156,7 @@ function inboundOrderModal(id){
   const items=inboundItemsFor(id);
   const body=`<div style="display:grid;gap:8px;font-size:14px">
     <div><b>Внешний ID:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
+    <div><b>Поступил:</b> ${o.created_at?esc(fmtDateTime(o.created_at)):'—'}</div>
     <div><b>Магазин:</b> ${esc(inboundOrderShopLabel(o))}</div>
     <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
     <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
