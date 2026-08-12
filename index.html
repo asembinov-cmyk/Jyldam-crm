@@ -6417,15 +6417,15 @@ async function generateMailLabelsPdf(items){
     const yOf=top=>h-top;
     // 1) закрашиваем строку отправителя (ИП) белым — у разных заказов будут разные ИП, пока оставляем пустой
     page.drawRectangle({x:90,y:h-158,width:260,height:16,color:rgb(1,1,1)});
-    // 2) первая строка "0 (ноль тенге...)" — сумма заказа
-    page.drawRectangle({x:465,y:h-146,width:150,height:15,color:rgb(1,1,1)});
-    if(it.amount)page.drawText(Math.round(+it.amount).toLocaleString('ru-RU')+' тенге',{x:470,y:yOf(143.5),size:11,font:fontBold});
-    // 3) Кому
-    drawFitText(page,it.client||'',460,yOf(376),360,font,11);
-    // 4) Куда — переносим на несколько строк (между «Куда» и «телефон №» достаточно места на 3 строки)
-    drawWrappedText(page,it.address||'',460,yOf(437),365,font,10.5,12,3);
-    // 5) телефон (после "+")
-    page.drawText((it.phone||'').replace(/^\+/,''),{x:468,y:yOf(478),size:11,font});
+    // 2) первая строка "0 (ноль тенге...)" — сумма заказа. Реальная линия поля: x 474–665 (не 825!)
+    page.drawRectangle({x:465,y:h-146,width:155,height:15,color:rgb(1,1,1)});
+    if(it.amount)page.drawText(Math.round(+it.amount).toLocaleString('ru-RU')+' т.',{x:478,y:yOf(144.5),size:10,font:fontBold});
+    // 3) Кому — линия поля: x 454–665, ширина ~200пт (не 360!)
+    drawFitText(page,it.client||'',458,yOf(388),195,font,10);
+    // 4) Куда — та же узкая ширина, обязательно переносим на несколько строк
+    drawWrappedText(page,it.address||'',458,yOf(439),195,font,9.5,11,3);
+    // 5) телефон (после "+") — та же колонка
+    drawFitText(page,(it.phone||'').replace(/^\+/,''),468,yOf(477),175,font,10);
   }
   return await outDoc.save();
 }
