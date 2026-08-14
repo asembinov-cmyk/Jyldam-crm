@@ -5064,10 +5064,15 @@ function aiBuildDataSummary(){
     allPartners[nm]=partnerOrders[nm]?partnerOrders[nm].Всего:0;
   });
   const partnersNoOrders=Object.entries(allPartners).filter(([n,c])=>c===0).map(([n])=>n);
-  // новые партнёры по месяцам регистрации (дата создания карточки партнёра, не дата первого заказа)
-  const partnersByRegMonth={};(S.partners||[]).forEach(p=>{
+  // новые партнёры по месяцам регистрации (дата создания карточки партнёра, не дата первого заказа) —
+  // и количество, и сами имена, чтобы ИИ мог перечислить их поимённо, а не только назвать цифру
+  const partnersByRegMonth={};
+  const partnersNamesByRegMonth={};
+  (S.partners||[]).forEach(p=>{
     const mm=(p.created_at||'').slice(0,7);if(!mm)return;
     partnersByRegMonth[mm]=(partnersByRegMonth[mm]||0)+1;
+    if(!partnersNamesByRegMonth[mm])partnersNamesByRegMonth[mm]=[];
+    partnersNamesByRegMonth[mm].push(p.name||p.title||'без названия');
   });
   // заявки на забор по месяцам
   const pickupsByMonth={};(S.pickups||[]).forEach(p=>{const mm=(p.pickup_date||p.created_at||'').slice(0,7);if(mm)pickupsByMonth[mm]=(pickupsByMonth[mm]||0)+1;});
@@ -5082,6 +5087,7 @@ function aiBuildDataSummary(){
     Всего_заказов:orders.length,
     Всего_партнёров:(S.partners||[]).length,
     Новых_партнёров_по_месяцам_регистрации:partnersByRegMonth,
+    Новых_партнёров_имена_по_месяцам:partnersNamesByRegMonth,
     Всего_заявок_на_забор:(S.pickups||[]).length,
     Курьерских:courier, Почтовых:mail,
     Заказов_по_месяцам:byMonth,
@@ -5117,7 +5123,7 @@ function aiAssistantModal(){
     log.innerHTML+=`<div class="ai-msg ai-user">${esc(q)}</div><div class="ai-msg ai-assistant ai-loading" id="aiLoading">Думаю…</div>`;
     log.scrollTop=log.scrollHeight;$('aiQ').value='';btn.disabled=true;
     const summary=aiBuildDataSummary();
-    const system='Ты — аналитик логистической компании Jyldam. Отвечай кратко и по делу на русском, опираясь ТОЛЬКО на предоставленную сводку данных в JSON. В разбивках для каждого имени указаны заказы по месяцам ГГГГ-ММ и поле Всего. Месяцы: 2026-06 = июнь, 2026-07 = июль. Для партнёров: Партнёры_все_заказов — сколько всего заказов дал каждый (0 = не давал), Партнёры_без_заказов — готовый список не дававших, Новых_партнёров_по_месяцам_регистрации — сколько партнёров ЗАРЕГИСТРИРОВАНО (создана карточка, не заказ) в каждом месяце — используй именно это поле для вопросов «сколько новых партнёров». Если спрашивают про конкретный месяц — бери значение месяца из разбивки. Если данных нет — скажи об этом. Не выдумывай. Суммы округляй, добавляй «₸». Списки можешь давать полностью.';
+    const system='Ты — аналитик логистической компании Jyldam. Отвечай кратко и по делу на русском, опираясь ТОЛЬКО на предоставленную сводку данных в JSON. В разбивках для каждого имени указаны заказы по месяцам ГГГГ-ММ и поле Всего. Месяцы: 2026-06 = июнь, 2026-07 = июль. Для партнёров: Партнёры_все_заказов — сколько всего заказов дал каждый (0 = не давал), Партнёры_без_заказов — готовый список не дававших, Новых_партнёров_по_месяцам_регистрации — количество ЗАРЕГИСТРИРОВАННЫХ (создана карточка, не заказ) партнёров по месяцам, Новых_партнёров_имена_по_месяцам — их имена по тем же месяцам (используй для вопросов «кто именно» / «список новых партнёров»). Если спрашивают про конкретный месяц — бери значение месяца из разбивки. Если данных нет — скажи об этом. Не выдумывай. Суммы округляй, добавляй «₸». Списки можешь давать полностью.';
     const prompt=`Сводка данных по заказам (JSON):\n${JSON.stringify(summary)}\n\nВопрос: ${q}`;
     const r=await callAI({system,prompt,model:'claude-haiku-4-5-20251001',max_tokens:1500});
     const loading=$('aiLoading');if(loading)loading.remove();
