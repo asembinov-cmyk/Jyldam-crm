@@ -5816,6 +5816,17 @@ function pickupModal(id,readonly){
       toast('Поля очищены');
     }});
   attachPhone('m_phone',d.phone);
+  // если справочник партнёров ещё не успел прогрузиться на момент открытия формы (например, окно
+  // открыли сразу после входа) — список поиска остался бы пустым и сам не обновился без перезагрузки
+  // страницы. Подстраховка: подгружаем партнёров в фоне и обновляем список поиска на лету.
+  if(!S.partners||!S.partners.length){
+    dbList('partners',{order:'name'}).then(fresh=>{
+      if(fresh&&fresh.length){
+        S.partners=fresh;
+        const dl=$('plist');if(dl)dl.innerHTML=S.partners.map(pt=>`<option value="${esc(pt.name)}">`).join('');
+      }
+    }).catch(()=>{});
+  }
   if(!ro){
     // автозапоминание: при любом изменении поля пишем черновик (не теряется при закрытии)
     const saveDraft=()=>{pickupDrafts[pickupDraftKey(id)]=readPickupForm();};
@@ -5990,8 +6001,9 @@ async function pickupOrdersModal(pickupId){
               const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
               patch={paid_by_sender:false,order_sum:back,cost:back,order_sum_orig:null};
             }
-            await dbUpdate('orders',o.id,patch);
-            Object.assign(o,patch);
+            const saved=await dbUpdate('orders',o.id,patch);
+            if(!saved){chk.checked=!v;toast('Не удалось сохранить — попробуйте ещё раз');return;}
+            Object.assign(o,saved);
             await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[
               {field:'paid_by_sender',label:FIELD_LABEL.paid_by_sender,old:v?'нет':'да',new:v?'да':'нет'},
               {field:'order_sum',label:FIELD_LABEL.order_sum,old:beforeSum!=null?String(beforeSum):'—',new:String(o.order_sum)},
