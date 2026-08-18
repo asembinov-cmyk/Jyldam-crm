@@ -7684,7 +7684,7 @@ function renderStaff(){
       <td><span class="pill ${(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='admin'?'gold':'moss'}">${esc(u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'—'))}</span></td>
       <td><div class="row-actions">
         ${can('users','edit')?`<button class="btn sm ghost" data-uedit="${u.id}">Изменить</button>`:''}
-        ${can('users','edit')?`<button class="btn sm ghost" data-upass="${u.id}">Пароль</button>`:''}
+        ${can('users','edit')&&(isAdmin()||(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='courier')?`<button class="btn sm ghost" data-upass="${u.id}">Пароль</button>`:''}
         ${can('users','delete')&&u.id!==S.me.id?`<button class="btn sm danger" data-udel="${u.id}">Удалить</button>`:''}
       </div></td></tr>`).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Ничего не найдено</td></tr>`}</tbody></table></div></div>`;
   $('usersContent').querySelectorAll('[data-uedit]').forEach(b=>b.onclick=()=>staffModal(b.dataset.uedit));
@@ -7702,13 +7702,17 @@ function renderStaff(){
   });
 }
 function createStaffModal(){
+  // не-админ с правом «Сотрудники» может создавать только курьеров — на выбор только курьерские роли
+  const roleOptions=isAdmin()?S.roles:S.roles.filter(r=>r.base_type==='courier');
+  if(!isAdmin()&&!roleOptions.length){toast('Нет ни одной роли с типом «Курьер» — создайте её в Роли и права');return;}
   showModal('Новый сотрудник',`
     <div class="grid2">
       <div class="field"><label>ФИО</label><input id="n_name" placeholder="Фамилия Имя"></div>
       <div class="field"><label>Должность</label><input id="n_pos" placeholder="Напр. Оператор"></div>
       <div class="field"><label>Телефон (логин)</label><input id="n_phone" inputmode="numeric"></div>
       <div class="field"><label>Пароль</label><input id="n_pass" type="text" autocomplete="off" placeholder="мин. 6 символов"></div>
-      <div class="field"><label>Роль</label><select id="n_role"><option value="">— не назначена —</option>${S.roles.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Роль</label><select id="n_role">${isAdmin()?'<option value="">— не назначена —</option>':''}${roleOptions.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select>
+        ${!isAdmin()?'<span class="hint">Доступны только курьерские роли</span>':''}</div>
       <div class="field" id="n_kind_field" style="display:none"><label>Тип курьера</label><select id="n_kind">
         <option value="pickup">Курьер заборщик</option>
         <option value="order">Курьер по заказам</option></select>
@@ -7721,6 +7725,7 @@ function createStaffModal(){
       if(!pass||pass.length<6){toast('Пароль минимум 6 символов');return false;}
       const roleId=val('n_role');
       const baseType=(S.roles.find(r=>r.id===roleId)||{}).base_type||'';
+      if(!isAdmin()&&baseType!=='courier'){toast('Можно создавать только курьеров');return false;}
       const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
       const courier_kind=baseType==='courier'?val('n_kind'):null;
       toast('Создаём сотрудника…');
@@ -7740,6 +7745,8 @@ function createStaffModal(){
 // модалка смены пароля сотрудника
 function changePassModal(id){
   const u=S.profiles.find(x=>x.id===id);if(!u)return;
+  const targetIsCourier=(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='courier';
+  if(!isAdmin()&&!targetIsCourier){toast('Менять пароль можно только курьерам');return;}
   const login=u.phone?phoneDisplay(u.phone):((u.email&&!u.email.endsWith('@jyldam.local'))?u.email:'(нет)');
   showModal(`Пароль · ${esc(u.full_name||login)}`,`
     <div class="grid2">
