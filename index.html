@@ -6614,7 +6614,7 @@ function exportInboundToExcel(rows){
   if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
   if(!rows.length){toast('Нет заказов для выгрузки');return;}
   const data=rows.map(o=>({
-    'Внешний ID':o.external_id||'',
+    'Штрих-код заказа':o.external_id||'',
     'Источник':o.source||'',
     'Клиент':o.client||'',
     'Телефон':o.phone?phoneDisplay(o.phone):'',
@@ -8352,14 +8352,14 @@ function drawInboundOrders(){
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
-        <th>Внеш. ID</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
+        <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
         <th>Статус KET</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
         const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
         return `<tr data-inbrow="${o.id}" style="cursor:pointer">
           ${admin?`<td onclick="event.stopPropagation()"><input type="checkbox" class="inbChk" data-inbchk="${o.id}" ${inbSelected.has(o.id)?'checked':''}></td>`:''}
-          <td data-label="Внеш. ID"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
+          <td data-label="Штрих-код заказа"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
           <td data-label="Клиент">${esc(o.client||'—')}</td>
           <td data-label="Телефон">${esc(o.phone||'—')}</td>
           <td data-label="Город">${esc(o.city||'—')}</td>
@@ -8541,7 +8541,7 @@ function inboundOrderModal(id){
     ?'<span style="color:#1a7f37">✓ привязан</span>'
     :`<span style="color:var(--rust)">⚠ требует привязки</span> <button type="button" class="btn sm" id="inbModalMatch">Привязать</button>`;
   const body=`<div style="display:grid;gap:8px;font-size:14px">
-    <div><b>Внешний ID:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
+    <div><b>Штрих-код заказа:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
     <div><b>Поступил:</b> ${o.created_at?esc(fmtDateTime(o.created_at)):'—'}</div>
     <div><b>Магазин:</b> ${esc(inboundOrderShopLabel(o))}</div>
     <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
