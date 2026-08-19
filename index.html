@@ -8263,6 +8263,30 @@ function ketDocsStatusTable(dict){
     ${Object.entries(dict).map(([code,label])=>`<tr><td><code>${esc(code)}</code></td><td>${esc(label)}</td></tr>`).join('')}
   </tbody></table>`;
 }
+// диагностика: показать, каких именно тех.кодов не хватает среди товаров, и сколько заказов на них висит —
+// вместо того чтобы просто показывать общую цифру «N заказов не привязано»
+function inboundUnmatchedModal(){
+  const items=(S.inbound_items||[]).filter(it=>!it.matched||!it.product_id);
+  if(!items.length){showInfo('Непривязанные коды','<div class="empty">Все позиции по всем заказам КЕТ привязаны к товарам. 🎉</div>');return;}
+  const byCode=new Map(); // code -> {code, orders:Set, qty}
+  items.forEach(it=>{
+    const code=(it.ket_sku||'').trim()||'(пусто)';
+    if(!byCode.has(code))byCode.set(code,{code,orders:new Set(),qty:0});
+    const g=byCode.get(code);
+    g.orders.add(it.inbound_order_id);g.qty+=(it.qty||1);
+  });
+  const rows=[...byCode.values()].sort((a,b)=>b.orders.size-a.orders.size);
+  const totalOrders=new Set(items.map(it=>it.inbound_order_id)).size;
+  const body=`
+    <div class="hint" style="margin-bottom:10px">Заказов, где есть хотя бы одна непривязанная позиция: <b>${totalOrders}</b>. Уникальных кодов, для которых нет товара: <b>${rows.length}</b>.</div>
+    <div class="table-scroll" style="max-height:60vh;overflow-y:auto"><table class="resp-table"><thead><tr>
+      <th>Код (ket_sku)</th><th>Заказов</th><th>Суммарно шт.</th>
+    </tr></thead><tbody>
+    ${rows.map(r=>`<tr><td><code>${esc(r.code)}</code></td><td>${r.orders.size}</td><td>${r.qty}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="hint" style="margin-top:10px">Это коды, которых нет ни у одного товара в «Склад → Товары» (поле «Коды KET»). Заведите товар с таким кодом (или добавьте код существующему товару) — привязка произойдёт автоматически при следующей загрузке/обновлении.</div>`;
+  showInfo('Непривязанные коды',body,{wide:true});
+}
 function ketDocsModal(){
   const body=`
   <div style="max-height:70vh;overflow-y:auto;line-height:1.55">
@@ -8327,6 +8351,7 @@ function drawInboundOrders(){
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
         <button class="btn ghost sm" id="inbRefresh" title="Заново загрузить все заказы КЕТ из базы">🔄 Обновить</button>
+        <button class="btn ghost sm" id="inbUnmatched" title="Показать, каких товаров не хватает">🔍 Непривязанные коды</button>
         <button class="btn btn-excel" id="inbExportXlsx">⬇ Выгрузить Excel</button>
         <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
         <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
@@ -8418,6 +8443,7 @@ function drawInboundOrders(){
     try{await loadInbound();drawInboundOrders();toast('Обновлено');}
     finally{btn.disabled=false;btn.textContent='🔄 Обновить';}
   };
+  if($('inbUnmatched'))$('inbUnmatched').onclick=()=>inboundUnmatchedModal();
   if($('inbExportXlsx'))$('inbExportXlsx').onclick=()=>exportInboundToExcel(inboundActionList());
   if($('inbPrintWaybills'))$('inbPrintWaybills').onclick=async()=>{
     const courierOnly=inboundActionList().filter(o=>inboundDeliveryType(o)==='courier');
