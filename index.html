@@ -3303,9 +3303,12 @@ function drawAssembly(){
       <div class="asm-items">
         ${_asmOrder.items.map(it=>{
           const done=it.scanned>=it.qty;
+          const p=(S.products||[]).find(x=>x.id===it.product_id);
+          const stockNow=p?productStock(p):0;
+          const short=stockNow<it.qty;
           return `<div class="asm-item ${done?'asm-ok':''}">
             <div class="asm-item-ico">${done?'✅':'⬜'}</div>
-            <div class="asm-item-body"><div class="asm-item-name">${esc(pn(it.product_id))}</div><div class="asm-item-bc">${esc(pbc(it.product_id))}</div></div>
+            <div class="asm-item-body"><div class="asm-item-name">${esc(pn(it.product_id))}</div><div class="asm-item-bc">${esc(pbc(it.product_id))}${short?` · <span style="color:#c23b3b">на складе: ${stockNow}</span>`:''}</div></div>
             <div class="asm-item-qty">${it.scanned} / ${it.qty}</div>
           </div>`;
         }).join('')}
@@ -3328,6 +3331,9 @@ function scanItem(code){
   const it=_asmOrder.items.find(i=>i.product_id===p.id);
   if(!it){flashFeedback(fb,`❌ «${p.name}» не в этом заказе`,'err');return;}
   if(it.scanned>=it.qty){flashFeedback(fb,`⚠️ «${p.name}» уже собран полностью`,'warn');return;}
+  // остатка на складе не должно хватать меньше, чем уже отсканировано в этой сборке — иначе уйдём в минус
+  const stockLeft=productStock(p)-it.scanned;
+  if(stockLeft<=0){flashFeedback(fb,`🚫 «${p.name}» — остатка товара нет на складе (${esc(whCity)})`,'err');return;}
   it.scanned++;
   flashFeedback(fb,`✅ ${p.name} (${it.scanned}/${it.qty})`,'ok');
   drawAssembly();
