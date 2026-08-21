@@ -1763,9 +1763,8 @@ async function refreshForTab(tab){
         dbList('pickups',{order:'created_at',asc:false}),
       ]);
       S.orders=orders;S.pickups=pickups;
-      if(tab==='orders'&&typeof ordersTab!=='undefined'&&ordersTab==='ket'&&typeof loadInbound==='function'){
-        try{await loadInbound();}catch(e){}
-      }
+    }else if(tab==='ket_orders'){
+      if(typeof loadInbound==='function'){try{await loadInbound();}catch(e){}}
     }else if(tab==='partners'){
       const [partners,cities,districts,sales,processors,whp]=await Promise.all([
         dbList('partners',{order:'name'}),dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),
@@ -2105,7 +2104,8 @@ function buildNav(){
     const main=[];
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
-    if(canMod('orders'))main.push({k:'orders',label:'Заказы',icon:'orders'});
+    if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
+    if(isAdmin())main.push({k:'ket_orders',label:'Заказы партнёров',icon:'orders'});
     if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];
@@ -2533,12 +2533,8 @@ function render(){
   if(typeof removeWhProductsPager==='function')removeWhProductsPager();
   if(S.tab==='dashboard')renderDashboard();
   else if(S.tab==='pickups')renderPickups();
-  else if(S.tab==='orders'){
-    if(typeof ordersTab!=='undefined'&&ordersTab==='ket'&&isAdmin()){
-      if(typeof drawInboundOrders==='function'&&S.inbound_orders)drawInboundOrders();
-      else if(typeof renderInboundOrders==='function')renderInboundOrders();
-    }else renderOrders();
-  }
+  else if(S.tab==='orders')renderOrders();
+  else if(S.tab==='ket_orders')renderInboundOrders();
   else if(S.tab==='courier')renderOrders('courier');
   else if(S.tab==='mail')renderOrders('mail');
   else if(S.tab==='today')renderOrders('today');
@@ -2946,7 +2942,7 @@ function productModal(){
       if(!S.inbound_orders){try{await loadInbound();}catch(e){}}
       else matchedCount=await autoMatchInboundItems();
       if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
-      if(typeof ordersTab!=='undefined'&&ordersTab==='ket'&&typeof drawInboundOrders==='function')drawInboundOrders();
+      if(S.tab==='ket_orders'&&typeof drawInboundOrders==='function')drawInboundOrders();
     }
     toast('Товар добавлен');renderCash();return true;
   },{wide:true});
@@ -6093,7 +6089,7 @@ function renderOrders(mode){
   const list=ordersDateScopedList();
   const totalCost=list.reduce((s,o)=>s+(+o.cost||0),0);
   const paid=list.filter(o=>o.pay_date).length;
-  const titles={'':'Заказы',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня'};
+  const titles={'':'Заказы заборов',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня'};
   const subs={'':'Отправления: курьерская и почтовая доставка',courier:'Заказы с курьерской доставкой',
     mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня'};
   let dayNote='';
@@ -6103,7 +6099,6 @@ function renderOrders(mode){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
       <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
-    ${ordersTabsHtml()}
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -6265,7 +6260,6 @@ function renderOrders(mode){
   if($('oftoday'))$('oftoday').onclick=()=>{const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   drawOrders();
-  bindOrdersTabs();
 }
 // число заказов с заполненным телефоном клиента
 function ordersWithPhone(list){return list.filter(o=>(o.phone||'').toString().replace(/\D/g,'').length>=10).length;}
@@ -8142,18 +8136,6 @@ async function runDuplicatesAI(){
 
 
 /* ============ ЧАСТЬ 3 — ЗАКАЗЫ ИЗ KET (входящие) ============ */
-let ordersTab='own';
-function ordersTabsHtml(){
-  if(!isAdmin())return '';
-  return `<div class="ord-tabs" style="display:flex;gap:8px;margin:0 0 14px">
-    <button class="btn ${ordersTab==='own'?'primary':'ghost'} sm" id="ordTabOwn">Заказы заборов</button>
-    <button class="btn ${ordersTab==='ket'?'primary':'ghost'} sm" id="ordTabKet">Заказы КЕТ</button>
-  </div>`;
-}
-function bindOrdersTabs(){
-  if($('ordTabOwn'))$('ordTabOwn').onclick=()=>{ordersTab='own';renderOrders(ordersMode);};
-  if($('ordTabKet'))$('ordTabKet').onclick=()=>{ordersTab='ket';renderInboundOrders();};
-}
 // сравнение технических названий (ket_sku) без учёта регистра и лишних пробелов
 function normKetSku(s){return String(s||'').trim().toLowerCase();}
 // у одного товара может быть НЕСКОЛЬКО тех-названий KET (разные листинги одного и того же товара) —
@@ -8254,12 +8236,10 @@ function ketSendLabel(s){return s==null||s===''?'—':(KET_SEND_STATUS[String(s)
 function ketKzLabel(s){return s==null||s===''?'—':(KET_STATUS_KZ[String(s)]||('код '+s));}
 async function renderInboundOrders(){
   if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
-  ordersTab='ket';
   // грузим всю историю только один раз за сессию — дальше данные держит свежими Realtime (+ фоновый опрос раз в 30с).
   // Без этого при большом и растущем количестве заказов КЕТ каждое открытие вкладки заново тянуло тысячи строк.
   if(!S.inbound_orders){
-    $('main').innerHTML='<div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div>'+ordersTabsHtml()+'<div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
-    bindOrdersTabs();
+    $('main').innerHTML='<div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div><div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
     await loadInbound();
   }
   drawInboundOrders();
@@ -8404,7 +8384,7 @@ function drawInboundOrders(){
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
   const colCount=17+(admin?1:0);
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
+    <div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
         <button class="btn ghost sm" id="inbRefresh" title="Заново загрузить все заказы КЕТ из базы">🔄 Обновить</button>
         <button class="btn ghost sm" id="inbUnmatched" title="Показать, каких товаров не хватает">🔍 Непривязанные коды</button>
@@ -8412,7 +8392,6 @@ function drawInboundOrders(){
         <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
         <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
       </div></div>
-    ${ordersTabsHtml()}
     <div class="stats stats-4">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Требуют привязки</div><div class="v" style="${unmatched?'color:var(--rust)':''}">${unmatched}</div></div>
@@ -8469,7 +8448,6 @@ function drawInboundOrders(){
       }).join(''):`<tr><td colspan="${colCount}"><div class="empty"><div class="big">${list.length?'Ничего не найдено':'Пока нет заказов из KET'}</div>${list.length?'Измените фильтры.':'Заказы появятся здесь, когда KET начнёт их присылать.'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
-  bindOrdersTabs();
   $('main').querySelectorAll('[data-inbdel]').forEach(b=>b.onclick=()=>delInboundOrder(b.dataset.inbdel));
   // двойной клик по строке — открыть карточку заказа (одиночный клик по кнопкам/чекбоксу не мешает)
   $('main').querySelectorAll('[data-inbrow]').forEach(tr=>tr.ondblclick=e=>{
