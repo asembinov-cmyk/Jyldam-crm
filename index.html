@@ -4856,13 +4856,41 @@ function printPartnerOrderLabel(o,partner){
   showInfo(`Этикетка заказа #${esc(code)}`,body);
 }
 // собрать значения полей одного заказа для сохранения
+// разбирает свободный текст «ФИО · Город · Адрес · Телефон», который вводит партнёр, на отдельные
+// поля — иначе они оставались пустыми в самом заказе (а печатаются на бланках/накладных именно из них,
+// не из комментария)
+function parsePartnerComment(text){
+  text=(text||'').trim();
+  if(!text)return{client:'',phone:'',address:''};
+  // телефон — ищем похожую на казахстанский номер последовательность цифр
+  const phoneMatch=text.match(/(?:\+?7|8)?[\s\-\(]*\d{3}[\s\-\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}/);
+  let phone='';
+  if(phoneMatch){
+    phone=phoneMatch[0].replace(/\D/g,'');
+    if(phone.length===11)phone=phone.slice(1); // убираем код страны 7/8, оставляем 10 цифр
+  }
+  const rest=phoneMatch?text.replace(phoneMatch[0],' '):text;
+  // делим на куски по типичным разделителям, которые просим использовать в подсказке (· , ; перенос строки)
+  const parts=rest.split(/[·\n,;]+/).map(s=>s.trim()).filter(Boolean);
+  // ФИО — первый кусок, где есть буквы и он не похож на «г. .../ул. .../мкр ...»
+  let client='';
+  const nameIdx=parts.findIndex(p=>/[A-Za-zА-Яа-яЁё]{2,}/.test(p)&&!/^(г\.|город|ул\.|улица|мкр|дом|кв\.|пос\.)/i.test(p));
+  if(nameIdx>=0){client=parts[nameIdx];parts.splice(nameIdx,1);}
+  const address=parts.join(', ');
+  return{client,phone,address};
+}
 function partnerCollectFields(o){
   const isMail=!!(($('mail_'+o.id)||{}).checked);
   const delivery_id=isMail?defaultMailDeliveryId():defaultCourierDeliveryId();
+  const comment=(($('cmt_'+o.id)||{}).value||'').trim();
+  const parsed=parsePartnerComment(comment);
   return {
     delivery_id:delivery_id,
     track:(($('trk_'+o.id)||{}).value||'').trim(),
-    comment:(($('cmt_'+o.id)||{}).value||'').trim(),
+    comment:comment,
+    client:parsed.client||o.client||'',
+    phone:parsed.phone||o.phone||'',
+    address:parsed.address||o.address||'',
   };
 }
 
