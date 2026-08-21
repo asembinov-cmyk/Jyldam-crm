@@ -2106,7 +2106,7 @@ function buildNav(){
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
-    if(isAdmin())main.push({k:'ket_orders',label:'Заказы партнёров',icon:'orders'});
+    if(isAdmin()||canMod('ket_orders'))main.push({k:'ket_orders',label:'Заказы партнёров',icon:'orders'});
     if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];
@@ -7651,7 +7651,8 @@ function warehouseModal(id){const c=id?S.warehouses.find(x=>x.id===id):{name:''}
 const MODULES=[
   ['dashboard','Дашборд'],
   ['pickups','Заявки на забор'],
-  ['orders','Заказы'],
+  ['orders','Заказы заборов'],
+  ['ket_orders','Заказы партнёров'],
   ['courier','Курьерская доставка'],
   ['mail','Почтовая доставка'],
   ['intercity','Отправки межгород'],
@@ -8239,11 +8240,15 @@ const KET_STATUS_KZ={
   '44':'Вложена в Тастамат','45':'Выкуп из Тастамата','46':'Невыкуп из Тастамата','47':'Не вложена (Тастамат)',
   '48':'Ожидает счёт',
 };
+// статус почтового возврата — новое поле, ещё нет в базе. Ожидаем 2 значения от бэкенда/KET
+// (см. пометку про SQL/уточнение поля ниже, тот же принцип, что и с call_status/calls_total).
+const KET_RETURN_STATUS={'0':'Принятие на почте','1':'Возврат по системе'};
+function ketReturnLabel(s){return s==null||s===''?'—':(KET_RETURN_STATUS[String(s)]||String(s));}
 function ketCallLabel(s){return s==null||s===''?'—':(KET_CALL_STATUS[String(s)]||('код '+s));}
 function ketSendLabel(s){return s==null||s===''?'—':(KET_SEND_STATUS[String(s)]||('код '+s));}
 function ketKzLabel(s){return s==null||s===''?'—':(KET_STATUS_KZ[String(s)]||('код '+s));}
 async function renderInboundOrders(){
-  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  if(!isAdmin()&&!canMod('ket_orders')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   // грузим всю историю только один раз за сессию — дальше данные держит свежими Realtime (+ фоновый опрос раз в 30с).
   // Без этого при большом и растущем количестве заказов КЕТ каждое открытие вкладки заново тянуло тысячи строк.
   if(!S.inbound_orders){
@@ -8388,9 +8393,9 @@ function drawInboundOrders(){
   if(inbPage<1)inbPage=1;
   const startIdx=(inbPage-1)*inbPerPage;
   const rows=allRows.slice(startIdx,startIdx+inbPerPage);
-  const admin=isAdmin();
+  const admin=isAdmin()||can('ket_orders','delete');
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
-  const colCount=17+(admin?1:0);
+  const colCount=18+(admin?1:0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
@@ -8431,7 +8436,7 @@ function drawInboundOrders(){
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
         <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Индекс</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
-        <th>Статус KET</th><th>Всего звонков</th><th>Звонков сегодня</th><th>Оператор логистики</th><th>Отправитель ИП</th><th>Трек номер</th><th>Склад</th><th>Дата</th><th></th>
+        <th>Статус KET</th><th>Статус почт. возврата</th><th>Всего звонков</th><th>Звонков сегодня</th><th>Оператор логистики</th><th>Отправитель ИП</th><th>Трек номер</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
         const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
@@ -8446,6 +8451,7 @@ function drawInboundOrders(){
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
           <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
+          <td data-label="Статус почт. возврата">${o.return_status!=null?esc(ketReturnLabel(o.return_status)):'—'}</td>
           <td data-label="Всего звонков">${o.calls_total!=null?esc(o.calls_total):'—'}</td>
           <td data-label="Звонков сегодня">${o.calls_today!=null?esc(o.calls_today):'—'}</td>
           <td data-label="Оператор логистики">${esc(o.logistics_operator||'—')}</td>
@@ -8592,7 +8598,7 @@ function updateInbAllChk(allRows){
   chk.indeterminate=selected>0&&selected<total;
 }
 async function delInboundOrder(id){
-  if(!isAdmin()){toast('Удалять заказы КЕТ может только администратор');return;}
+  if(!isAdmin()&&!can('ket_orders','delete')){toast('Нет прав на удаление заказов партнёров');return;}
   const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
   if(!confirm(`Удалить заказ КЕТ «${o.external_id||''}»?\n\nЭто действие нельзя отменить. Остатки на складе (если уже списаны) затронуты не будут.`))return;
   const items=inboundItemsFor(id);
@@ -8606,9 +8612,9 @@ async function delInboundOrder(id){
   toast('Заказ КЕТ удалён');
   drawInboundOrders();
 }
-// массовое удаление отмеченных галочками заказов КЕТ — только администратор
+// массовое удаление отмеченных галочками заказов КЕТ — нужно право на удаление в модуле «Заказы партнёров»
 async function delInboundOrdersBulk(){
-  if(!isAdmin())return;
+  if(!isAdmin()&&!can('ket_orders','delete'))return;
   const ids=[...inbSelected];
   if(!ids.length)return;
   if(!confirm(`Удалить выбранные заказы КЕТ (${ids.length} шт.)?\n\nЭто действие нельзя отменить.`))return;
