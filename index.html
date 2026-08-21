@@ -1225,6 +1225,7 @@ async function dbList(table,opts={}){
   const PAGE=1000;
   const fetchPage=(from,to)=>{
     let q=sb.from(table).select('*');
+    if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val); // напр. только записи не раньше даты X — сильно сокращает объём для быстро растущих таблиц
     if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
     q=q.range(from,to);
     return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))]);
@@ -8197,11 +8198,18 @@ async function autoMatchInboundItems(){
   });
   return matchedCount;
 }
-async function loadInbound(){
+let _inboundFullHistory=false; // false = грузим только последние N дней (быстро), true = вся история (по запросу)
+const INBOUND_DEFAULT_DAYS=60;
+async function loadInbound(opts){
+  opts=opts||{};
+  const full=opts.full!=null?opts.full:_inboundFullHistory;
+  _inboundFullHistory=full;
   try{
+    const since=(()=>{const d=new Date();d.setDate(d.getDate()-INBOUND_DEFAULT_DAYS);return d.toISOString();})();
+    const gteOpt=full?{}:{gte:{col:'created_at',val:since}};
     const [orders,items,partners]=await Promise.all([
-      dbList('inbound_orders',{order:'created_at',asc:false}),
-      dbList('inbound_order_items',{}),
+      dbList('inbound_orders',Object.assign({order:'created_at',asc:false},gteOpt)),
+      dbList('inbound_order_items',gteOpt),
       dbList('inbound_partners',{order:'partner_name'}).catch(()=>[]),
     ]);
     S.inbound_orders=orders||[];S.inbound_items=items||[];S.inbound_partners=partners||[];
@@ -8392,6 +8400,9 @@ function drawInboundOrders(){
         <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
         <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
       </div></div>
+    <div class="hint" style="margin-bottom:12px">${_inboundFullHistory
+      ?`Показана вся история заказов. <button type="button" class="btn sm ghost" id="inbLimitHistory" style="margin-left:6px">Вернуть последние ${INBOUND_DEFAULT_DAYS} дней (быстрее)</button>`
+      :`Показаны заказы за последние ${INBOUND_DEFAULT_DAYS} дней — так вкладка открывается быстро. <button type="button" class="btn sm ghost" id="inbFullHistory" style="margin-left:6px">Показать за всё время</button>`}</div>
     <div class="stats stats-4">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Требуют привязки</div><div class="v" style="${unmatched?'color:var(--rust)':''}">${unmatched}</div></div>
@@ -8482,6 +8493,16 @@ function drawInboundOrders(){
     const btn=$('inbRefresh');btn.disabled=true;btn.textContent='Обновляем…';
     try{await loadInbound();drawInboundOrders();toast('Обновлено');}
     finally{btn.disabled=false;btn.textContent='🔄 Обновить';}
+  };
+  if($('inbFullHistory'))$('inbFullHistory').onclick=async()=>{
+    const btn=$('inbFullHistory');btn.disabled=true;btn.textContent='Загружаем всю историю…';
+    try{await loadInbound({full:true});inbPage=1;drawInboundOrders();toast('Загружена вся история');}
+    finally{if(btn)btn.disabled=false;}
+  };
+  if($('inbLimitHistory'))$('inbLimitHistory').onclick=async()=>{
+    const btn=$('inbLimitHistory');btn.disabled=true;
+    try{await loadInbound({full:false});inbPage=1;drawInboundOrders();toast(`Показаны последние ${INBOUND_DEFAULT_DAYS} дней`);}
+    finally{if(btn)btn.disabled=false;}
   };
   if($('inbUnmatched'))$('inbUnmatched').onclick=()=>inboundUnmatchedModal();
   if($('inbExportXlsx'))$('inbExportXlsx').onclick=()=>exportInboundToExcel(inboundActionList());
