@@ -8286,7 +8286,10 @@ function filteredInbound(){
     if(inbFilter.dateTo&&(!cd||cd>inbFilter.dateTo))return false;
     if(q){
       const hay=[o.external_id,o.client,o.phone,phoneDisplay(o.phone)].join(' ').toLowerCase();
-      if(!hay.includes(q))return false;
+      // можно вставить сразу много ID — через пробел, запятую, точку с запятой или с новой строки;
+      // подходит заказ, совпавший хотя бы с одним из вставленных значений
+      const terms=q.split(/[\s,;]+/).filter(Boolean);
+      if(!terms.some(t=>hay.includes(t)))return false;
     }
     return true;
   }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
@@ -8402,7 +8405,7 @@ function drawInboundOrders(){
       <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(allRows.length+' / '+list.length):list.length}</span>
         ${admin&&inbSelected.size?`<button class="btn danger sm" id="inbDelSel" style="margin-left:auto">✕ Удалить выбранные (${inbSelected.size})</button>`:''}</div>
       <div class="filters">
-        <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон…" value="${esc(inbFilter.q)}">
+        <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон… (можно вставить сразу несколько через пробел)" value="${esc(inbFilter.q)}">
         <select id="inbpartner"><option value="">Все магазины</option>${[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.name||'—')}</option>`).join('')}</select>
         <select id="inbdelivery"><option value="">Все типы доставки</option>
           <option value="courier" ${inbFilter.delivery==='courier'?'selected':''}>Курьерская</option>
