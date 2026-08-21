@@ -8178,12 +8178,18 @@ async function autoMatchInboundItems(){
     }
   }
   // сверяем ВСЕ заказы (не только тронутые в этом запуске) — иначе если позиции привязались, а флажок
-  // заказа по какой-то причине не обновился раньше, это расхождение никогда само не исправится:
-  // предыдущая версия выходила из функции раньше и не доходила до этой проверки, если новых совпадений не было.
+  // заказа по какой-то причине не обновился раньше, это расхождение никогда само не исправится.
+  // Группируем позиции по заказу ОДИН раз (O(items)) вместо повторного полного скана на каждый заказ
+  // (O(orders × items) — именно это раньше подвешивало вкладку при большом числе заказов).
+  const itemsByOrder=new Map();
+  S.inbound_items.forEach(it=>{
+    if(!itemsByOrder.has(it.inbound_order_id))itemsByOrder.set(it.inbound_order_id,[]);
+    itemsByOrder.get(it.inbound_order_id).push(it);
+  });
   const ordersToFlip=(S.inbound_orders||[]).filter(order=>{
     if(order.match_status==='matched')return false;
-    const its=inboundItemsFor(order.id);
-    return its.length>0&&!its.some(x=>!x.matched||!x.product_id);
+    const its=itemsByOrder.get(order.id);
+    return its&&its.length>0&&!its.some(x=>!x.matched||!x.product_id);
   });
   await runInBatches(ordersToFlip,20,async order=>{
     const upd=await dbUpdate('inbound_orders',order.id,{match_status:'matched'});
