@@ -8385,7 +8385,6 @@ function drawInboundOrders(){
   const list=S.inbound_orders||[];
   const allRows=filteredInbound();
   const unmatched=list.filter(o=>o.match_status==='unmatched').length;
-  const written=list.filter(o=>o.stock_written).length;
   const anyFilter=inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.callStatus||inbFilter.statusKz||inbFilter.dateFrom||inbFilter.dateTo;
   // пагинация — как в «Заказах» и «Заявках на забор»
   const totalPages=Math.max(1,Math.ceil(allRows.length/inbPerPage));
@@ -8395,7 +8394,7 @@ function drawInboundOrders(){
   const rows=allRows.slice(startIdx,startIdx+inbPerPage);
   const admin=isAdmin()||can('ket_orders','delete');
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
-  const colCount=18+(admin?1:0);
+  const colCount=19+(admin?1:0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
@@ -8405,14 +8404,11 @@ function drawInboundOrders(){
         <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
         <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
       </div></div>
-    <div class="hint" style="margin-bottom:12px">${_inboundFullHistory
-      ?`Показана вся история заказов. <button type="button" class="btn sm ghost" id="inbLimitHistory" style="margin-left:6px">Вернуть последние ${INBOUND_DEFAULT_DAYS} дней (быстрее)</button>`
-      :`Показаны заказы за последние ${INBOUND_DEFAULT_DAYS} дней — так вкладка открывается быстро. <button type="button" class="btn sm ghost" id="inbFullHistory" style="margin-left:6px">Показать за всё время</button>`}</div>
     <div class="stats stats-4">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}</div></div>
       <div class="stat"><div class="k">Требуют привязки</div><div class="v" style="${unmatched?'color:var(--rust)':''}">${unmatched}</div></div>
-      <div class="stat"><div class="k">Склад списан</div><div class="v">${written}</div></div>
-      <div class="stat"><div class="k">Магазинов</div><div class="v">${new Set(list.flatMap(inboundOrderShopIds)).size}</div></div>
+      <div class="stat"><div class="k">Курьерских заказов</div><div class="v">${list.filter(o=>inboundDeliveryType(o)==='courier').length}</div></div>
+      <div class="stat"><div class="k">Почтовых заказов</div><div class="v">${list.filter(o=>inboundDeliveryType(o)==='mail').length}</div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(allRows.length+' / '+list.length):list.length}</span>
@@ -8435,7 +8431,7 @@ function drawInboundOrders(){
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
-        <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Индекс</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
+        <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Индекс</th><th>Вес</th><th>Сумма</th><th>Доставка</th><th>Магазин</th>
         <th>Статус KET</th><th>Статус почт. возврата</th><th>Всего звонков</th><th>Звонков сегодня</th><th>Оператор логистики</th><th>Отправитель ИП</th><th>Трек номер</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
@@ -8448,6 +8444,7 @@ function drawInboundOrders(){
           <td data-label="Город">${esc(o.city||'—')}</td>
           <td data-label="Индекс">${esc(o.index||'—')}</td>
           <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
+          <td data-label="Сумма">${(o.price!=null?o.price:o.total_price)!=null?Math.round(+(o.price!=null?o.price:o.total_price)).toLocaleString('ru-RU')+' ₸':'—'}</td>
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
           <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
