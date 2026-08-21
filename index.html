@@ -8440,6 +8440,7 @@ function drawInboundOrders(){
           <td data-label="Штрих-код заказа"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
           <td data-label="Клиент">${esc(o.client||'—')}</td>
           <td data-label="Телефон">${esc(o.phone||'—')}</td>
+          <td data-label="Город">${esc(o.city||'—')}</td>
           <td data-label="Индекс">${esc(o.index||'—')}</td>
           <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
