@@ -1761,7 +1761,7 @@ async function loadAll(){
   ]).then(([pickups,orders])=>{
     S.pickups=pickups;S.orders=orders;S._heavyLoaded=true;
     // перерисуем текущий экран, когда тяжёлые данные пришли
-    try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav();}catch(e){}
+    try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav({skipTabFix:true});}catch(e){}
   }).catch(e=>{console.error('heavy load',e);});
 }
 
@@ -1895,7 +1895,7 @@ function scheduleRtRender(){
   _rtTimer=setTimeout(()=>{
     _rtTimer=null;
     if(!canAutoRefresh())return; // пользователь занят — не мешаем, обновим позже
-    try{render();buildNav();}catch(e){}
+    try{render();buildNav({skipTabFix:true});}catch(e){}
   },400);
 }
 // можно ли сейчас обновлять — НЕ обновляем, если пользователь работает
@@ -2072,6 +2072,7 @@ const ICONS={
   dashboard:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
   pickups:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 7h11l-2 5h2M5 12h8M6 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 8l4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   orders:'<svg viewBox="0 0 24 24" fill="none"><path d="M6 2l1.5 2h9L18 2M4 6h16l-1.5 14a1 1 0 01-1 .9H6.5a1 1 0 01-1-.9L4 6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 10v6M15 10v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  handshake:'<svg viewBox="0 0 24 24" fill="none"><path d="M2 12l5-4 4 3 3-2 5 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 8l3.5 3.5a1.8 1.8 0 002.5 0v0a1.8 1.8 0 000-2.5L9 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12v5a1 1 0 001 1h2M22 12v5a1 1 0 01-1 1h-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="16" y="7" width="4" height="9" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="7" width="4" height="9" rx="1" stroke="currentColor" stroke-width="1.7"/></svg>',
   today:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="15" r="2" fill="currentColor"/></svg>',
   mail:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M4 7l8 6 8-6" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   courier:'<svg viewBox="0 0 24 24" fill="none"><path d="M1 7h11v8H1zM12 9h5l4 3v3h-9" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="6" cy="17" r="1.8" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="17" r="1.8" stroke="currentColor" stroke-width="1.7"/></svg>',
@@ -2110,7 +2111,8 @@ function pickupsTodayActive(){
     return /нов|пути|выехал|принял/i.test(nm);
   }).length;
 }
-function buildNav(){
+function buildNav(opts){
+  opts=opts||{};
   // восстановить свёрнутые группы меню из localStorage (один раз)
   if(!window._navCollapsed){try{window._navCollapsed=JSON.parse(localStorage.getItem('navCollapsed')||'{}');}catch(e){window._navCollapsed={};}}
   const courier=isCourierBase();
@@ -2122,7 +2124,7 @@ function buildNav(){
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
-    if(isAdmin()||canMod('ket_orders'))main.push({k:'ket_orders',label:'Заказы партнёров',icon:'orders'});
+    if(isAdmin()||canMod('ket_orders'))main.push({k:'ket_orders',label:'Заказы партнёров',icon:'handshake'});
     if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];
@@ -2160,7 +2162,10 @@ function buildNav(){
   // собрать список активных ключей для проверки текущей вкладки
   const activeKeys=[];groups.forEach(g=>g.items.forEach(it=>{if(!it.disabled&&!it.href)activeKeys.push(it.k);}));
   if(!activeKeys.length)activeKeys.push('none');
-  if(!activeKeys.includes(S.tab))S.tab=activeKeys[0];
+  // подмену текущей вкладки на первую доступную делаем ТОЛЬКО не в фоновом вызове — иначе фоновое
+  // обновление (например, от Realtime по заказам КЕТ) может незаметно перекинуть человека с открытой
+  // страницы (например, «Склад») на другую вкладку прямо во время работы
+  if(!opts.skipTabFix&&!activeKeys.includes(S.tab))S.tab=activeKeys[0];
 
   let html='';
   groups.forEach(g=>{
