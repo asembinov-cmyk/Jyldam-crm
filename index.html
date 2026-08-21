@@ -541,6 +541,14 @@
   #inboundTable .cell-time{font-size:9.5px}
   #inboundTable .pill{padding:2px 8px;font-size:11px}
   #inboundTable .ket-badge{padding:2px 7px;font-size:10.5px}
+  #inboundTable .inb-th{cursor:pointer;user-select:none;position:relative}
+  #inboundTable .inb-th:hover{background:var(--card)}
+  #inboundTable .inb-th-dragging{opacity:.4}
+  #inboundTable .inb-th-over{box-shadow:inset 2px 0 0 var(--rust)}
+  #inboundTable .inb-th-filtered{color:var(--rust)}
+  .inb-col-filter-pop{filter:drop-shadow(0 10px 24px rgba(20,30,60,.25))}
+  .inb-col-filter-box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;gap:6px;align-items:center}
+  .inb-col-filter-box input{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;width:200px}
   /* Десктоп: читабельные колонки заявок/заказов */
   @media (min-width:761px){
     .resp-table td[data-label="Номер"]{white-space:nowrap}
@@ -8360,6 +8368,13 @@ function filteredInbound(){
     const cd=(o.created_at||'').slice(0,10);
     if(inbFilter.dateFrom&&(!cd||cd<inbFilter.dateFrom))return false;
     if(inbFilter.dateTo&&(!cd||cd>inbFilter.dateTo))return false;
+    // фильтры по отдельным колонкам (клик на заголовок столбца)
+    for(const key in inbColFilters){
+      const val=(inbColFilters[key]||'').toLowerCase().trim();
+      if(!val)continue;
+      const col=INB_COLUMNS.find(c=>c.key===key);if(!col)continue;
+      if(!col.text(o).toLowerCase().includes(val))return false;
+    }
     if(q){
       const hay=[o.external_id,o.client,o.phone,phoneDisplay(o.phone)].join(' ').toLowerCase();
       // можно вставить сразу много ID — через пробел, запятую, точку с запятой или с новой строки;
@@ -8446,8 +8461,76 @@ function ketDocsModal(){
   </div>`;
   showInfo('Документация: интеграция с KET',body,{wide:true});
 }
+// описание колонок грида «Заказы партнёров» — по одному месту для порядка/фильтра/перетаскивания колонок
+const INB_COLUMNS=[
+  {key:'external_id',label:'Штрих-код заказа',text:o=>(o.external_id||'')+' '+(o.source||''),
+    cell:o=>`<td data-label="Штрих-код заказа"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>`},
+  {key:'client',label:'Клиент',text:o=>o.client||'',cell:o=>`<td data-label="Клиент">${esc(o.client||'—')}</td>`},
+  {key:'phone',label:'Телефон',text:o=>o.phone||'',cell:o=>`<td data-label="Телефон">${esc(o.phone||'—')}</td>`},
+  {key:'city',label:'Город',text:o=>o.city||'',cell:o=>`<td data-label="Город">${esc(o.city||'—')}</td>`},
+  {key:'index',label:'Индекс',text:o=>o.index||'',cell:o=>`<td data-label="Индекс">${esc(o.index||'—')}</td>`},
+  {key:'weight',label:'Вес',text:o=>o.weight!=null?String(o.weight):'',cell:o=>`<td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>`},
+  {key:'amount',label:'Сумма',text:o=>{const a=o.price!=null?o.price:o.total_price;return a!=null?String(a):'';},
+    cell:o=>{const a=o.price!=null?o.price:o.total_price;return `<td data-label="Сумма">${a!=null?Math.round(+a).toLocaleString('ru-RU'):'—'}</td>`;}},
+  {key:'delivery',label:'Доставка',text:o=>inboundDeliveryLabel(o),
+    cell:o=>`<td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>`},
+  {key:'shop',label:'Магазин',text:o=>inboundOrderShopLabel(o),cell:o=>`<td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>`},
+  {key:'ket_status',label:'Статус KET',text:o=>[ketSendLabel(o.send_status),ketKzLabel(o.status_kz),o.call_status!=null?ketCallLabel(o.call_status):''].join(' '),
+    cell:o=>`<td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>`},
+  {key:'return_status',label:'Статус почт. возврата',text:o=>o.return_status!=null?ketReturnLabel(o.return_status):'',
+    cell:o=>`<td data-label="Статус почт. возврата">${o.return_status!=null?esc(ketReturnLabel(o.return_status)):'—'}</td>`},
+  {key:'calls_total',label:'Всего звонков',text:o=>o.calls_total!=null?String(o.calls_total):'',cell:o=>`<td data-label="Всего звонков">${o.calls_total!=null?esc(o.calls_total):'—'}</td>`},
+  {key:'calls_today',label:'Звонков сегодня',text:o=>o.calls_today!=null?String(o.calls_today):'',cell:o=>`<td data-label="Звонков сегодня">${o.calls_today!=null?esc(o.calls_today):'—'}</td>`},
+  {key:'logistics_operator',label:'Оператор логистики',text:o=>o.logistics_operator||'',cell:o=>`<td data-label="Оператор логистики">${esc(o.logistics_operator||'—')}</td>`},
+  {key:'sender_ip',label:'Отправитель ИП',text:o=>o.sender_ip||'',cell:o=>`<td data-label="Отправитель ИП">${esc(o.sender_ip||'—')}</td>`},
+  {key:'kz_code',label:'Трек номер',text:o=>o.kz_code||'',cell:o=>`<td data-label="Трек номер">${esc(o.kz_code||'—')}</td>`},
+  {key:'stock',label:'Склад',text:o=>o.stock_written?'списан':'',
+    cell:o=>`<td data-label="Склад">${o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>'}</td>`},
+  {key:'created_at',label:'Дата',text:o=>fmtDate(o.created_at),
+    cell:o=>`<td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>`},
+];
+// порядок колонок — можно перетаскивать мышкой, запоминаем в браузере
+let inbColOrder=(()=>{try{const saved=JSON.parse(localStorage.getItem('inbColOrder')||'null');
+  if(Array.isArray(saved)&&saved.length===INB_COLUMNS.length&&saved.every(k=>INB_COLUMNS.some(c=>c.key===k)))return saved;}catch(e){}
+  return INB_COLUMNS.map(c=>c.key);})();
+function inbColumnsInOrder(){return inbColOrder.map(k=>INB_COLUMNS.find(c=>c.key===k)).filter(Boolean);}
+// фильтр по клику на конкретную колонку — {key: текст фильтра}
+let inbColFilters={};
+function inboundColFiltersActive(){return Object.values(inbColFilters).some(v=>v);}
+// всплывающий фильтр по конкретной колонке — открывается по клику на заголовок столбца
+function openInboundColFilter(th,key){
+  document.querySelectorAll('.inb-col-filter-pop').forEach(p=>p.remove());
+  const rect=th.getBoundingClientRect();
+  const pop=document.createElement('div');
+  pop.className='inb-col-filter-pop';
+  pop.style.cssText=`position:fixed;left:${Math.max(8,rect.left)}px;top:${rect.bottom+4}px;z-index:9000`;
+  const col=INB_COLUMNS.find(c=>c.key===key);
+  pop.innerHTML=`<div class="inb-col-filter-box">
+    <input type="text" id="inbColFilterInput" placeholder="Поиск по «${esc(col?col.label:'')}»…" value="${esc(inbColFilters[key]||'')}">
+    ${inbColFilters[key]?'<button type="button" class="btn sm ghost" id="inbColFilterClear">✕</button>':''}
+  </div>`;
+  document.body.appendChild(pop);
+  const inp=pop.querySelector('#inbColFilterInput');
+  inp.focus();inp.select();
+  const apply=async(val)=>{
+    inbColFilters[key]=val;
+    if(!val)delete inbColFilters[key];
+    if(inboundColFiltersActive()&&!S.inbound_full_loaded){
+      toast('Загружаем весь список для фильтра…');
+      try{await loadInbound();}catch(e){}
+    }
+    inbPage=1;
+    drawInboundOrders();
+  };
+  inp.onkeydown=e=>{if(e.key==='Enter'){pop.remove();apply(inp.value.trim());}if(e.key==='Escape')pop.remove();};
+  const clearBtn=pop.querySelector('#inbColFilterClear');
+  if(clearBtn)clearBtn.onclick=()=>{pop.remove();apply('');};
+  document.addEventListener('click',function closePop(ev){
+    if(!pop.contains(ev.target)&&ev.target!==th){pop.remove();apply(inp.value.trim());document.removeEventListener('click',closePop);}
+  },{capture:true});
+}
 function drawInboundOrders(){
-  const anyFilter=inboundHasActiveFilters();
+  const anyFilter=inboundHasActiveFilters()||inboundColFiltersActive();
   const lazy=!S.inbound_full_loaded&&!anyFilter; // быстрый режим: постранично с сервера, без полного набора в памяти
   const list=S.inbound_orders||[]; // в быстром режиме — только текущая страница; иначе — весь (отфильтрованный по дате) набор
   const allRows=lazy?list:filteredInbound();
@@ -8501,31 +8584,13 @@ function drawInboundOrders(){
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
-        <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Индекс</th><th>Вес</th><th>Сумма</th><th>Доставка</th><th>Магазин</th>
-        <th>Статус KET</th><th>Статус почт. возврата</th><th>Всего звонков</th><th>Звонков сегодня</th><th>Оператор логистики</th><th>Отправитель ИП</th><th>Трек номер</th><th>Склад</th><th>Дата</th><th></th>
+        ${inbColumnsInOrder().map(c=>`<th draggable="true" class="inb-th ${inbColFilters[c.key]?'inb-th-filtered':''}" data-colkey="${c.key}" title="Перетащите, чтобы переставить · нажмите, чтобы найти по столбцу">${esc(c.label)}${inbColFilters[c.key]?' 🔎':''}</th>`).join('')}
+        <th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
-        const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
         return `<tr data-inbrow="${o.id}" style="cursor:pointer">
           ${admin?`<td onclick="event.stopPropagation()"><input type="checkbox" class="inbChk" data-inbchk="${o.id}" ${inbSelected.has(o.id)?'checked':''}></td>`:''}
-          <td data-label="Штрих-код заказа"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
-          <td data-label="Клиент">${esc(o.client||'—')}</td>
-          <td data-label="Телефон">${esc(o.phone||'—')}</td>
-          <td data-label="Город">${esc(o.city||'—')}</td>
-          <td data-label="Индекс">${esc(o.index||'—')}</td>
-          <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
-          <td data-label="Сумма">${(o.price!=null?o.price:o.total_price)!=null?Math.round(+(o.price!=null?o.price:o.total_price)).toLocaleString('ru-RU')+' ₸':'—'}</td>
-          <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
-          <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
-          <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
-          <td data-label="Статус почт. возврата">${o.return_status!=null?esc(ketReturnLabel(o.return_status)):'—'}</td>
-          <td data-label="Всего звонков">${o.calls_total!=null?esc(o.calls_total):'—'}</td>
-          <td data-label="Звонков сегодня">${o.calls_today!=null?esc(o.calls_today):'—'}</td>
-          <td data-label="Оператор логистики">${esc(o.logistics_operator||'—')}</td>
-          <td data-label="Отправитель ИП">${esc(o.sender_ip||'—')}</td>
-          <td data-label="Трек номер">${esc(o.kz_code||'—')}</td>
-          <td data-label="Склад">${stockBadge}</td>
-          <td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>
+          ${inbColumnsInOrder().map(c=>c.cell(o)).join('')}
           <td data-label="" class="cell-actions"><div class="row-actions">
             ${admin?`<button class="btn sm danger" data-inbdel="${o.id}">Удалить</button>`:''}
           </div></td>
@@ -8609,7 +8674,31 @@ function drawInboundOrders(){
   if($('inbstatuskz'))$('inbstatuskz').onchange=e=>{inbFilter.statusKz=e.target.value;redraw();};
   if($('inbdatefrom'))$('inbdatefrom').onchange=e=>{inbFilter.dateFrom=e.target.value;redraw();};
   if($('inbdateto'))$('inbdateto').onchange=e=>{inbFilter.dateTo=e.target.value;redraw();};
-  if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',callStatus:'',statusKz:'',dateFrom:'',dateTo:''};inbPage=1;inbSelectAll=false;drawInboundOrders();};
+  if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',callStatus:'',statusKz:'',dateFrom:'',dateTo:''};inbColFilters={};inbPage=1;inbSelectAll=false;drawInboundOrders();};
+  // перетаскивание заголовков столбцов мышкой — меняет порядок колонок, запоминается в браузере
+  let _inbDragKey=null,_inbDidDrag=false;
+  $('main').querySelectorAll('.inb-th').forEach(th=>{
+    th.ondragstart=e=>{_inbDragKey=th.dataset.colkey;_inbDidDrag=false;e.dataTransfer.effectAllowed='move';th.classList.add('inb-th-dragging');};
+    th.ondragend=()=>{th.classList.remove('inb-th-dragging');$('main').querySelectorAll('.inb-th').forEach(x=>x.classList.remove('inb-th-over'));};
+    th.ondragover=e=>{e.preventDefault();if(th.dataset.colkey!==_inbDragKey)th.classList.add('inb-th-over');};
+    th.ondragleave=()=>th.classList.remove('inb-th-over');
+    th.ondrop=e=>{
+      e.preventDefault();th.classList.remove('inb-th-over');
+      const toKey=th.dataset.colkey;
+      if(!_inbDragKey||_inbDragKey===toKey)return;
+      _inbDidDrag=true;
+      const from=inbColOrder.indexOf(_inbDragKey),to=inbColOrder.indexOf(toKey);
+      if(from<0||to<0)return;
+      inbColOrder.splice(from,1);inbColOrder.splice(to,0,_inbDragKey);
+      try{localStorage.setItem('inbColOrder',JSON.stringify(inbColOrder));}catch(e2){}
+      drawInboundOrders();
+    };
+    // клик по заголовку (не после перетаскивания) — фильтр по этому столбцу
+    th.onclick=()=>{
+      if(_inbDidDrag){_inbDidDrag=false;return;}
+      openInboundColFilter(th,th.dataset.colkey);
+    };
+  });
 }
 // плавающая панель пагинации для «Заказы КЕТ» (тот же вид, что у заказов/заявок)
 function removeInboundPager(){const ex=$('inboundPager');if(ex)ex.remove();
