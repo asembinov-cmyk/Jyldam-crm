@@ -6533,10 +6533,28 @@ async function generateWaybillsPdf(items){
   const font=await outDoc.embedFont(assets.regularBytes,{subset:true});
   const fontBold=await outDoc.embedFont(assets.boldBytes,{subset:true});
   const W=420,H=595; // примерно A5
+  const BC_W=164.4,BC_H=113.4; // 58×40мм в pt (1мм = 2.8346pt) — размер штрихкода сверху, как просили
   for(const it of items){
     const page=outDoc.addPage([W,H]);
-    let y=H-40;
+    let y=H-24;
     const line=(dy)=>{y-=dy;};
+    // штрихкод заказа сверху, 58×40мм, по центру — рисуем полосками по символам штрих-кода заказа (orderNo)
+    const bcX=(W-BC_W)/2;
+    const code=String(it.orderNo||'');
+    const barCount=Math.max(code.length,1);
+    const gap=1.2;
+    const barW=(BC_W-gap*(barCount-1))/barCount;
+    let bx=bcX;
+    for(let i=0;i<barCount;i++){
+      const ch=code.charCodeAt(i%code.length)||48;
+      const w=barW*(0.5+((ch%5)/5)*0.5); // ширина полоски "пляшет" по символу — визуально как штрихкод
+      page.drawRectangle({x:bx,y:y-BC_H,width:w,height:BC_H,color:rgb(0,0,0)});
+      bx+=barW+gap;
+    }
+    line(BC_H+18);
+    // номер по центру под штрихкодом
+    {const tw=fontBold.widthOfTextAtSize(code,11);page.drawText(code,{x:(W-tw)/2,y,size:11,font:fontBold});}
+    line(24);
     // шапка
     page.drawText('Jyldam Logistics',{x:32,y,size:18,font:fontBold});
     line(30);
@@ -8384,7 +8402,7 @@ function drawInboundOrders(){
   const rows=allRows.slice(startIdx,startIdx+inbPerPage);
   const admin=isAdmin();
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
-  const colCount=13+(admin?1:0);
+  const colCount=17+(admin?1:0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
@@ -8422,8 +8440,8 @@ function drawInboundOrders(){
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
-        <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
-        <th>Статус KET</th><th>Всего звонков</th><th>Звонков сегодня</th><th>Склад</th><th>Дата</th><th></th>
+        <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Индекс</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
+        <th>Статус KET</th><th>Всего звонков</th><th>Звонков сегодня</th><th>Оператор логистики</th><th>Отправитель ИП</th><th>Трек номер</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
         const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
@@ -8432,13 +8450,16 @@ function drawInboundOrders(){
           <td data-label="Штрих-код заказа"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>
           <td data-label="Клиент">${esc(o.client||'—')}</td>
           <td data-label="Телефон">${esc(o.phone||'—')}</td>
-          <td data-label="Город">${esc(o.city||'—')}</td>
+          <td data-label="Индекс">${esc(o.index||'—')}</td>
           <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
           <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
           <td data-label="Всего звонков">${o.calls_total!=null?esc(o.calls_total):'—'}</td>
           <td data-label="Звонков сегодня">${o.calls_today!=null?esc(o.calls_today):'—'}</td>
+          <td data-label="Оператор логистики">${esc(o.logistics_operator||'—')}</td>
+          <td data-label="Отправитель ИП">${esc(o.sender_ip||'—')}</td>
+          <td data-label="Трек номер">${esc(o.kz_code||'—')}</td>
           <td data-label="Склад">${stockBadge}</td>
           <td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>
           <td data-label="" class="cell-actions"><div class="row-actions">
