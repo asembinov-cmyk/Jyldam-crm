@@ -546,7 +546,7 @@
   #inboundTable .inb-th-dragging{opacity:.4}
   #inboundTable .inb-th-over{box-shadow:inset 2px 0 0 var(--rust)}
   #inboundTable .inb-th-filtered{color:var(--rust)}
-  .inb-col-filter-pop{filter:drop-shadow(0 10px 24px rgba(20,30,60,.25))}
+  .inb-col-filter-pop{position:absolute;top:100%;left:0;margin-top:4px;z-index:9000;filter:drop-shadow(0 10px 24px rgba(20,30,60,.25))}
   .inb-col-filter-box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;gap:6px;align-items:center}
   .inb-col-filter-box input{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;width:200px}
   /* Десктоп: читабельные колонки заявок/заказов */
@@ -8497,19 +8497,45 @@ function inbColumnsInOrder(){return inbColOrder.map(k=>INB_COLUMNS.find(c=>c.key
 // фильтр по клику на конкретную колонку — {key: текст фильтра}
 let inbColFilters={};
 function inboundColFiltersActive(){return Object.values(inbColFilters).some(v=>v);}
-// всплывающий фильтр по конкретной колонке — открывается по клику на заголовок столбца
+// всплывающий фильтр по конкретной колонке — открывается по клику на заголовок столбца.
+// Крепится прямо к самому заголовку (position:relative на th + position:absolute на попап) —
+// не «улетает» в угол экрана, как было раньше с фиксированными координатами.
 function openInboundColFilter(th,key){
   document.querySelectorAll('.inb-col-filter-pop').forEach(p=>p.remove());
-  const rect=th.getBoundingClientRect();
+  const col=INB_COLUMNS.find(c=>c.key===key);
   const pop=document.createElement('div');
   pop.className='inb-col-filter-pop';
-  pop.style.cssText=`position:fixed;left:${Math.max(8,rect.left)}px;top:${rect.bottom+4}px;z-index:9000`;
-  const col=INB_COLUMNS.find(c=>c.key===key);
+  if(key==='delivery'){
+    // «Доставка» — не свободный текст, а выбор из двух вариантов (тот же фильтр, что и в строке фильтров сверху)
+    pop.innerHTML=`<div class="inb-col-filter-box">
+      <select id="inbColFilterSelect">
+        <option value="">Все</option>
+        <option value="courier" ${inbFilter.delivery==='courier'?'selected':''}>Курьерская</option>
+        <option value="mail" ${inbFilter.delivery==='mail'?'selected':''}>Почтовая</option>
+      </select>
+    </div>`;
+    th.appendChild(pop);
+    const sel=pop.querySelector('#inbColFilterSelect');
+    sel.focus();
+    const applyDelivery=async(val)=>{
+      inbFilter.delivery=val;
+      if(inboundHasActiveFilters()&&!S.inbound_full_loaded){
+        toast('Загружаем весь список для фильтра…');
+        try{await loadInbound();}catch(e){}
+      }
+      inbPage=1;drawInboundOrders();
+    };
+    sel.onchange=()=>{pop.remove();applyDelivery(sel.value);};
+    document.addEventListener('click',function closePop(ev){
+      if(!pop.contains(ev.target)&&ev.target!==th){pop.remove();document.removeEventListener('click',closePop);}
+    },{capture:true});
+    return;
+  }
   pop.innerHTML=`<div class="inb-col-filter-box">
     <input type="text" id="inbColFilterInput" placeholder="Поиск по «${esc(col?col.label:'')}»…" value="${esc(inbColFilters[key]||'')}">
     ${inbColFilters[key]?'<button type="button" class="btn sm ghost" id="inbColFilterClear">✕</button>':''}
   </div>`;
-  document.body.appendChild(pop);
+  th.appendChild(pop);
   const inp=pop.querySelector('#inbColFilterInput');
   inp.focus();inp.select();
   const apply=async(val)=>{
@@ -8584,7 +8610,8 @@ function drawInboundOrders(){
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
-        ${inbColumnsInOrder().map(c=>`<th draggable="true" class="inb-th ${inbColFilters[c.key]?'inb-th-filtered':''}" data-colkey="${c.key}" title="Перетащите, чтобы переставить · нажмите, чтобы найти по столбцу">${esc(c.label)}${inbColFilters[c.key]?' 🔎':''}</th>`).join('')}
+        ${inbColumnsInOrder().map(c=>{const active=c.key==='delivery'?!!inbFilter.delivery:!!inbColFilters[c.key];
+          return `<th draggable="true" class="inb-th ${active?'inb-th-filtered':''}" data-colkey="${c.key}" title="Перетащите, чтобы переставить · нажмите, чтобы найти по столбцу">${esc(c.label)}${active?' 🔎':''}</th>`;}).join('')}
         <th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
