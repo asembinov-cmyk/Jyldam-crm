@@ -541,6 +541,7 @@
   #inboundTable .cell-time{font-size:9.5px}
   #inboundTable .pill{padding:2px 8px;font-size:11px}
   #inboundTable .ket-badge{padding:2px 7px;font-size:10.5px}
+  #inboundTable td[data-label="Индекс"],#inboundTable th[data-colkey="index"]{min-width:64px;white-space:nowrap}
   #inboundTable .inb-th{cursor:pointer;user-select:none;position:relative}
   #inboundTable .inb-th:hover{background:var(--card)}
   #inboundTable .inb-th-dragging{opacity:.4}
@@ -8479,7 +8480,7 @@ const INB_COLUMNS=[
     cell:o=>{const a=o.price!=null?o.price:o.total_price;return `<td data-label="Сумма">${a!=null?Math.round(+a).toLocaleString('ru-RU'):'—'}</td>`;}},
   {key:'delivery',label:'Доставка',text:o=>inboundDeliveryLabel(o),
     cell:o=>`<td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>`},
-  {key:'shop',label:'Магазин',text:o=>inboundOrderShopLabel(o),cell:o=>`<td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>`},
+  {key:'shop',label:'Партнёр',text:o=>inboundOrderShopLabel(o),cell:o=>`<td data-label="Партнёр">${esc(inboundOrderShopLabel(o))}</td>`},
   {key:'ket_status',label:'Статус KET',text:o=>[ketSendLabel(o.send_status),ketKzLabel(o.status_kz),o.call_status!=null?ketCallLabel(o.call_status):''].join(' '),
     cell:o=>`<td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>`},
   {key:'return_status',label:'Статус почт. возврата',text:o=>o.return_status!=null?ketReturnLabel(o.return_status):'',
@@ -8837,14 +8838,19 @@ function inboundOrderModal(id){
   const body=`<div style="display:grid;gap:8px;font-size:14px">
     <div><b>Штрих-код заказа:</b> ${esc(o.external_id||'—')} <span class="wh-cat">(${esc(o.source||'')})</span></div>
     <div><b>Поступил:</b> ${o.created_at?esc(fmtDateTime(o.created_at)):'—'}</div>
-    <div><b>Магазин:</b> ${esc(inboundOrderShopLabel(o))}</div>
+    <div><b>Партнёр:</b> ${esc(inboundOrderShopLabel(o))}</div>
+    <div><b>Тип доставки:</b> ${esc(inboundDeliveryLabel(o))}</div>
     <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
     <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
     <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
     <div><b>Вес:</b> ${o.weight?esc(o.weight)+' кг':'—'}</div>
     <div><b>Сумма:</b> ${o.price!=null?esc(o.price):'—'} ${o.total_price!=null&&o.total_price!==o.price?('(итого '+esc(o.total_price)+')'):''}</div>
     <div><b>Статус доставки:</b> ${esc(ketSendLabel(o.send_status))} · <b>Посылка:</b> ${esc(ketKzLabel(o.status_kz))}${o.call_status!=null?` · <b>Звонок:</b> ${esc(ketCallLabel(o.call_status))}`:''}</div>
-    ${o.kz_code?`<div><b>Трек:</b> ${esc(o.kz_code)}</div>`:''}
+    <div><b>Статус почтового возврата:</b> ${o.return_status!=null?esc(ketReturnLabel(o.return_status)):'—'}</div>
+    <div><b>Звонков клиенту:</b> всего ${o.calls_total!=null?esc(o.calls_total):'—'} · сегодня ${o.calls_today!=null?esc(o.calls_today):'—'}</div>
+    <div><b>Оператор логистики:</b> ${esc(o.logistics_operator||'—')}</div>
+    <div><b>Отправитель ИП:</b> ${esc(o.sender_ip||'—')}</div>
+    <div><b>Трек номер:</b> ${esc(o.kz_code||'—')}</div>
     <div><b>Привязка товаров:</b> ${matchLine}</div>
     <div style="margin-top:6px"><b>Состав:</b></div>
     <div style="display:grid;gap:4px">
