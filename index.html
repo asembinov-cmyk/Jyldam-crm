@@ -8268,7 +8268,7 @@ function inboundOrderShopLabel(o){
 // если указан почтовый индекс, считаем почтовой доставкой, иначе курьерской
 function inboundDeliveryType(o){return o.index?'mail':'courier';}
 function inboundDeliveryLabel(o){return inboundDeliveryType(o)==='mail'?'Почтовая':'Курьерская';}
-let inbFilter={q:'',partner:'',delivery:'',status:'',callStatus:'',dateFrom:'',dateTo:''};
+let inbFilter={q:'',partner:'',delivery:'',status:'',callStatus:'',statusKz:'',dateFrom:'',dateTo:''};
 let inbPage=1;      // текущая страница пагинации заказов КЕТ
 let inbPerPage=50;  // заказов КЕТ на страницу
 const inbSelected=new Set(); // id выбранных заказов КЕТ (для массовых действий, живёт между страницами)
@@ -8280,6 +8280,7 @@ function filteredInbound(){
     if(inbFilter.delivery&&inboundDeliveryType(o)!==inbFilter.delivery)return false;
     if(inbFilter.status&&String(o.send_status||'')!==inbFilter.status)return false;
     if(inbFilter.callStatus&&String(o.call_status||'')!==inbFilter.callStatus)return false;
+    if(inbFilter.statusKz&&String(o.status_kz||'')!==inbFilter.statusKz)return false;
     const cd=(o.created_at||'').slice(0,10);
     if(inbFilter.dateFrom&&(!cd||cd<inbFilter.dateFrom))return false;
     if(inbFilter.dateTo&&(!cd||cd>inbFilter.dateTo))return false;
@@ -8371,7 +8372,7 @@ function drawInboundOrders(){
   const allRows=filteredInbound();
   const unmatched=list.filter(o=>o.match_status==='unmatched').length;
   const written=list.filter(o=>o.stock_written).length;
-  const anyFilter=inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.callStatus||inbFilter.dateFrom||inbFilter.dateTo;
+  const anyFilter=inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.callStatus||inbFilter.statusKz||inbFilter.dateFrom||inbFilter.dateTo;
   // пагинация — как в «Заказах» и «Заявках на забор»
   const totalPages=Math.max(1,Math.ceil(allRows.length/inbPerPage));
   if(inbPage>totalPages)inbPage=totalPages;
@@ -8380,7 +8381,7 @@ function drawInboundOrders(){
   const rows=allRows.slice(startIdx,startIdx+inbPerPage);
   const admin=isAdmin();
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
-  const colCount=11+(admin?1:0);
+  const colCount=13+(admin?1:0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы КЕТ</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
@@ -8407,6 +8408,7 @@ function drawInboundOrders(){
           <option value="courier" ${inbFilter.delivery==='courier'?'selected':''}>Курьерская</option>
           <option value="mail" ${inbFilter.delivery==='mail'?'selected':''}>Почтовая</option></select>
         <select id="inbstatus"><option value="">Все статусы</option>${Object.entries(KET_SEND_STATUS).map(([code,label])=>`<option value="${code}" ${inbFilter.status===code?'selected':''}>${esc(label)}</option>`).join('')}</select>
+        <select id="inbstatuskz"><option value="">Все статусы посылки</option>${Object.entries(KET_STATUS_KZ).map(([code,label])=>`<option value="${code}" ${inbFilter.statusKz===code?'selected':''}>${esc(label)}</option>`).join('')}</select>
         <select id="inbcallstatus"><option value="">Все звонковые</option>${Object.entries(KET_CALL_STATUS).map(([code,label])=>`<option value="${code}" ${inbFilter.callStatus===code?'selected':''}>${esc(label)}</option>`).join('')}</select>
       </div>
       <div class="filters filters-dates">
@@ -8418,7 +8420,7 @@ function drawInboundOrders(){
       <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
         <th>Штрих-код заказа</th><th>Клиент</th><th>Телефон</th><th>Город</th><th>Вес</th><th>Доставка</th><th>Магазин</th>
-        <th>Статус KET</th><th>Склад</th><th>Дата</th><th></th>
+        <th>Статус KET</th><th>Всего звонков</th><th>Звонков сегодня</th><th>Склад</th><th>Дата</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
         const stockBadge=o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>';
@@ -8432,6 +8434,8 @@ function drawInboundOrders(){
           <td data-label="Доставка"><span class="pill ${inboundDeliveryType(o)==='mail'?'gold':'moss'}">${esc(inboundDeliveryLabel(o))}</span></td>
           <td data-label="Магазин">${esc(inboundOrderShopLabel(o))}</td>
           <td data-label="Статус KET"><div style="font-size:12px">${esc(ketSendLabel(o.send_status))}</div><div class="wh-cat">${esc(ketKzLabel(o.status_kz))}</div>${o.call_status!=null?`<div class="wh-cat">☎ ${esc(ketCallLabel(o.call_status))}</div>`:''}</td>
+          <td data-label="Всего звонков">${o.calls_total!=null?esc(o.calls_total):'—'}</td>
+          <td data-label="Звонков сегодня">${o.calls_today!=null?esc(o.calls_today):'—'}</td>
           <td data-label="Склад">${stockBadge}</td>
           <td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>
           <td data-label="" class="cell-actions"><div class="row-actions">
@@ -8501,9 +8505,10 @@ function drawInboundOrders(){
   if($('inbdelivery'))$('inbdelivery').onchange=e=>{inbFilter.delivery=e.target.value;redraw();};
   if($('inbstatus'))$('inbstatus').onchange=e=>{inbFilter.status=e.target.value;redraw();};
   if($('inbcallstatus'))$('inbcallstatus').onchange=e=>{inbFilter.callStatus=e.target.value;redraw();};
+  if($('inbstatuskz'))$('inbstatuskz').onchange=e=>{inbFilter.statusKz=e.target.value;redraw();};
   if($('inbdatefrom'))$('inbdatefrom').onchange=e=>{inbFilter.dateFrom=e.target.value;redraw();};
   if($('inbdateto'))$('inbdateto').onchange=e=>{inbFilter.dateTo=e.target.value;redraw();};
-  if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',dateFrom:'',dateTo:''};inbPage=1;inbSelectAll=false;drawInboundOrders();};
+  if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',callStatus:'',statusKz:'',dateFrom:'',dateTo:''};inbPage=1;inbSelectAll=false;drawInboundOrders();};
 }
 // плавающая панель пагинации для «Заказы КЕТ» (тот же вид, что у заказов/заявок)
 function removeInboundPager(){const ex=$('inboundPager');if(ex)ex.remove();
