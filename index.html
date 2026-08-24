@@ -6091,7 +6091,7 @@ async function pickupOrdersModal(pickupId){
       <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
       ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:'<div class="pom-track pom-track-empty">⚠ Штрих-код не привязан партнёром</div>'}
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
-      ${isStaff()?`
+      ${(isStaff()||isCourier())?`
       <div class="pom-sumrow"><span>Размер пакета</span><select class="pom-sum" data-pomsize="${o.id}" style="width:auto">
         <option value="">— не выбран —</option>${Object.entries(PACKAGE_SIZES).map(([k,v])=>`<option value="${k}" ${o.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}
       </select></div>
