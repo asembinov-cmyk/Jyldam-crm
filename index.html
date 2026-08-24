@@ -611,6 +611,7 @@
   .stats.stats-5{grid-template-columns:repeat(5,1fr)}
   .stats.stats-1{grid-template-columns:1fr;max-width:280px}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);display:flex;align-items:flex-start;gap:14px}
+  .stat-active{border-color:var(--rust);box-shadow:0 0 0 2px rgba(37,70,201,.18)}
   .stat-ic{flex:none;width:46px;height:46px;border-radius:12px;background:rgba(37,70,201,.10);display:grid;place-items:center;color:var(--rust)}
   .stat-ic svg{width:24px;height:24px}
   .stat-body{flex:1;min-width:0}
@@ -5459,7 +5460,7 @@ function defaultPickupDate(){
   const off=d.getTimezoneOffset();
   return new Date(d.getTime()-off*60000).toISOString().slice(0,10);
 }
-let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:localToday(),dateTo:localToday()};
+let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:localToday(),dateTo:localToday(),qr:false};
 let pickupsPage=1; // текущая страница пагинации заявок
 let pickupsPerPage=50; // заявок на страницу
 // мобильный режим: вместо пагинации — «Показать ещё»
@@ -5499,7 +5500,7 @@ function renderPickups(){
       <div class="stat"><div class="stat-ic">${ICONS.pickups}</div><div class="stat-body"><div class="k">Собрано заявок</div><div class="v">${collectedCount}<small> / ${list.length}</small></div></div></div>
       <div class="stat"><div class="stat-ic">${ICONS.orders}</div><div class="stat-body"><div class="k">Собрано заказов</div><div class="v">${totalOrders}</div></div></div>
       <div class="stat"><div class="stat-ic">${ICONS.today}</div><div class="stat-body"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div></div>
-      <div class="stat"><div class="stat-ic">${ICONS.handshake}</div><div class="stat-body"><div class="k">Заявки по QR</div><div class="v">${list.filter(p=>p.partner_id).length}</div></div></div>
+      <div class="stat ${pf.qr?'stat-active':''}" id="pkQrStat" style="cursor:pointer" title="Показать только заявки, пришедшие от партнёров"><div class="stat-ic">${ICONS.handshake}</div><div class="stat-body"><div class="k">Заявки по QR</div><div class="v">${list.filter(p=>p.partner_id).length}</div></div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Карточки забора</h2><span class="count" id="pickupsCount">${list.length}</span></div>
@@ -5515,6 +5516,7 @@ function renderPickups(){
       <div id="pickupTable"></div>
     </div>`;
   if($('newPickup'))$('newPickup').onclick=()=>pickupModal();
+  if($('pkQrStat'))$('pkQrStat').onclick=()=>{pf.qr=!pf.qr;pickupsPage=1;renderPickups();};
   if($('pkNotifyEnable'))$('pkNotifyEnable').onclick=async()=>{
     try{
       const perm=await Notification.requestPermission();
@@ -5537,12 +5539,18 @@ function filteredPickups(){
     if(pf.city&&p.city_id!==pf.city)return false;
     if(pf.courier&&p.courier_id!==pf.courier)return false;
     if(pf.status&&p.status_id!==pf.status)return false;
+    if(pf.qr&&!p.partner_id)return false;
     const pd=(p.pickup_date||'').slice(0,10);
     if(pf.dateFrom&&(!pd||pd<pf.dateFrom))return false;
     if(pf.dateTo&&(!pd||pd>pf.dateTo))return false;
     if(q){const hay=[p.name,phoneDisplay(p.phone),cityName(p.city_id),districtName(p.district_id),courierName(p.courier_id),p.address].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
-  }).sort((a,b)=>(b.pickup_date||'').localeCompare(a.pickup_date||''));
+  }).sort((a,b)=>{
+    // заявки от партнёра (пришли через кабинет) — всегда первыми, чтобы не пропустить и успеть назначить курьера
+    const pa=a.partner_id?1:0,pb=b.partner_id?1:0;
+    if(pa!==pb)return pb-pa;
+    return (b.created_at||b.pickup_date||'').localeCompare(a.created_at||a.pickup_date||'');
+  });
 }
 function drawPickups(){
   const el=$('pickupTable');const allRows=filteredPickups();
