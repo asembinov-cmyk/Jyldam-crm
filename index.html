@@ -1879,7 +1879,10 @@ function applyRealtime(table,payload){
     const row=payload.new||payload.old;
     if(!row||!row.id)return;
     if(payload.eventType==='INSERT'){
-      if(!arr.find(x=>x.id===row.id))arr.unshift(row);
+      if(!arr.find(x=>x.id===row.id)){
+        arr.unshift(row);
+        if(table==='pickups')notifyNewPickup(row); // новая заявка — звук + уведомление
+      }
     }else if(payload.eventType==='UPDATE'){
       const i=arr.findIndex(x=>x.id===row.id);
       if(i>=0)Object.assign(arr[i],row); else arr.unshift(row);
@@ -1889,6 +1892,29 @@ function applyRealtime(table,payload){
     }
     scheduleRtRender();
   }catch(e){console.warn('applyRealtime',e);}
+}
+// звук + всплывающее уведомление при новой заявке на забор (в т.ч. от партнёра из личного кабинета) —
+// коротко пикает через Web Audio (без внешних файлов) и, если разрешение на уведомления браузера уже
+// выдано, показывает системный тост поверх остальных окон/вкладок
+function notifyNewPickup(p){
+  if(!S.me||!can('pickups','view'))return; // не мешаем тем, у кого нет доступа к заявкам
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const beep=(freq,start,dur)=>{
+      const o=ctx.createOscillator(),g=ctx.createGain();
+      o.type='sine';o.frequency.value=freq;o.connect(g);g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001,ctx.currentTime+start);
+      g.gain.exponentialRampToValueAtTime(0.25,ctx.currentTime+start+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+start+dur);
+      o.start(ctx.currentTime+start);o.stop(ctx.currentTime+start+dur+0.02);
+    };
+    beep(880,0,0.14);beep(1180,0.16,0.18);
+  }catch(e){}
+  const title=`📝 Новая заявка: ${p.name||'без названия'}`;
+  toast(title);
+  if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+    try{new Notification(title,{body:p.address||'',icon:'',tag:'pickup-'+p.id});}catch(e){}
+  }
 }
 // перерисовка с небольшой задержкой (чтобы не дёргать экран при пачке изменений)
 function scheduleRtRender(){
@@ -5445,7 +5471,10 @@ function renderPickups(){
   const head=isCourier()?'Мои заборы':'Заявки на забор';
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>Карточки забора посылок из магазинов-партнёров</p></div>
-      ${can('pickups','create')?`<div class="head-actions"><button class="btn primary" id="newPickup">＋ Создать карточку забора</button></div>`:''}
+      <div class="head-actions">
+        ${(typeof Notification!=='undefined'&&Notification.permission==='default')?'<button class="btn ghost" id="pkNotifyEnable">🔔 Включить уведомления</button>':''}
+        ${can('pickups','create')?`<button class="btn primary" id="newPickup">＋ Создать карточку забора</button>`:''}
+      </div>
     </div>
     <div class="stats">
       <div class="stat"><div class="stat-ic">${ICONS.pickups}</div><div class="stat-body"><div class="k">Собрано заявок</div><div class="v">${collectedCount}<small> / ${list.length}</small></div></div></div>
@@ -5467,6 +5496,13 @@ function renderPickups(){
       <div id="pickupTable"></div>
     </div>`;
   if($('newPickup'))$('newPickup').onclick=()=>pickupModal();
+  if($('pkNotifyEnable'))$('pkNotifyEnable').onclick=async()=>{
+    try{
+      const perm=await Notification.requestPermission();
+      if(perm==='granted'){toast('Уведомления включены — теперь будут приходить даже когда вкладка свёрнута');renderPickups();}
+      else toast('Уведомления не разрешены в браузере');
+    }catch(e){toast('Не удалось запросить разрешение');}
+  };
   $('pfq').oninput=e=>{pf.q=e.target.value;drawPickupsReset();};
   if($('pfcity'))$('pfcity').onchange=e=>{pf.city=e.target.value;drawPickupsReset();};
   if($('pfcourier'))$('pfcourier').onchange=e=>{pf.courier=e.target.value;drawPickupsReset();};
