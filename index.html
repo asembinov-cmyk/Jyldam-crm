@@ -1206,7 +1206,11 @@
 /* ================= SUPABASE ================= */
 const SUPABASE_URL='https://tdexhspesodslwgbxojw.supabase.co';
 const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkZXhoc3Blc29kc2x3Z2J4b2p3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMTcxOTMsImV4cCI6MjA5Nzc5MzE5M30.QojVMQAWzINufmqdI5nEL-gX_UsIZV8Nq48-3Fn6YoE';
-const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
+// сессию входа храним в sessionStorage (свой для каждой вкладки), а не в localStorage (общий на все
+// вкладки) — иначе вход под другим аккаунтом в одной вкладке «перебивал» сессию во всех остальных
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON,{
+  auth:{storage:window.sessionStorage,persistSession:true,autoRefreshToken:true},
+});
 let _partnerQR=''; // текущий QR-код партнёра (кабинет по ?p=)
 
 const $=id=>document.getElementById(id);
@@ -6088,6 +6092,9 @@ async function pickupOrdersModal(pickupId){
       ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:'<div class="pom-track pom-track-empty">⚠ Штрих-код не привязан партнёром</div>'}
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${isStaff()?`
+      <div class="pom-sumrow"><span>Размер пакета</span><select class="pom-sum" data-pomsize="${o.id}" style="width:auto">
+        <option value="">— не выбран —</option>${Object.entries(PACKAGE_SIZES).map(([k,v])=>`<option value="${k}" ${o.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}
+      </select></div>
       <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.paid_by_sender?'disabled':''}></div>
       `:''}
       ${(isStaff()||isCourier())?`
@@ -6157,6 +6164,29 @@ async function pickupOrdersModal(pickupId){
             if(sumInp){sumInp.value=o.order_sum!=null?o.order_sum:'';sumInp.disabled=!!o.paid_by_sender;}
             renderDashboardIfActive();
           }catch(e){chk.checked=!v;toast('Не удалось сохранить');}
+        };
+      });
+      // выбор размера пакета — сразу сохраняем размер и подставляем/сохраняем сумму по типу доставки заказа
+      wrap.querySelectorAll('[data-pomsize]').forEach(sel=>{
+        sel.onchange=async()=>{
+          const o=S.orders.find(x=>x.id===sel.dataset.pomsize);if(!o)return;
+          const size=sel.value||null;
+          const patch={size};
+          if(size&&PACKAGE_SIZES[size]&&!o.paid_by_sender){
+            const courier=isCourierDelivery(o.delivery_id);
+            const amount=PACKAGE_SIZES[size][courier?'courier':'mail'];
+            patch.order_sum=amount;patch.cost=amount;
+          }
+          const before=o.order_sum;
+          const saved=await dbUpdate('orders',o.id,patch);
+          if(!saved){toast('Не удалось сохранить размер');return;}
+          Object.assign(o,saved);
+          await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[
+            {field:'size',label:'Размер пакета',old:'—',new:size||'—'},
+          ]});
+          const sumInp=wrap.querySelector(`[data-pomsum="${o.id}"]`);
+          if(sumInp&&patch.order_sum!=null)sumInp.value=patch.order_sum;
+          toast(before!==o.order_sum?`Сумма обновлена: ${o.order_sum} ₸`:'Размер сохранён');
         };
       });
       // поле суммы заказа (ручное изменение — главнее авто)
