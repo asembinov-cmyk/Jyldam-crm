@@ -7033,6 +7033,12 @@ function showBarcode(id){const o=S.orders.find(x=>x.id===id);if(!o)return;
   setTimeout(()=>renderBarcode($('bcView'),o.code),60);}
 async function delOrder(id){const o=S.orders.find(x=>x.id===id);if(!confirm(`Удалить заказ ${o?.code||''}?`))return;
   if(await dbDelete('orders',id)){await logAction('delete','orders',{entity_id:id,entity_label:orderLabel(o)});S.orders=S.orders.filter(x=>x.id!==id);toast('Заказ удалён');renderOrders();}}
+// расценки по размеру пакета (S/M/L) — раздельно для почтовой и курьерской доставки
+const PACKAGE_SIZES={
+  S:{label:'S — малый',mail:1500,courier:3000},
+  M:{label:'M — средний',mail:2000,courier:5000},
+  L:{label:'L — большой',mail:3000,courier:7000},
+};
 function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
@@ -7059,7 +7065,8 @@ function orderModal(id,readonly){
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
-      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
+      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
+      <div class="field"><label>Размер пакета</label><select id="o_size" ${dis}><option value="">— не выбран —</option>${Object.entries(PACKAGE_SIZES).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)} (почта ${v.mail.toLocaleString('ru-RU')} / курьер ${v.courier.toLocaleString('ru-RU')} ₸)</option>`).join('')}</select><span class="hint">Выберите размер — сумма заказа подставится автоматически по типу доставки.</span></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       ${(isStaff()&&d.id&&isCourierDelivery(d.delivery_id))?(()=>{
         const f=orderCourierFinance(d);const m=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
@@ -7111,6 +7118,7 @@ function orderModal(id,readonly){
         status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
         index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
         cost:(val('o_sum')!==''?parseFloat(val('o_sum')):0),pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,comment:val('o_comment').trim(),
+        size:val('o_size')||null,
         order_courier_id:val('o_ocourier')||null};
       // галочка «Оплачено отправителем»: сумма→0 (исходная запоминается), снятие — возврат
       if($('o_paidorder')){
@@ -7242,13 +7250,27 @@ function orderModal(id,readonly){
     };
     const applyTariff=()=>{
       if(sumTouched)return; // не перезаписываем введённую вручную сумму
+      // если выбран размер пакета — считаем по нему, это приоритетнее общего тарифа партнёра
+      const sizeEl=$('o_size');
+      if(sizeEl&&sizeEl.value&&PACKAGE_SIZES[sizeEl.value]){applySize();return;}
       const pt=findPartner();if(!pt)return;
       const courier=isCourierDelivery($('o_delivery').value);
       const t=courier?pt.tariff_courier:pt.tariff_post;
       const sumEl=$('o_sum');
       if(sumEl&&t!=null&&t!==''){sumEl.value=t;}
     };
+    // сумма по размеру пакета (S/M/L) — сразу по типу доставки. Выбор размера — явное действие
+    // сотрудника, поэтому подставляем сумму даже если до этого что-то уже было в поле вручную,
+    // но саму сумму «ручной правкой» не считаем — если сменится тип доставки, пересчитается снова.
+    const applySize=()=>{
+      const sizeEl=$('o_size');if(!sizeEl||!sizeEl.value)return;
+      const cfg=PACKAGE_SIZES[sizeEl.value];if(!cfg)return;
+      const courier=isCourierDelivery($('o_delivery').value);
+      const sumEl=$('o_sum');
+      if(sumEl&&!sumEl.disabled){sumEl.value=courier?cfg.courier:cfg.mail;sumTouched=false;}
+    };
     const sumEl=$('o_sum');if(sumEl)sumEl.oninput=()=>{sumTouched=true;};
+    const sizeEl=$('o_size');if(sizeEl)sizeEl.onchange=()=>{applySize();};
     // галочка «Оплачен заказ»: обнуляет поле суммы и блокирует его (исходная вернётся при снятии)
     const paidChk=$('o_paidorder');
     if(paidChk){
