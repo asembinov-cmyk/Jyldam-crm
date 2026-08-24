@@ -1896,19 +1896,36 @@ function applyRealtime(table,payload){
 // звук + всплывающее уведомление при новой заявке на забор (в т.ч. от партнёра из личного кабинета) —
 // коротко пикает через Web Audio (без внешних файлов) и, если разрешение на уведомления браузера уже
 // выдано, показывает системный тост поверх остальных окон/вкладок
+// один общий аудио-контекст на всё приложение (создаём один раз, не на каждый сигнал) +
+// «разблокируем» его первым же кликом/тапом пользователя — иначе браузер молча блокирует звук,
+// пока не было явного взаимодействия со страницей
+let _audioCtx=null;
+function getAudioCtx(){
+  if(!_audioCtx){try{_audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+  return _audioCtx;
+}
+['click','touchstart','keydown'].forEach(ev=>document.addEventListener(ev,()=>{
+  const ctx=getAudioCtx();if(ctx&&ctx.state==='suspended')ctx.resume().catch(()=>{});
+},{passive:true}));
 function notifyNewPickup(p){
   if(!S.me||!can('pickups','view'))return; // не мешаем тем, у кого нет доступа к заявкам
   try{
-    const ctx=new (window.AudioContext||window.webkitAudioContext)();
-    const beep=(freq,start,dur)=>{
-      const o=ctx.createOscillator(),g=ctx.createGain();
-      o.type='sine';o.frequency.value=freq;o.connect(g);g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.0001,ctx.currentTime+start);
-      g.gain.exponentialRampToValueAtTime(0.25,ctx.currentTime+start+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+start+dur);
-      o.start(ctx.currentTime+start);o.stop(ctx.currentTime+start+dur+0.02);
-    };
-    beep(880,0,0.14);beep(1180,0.16,0.18);
+    const ctx=getAudioCtx();
+    if(ctx){
+      const play=()=>{
+        const beep=(freq,start,dur)=>{
+          const o=ctx.createOscillator(),g=ctx.createGain();
+          o.type='sine';o.frequency.value=freq;o.connect(g);g.connect(ctx.destination);
+          g.gain.setValueAtTime(0.0001,ctx.currentTime+start);
+          g.gain.exponentialRampToValueAtTime(0.25,ctx.currentTime+start+0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+start+dur);
+          o.start(ctx.currentTime+start);o.stop(ctx.currentTime+start+dur+0.02);
+        };
+        beep(880,0,0.14);beep(1180,0.16,0.18);
+      };
+      if(ctx.state==='suspended')ctx.resume().then(play).catch(()=>{}); // без хотя бы одного клика по странице раньше браузер это всё равно не пропустит
+      else play();
+    }
   }catch(e){}
   const title=`📝 Новая заявка: ${p.name||'без названия'}`;
   toast(title);
