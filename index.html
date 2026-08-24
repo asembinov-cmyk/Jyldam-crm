@@ -5488,7 +5488,7 @@ let ordersMobileLimit=MOBILE_STEP;  // сколько заказов показ�
 function visiblePickups(){
   if(isCourier()){
     const ids=myPickupCourierIds();
-    const today=new Date().toISOString().slice(0,10);
+    const today=localToday(); // локальная дата (как у остальных фильтров), а не UTC — иначе вечером/ночью могло разъезжаться
     return S.pickups.filter(p=>ids.includes(p.courier_id) && (p.pickup_date||'').slice(0,10)===today);
   }
   return S.pickups;
@@ -5527,7 +5527,8 @@ function renderPickups(){
         <select id="pfstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${isStaff()?`<label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
         <label class="date-field"><span>Дата по</span><input type="date" id="pfdateto" value="${esc(pf.dateTo)}"></label>
-        ${(pf.dateFrom||pf.dateTo)?`<button class="btn ghost sm" id="pfdateclear" style="align-self:flex-end">Сбросить даты</button>`:''}`:''}
+        <button class="btn sm" id="pftoday" style="align-self:flex-end">Сегодня</button>
+        <button class="btn ghost sm" id="pfdateclear" style="align-self:flex-end">Все даты</button>`:''}
       </div>
       <div id="pickupTable"></div>
     </div>`;
@@ -5546,6 +5547,7 @@ function renderPickups(){
   $('pfstatus').onchange=e=>{pf.status=e.target.value;drawPickupsReset();};
   if($('pfdatefrom'))$('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
   if($('pfdateto'))$('pfdateto').onchange=e=>{pf.dateTo=e.target.value;renderPickups();};
+  if($('pftoday'))$('pftoday').onclick=()=>{const t=localToday();pf.dateFrom=t;pf.dateTo=t;renderPickups();};
   if($('pfdateclear'))$('pfdateclear').onclick=()=>{pf.dateFrom='';pf.dateTo='';renderPickups();};
   drawPickups();
 }
@@ -5931,7 +5933,16 @@ function pickupModal(id,readonly){
       if(id){const before=Object.assign({},p);const u=await dbUpdate('pickups',id,row);if(!u)return false;Object.assign(p,u);
         await logAction('update','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:buildChanges(before,p)});}
       else{const u=await dbInsert('pickups',row);if(!u)return false;S.pickups.unshift(u);
-        await logAction('create','pickups',{entity_id:u.id,entity_label:pickupLabel(u)});}
+        await logAction('create','pickups',{entity_id:u.id,entity_label:pickupLabel(u)});
+        // если заявка создалась на дату вне текущего фильтра (например, после 18:00 дата ушла на
+        // завтра, а список сейчас показывает только сегодня) — расширяем фильтр, чтобы её сразу увидеть
+        const ud=(u.pickup_date||'').slice(0,10);
+        if(ud){
+          if(pf.dateFrom&&ud<pf.dateFrom)pf.dateFrom=ud;
+          if(pf.dateTo&&ud>pf.dateTo)pf.dateTo=ud;
+        }
+        if(pf.qr&&!u.partner_id)pf.qr=false; // иначе заявка сотрудника не попадёт под фильтр «только от партнёров»
+      }
       delete pickupDrafts[pickupDraftKey(id)]; // сохранили — черновик больше не нужен
       toast(id?'Сохранено':'Карточка создана');renderPickups();return true;
     },{readonly:ro,clearBtn:ro?null:(ov)=>{
