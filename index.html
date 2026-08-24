@@ -542,6 +542,8 @@
   #inboundTable .pill{padding:2px 8px;font-size:11px}
   #inboundTable .ket-badge{padding:2px 7px;font-size:10.5px}
   #inboundTable td[data-label="Индекс"],#inboundTable th[data-colkey="index"]{min-width:64px;white-space:nowrap}
+  .pickup-row-qr td{background:#fff6df!important}
+  .pickup-row-qr:hover td{background:#fdecc4!important}
   #inboundTable .inb-th{cursor:pointer;user-select:none;position:relative}
   #inboundTable .inb-th:hover{background:var(--card)}
   #inboundTable .inb-th-dragging{opacity:.4}
@@ -5497,7 +5499,7 @@ function renderPickups(){
       <div class="stat"><div class="stat-ic">${ICONS.pickups}</div><div class="stat-body"><div class="k">Собрано заявок</div><div class="v">${collectedCount}<small> / ${list.length}</small></div></div></div>
       <div class="stat"><div class="stat-ic">${ICONS.orders}</div><div class="stat-body"><div class="k">Собрано заказов</div><div class="v">${totalOrders}</div></div></div>
       <div class="stat"><div class="stat-ic">${ICONS.today}</div><div class="stat-body"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div></div>
-      ${isStaff()?`<div class="stat"><div class="stat-ic">${ICONS.users}</div><div class="stat-body"><div class="k">Курьеров</div><div class="v">${new Set(list.map(p=>p.courier_id).filter(Boolean)).size}</div></div></div>`:''}
+      <div class="stat"><div class="stat-ic">${ICONS.handshake}</div><div class="stat-body"><div class="k">Заявки по QR</div><div class="v">${list.filter(p=>p.partner_id).length}</div></div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Карточки забора</h2><span class="count" id="pickupsCount">${list.length}</span></div>
@@ -5567,7 +5569,7 @@ function drawPickups(){
   el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
     ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
-    <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer">
+    <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer" class="${p.partner_id?'pickup-row-qr':''}" title="${p.partner_id?'Пришла от партнёра через кабинет (QR)':''}">
       <td data-label="Дата">${esc(fmtDate(p.pickup_date))}${p.created_at?`<small class="cell-time">создана ${esc(fmtDateTime(p.created_at))}</small>`:''}</td>
       <td data-label="Город">${cityPill(p.city_id)}</td>
       <td data-label="Наименование"><strong>${esc(p.name)}</strong></td>
