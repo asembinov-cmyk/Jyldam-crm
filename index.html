@@ -6461,7 +6461,15 @@ function filteredOrders(){
     // фильтр по оплате отправителем
     if(of.paidBySender==='yes'&&!o.paid_by_sender)return false;
     if(of.paidBySender==='no'&&o.paid_by_sender)return false;
-    if(q){const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    if(q){
+      const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.phone,o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();
+      // поиск по телефону — устойчивый к формату ввода (с +7/8 впереди, с пробелами/скобками или просто цифрами)
+      const qDigits=q.replace(/\D/g,'');
+      const phoneDigits=(o.phone||'').replace(/\D/g,'');
+      const qDigitsNorm=(qDigits.length===11&&(qDigits[0]==='7'||qDigits[0]==='8'))?qDigits.slice(1):qDigits;
+      const matchByPhone=qDigitsNorm.length>=5&&phoneDigits.includes(qDigitsNorm);
+      if(!hay.includes(q)&&!matchByPhone)return false;
+    }
     return true;
   }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
 }
