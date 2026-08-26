@@ -6774,6 +6774,7 @@ function exportOrdersToExcel(){
       'ФИО клиента':o.client||'',
       'Телефон':o.phone?phoneDisplay(o.phone):'',
       'Вес (кг)':o.weight||'',
+      'Размер пакета':o.size?((PACKAGE_SIZES[o.size]||{}).label||o.size):'',
       'Тип доставки':o.delivery_id?deliveryName(o.delivery_id):'',
       'Город':city||'',
       'Адрес':o.address||'',
