@@ -7281,7 +7281,10 @@ function orderModal(id,readonly){
       if(opts.find(c=>c.id===cur))sel.value=cur; // сохранить выбор, если курьер из этого города
     };
     // сумма заказа тянется от тарифа партнёра (пока её не правили вручную)
-    let sumTouched=(d.order_sum!=null&&d.order_sum!==''); // если сумма уже была (включая 0) — заполнена вручную
+    // если сумма уже была — считаем её «введённой вручную» только если размер пакета НЕ выбран.
+    // Если размер выбран (значит сумму подставил именно он) — при смене типа доставки сумма должна
+    // пересчитываться automatически и дальше, а не «замирать» на старом значении.
+    let sumTouched=(d.order_sum!=null&&d.order_sum!==''&&!d.size);
     const findPartner=()=>{
       // 1) по partner_id заказа, если есть
       if(d.partner_id){const p=S.partners.find(x=>x.id===d.partner_id);if(p)return p;}
