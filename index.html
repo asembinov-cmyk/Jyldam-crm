@@ -5126,8 +5126,8 @@ async function aiRecognizeFromPhoto(o){
     let data;try{data=JSON.parse(txt);}catch(e){setNote('Не удалось разобрать ответ ИИ. Попробуйте ещё раз.','err');if(btn)btn.disabled=false;return;}
     // заполняем поля (не затираем уже заполненное без надобности — но предлагаем распознанное)
     let filled=[];
-    if(data.client&&$('o_client')){$('o_client').value=data.client;filled.push('ФИО');}
-    if(data.address&&$('o_address')){$('o_address').value=data.address;filled.push('адрес');}
+    if(data.client&&$('o_client')){$('o_client').value=String(data.client).toUpperCase();filled.push('ФИО');}
+    if(data.address&&$('o_address')){$('o_address').value=String(data.address).toUpperCase();filled.push('адрес');}
     if(data.phone&&$('o_phone')){
       let digits=String(data.phone).replace(/\D/g,''); // только цифры
       // код страны 7/8 убираем ТОЛЬКО если 11 цифр (иначе теряем первую 7 у номеров 77xx)
