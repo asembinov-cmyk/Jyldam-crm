@@ -624,7 +624,7 @@
     place-items:center;z-index:100;padding:20px}
   .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:560px;
     box-shadow:0 30px 80px -30px rgba(20,30,60,.6);max-height:90vh;overflow:auto;will-change:transform}
-  .modal-wide{max-width:1240px}
+  .modal-wide{max-width:1240px;width:min(1240px,96vw)}
   .modal-mid{max-width:720px}
   /* двухколоночный макет карточки заказа: фото слева (половина), форма справа */
   .order-split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
@@ -648,7 +648,7 @@
   .photo-zoom-ov img{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
   .photo-zoom-ov .pz-x{position:absolute;top:18px;right:24px;font-size:36px;color:#fff;background:none;border:none;cursor:pointer;line-height:1}
   @media (max-width:760px){
-    .modal-wide{max-width:560px}
+    .modal-wide{max-width:560px;width:min(560px,96vw)}
     .modal-mid{max-width:560px}
     .order-split{grid-template-columns:1fr;gap:16px}
     .order-split .ophoto-col{position:static;top:auto}
