@@ -1221,7 +1221,7 @@ const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',
 /* состояние сессии и данных */
 const S={
   me:null,           // профиль текущего пользователя {id,email,full_name,role,courier_kind}
-  tab:'pickups',
+  tab:'dashboard',
   dir:'cities',
   // справочники-кэш
   cities:[],districts:[],couriers:[],order_couriers:[],sales:[],processors:[],
@@ -1246,16 +1246,20 @@ const S={
   });
 })();
 
-/* ---------- ЗАПОМИНАНИЕ ВКЛАДКИ (чтобы при обновлении остаться на месте) ---------- */
+/* ---------- ЗАПОМИНАНИЕ ВКЛАДКИ (чтобы при ОБНОВЛЕНИИ страницы остаться на месте, но при НОВОМ
+   входе — например, новая вкладка или после выхода — всегда начинать с дашборда). Поэтому храним
+   не в localStorage (общий, живёт вечно), а в sessionStorage (свой для вкладки, живёт до её закрытия
+   или явного выхода) — та же логика, что и у самой сессии входа. ---------- */
 const NAV_KEY='jyldam_nav';
 function saveNav(){
-  try{localStorage.setItem(NAV_KEY,JSON.stringify({tab:S.tab,dir:S.dir,users:(typeof usersSub!=='undefined'?usersSub:'staff')}));}catch(e){}
+  try{sessionStorage.setItem(NAV_KEY,JSON.stringify({tab:S.tab,dir:S.dir,users:(typeof usersSub!=='undefined'?usersSub:'staff')}));}catch(e){}
 }
 function loadNav(){
-  try{const raw=localStorage.getItem(NAV_KEY);if(!raw)return;const n=JSON.parse(raw);
+  try{const raw=sessionStorage.getItem(NAV_KEY);if(!raw)return;const n=JSON.parse(raw);
     if(n.tab)S.tab=n.tab;if(n.dir)S.dir=(n.dir==='partners'?'cities':n.dir);if(n.users&&typeof usersSub!=='undefined')usersSub=n.users;
   }catch(e){}
 }
+function clearNav(){try{sessionStorage.removeItem(NAV_KEY);}catch(e){}}
 
 /* ---------- DATA LAYER ---------- */
 async function dbList(table,opts={}){
@@ -1723,7 +1727,7 @@ async function doLogin(){
   await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
-async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;$('email').value='';$('password').value='';showLogin();}
+async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;clearNav();$('email').value='';$('password').value='';showLogin();}
 function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();
   // по умолчанию подставляем +7 (можно стереть и ввести email)
   const el=$('email');if(el&&!el.value){el.value='+7 ';}
@@ -5417,35 +5421,9 @@ function renderDashboard(){
     return `<div class="dc-trend ${up?'tr-up':'tr-down'}">${up?'↑':'↓'} ${Math.abs(v)}% <span>к прошлому месяцу</span></div>`;
   };
   // ── ВТОРОЙ РЯД КАРТОЧЕК ──
-  // 1) всего заказов за ВСЁ время (курьерские + почтовые)
-  const allOrdersTotal=orders.length;
-  const allCourier=orders.filter(o=>isCourierDelivery(o.delivery_id)).length;
-  const allMail=allOrdersTotal-allCourier;
-  // 2) всего забранных заявок за ВСЁ время
-  const allPickupsCollected=pickups.filter(p=>isCollectedStatus(p.status_id)).length;
-  // 3) заказы по городам за месяц (по городу забора)
+  // заказы по городам за месяц (по городу забора)
   const ordAstana=ordMonth.filter(o=>isAstana(o.pickup_city_id)).length;
   const ordAlmaty=ordMonth.filter(o=>isAlmaty(o.pickup_city_id)).length;
-  // 4) топ-5 партнёров по заказам за месяц
-  const pkById={};pickups.forEach(p=>{pkById[p.id]=p;});
-  const partnerCnt={};
-  ordMonth.forEach(o=>{
-    let pid=o.partner_id;
-    if(!pid&&o.pickup_id&&pkById[o.pickup_id])pid=pkById[o.pickup_id].partner_id;
-    if(!pid)return;
-    partnerCnt[pid]=(partnerCnt[pid]||0)+1;
-  });
-  const topPartners=Object.entries(partnerCnt).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  // 5) топ-5 курьеров-заборщиков по собранным заявкам за месяц
-  const HIDDEN_COURIERS=/дукенбаев|сембинов/i; // скрыты на дашборде по запросу
-  const courCnt={};
-  pkMonth.filter(p=>isCollectedStatus(p.status_id)).forEach(p=>{
-    if(!p.courier_id)return;
-    const _c=S.couriers.find(x=>x.id===p.courier_id);
-    if(_c&&HIDDEN_COURIERS.test(_c.fio||''))return; // скрыты на дашборде
-    courCnt[p.courier_id]=(courCnt[p.courier_id]||0)+1;
-  });
-  const topCouriers=Object.entries(courCnt).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
   $('main').innerHTML=`
     <div class="page-head dash-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div>
@@ -5464,19 +5442,7 @@ function renderDashboard(){
       <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
     </div>
     <div class="dash-cards dash-cards-2">
-      <div class="dash-card c-total"><div class="dc-ic">🚀</div><div><div class="dc-v">${allOrdersTotal.toLocaleString('ru-RU')}</div><div class="dc-k">Доставлено заказов за всё время</div><div class="dc-extra">курьерских ${allCourier.toLocaleString('ru-RU')} · почтовых ${allMail.toLocaleString('ru-RU')}</div><div class="dc-period">Jyldam Logistics</div></div></div>
-      <div class="dash-card c-total2"><div class="dc-ic">✅</div><div><div class="dc-v">${allPickupsCollected.toLocaleString('ru-RU')}</div><div class="dc-k">Забрано заявок за всё время</div><div class="dc-extra">всего заявок ${pickups.length.toLocaleString('ru-RU')}</div><div class="dc-period">Jyldam Logistics</div></div></div>
       <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Заказы по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAstana/30)))||'○'}</span><span class="dcity-v">${ordAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAlmaty/30)))||'○'}</span><span class="dcity-v">${ordAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
-      <div class="dash-card c-top"><div class="dc-top">
-        <div class="dc-top-h">🏆 Топ партнёров</div>
-        ${topPartners.length?topPartners.map(([pid,cnt],i)=>`<div class="dtop-row"><span class="dtop-i">${i+1}</span><span class="dtop-n">${esc(partnerName(pid))}</span><span class="dtop-v">${cnt}</span></div>`).join(''):'<div class="dtop-empty">Нет данных за месяц</div>'}
-        <div class="dc-period">${esc(periodLabel)}</div>
-      </div></div>
-      <div class="dash-card c-top"><div class="dc-top">
-        <div class="dc-top-h">🚚 Топ заборщиков</div>
-        ${topCouriers.length?topCouriers.map(([cid,cnt],i)=>`<div class="dtop-row"><span class="dtop-i">${i+1}</span><span class="dtop-n">${esc(courierName(cid))}</span><span class="dtop-v">${cnt}</span></div>`).join(''):'<div class="dtop-empty">Нет данных за месяц</div>'}
-        <div class="dc-period">${esc(periodLabel)}</div>
-      </div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Статистика по дням</h2><span class="count">${statRows.length}</span></div>
