@@ -209,13 +209,13 @@
     body.nav-collapsed .su-info{display:block}}
 
   /* ── Дашборд ── */
-  .dash-cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
-  .dash-card{display:flex;align-items:center;gap:14px;padding:18px 20px;border-radius:16px;border:1px solid var(--line);
+  .dash-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px}
+  .dash-card{display:flex;align-items:center;gap:18px;padding:24px 26px;border-radius:18px;border:1px solid var(--line);
     box-shadow:var(--shadow);background:var(--card)}
-  .dash-card .dc-ic{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:20px;flex:none;color:#fff}
-  .dash-card .dc-v{font-family:'Fraunces',serif;font-weight:900;font-size:30px;line-height:1}
-  .dash-card .dc-k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-top:3px}
-  .dash-card .dc-extra{font-size:11.5px;color:var(--ink);margin-top:6px;font-weight:600}
+  .dash-card .dc-ic{width:56px;height:56px;border-radius:14px;display:grid;place-items:center;font-size:24px;flex:none;color:#fff}
+  .dash-card .dc-v{font-family:'Fraunces',serif;font-weight:900;font-size:36px;line-height:1}
+  .dash-card .dc-k{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-top:4px}
+  .dash-card .dc-extra{font-size:12.5px;color:var(--ink);margin-top:7px;font-weight:600}
   .dc-trend{font-size:12px;font-weight:800;margin-top:5px;display:flex;align-items:center;gap:5px}
   .dc-trend span{font-weight:600;color:var(--muted);font-size:11px}
   .dc-trend.tr-up{color:#2e7d32}
@@ -5438,10 +5438,10 @@ function renderDashboard(){
       <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div>${trendHtml(trOrders)}<div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div>${trendHtml(trPickups)}<div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Собрано заявок по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
-      <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
-      <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
     </div>
     <div class="dash-cards dash-cards-2">
+      <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
+      <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Заказы по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAstana/30)))||'○'}</span><span class="dcity-v">${ordAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAlmaty/30)))||'○'}</span><span class="dcity-v">${ordAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
     </div>
     <div class="panel">
