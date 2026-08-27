@@ -6027,6 +6027,12 @@ function genOrderCode(){
 function ordersCountForPickup(pickupId){return S.orders.filter(o=>o.pickup_id===pickupId).length;}
 // Создаёт недостающие заказы-заготовки по заявке, подтягивая данные магазина-партнёра
 const _creatingOrders={}; // защита от параллельного создания заказов по одной заявке
+// «Физ лицо Астана» / «Физ лицо Алматы» — это не магазины, а конкретные клиенты (у каждого свой,
+// всегда один и тот же адрес). Проверка по названию, без учёта регистра и лишних пробелов.
+function isFizlicoPartner(partner){
+  const n=(partner&&partner.name||'').trim().toLowerCase().replace(/\s+/g,' ');
+  return n==='физ лицо астана'||n==='физ лицо алматы';
+}
 async function createOrdersFromPickup(pickupId,opts){
   opts=opts||{};
   const p=S.pickups.find(x=>x.id===pickupId);if(!p)return;
@@ -6062,7 +6068,9 @@ async function createOrdersFromPickup(pickupId,opts){
         sender:partner?partner.name:(p.name||''),
         pickup_date:p.pickup_date||null,
         phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
-        address:'', // адрес доставки клиента заполняется вручную, не адрес магазина
+        // для «Физ лицо Астана» / «Физ лицо Алматы» — это не магазины, а конкретные клиенты,
+        // адрес у них один и тот же всегда, поэтому подтягиваем его из карточки партнёра автоматически
+        address:(partner&&isFizlicoPartner(partner))?(partner.address||''):'', // иначе адрес доставки клиента заполняется вручную, не адрес магазина
         client:'',weight:null,qty:1,
         delivery_id:courierDelivery?courierDelivery.id:null,
         courier_city_id:null,
@@ -7323,6 +7331,12 @@ function orderModal(id,readonly){
       const ptForPaid=findPartner();
       if(ptForPaid&&paidChk&&!paidChk.checked&&+ptForPaid.tariff_courier===0&&+ptForPaid.tariff_post===0){
         paidChk.checked=true;paidChk.onchange();
+      }
+      // «Физ лицо Астана» / «Физ лицо Алматы» — это конкретные клиенты, адрес у них всегда один и
+      // тот же, подставляем из карточки партнёра (только если поле ещё пустое — не затираем ручной ввод)
+      if(ptForPaid&&isFizlicoPartner(ptForPaid)){
+        const addrEl=$('o_address');
+        if(addrEl&&!addrEl.value.trim())addrEl.value=ptForPaid.address||'';
       }
       if(sumTouched)return; // не перезаписываем введённую вручную сумму
       // если выбран размер пакета — считаем по нему, это приоритетнее общего тарифа партнёра
