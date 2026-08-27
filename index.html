@@ -4846,6 +4846,9 @@ async function partnerCallCourier(partner){
   const btn=$('pcabCall');if(btn){btn.disabled=true;btn.textContent='Создаём…';}
   try{
     const today=new Date().toISOString().slice(0,10);
+    // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — значит доставку он оплачивает сам
+    // отдельно, не через сумму заказа. Такие заказы сразу помечаем «Оплачено отправителем»
+    const zeroTariffs=(+partner.tariff_courier===0)&&(+partner.tariff_post===0);
     // строим заготовки заказов на клиенте (без pickup_id — его проставит функция)
     const orderRows=[];
     for(let i=0;i<cnt;i++){
@@ -4855,7 +4858,8 @@ async function partnerCallCourier(partner){
         delivery_id:defaultCourierDeliveryId(),
         pickup_city_id:partner.city_id||null,
         sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
-        order_sum:partner.tariff_courier||null,cost:partner.tariff_courier||0,
+        order_sum:zeroTariffs?0:(partner.tariff_courier||null),cost:zeroTariffs?0:(partner.tariff_courier||0),
+        paid_by_sender:zeroTariffs,
         created_at:new Date().toISOString(),
       });
     }
@@ -6058,6 +6062,9 @@ async function createOrdersFromPickup(pickupId,opts){
         sales_id:partner?partner.sales_id:(p.sales_id||null),
         processor_id:partner?partner.processor_id:(p.processor_id||null),
         cost:partner?(courierDelivery?partner.tariff_courier:partner.tariff_post)||0:0,
+        // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — доставку он оплачивает сам
+        // отдельно, не через сумму заказа — сразу помечаем заказ «Оплачено отправителем»
+        paid_by_sender:!!(partner&&+partner.tariff_courier===0&&+partner.tariff_post===0),
         index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
       };
       const u=await dbInsert('orders',row);
@@ -7302,6 +7309,12 @@ function orderModal(id,readonly){
       return S.partners.find(x=>(x.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name)||null;
     };
     const applyTariff=()=>{
+      // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — доставку он оплачивает сам отдельно,
+      // не через сумму заказа — сразу ставим «Оплачено отправителем» (если ещё не отмечено вручную)
+      const ptForPaid=findPartner();
+      if(ptForPaid&&paidChk&&!paidChk.checked&&+ptForPaid.tariff_courier===0&&+ptForPaid.tariff_post===0){
+        paidChk.checked=true;paidChk.onchange();
+      }
       if(sumTouched)return; // не перезаписываем введённую вручную сумму
       // если выбран размер пакета — считаем по нему, это приоритетнее общего тарифа партнёра
       const sizeEl=$('o_size');
