@@ -7123,7 +7123,6 @@ function orderModal(id,readonly){
     <div class="order-split">
       <div class="ophoto-col">
         ${orderBigPhotoHtml(o,!ro)}
-        <div class="field full" style="margin-top:14px"><label>Штрих-код</label><div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center"><svg id="o_barcode"></svg></div></div>
         ${(o&&o.id&&!ro)?`<div class="field full" style="margin-top:14px"><label>KET</label>
           <div style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)">
             ${o.ket_id?`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}
@@ -7142,27 +7141,6 @@ function orderModal(id,readonly){
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
       <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}><option value="">— не выбран —</option>${Object.entries(PACKAGE_SIZES).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint">Почта ${PACKAGE_SIZES.S.mail}/${PACKAGE_SIZES.M.mail}/${PACKAGE_SIZES.L.mail} · Курьер ${PACKAGE_SIZES.S.courier}/${PACKAGE_SIZES.M.courier}/${PACKAGE_SIZES.L.courier} ₸ (S/M/L). Сумма подставится автоматически по типу доставки.</span></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-      ${(isStaff()&&d.id&&isCourierDelivery(d.delivery_id))?(()=>{
-        const f=orderCourierFinance(d);const m=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
-        return `<div class="field full o-finance">
-          <label>Финансы по заказу (курьерская)</label>
-          <div class="ofin-grid">
-            <div class="ofin-row"><span>Сумма заказа</span><b>${m(f.revenue)}</b></div>
-            <div class="ofin-row"><span>Стоимость отправки межгород</span><b>${m(f.intercity)}</b></div>
-            <div class="ofin-row"><span>Оплата курьеру города</span><b>${m(f.courierPay)}</b></div>
-            <div class="ofin-row"><span>Оплата заборщику${f.pickerId?' ('+esc(courierName(f.pickerId))+')':''}</span><b>${m(f.pickerPay)}</b></div>
-            <div class="ofin-row"><span>Бланк</span><b>${m(f.blank)}</b></div>
-            <div class="ofin-row"><span>Пакет</span><b>${m(f.pack)}</b></div>
-            <div class="ofin-row"><span>ЗП Администратор курьера</span><b>${m(f.adminCourier)}</b></div>
-            <div class="ofin-row"><span>Общий оклад (÷${f.monthOrders} заказов)</span><b>${m(f.commonSalary)}</b></div>
-            <div class="ofin-row"><span>ЗП Менеджер по продажам${o.sales_id?'':' (не указан)'}</span><b>${m(f.manager)}</b></div>
-            <div class="ofin-row"><span>ЗП Менеджер обработчик</span><b>${m(f.processor)}</b></div>
-            <div class="ofin-row ofin-subtotal"><span>Итого расходы</span><b>${m(f.totalCost)}</b></div>
-            <div class="ofin-row ofin-total"><span>Остаток</span><b style="color:${f.remainder<0?'#c0392b':'#2e7d32'}">${m(f.remainder)}</b></div>
-          </div>
-          <span class="hint">Общий оклад (менеджеры + логист) делится на ${f.monthOrders} заказов месяца. Менеджер продаж (150₸) — только заказам с указанным менеджером; обработчик (80₸) — на каждый.</span>
-        </div>`;
-      })():''}
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" id="postCityField" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Город (почтовая)</label><select id="o_postcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
@@ -7170,8 +7148,6 @@ function orderModal(id,readonly){
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="o_weight" value="${esc(d.weight)}" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
-      <div class="field"><label>Менеджер по продажам</label><select id="o_sales" ${dis}><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${d.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
-      <div class="field"><label>Обработчик</label><select id="o_proc" ${dis}><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${d.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Дата доставки</label><input type="date" id="o_deliver" min="${localToday()}" value="${esc(d.deliver_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
@@ -7190,7 +7166,7 @@ function orderModal(id,readonly){
         city_id:!isCourierDelivery(val('o_delivery'))?(val('o_postcity')||null):null,
         order_sum:(val('o_sum')!==''?parseFloat(val('o_sum')):null),
         status_id:val('o_status')||null,delivery_id:val('o_delivery')||null,
-        index:val('o_index').trim(),track:val('o_track').trim(),sales_id:val('o_sales')||null,processor_id:val('o_proc')||null,
+        index:val('o_index').trim(),track:val('o_track').trim(),sales_id:d.sales_id||null,processor_id:d.processor_id||null,
         cost:(val('o_sum')!==''?parseFloat(val('o_sum')):0),pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,comment:val('o_comment').trim(),
         size:val('o_size')||null,
         order_courier_id:val('o_ocourier')||null};
@@ -7224,7 +7200,6 @@ function orderModal(id,readonly){
       toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
     },{readonly:ro,wide:true});
   attachPhone('o_phone',d.phone);
-  setTimeout(()=>renderBarcode($('o_barcode'),code),60);
   // кнопка «Отправить в KET»
   if(o&&o.id){const kb=document.querySelector(`[data-ketsend="${o.id}"]`);if(kb)kb.onclick=async()=>{
     kb.disabled=true;
