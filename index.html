@@ -4845,7 +4845,12 @@ async function partnerCallCourier(partner){
   const cnt=Math.max(1,parseInt(n,10)||1);
   const btn=$('pcabCall');if(btn){btn.disabled=true;btn.textContent='Создаём…';}
   try{
-    const today=new Date().toISOString().slice(0,10);
+    // до 12:00 — заявка на сегодня, после 12:00 — на завтра (курьер уже не успеет сегодня)
+    const nowLocal=new Date();
+    const afterNoon=nowLocal.getHours()>=12;
+    if(afterNoon)nowLocal.setDate(nowLocal.getDate()+1);
+    const tzOff=nowLocal.getTimezoneOffset();
+    const today=new Date(nowLocal.getTime()-tzOff*60000).toISOString().slice(0,10);
     // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — значит доставку он оплачивает сам
     // отдельно, не через сумму заказа. Такие заказы сразу помечаем «Оплачено отправителем»
     const zeroTariffs=(+partner.tariff_courier===0)&&(+partner.tariff_post===0);
@@ -4869,9 +4874,13 @@ async function partnerCallCourier(partner){
       sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
       created_at:new Date().toISOString(),
     };
-    const r=await callPartnerCabinet('call_courier',{orders:orderRows,pickup_extra});
+    const r=await callPartnerCabinet('call_courier',{orders:orderRows,pickup_extra,pickup_date:today});
     if(r.error)throw new Error(r.error);
     if(btn){btn.disabled=false;btn.textContent='📦 Вызвать курьера';}
+    const tomorrow=(r.courier_tomorrow!=null)?r.courier_tomorrow:afterNoon; // сервер точнее (не зависит от часов браузера)
+    alert(tomorrow
+      ? '✅ Заявка создана!\n\nСейчас после 12:00 — курьер заберёт посылки ЗАВТРА.'
+      : '✅ Заявка создана!\n\nСейчас до 12:00 — курьер заберёт посылки СЕГОДНЯ.');
     partnerFillOrders(partner,r.orders||[]);
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent='📦 Вызвать курьера';}
