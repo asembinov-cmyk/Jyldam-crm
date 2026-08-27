@@ -1871,7 +1871,7 @@ async function enterApp(){
 let _autoRefreshTimer=null;
 function startAutoRefresh(){
   if(_autoRefreshTimer)clearInterval(_autoRefreshTimer);
-  _autoRefreshTimer=setInterval(autoRefreshTick,30000); // 30 секунд — страховка, если Realtime отвалится
+  _autoRefreshTimer=setInterval(autoRefreshTick,180000); // 3 минуты — просто подстраховка, если Realtime отвалится (сам Realtime обновляет мгновенно)
   startRealtime(); // мгновенные обновления
 }
 
