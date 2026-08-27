@@ -1081,8 +1081,6 @@
   /* и у самой таблицы — иначе плавающая панель перекрывает строки уже на первом экране, а не только в самом низу списка */
   .content.has-pager .panel:last-of-type{margin-bottom:76px}
 </style>
-<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-<script src="https://unpkg.com/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
 </head>
 <body>
 
@@ -6132,6 +6130,9 @@ async function pickupOrdersModal(pickupId){
     const list=S.orders.filter(o=>o.pickup_id===pickupId);
     const noPhoto=list.filter(o=>!pickupPhotos(o).length);
     if(noPhoto.length){toast(`Добавьте фото к заказам (${noPhoto.length} без фото)`);return false;}
+    // размер пакета тоже обязателен — курьер должен указать его на месте, глядя на посылку
+    const noSize=list.filter(o=>!o.size);
+    if(noSize.length){toast(`Выберите размер пакета у каждого заказа (не указан у ${noSize.length})`);return false;}
     return true;
   }});
   drawPickups(); // обновляем счётчик в карточке заявки сразу после автосоздания
@@ -6586,8 +6587,26 @@ const MAIL_LABEL_TEMPLATE_B64=
 // печать бланков «5 нысан - форма 5» для почтовых заказов — генерируется прямо в браузере (pdf-lib),
 // одним PDF со всеми выбранными заказами подряд. Шаблон встроен как base64 (см. MAIL_LABEL_TEMPLATE_B64 выше).
 let _mailLabelAssets=null;
+// подгружаем скрипт динамически (один раз) — используется для pdf-lib/fontkit, которые нужны только
+// при печати бланков/накладных, поэтому не должны тормозить обычную загрузку сайта каждый раз
+function loadScriptOnce(src){
+  return new Promise((resolve,reject)=>{
+    if(document.querySelector(`script[src="${src}"]`)){resolve();return;}
+    const s=document.createElement('script');
+    s.src=src;s.onload=()=>resolve();s.onerror=()=>reject(new Error('Не удалось загрузить '+src));
+    document.head.appendChild(s);
+  });
+}
+async function ensurePdfLib(){
+  if(window.PDFLib&&window.fontkit)return;
+  await Promise.all([
+    loadScriptOnce('https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'),
+    loadScriptOnce('https://unpkg.com/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js'),
+  ]);
+}
 async function loadMailLabelAssets(){
   if(_mailLabelAssets)return _mailLabelAssets;
+  await ensurePdfLib();
   const templateBytes=Uint8Array.from(atob(MAIL_LABEL_TEMPLATE_B64),c=>c.charCodeAt(0));
   const [regularBytes,boldBytes]=await Promise.all([
     fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf/ttf/DejaVuSans.ttf').then(r=>r.arrayBuffer()),
@@ -6629,6 +6648,7 @@ function drawWrappedText(page,text,x,yTop,maxWidth,font,size,lineHeight,maxLines
 }
 // общая генерация PDF со бланками — принимает уже нормализованный список {client,address,phone,amount}
 async function generateMailLabelsPdf(items){
+  await ensurePdfLib();
   if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
   const {PDFDocument,rgb}=PDFLib;
   const assets=await loadMailLabelAssets();
@@ -6694,6 +6714,7 @@ async function printInboundMailLabelsPdf(orders){
 // одна накладная на страницу. Правки по запросу: после товара — магазин/партнёр (не «КС-3»), без номера
 // курьера, шапка — «Jyldam Logistics».
 async function generateWaybillsPdf(items){
+  await ensurePdfLib();
   if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
   const {PDFDocument,rgb}=PDFLib;
   const assets=await loadMailLabelAssets(); // тот же кэш шрифтов с кириллицей, шаблон бланка тут не нужен
@@ -7139,7 +7160,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
-      <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}><option value="">— не выбран —</option>${Object.entries(PACKAGE_SIZES).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint">Почта ${PACKAGE_SIZES.S.mail}/${PACKAGE_SIZES.M.mail}/${PACKAGE_SIZES.L.mail} · Курьер ${PACKAGE_SIZES.S.courier}/${PACKAGE_SIZES.M.courier}/${PACKAGE_SIZES.L.courier} ₸ (S/M/L). Сумма подставится автоматически по типу доставки.</span></div>
+      <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(PACKAGE_SIZES).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint">Почта ${PACKAGE_SIZES.S.mail}/${PACKAGE_SIZES.M.mail}/${PACKAGE_SIZES.L.mail} · Курьер ${PACKAGE_SIZES.S.courier}/${PACKAGE_SIZES.M.courier}/${PACKAGE_SIZES.L.courier} ₸ (S/M/L). Сумма подставится автоматически по типу доставки.</span></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" id="postCityField" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Город (почтовая)</label><select id="o_postcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
