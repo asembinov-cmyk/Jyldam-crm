@@ -1259,7 +1259,10 @@ function loadNav(){
 
 /* ---------- DATA LAYER ---------- */
 async function dbList(table,opts={}){
-  // Supabase отдаёт максимум 1000 строк за запрос. Если строк больше — грузим постранично.
+  // Supabase отдаёт максимум 1000 строк за запрос. Раньше при больших таблицах страницы грузились
+  // строго одна за другой (10 страниц = 10 последовательных ожиданий сети — секунды задержки).
+  // Теперь: сперва узнаём точное число строк (дёшево, есть индексы), считаем сколько страниц нужно,
+  // и запрашиваем их ВСЕ одновременно — общее время ≈ времени одной страницы, а не суммы всех.
   const PAGE=1000;
   const fetchPage=(from,to)=>{
     let q=sb.from(table).select('*');
@@ -1269,19 +1272,41 @@ async function dbList(table,opts={}){
     return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))]);
   };
   try{
-    let all=[],from=0;
-    while(true){
-      const res=await fetchPage(from,from+PAGE-1);
+    let countQ=sb.from(table).select('id',{count:'exact',head:true});
+    if(opts.gte)countQ=countQ.gte(opts.gte.col,opts.gte.val);
+    const {count}=await Promise.race([countQ,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))]);
+    const total=count||0;
+    if(!total)return [];
+    const pageCount=Math.min(Math.ceil(total/PAGE),51); // предохранитель — как и раньше, максимум ~51000 строк
+    const pages=await Promise.all(
+      Array.from({length:pageCount},(_,i)=>fetchPage(i*PAGE,i*PAGE+PAGE-1))
+    );
+    let all=[];
+    for(const res of pages){
       const {data,error}=res;
-      if(error){console.error(table,error);return all;}
-      const chunk=data||[];
-      all=all.concat(chunk);
-      if(chunk.length<PAGE)break; // последняя страница
-      from+=PAGE;
-      if(from>50000)break; // предохранитель от бесконечного цикла
+      if(error){console.error(table,error);continue;}
+      all=all.concat(data||[]);
     }
     return all;
-  }catch(e){console.error('dbList',table,e&&e.message);return [];}
+  }catch(e){
+    // если count почему-то не сработал (например, для представлений без прав на count) — старый
+    // надёжный способ постранично, но хотя бы не молча теряем данные
+    console.error('dbList (fallback to sequential)',table,e&&e.message);
+    try{
+      let all=[],from=0;
+      while(true){
+        const res=await fetchPage(from,from+PAGE-1);
+        const {data,error}=res;
+        if(error){console.error(table,error);return all;}
+        const chunk=data||[];
+        all=all.concat(chunk);
+        if(chunk.length<PAGE)break;
+        from+=PAGE;
+        if(from>50000)break;
+      }
+      return all;
+    }catch(e2){console.error('dbList',table,e2&&e2.message);return [];}
+  }
 }
 // точечная загрузка строк таблицы по значению одного поля, мимо общего кэша S — используется там,
 // где важна свежесть данных именно сейчас (например, подсчёт заказов по заявке перед массовым созданием)
@@ -1774,9 +1799,21 @@ async function loadAll(){
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
   S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];S.wh_reservations=tail[11]||[];
-  // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк) грузим ПАРАЛЛЕЛЬНО с ядром,
-  // но вход их НЕ ждёт — стартуем загрузку и продолжаем
+  // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк за всё время) грузим ПАРАЛЛЕЛЬНО с ядром,
+  // но вход их НЕ ждёт — стартуем загрузку и продолжаем.
+  // Сначала — быстрый узкий запрос ТОЛЬКО за сегодня (большинство экранов по умолчанию и
+  // показывают только сегодня), чтобы не сидеть с пустым/загружающимся экраном, пока грузится
+  // вся история. Полная история докачивается следом и подменяет данные, когда будет готова.
   S.pickups=S.pickups||[];S.orders=S.orders||[];
+  const _todayISO=localToday();
+  Promise.all([
+    dbList('pickups',{order:'created_at',asc:false,gte:{col:'created_at',val:_todayISO}}),
+    dbList('orders',{order:'created_at',asc:false,gte:{col:'created_at',val:_todayISO}}),
+  ]).then(([pickupsToday,ordersToday])=>{
+    if(S._heavyLoaded)return; // полная история уже подъехала — быстрые «сегодняшние» данные больше не нужны
+    S.pickups=pickupsToday;S.orders=ordersToday;
+    try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav({skipTabFix:true});}catch(e){}
+  }).catch(e=>console.error('quick today load',e));
   S._heavyLoading=Promise.all([
     dbList('pickups',{order:'created_at',asc:false}),
     dbList('orders',{order:'created_at',asc:false}),
