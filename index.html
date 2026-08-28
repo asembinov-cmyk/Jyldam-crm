@@ -5557,7 +5557,7 @@ function renderPickups(){
       <div class="stat"><div class="stat-ic">${ICONS.pickups}</div><div class="stat-body"><div class="k">Собрано заявок</div><div class="v">${collectedCount}<small> / ${list.length}</small></div></div></div>
       <div class="stat"><div class="stat-ic">${ICONS.orders}</div><div class="stat-body"><div class="k">Собрано заказов</div><div class="v">${totalOrders}</div></div></div>
       <div class="stat"><div class="stat-ic">${ICONS.today}</div><div class="stat-body"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div></div>
-      <div class="stat ${pf.qr?'stat-active':''}" id="pkQrStat" style="cursor:pointer" title="Показать только заявки, пришедшие от партнёров"><div class="stat-ic">${ICONS.handshake}</div><div class="stat-body"><div class="k">Заявки по QR</div><div class="v">${list.filter(p=>p.partner_id).length}</div></div></div>
+      ${!isCourier()?`<div class="stat ${pf.qr?'stat-active':''}" id="pkQrStat" style="cursor:pointer" title="Показать только заявки, пришедшие от партнёров"><div class="stat-ic">${ICONS.handshake}</div><div class="stat-body"><div class="k">Заявки по QR</div><div class="v">${list.filter(p=>p.partner_id).length}</div></div></div>`:''}
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Карточки забора</h2><span class="count" id="pickupsCount">${list.length}</span></div>
