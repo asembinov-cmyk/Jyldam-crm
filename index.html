@@ -686,6 +686,7 @@
   .cc-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
   .cc-id{font-family:'Fraunces',serif;font-weight:900;font-size:17px;color:var(--rust-dk);letter-spacing:.5px}
   .cc-client{font-weight:600;font-size:15px;line-height:1.25;margin-bottom:2px;word-break:break-word}
+  .cc-dist{display:inline-block;font-size:12px;font-weight:700;color:#1a7f37;background:#e6f4ea;padding:2px 8px;border-radius:20px;vertical-align:middle}
   .cc-addr{font-size:13.5px;color:var(--ink);line-height:1.35;word-break:break-word}
   .cc-addr-row{margin-top:5px;line-height:1.4}
   .cc-addr-row .addr-link{display:inline-flex;align-items:flex-start;gap:4px;font-size:14px;color:var(--rust-dk);
@@ -5550,6 +5551,7 @@ function renderPickups(){
     <div class="page-head"><div><h1>${head}</h1><p>Карточки забора посылок из магазинов-партнёров</p></div>
       <div class="head-actions">
         ${(typeof Notification!=='undefined'&&Notification.permission==='default')?'<button class="btn ghost" id="pkNotifyEnable">🔔 Включить уведомления</button>':''}
+        ${isCourier()?`<button class="btn primary" id="pkRoute">🧭 Построить маршрут</button>`:''}
         ${(can('pickups','create')&&!isCourier())?`<button class="btn primary" id="newPickup">＋ Создать карточку забора</button>`:''}
       </div>
     </div>
@@ -5575,6 +5577,7 @@ function renderPickups(){
     </div>`;
   if($('newPickup'))$('newPickup').onclick=()=>pickupModal();
   if($('pkQrStat'))$('pkQrStat').onclick=()=>{pf.qr=!pf.qr;pickupsPage=1;renderPickups();};
+  if($('pkRoute'))$('pkRoute').onclick=buildCourierRoute;
   if($('pkNotifyEnable'))$('pkNotifyEnable').onclick=async()=>{
     try{
       const perm=await Notification.requestPermission();
@@ -5592,9 +5595,62 @@ function renderPickups(){
   if($('pfdateclear'))$('pfdateclear').onclick=()=>{pf.dateFrom='';pf.dateTo='';renderPickups();};
   drawPickups();
 }
+let _courierRouteOrder=null; // порядок id заявок по маршруту (ближайшая первая) или null, если не построен
+let _courierRouteDist={}; // id заявки → расстояние в км от курьера (для показа на карточке)
+// расстояние между двумя точками по прямой (формула гаверсинусов), в километрах
+function haversineKm(lat1,lon1,lat2,lon2){
+  const R=6371,toRad=x=>x*Math.PI/180;
+  const dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+// определяем координаты адреса через бесплатный геокодер OpenStreetMap (без ключей/оплаты) —
+// используется только когда координат ещё нет и они запрашиваются заранее в базе
+async function geocodeAddress(address,cityNm){
+  const q=encodeURIComponent(`${address}, ${cityNm||''}, Казахстан`);
+  const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`);
+  const data=await res.json();
+  if(data&&data[0])return {lat:parseFloat(data[0].lat),lng:parseFloat(data[0].lon)};
+  return null;
+}
+async function buildCourierRoute(){
+  const btn=$('pkRoute');
+  if(!navigator.geolocation){toast('Геолокация не поддерживается этим браузером');return;}
+  if(btn){btn.disabled=true;btn.textContent='📍 Определяем ваше местоположение…';}
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const myLat=pos.coords.latitude,myLng=pos.coords.longitude;
+    const list=filteredPickups(); // текущий видимый список (уже без учёта старого маршрута)
+    if(btn)btn.textContent='📍 Определяем адреса…';
+    // на каждый адрес без координат — геокодируем по одному (уважаем лимит бесплатного сервиса)
+    for(const p of list){
+      if(p.lat!=null&&p.lng!=null)continue;
+      if(!p.address){continue;}
+      try{
+        const coords=await geocodeAddress(p.address,cityName(p.city_id));
+        if(coords){
+          p.lat=coords.lat;p.lng=coords.lng;
+          dbUpdate('pickups',p.id,{lat:coords.lat,lng:coords.lng}); // сохраняем в фоне, не ждём — в следующий раз геокодировать не придётся
+        }
+        await new Promise(r=>setTimeout(r,1100)); // не чаще 1 запроса в секунду — таковы правила бесплатного сервиса
+      }catch(e){console.error('geocode',p.address,e);}
+    }
+    const withCoords=list.filter(p=>p.lat!=null&&p.lng!=null);
+    const noCoords=list.filter(p=>p.lat==null||p.lng==null);
+    withCoords.forEach(p=>{_courierRouteDist[p.id]=haversineKm(myLat,myLng,p.lat,p.lng);});
+    withCoords.sort((a,b)=>_courierRouteDist[a.id]-_courierRouteDist[b.id]);
+    _courierRouteOrder=[...withCoords.map(p=>p.id),...noCoords.map(p=>p.id)];
+    if(btn){btn.disabled=false;btn.textContent='🧭 Построить маршрут';}
+    if(noCoords.length)toast(`Маршрут построен · не удалось определить адрес у ${noCoords.length} заявок — они внизу списка`);
+    else toast('Маршрут построен — заявки отсортированы по расстоянию от вас');
+    renderPickups();
+  },err=>{
+    if(btn){btn.disabled=false;btn.textContent='🧭 Построить маршрут';}
+    toast('Не удалось определить местоположение: '+(err&&err.message||'разрешите доступ к геолокации'));
+  },{enableHighAccuracy:true,timeout:15000});
+}
 function filteredPickups(){
   const q=pf.q.toLowerCase().trim();
-  return visiblePickups().filter(p=>{
+  const rows=visiblePickups().filter(p=>{
     if(pf.city&&p.city_id!==pf.city)return false;
     if(pf.courier&&p.courier_id!==pf.courier)return false;
     if(pf.status&&p.status_id!==pf.status)return false;
@@ -5604,7 +5660,18 @@ function filteredPickups(){
     if(pf.dateTo&&(!pd||pd>pf.dateTo))return false;
     if(q){const hay=[p.name,phoneDisplay(p.phone),cityName(p.city_id),districtName(p.district_id),courierName(p.courier_id),p.address].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
-  }).sort((a,b)=>{
+  });
+  // если курьер построил маршрут по близости — сортируем строго по нему (ближайшее сверху)
+  if(isCourier()&&_courierRouteOrder){
+    return rows.sort((a,b)=>{
+      const ia=_courierRouteOrder.indexOf(a.id),ib=_courierRouteOrder.indexOf(b.id);
+      if(ia===-1&&ib===-1)return 0;
+      if(ia===-1)return 1; // без координат — в конец
+      if(ib===-1)return -1;
+      return ia-ib;
+    });
+  }
+  return rows.sort((a,b)=>{
     // заявки от партнёра (пришли через кабинет) — всегда первыми, чтобы не пропустить и успеть назначить курьера
     const pa=a.partner_id?1:0,pb=b.partner_id?1:0;
     if(pa!==pb)return pb-pa;
@@ -5749,7 +5816,7 @@ function drawCourierPickupCards(el,rows){
     return `<div class="cour-card" data-card="${p.id}">
       <div class="cc-head" data-toggle="${p.id}">
         <div class="cc-main">
-          <div class="cc-client">${esc(p.name)||'Без названия'}</div>
+          <div class="cc-client">${esc(p.name)||'Без названия'}${_courierRouteDist[p.id]!=null?` <span class="cc-dist">📍 ${_courierRouteDist[p.id]<1?Math.round(_courierRouteDist[p.id]*1000)+' м':_courierRouteDist[p.id].toFixed(1)+' км'}</span>`:''}</div>
           <div class="cc-addr-row">${address2gis(p.address,cityName(p.city_id),p.name)}</div>
           ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}</div>`:''}
           ${(p.give_packets||p.give_invoices)?`<div class="cc-give">${p.give_packets?'<span class="cc-give-tag">📦 Пакеты для партнёра</span>':''}${p.give_invoices?'<span class="cc-give-tag">📄 Накладные для партнёра</span>':''}</div>`:''}
