@@ -1357,10 +1357,40 @@ async function dbGetOne(table,id){
 async function dbDelete(table,id){
   const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
   const lbl=before?recLabel(before):String(id);
+  // сохраняем полный снимок строки в корзину, ПРЕЖДЕ чем реально удалить — на случай, если
+  // понадобится восстановить (Центр контроля → Корзина, хранится 30 дней, потом чистится сама)
+  try{
+    let snapshot=before;
+    if(!snapshot){
+      const {data}=await sb.from(table).select('*').eq('id',id).limit(1);
+      snapshot=data&&data[0];
+    }
+    if(snapshot){
+      await sb.from('deleted_items').insert({
+        table_name:table,record_id:String(id),record_data:snapshot,
+        entity_label:lbl||recLabel(snapshot)||String(id),
+        deleted_by:(S.me&&(S.me.full_name||S.me.email))||null,
+      });
+    }
+  }catch(e){console.error('trash snapshot',e);} // не блокируем само удаление, даже если бэкап не удался
   const {error}=await sb.from(table).delete().eq('id',id);
   if(error){console.error('delete',table,error);toast('Ошибка: '+error.message);return false;}
   if(AUTO_LOG_TABLES.has(table))logAction('delete',table,{entity_id:id,entity_label:lbl});
   return true;
+}
+// восстановить запись из корзины обратно в исходную таблицу
+async function restoreDeletedItem(trashId){
+  const item=(S.deletedItems||[]).find(x=>x.id===trashId);
+  if(!item)return;
+  const row=Object.assign({},item.record_data);
+  const {data,error}=await sb.from(item.table_name).insert(row).select();
+  if(error){toast('Не удалось восстановить: '+error.message);return;}
+  await sb.from('deleted_items').delete().eq('id',trashId);
+  S.deletedItems=(S.deletedItems||[]).filter(x=>x.id!==trashId);
+  const arrKey=RT_TABLE_ARR[item.table_name]||item.table_name;
+  if(Array.isArray(S[arrKey])&&data&&data[0])S[arrKey].unshift(data[0]);
+  toast('Восстановлено: '+(item.entity_label||''));
+  renderNotify();
 }
 
 /* ---------- ЖУРНАЛ ДЕЙСТВИЙ (История изменений) ---------- */
@@ -1891,6 +1921,14 @@ async function refreshForTab(tab){
       try{const [pr,wp,wm,oi,rv]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false}),dbList('wh_order_items',{}),dbList('wh_reservations',{order:'created_at',asc:false})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;S.wh_order_items=oi;S.wh_reservations=rv;}catch(e){}
     }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
+      if(tab==='notify'){
+        try{
+          // чистим корзину от всего старше 30 дней — сначала сама чистка, потом загружаем оставшееся
+          const cutoff=new Date();cutoff.setDate(cutoff.getDate()-30);
+          await sb.from('deleted_items').delete().lt('deleted_at',cutoff.toISOString());
+        }catch(e){console.error('trash cleanup',e);}
+        try{S.deletedItems=await dbList('deleted_items',{order:'deleted_at',asc:false});}catch(e){S.deletedItems=[];}
+      }
     }else if(tab==='intercity'){
       try{S.shipments=await dbList('shipments',{});}catch(e){}
       try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
@@ -2537,21 +2575,24 @@ async function loadAiInsights(){
 
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
-  const issues=notifyIssues();
-  const crit=issues.filter(i=>i.lvl==='crit').length;
+  const trash=S.deletedItems||[];
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Центр контроля</h1><p>${crit?`<span style="color:#c0392b;font-weight:700">${crit} срочных</span> · `:''}Задачи, выводы и важные изменения</p></div>
+    <div class="page-head"><div><h1>Центр контроля</h1><p>Резервная корзина, выводы и важные изменения</p></div>
       <div class="head-actions"><button class="btn ghost" id="nfReload">⟳ Обновить</button></div>
     </div>
 
     <div class="panel" style="margin-bottom:18px">
-      <div class="panel-head"><h2>⚠️ Требует внимания</h2><span class="count">${issues.length}</span></div>
-      ${issues.length?issues.map(i=>`
-        <div class="nf-issue nf-i-${i.lvl}" ${i.act?`data-nfgo="${i.act}"`:''}>
-          <div class="nf-i-ico">${i.ico}</div>
-          <div class="nf-i-body"><div class="nf-i-title">${esc(i.title)}</div><div class="nf-i-desc">${esc(i.desc)}</div></div>
-          ${i.act?'<div class="nf-i-arrow">→</div>':''}
-        </div>`).join(''):'<div class="empty" style="padding:28px"><div class="big">✅ Всё в порядке</div>Нет задач, требующих внимания.</div>'}
+      <div class="panel-head"><h2>🗑 Корзина</h2><span class="count">${trash.length}</span></div>
+      <div class="hint" style="margin:0 20px 12px;color:var(--muted)">Здесь хранится всё удалённое (заказы, заявки, сотрудники и т.д.) — 30 дней, потом чистится само. Если что-то удалили по ошибке — можно восстановить.</div>
+      ${trash.length?trash.map(it=>`
+        <div class="nf-issue">
+          <div class="nf-i-ico">🗑</div>
+          <div class="nf-i-body">
+            <div class="nf-i-title">${esc(it.entity_label||it.record_id||'')} <span class="wh-cat">(${esc(ENTITY_LABEL[it.table_name]||it.table_name)})</span></div>
+            <div class="nf-i-desc">Удалено ${it.deleted_at?esc(fmtDateTime(it.deleted_at)):''}${it.deleted_by?' · '+esc(it.deleted_by):''}</div>
+          </div>
+          <button class="btn sm primary" data-restore="${it.id}">↩ Восстановить</button>
+        </div>`).join(''):'<div class="empty" style="padding:28px"><div class="big">Пусто</div>За последние 30 дней ничего не удаляли.</div>'}
     </div>
 
     ${isStaff()?`
@@ -2580,7 +2621,12 @@ function renderNotify(){
     S.tab=tab;saveNav();buildNav();render();
     refreshForTab(tab).then(()=>{if(S.tab===tab)render();}).catch(()=>{});
   });
-  if($('nfReload'))$('nfReload').onclick=async()=>{await loadActivityLog();renderNotify();toast('Обновлено');};
+  if($('nfReload'))$('nfReload').onclick=async()=>{
+    await loadActivityLog();
+    try{S.deletedItems=await dbList('deleted_items',{order:'deleted_at',asc:false});}catch(e){}
+    renderNotify();toast('Обновлено');
+  };
+  $('main').querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>restoreDeletedItem(b.dataset.restore));
 }
 
 function renderHistory(){
