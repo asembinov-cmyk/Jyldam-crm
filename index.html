@@ -1814,7 +1814,9 @@ async function loadAll(){
   S.pickups=S.pickups||[];S.orders=S.orders||[];
   const _todayISO=localToday();
   Promise.all([
-    dbList('pickups',{order:'created_at',asc:false,gte:{col:'created_at',val:_todayISO}}),
+    // заявки — фильтруем по ДАТЕ ЗАБОРА (pickup_date), а не по дате создания записи: заявка могла
+    // быть создана вчера вечером, но назначена на сегодня — по created_at она бы потерялась
+    dbList('pickups',{order:'created_at',asc:false,gte:{col:'pickup_date',val:_todayISO}}),
     dbList('orders',{order:'created_at',asc:false,gte:{col:'created_at',val:_todayISO}}),
   ]).then(([pickupsToday,ordersToday])=>{
     if(S._heavyLoaded)return; // полная история уже подъехала — быстрые «сегодняшние» данные больше не нужны
@@ -1839,13 +1841,18 @@ async function refreshForTab(tab){
         dbList('pickups',{order:'created_at',asc:false}),
         dbList('orders',{order:'created_at',asc:false}),
       ]);
-      S.pickups=pickups;S.orders=orders;
+      // защита: если раньше заявки уже были, а сейчас вдруг пришёл пустой список — почти наверняка
+      // сбой сети (частое дело на мобильном у курьеров в дороге), а не то, что все заявки правда
+      // исчезли. Не затираем то, что уже показано, — подождём следующего успешного обновления.
+      if(pickups.length||!S.pickups.length)S.pickups=pickups;
+      if(orders.length||!S.orders.length)S.orders=orders;
     }else if(tab==='orders'||tab==='courier'||tab==='mail'||tab==='today'||tab==='dashboard'){
       const [orders,pickups]=await Promise.all([
         dbList('orders',{order:'created_at',asc:false}),
         dbList('pickups',{order:'created_at',asc:false}),
       ]);
-      S.orders=orders;S.pickups=pickups;
+      if(orders.length||!S.orders.length)S.orders=orders;
+      if(pickups.length||!S.pickups.length)S.pickups=pickups;
     }else if(tab==='ket_orders'){
       if(typeof loadInbound==='function'){try{await loadInbound();}catch(e){}}
     }else if(tab==='partners'){
