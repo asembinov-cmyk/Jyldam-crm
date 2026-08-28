@@ -1204,10 +1204,13 @@
 /* ================= SUPABASE ================= */
 const SUPABASE_URL='https://tdexhspesodslwgbxojw.supabase.co';
 const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkZXhoc3Blc29kc2x3Z2J4b2p3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMTcxOTMsImV4cCI6MjA5Nzc5MzE5M30.QojVMQAWzINufmqdI5nEL-gX_UsIZV8Nq48-3Fn6YoE';
-// сессию входа храним в sessionStorage (свой для каждой вкладки), а не в localStorage (общий на все
-// вкладки) — иначе вход под другим аккаунтом в одной вкладке «перебивал» сессию во всех остальных
+// сессия входа — localStorage (переживает закрытие/сворачивание вкладки, критично для курьеров
+// на телефоне: sessionStorage там часто стирается, когда браузер уходит в фон). Раньше пробовали
+// sessionStorage ради независимости вкладок друг от друга, но это ломало вход у курьеров на мобильных —
+// стабильность входа важнее. Для одновременной работы под разными аккаунтами в разных вкладках на
+// компьютере есть обходной путь — приватное окно браузера.
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON,{
-  auth:{storage:window.sessionStorage,persistSession:true,autoRefreshToken:true},
+  auth:{storage:window.localStorage,persistSession:true,autoRefreshToken:true},
 });
 let _partnerQR=''; // текущий QR-код партнёра (кабинет по ?p=)
 
