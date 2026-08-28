@@ -1747,10 +1747,15 @@ $('email').addEventListener('input',function(){
   if(/[a-zA-Zа-яА-Я@]/.test(raw))return;
   // все цифры из поля
   let d=raw.replace(/\D/g,'');
-  // префикс +7 даёт ведущую 7 (или пользователь ввёл 8) — убираем код страны
-  if(d[0]==='7'||d[0]==='8')d=d.slice(1);
+  // поле можно полностью очистить (например, чтобы ввести email вместо телефона) — раньше «+7 »
+  // невозможно было стереть до конца, приходилось переставлять курсор
+  if(!d){el.value='';return;}
+  // код страны (+7/8) срезаем, только если цифр реально больше 10 — то есть он точно есть.
+  // Если ровно 10 цифр — трогать нельзя: у казахстанских номеров сама первая цифра часто «7»
+  // (7XX...), и старая проверка ошибочно срезала её как код страны, портя вставленный номер.
+  if(d.length>10&&(d[0]==='7'||d[0]==='8'))d=d.slice(1);
   d=d.slice(0,10);
-  el.value=d.length?'+7 '+fmt10(d):'+7 ';
+  el.value='+7 '+fmt10(d);
   // курсор в конец (телефон вводят последовательно)
   const n=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(n,n);}catch(e){}});
 });
@@ -5537,7 +5542,7 @@ function renderPickups(){
     <div class="page-head"><div><h1>${head}</h1><p>Карточки забора посылок из магазинов-партнёров</p></div>
       <div class="head-actions">
         ${(typeof Notification!=='undefined'&&Notification.permission==='default')?'<button class="btn ghost" id="pkNotifyEnable">🔔 Включить уведомления</button>':''}
-        ${can('pickups','create')?`<button class="btn primary" id="newPickup">＋ Создать карточку забора</button>`:''}
+        ${(can('pickups','create')&&!isCourier())?`<button class="btn primary" id="newPickup">＋ Создать карточку забора</button>`:''}
       </div>
     </div>
     <div class="stats">
