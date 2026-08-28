@@ -4895,7 +4895,7 @@ async function partnerCallCourier(partner){
     const today=new Date(nowLocal.getTime()-tzOff*60000).toISOString().slice(0,10);
     // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — значит доставку он оплачивает сам
     // отдельно, не через сумму заказа. Такие заказы сразу помечаем «Оплачено отправителем»
-    const zeroTariffs=(+partner.tariff_courier===0)&&(+partner.tariff_post===0);
+    const zeroTariffs=isExplicitZero(partner.tariff_courier)&&isExplicitZero(partner.tariff_post);
     // строим заготовки заказов на клиенте (без pickup_id — его проставит функция)
     const orderRows=[];
     for(let i=0;i<cnt;i++){
@@ -6033,6 +6033,12 @@ function ordersCountForPickup(pickupId){return S.orders.filter(o=>o.pickup_id===
 const _creatingOrders={}; // защита от параллельного создания заказов по одной заявке
 // «Физ лицо Астана» / «Физ лицо Алматы» — это не магазины, а конкретные клиенты (у каждого свой,
 // всегда один и тот же адрес). Проверка по названию, без учёта регистра и лишних пробелов.
+// строго «тариф явно поставлен в 0» — не путать с «тариф вообще не заполнен» (null/пусто).
+// Важно: +null===0 в JS истинно, поэтому нельзя было просто сравнивать +v===0 напрямую — это
+// ловило заодно и всех партнёров с незаполненным тарифом (а таких большинство), а не только тех,
+// у кого реально стоит 0. Именно это раньше приводило к тому, что «Оплачено отправителем»
+// проставлялось почти всем заказам подряд.
+function isExplicitZero(v){return v!=null&&v!==''&&+v===0;}
 function isFizlicoPartner(partner){
   const n=(partner&&partner.name||'').trim().toLowerCase().replace(/\s+/g,' ');
   return n==='физ лицо астана'||n==='физ лицо алматы';
@@ -6085,7 +6091,7 @@ async function createOrdersFromPickup(pickupId,opts){
         cost:partner?(courierDelivery?partner.tariff_courier:partner.tariff_post)||0:0,
         // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — доставку он оплачивает сам
         // отдельно, не через сумму заказа — сразу помечаем заказ «Оплачено отправителем»
-        paid_by_sender:!!(partner&&+partner.tariff_courier===0&&+partner.tariff_post===0),
+        paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)&&isExplicitZero(partner.tariff_post)),
         index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
       };
       const u=await dbInsert('orders',row);
@@ -7331,7 +7337,7 @@ function orderModal(id,readonly){
       // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — доставку он оплачивает сам отдельно,
       // не через сумму заказа — сразу ставим «Оплачено отправителем» (если ещё не отмечено вручную)
       const ptForPaid=findPartner();
-      if(ptForPaid&&paidChk&&!paidChk.checked&&+ptForPaid.tariff_courier===0&&+ptForPaid.tariff_post===0){
+      if(ptForPaid&&paidChk&&!paidChk.checked&&isExplicitZero(ptForPaid.tariff_courier)&&isExplicitZero(ptForPaid.tariff_post)){
         paidChk.checked=true;paidChk.onchange();
       }
       // «Физ лицо Астана» / «Физ лицо Алматы» — это конкретные клиенты, адрес у них всегда один и
