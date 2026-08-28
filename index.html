@@ -1730,7 +1730,7 @@ async function doLogin(){
   await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
-async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;clearNav();$('email').value='';$('password').value='';showLogin();}
+async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;clearNav();$('email').value='';_emailPrevRaw='';$('password').value='';showLogin();}
 function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();
   // по умолчанию подставляем +7 (можно стереть и ввести email)
   const el=$('email');if(el&&!el.value){el.value='+7 ';}
@@ -1741,23 +1741,29 @@ $('loginBtn').onclick=doLogin;
 $('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 $('email').addEventListener('keydown',e=>{if(e.key==='Enter')$('password').focus();});
 // форматирование телефона в поле логина: +7 (777) 777-77-77. Email не трогаем.
+let _emailPrevRaw='';
 $('email').addEventListener('input',function(){
   const el=this;const raw=el.value;
   // если есть буквы или @ — это email, форматирование не применяем
-  if(/[a-zA-Zа-яА-Я@]/.test(raw))return;
+  if(/[a-zA-Zа-яА-Я@]/.test(raw)){_emailPrevRaw=raw;return;}
   // сначала отрезаем сам служебный префикс «+7» (если он уже есть в поле) — иначе его «7»
   // ошибочно считается первой цифрой номера при подсчёте, и всё дублируется/съезжает
   let rest=raw;
   if(rest.startsWith('+7'))rest=rest.slice(2);
   let d=rest.replace(/\D/g,'');
-  // поле можно полностью очистить (например, чтобы ввести email вместо телефона) — раньше «+7 »
-  // невозможно было стереть до конца, приходилось переставлять курсор
-  if(!d){el.value='';return;}
+  // «умный» backspace: скобки/пробел/тире рисует сама маска, а не человек. Если стёрли именно
+  // такой символ (значение стало короче, а цифр осталось столько же) — маска тут же дорисует его
+  // обратно, и удаление визуально «зависает» на месте. В этом случае убираем ещё и саму цифру.
+  const prevRest=_emailPrevRaw.startsWith('+7')?_emailPrevRaw.slice(2):_emailPrevRaw;
+  const prevDigits=prevRest.replace(/\D/g,'');
+  if(raw.length<_emailPrevRaw.length&&d.length===prevDigits.length&&d.length>0)d=d.slice(0,-1);
+  if(!d){el.value='';_emailPrevRaw='';return;} // поле можно полностью очистить (например, для ввода email)
   // если вставили номер целиком со своим кодом страны внутри (частый случай при копировании
   // с 8 впереди) — срезаем его, но только когда цифр реально больше 10
   if(d.length>10&&(d[0]==='7'||d[0]==='8'))d=d.slice(1);
   d=d.slice(0,10);
   el.value='+7 '+fmt10(d);
+  _emailPrevRaw=el.value;
   // курсор в конец (телефон вводят последовательно)
   const n=el.value.length;requestAnimationFrame(()=>{try{el.setSelectionRange(n,n);}catch(e){}});
 });
