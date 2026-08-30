@@ -6255,7 +6255,7 @@ async function pickupOrdersModal(pickupId){
     if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Создать ещё заказ».</div>`;
     const cards=list.map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
-      <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?esc(phoneDisplay(o.phone)):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
+      <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?phoneLink(o.phone):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
       ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:'<div class="pom-track pom-track-empty">⚠ Штрих-код не привязан партнёром</div>'}
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${(isStaff()||isCourier())?`
@@ -6342,10 +6342,14 @@ async function pickupOrdersModal(pickupId){
           const o=S.orders.find(x=>x.id===sel.dataset.pomsize);if(!o)return;
           const size=sel.value||null;
           const patch={size};
-          if(size&&PACKAGE_SIZES[size]&&!o.paid_by_sender){
-            const courier=isCourierDelivery(o.delivery_id);
-            const amount=PACKAGE_SIZES[size][courier?'courier':'mail'];
-            patch.order_sum=amount;patch.cost=amount;
+          if(size){
+            const pt=(o.partner_id&&S.partners.find(x=>x.id===o.partner_id))||(o.sender&&S.partners.find(x=>(x.name||'').trim().toLowerCase()===o.sender.trim().toLowerCase()));
+            const sizes=packageSizesFor(pt);
+            if(sizes[size]&&!o.paid_by_sender){
+              const courier=isCourierDelivery(o.delivery_id);
+              const amount=sizes[size][courier?'courier':'mail'];
+              patch.order_sum=amount;patch.cost=amount;
+            }
           }
           const before=o.order_sum;
           const saved=await dbUpdate('orders',o.id,patch);
@@ -7273,17 +7277,32 @@ function showBarcode(id){const o=S.orders.find(x=>x.id===id);if(!o)return;
   setTimeout(()=>renderBarcode($('bcView'),o.code),60);}
 async function delOrder(id){const o=S.orders.find(x=>x.id===id);if(!confirm(`Удалить заказ ${o?.code||''}?`))return;
   if(await dbDelete('orders',id)){await logAction('delete','orders',{entity_id:id,entity_label:orderLabel(o)});S.orders=S.orders.filter(x=>x.id!==id);toast('Заказ удалён');renderOrders();}}
-// расценки по размеру пакета (S/M/L) — раздельно для почтовой и курьерской доставки
-const PACKAGE_SIZES={
-  S:{label:'S — малый',mail:1500,courier:3000},
-  M:{label:'M — средний',mail:2000,courier:5000},
-  L:{label:'L — большой',mail:3000,courier:7000},
-};
+// расценки по размеру пакета (S/M/L) — раздельно для почтовой и курьерской доставки.
+// Больше не единая цена на всех: размер S = собственный тариф ПАРТНЁРА (курьер/почта), а M и L
+// считаются от него с надбавкой — курьерская: +2000 на каждый шаг (S→M→L); почтовая: M = S+500,
+// L = S+1500. Если у партнёра тариф не указан (пусто) — используются базовые значения по умолчанию.
+const PACKAGE_SIZE_LABELS={S:'S — малый',M:'M — средний',L:'L — большой'};
+function packageSizesFor(partner){
+  const baseCourier=isExplicitNum(partner&&partner.tariff_courier)?+partner.tariff_courier:3000;
+  const baseMail=isExplicitNum(partner&&partner.tariff_post)?+partner.tariff_post:1500;
+  return {
+    S:{label:PACKAGE_SIZE_LABELS.S,courier:baseCourier,mail:baseMail},
+    M:{label:PACKAGE_SIZE_LABELS.M,courier:baseCourier+2000,mail:baseMail+500},
+    L:{label:PACKAGE_SIZE_LABELS.L,courier:baseCourier+4000,mail:baseMail+1500},
+  };
+}
+function isExplicitNum(v){return v!=null&&v!==''&&!isNaN(+v);}
+// вариант без привязки к партнёру — на случай, если партнёр ещё не определён/не выбран (базовые значения)
+const PACKAGE_SIZES=packageSizesFor(null);
 function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=new Date().toISOString().slice(0,10);
   const code=o?o.code:genOrderCode();
   const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',pickup_city_id:'',address:'',qty:'',status_id:defaultOrderStatusId(),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
+  // размеры пакетов — сразу по партнёру из поля «Отправитель», если он уже известен (для первичной
+  // отрисовки формы; при смене отправителя/типа доставки дальше пересчитывается через findPartner())
+  const _initPartner=d.sender?S.partners.find(pp=>(pp.name||'').trim().toLowerCase()===d.sender.trim().toLowerCase()):null;
+  const _initSizes=packageSizesFor(_initPartner);
   const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
     <div class="order-split">
@@ -7305,7 +7324,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
-      <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(PACKAGE_SIZES).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint">Почта ${PACKAGE_SIZES.S.mail}/${PACKAGE_SIZES.M.mail}/${PACKAGE_SIZES.L.mail} · Курьер ${PACKAGE_SIZES.S.courier}/${PACKAGE_SIZES.M.courier}/${PACKAGE_SIZES.L.courier} ₸ (S/M/L). Сумма подставится автоматически по типу доставки.</span></div>
+      <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?' — по тарифу '+esc(_initPartner.name):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" id="postCityField" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Город (почтовая)</label><select id="o_postcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -7492,12 +7511,24 @@ function orderModal(id,readonly){
     // сумма по размеру пакета (S/M/L) — сразу по типу доставки. Выбор размера — явное действие
     // сотрудника, поэтому подставляем сумму даже если до этого что-то уже было в поле вручную,
     // но саму сумму «ручной правкой» не считаем — если сменится тип доставки, пересчитается снова.
+    // сумма по размеру пакета (S/M/L) — сразу по типу доставки и ТАРИФУ КОНКРЕТНОГО ПАРТНЁРА
+    // (не общая цена на всех: размер S = собственный тариф партнёра, M/L считаются от него).
+    // Выбор размера — явное действие сотрудника, поэтому подставляем сумму даже если до этого
+    // что-то уже было в поле вручную, но саму сумму «ручной правкой» не считаем — если сменится
+    // тип доставки, пересчитается снова.
     const applySize=()=>{
       const sizeEl=$('o_size');if(!sizeEl||!sizeEl.value)return;
-      const cfg=PACKAGE_SIZES[sizeEl.value];if(!cfg)return;
+      const sizes=packageSizesFor(findPartner());
+      const cfg=sizes[sizeEl.value];if(!cfg)return;
       const courier=isCourierDelivery($('o_delivery').value);
       const sumEl=$('o_sum');
       if(sumEl&&!sumEl.disabled){sumEl.value=courier?cfg.courier:cfg.mail;sumTouched=false;}
+      // подпись под списком тоже обновляем — числа могли смениться вместе с партнёром
+      const hintEl=$('o_size_hint');
+      if(hintEl){
+        const pt=findPartner();
+        hintEl.textContent=`Почта ${sizes.S.mail}/${sizes.M.mail}/${sizes.L.mail} · Курьер ${sizes.S.courier}/${sizes.M.courier}/${sizes.L.courier} ₸ (S/M/L)${pt?' — по тарифу '+pt.name:' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.`;
+      }
     };
     const sumEl=$('o_sum');if(sumEl)sumEl.oninput=()=>{sumTouched=true;};
     const sizeEl=$('o_size');if(sizeEl)sizeEl.onchange=()=>{applySize();};
@@ -7586,7 +7617,7 @@ function renderWhPartners(){
     ${arr.length?arr.map(p=>`<tr>
       <td data-label="Название"><strong>${esc(p.name||'—')}</strong></td>
       <td data-label="Контакт">${esc(p.contact||'—')}</td>
-      <td data-label="Телефон">${esc(p.phone||'—')}</td>
+      <td data-label="Телефон">${p.phone?phoneLink(p.phone):'—'}</td>
       <td data-label="Комментарий">${esc(p.comment||'—')}</td>
       <td data-label="" class="cell-actions">${can('directories','edit')||can('directories','delete')?`<div class="row-actions">
         ${can('directories','edit')?`<button class="btn sm ghost" data-whpe="${p.id}">Изм.</button>`:''}
@@ -8803,7 +8834,7 @@ const INB_COLUMNS=[
   {key:'external_id',label:'Штрих-код заказа',text:o=>(o.external_id||'')+' '+(o.source||''),
     cell:o=>`<td data-label="Штрих-код заказа"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>`},
   {key:'client',label:'Клиент',text:o=>o.client||'',cell:o=>`<td data-label="Клиент">${esc(o.client||'—')}</td>`},
-  {key:'phone',label:'Телефон',text:o=>o.phone||'',cell:o=>`<td data-label="Телефон">${esc(o.phone||'—')}</td>`},
+  {key:'phone',label:'Телефон',text:o=>o.phone||'',cell:o=>`<td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>`},
   {key:'city',label:'Город',text:o=>o.city||'',cell:o=>`<td data-label="Город">${esc(o.city||'—')}</td>`},
   {key:'index',label:'Индекс',text:o=>o.index||'',cell:o=>`<td data-label="Индекс">${esc(o.index||'—')}</td>`},
   {key:'weight',label:'Вес',text:o=>o.weight!=null?String(o.weight):'',cell:o=>`<td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>`},
