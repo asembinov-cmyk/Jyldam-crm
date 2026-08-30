@@ -6200,11 +6200,12 @@ async function createOrdersFromPickup(pickupId,opts){
     // тип доставки по умолчанию — курьерский, если есть такой тип
     const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
     const baseStatus=defaultOrderStatusId();
-    let created=0;
+    // собираем ВСЕ строки заранее и вставляем ОДНИМ запросом — раньше вставляли по одной штуке в
+    // цикле (каждая ждала ответ сервера), и на партиях в сотни заказов это могло занимать больше
+    // минуты и выглядело как зависание. Пакетная вставка — доли секунды даже на 500+ строк.
+    const rows=[];
     for(let i=0;i<need;i++){
-      // перепроверяем фактическое количество перед КАЖДОЙ вставкой — не создаём лишнего
-      if(ordersCountForPickup(pickupId)>=want)break;
-      const row={
+      rows.push({
         code:genOrderCode(),
         pickup_id:pickupId,
         partner_id:partner?partner.id:null,
@@ -6226,9 +6227,18 @@ async function createOrdersFromPickup(pickupId,opts){
         // отдельно, не через сумму заказа — сразу помечаем заказ «Оплачено отправителем»
         paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)&&isExplicitZero(partner.tariff_post)),
         index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
-      };
-      const u=await dbInsert('orders',row);
-      if(u){S.orders.unshift(u);created++;}
+      });
+    }
+    let created=0;
+    // Supabase/PostgREST спокойно принимает несколько тысяч строк за раз, но на всякий случай
+    // (лимиты размера запроса, таймауты на слабом интернете) режем на пачки по 200 штук —
+    // для 500 заказов это всего 3 запроса вместо пятисот
+    const CHUNK=200;
+    for(let i=0;i<rows.length;i+=CHUNK){
+      const chunk=rows.slice(i,i+CHUNK);
+      const {data:inserted,error}=await sb.from('orders').insert(chunk).select();
+      if(error){console.error('bulk insert orders',error);toast('Ошибка при создании заказов: '+error.message);break;}
+      if(inserted){inserted.forEach(u=>S.orders.unshift(u));created+=inserted.length;}
     }
     if(created&&!opts.silent)toast(`Создано заказов: ${created}`);
     return created;
