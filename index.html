@@ -6254,16 +6254,22 @@ async function pickupOrdersModal(pickupId){
   const want=parseInt(p.orders||'0',10)||0;
   const have=ordersCountForPickup(pickupId);
   if(want>have){await createOrdersFromPickup(pickupId,{silent:true});}
+  // при большом числе заказов (сотни) рисовать все карточки сразу — тяжело и тормозит прокрутку,
+  // особенно на телефоне у курьера. Показываем порциями, следующая подгружается сама при подходе
+  // к концу списка — курьер просто листает как обычно, без лишних кнопок «показать ещё».
+  const POM_BATCH=40;
+  let pomVisible=POM_BATCH;
   const renderBody=()=>{
     const list=S.orders.filter(o=>o.pickup_id===pickupId);
     const wantNow=parseInt(p.orders||'0',10)||0;
+    const shown=Math.min(pomVisible,list.length);
     const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
-      <div style="color:var(--muted);font-size:14px">Создано <b>${list.length}</b>${wantNow?` из ${wantNow}`:''} заказ(ов) по магазину «${esc(p.name)}»</div>
+      <div style="color:var(--muted);font-size:14px">Создано <b>${list.length}</b>${wantNow?` из ${wantNow}`:''} заказ(ов) по магазину «${esc(p.name)}»${list.length>shown?` · показано ${shown}`:''}</div>
       <button class="btn sm primary" id="pom_create">＋ Создать ещё заказ</button>
     </div>
     ${list.some(o=>o.track)?`<div class="pom-scan"><input id="pom_scan_input" placeholder="📷 Отсканируйте штрих-код посылки, чтобы найти её заказ…" autocomplete="off"></div>`:''}`;
     if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Создать ещё заказ».</div>`;
-    const cards=list.map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
+    const cards=list.slice(0,shown).map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
       <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?phoneLink(o.phone):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
       ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:'<div class="pom-track pom-track-empty">⚠ Штрих-код не привязан партнёром</div>'}
@@ -6278,7 +6284,9 @@ async function pickupOrdersModal(pickupId){
       <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем <span class="pom-paidhint">(сумма станет 0)</span></label>
       `:''}
     </div>`).join('');
-    return head+`<div class="pom-list">${cards}</div>`;
+    // «датчик» внизу — как только докручивают почти до него, сама подгружается следующая порция
+    const sentinel=shown<list.length?`<div id="pom_sentinel" style="padding:18px;text-align:center;color:var(--muted);font-size:13px">Загружаем ещё заказы…</div>`:'';
+    return head+`<div class="pom-list">${cards}</div>${sentinel}`;
   };
   showInfo(`Заказы заявки · ${p.name||''}`,renderBody(),{closeLabel:'Сохранить',beforeClose:()=>{
     // фото обязательно: проверяем, что у каждого заказа есть хотя бы одно фото
@@ -6301,7 +6309,19 @@ async function pickupOrdersModal(pickupId){
         scanInp.oninput=()=>{
           const q=scanInp.value.trim().toLowerCase();
           if(!q)return;
-          const card=wrap.querySelector(`[data-pomtrack="${q}"]`)||wrap.querySelector(`[data-pomcode="${q}"]`);
+          let card=wrap.querySelector(`[data-pomtrack="${q}"]`)||wrap.querySelector(`[data-pomcode="${q}"]`);
+          if(!card){
+            // нужного заказа может не быть среди уже отрисованных (список подгружается порциями) —
+            // ищем по всем данным и, если нашли, подгружаем достаточно карточек, чтобы её показать
+            const full=S.orders.filter(o=>o.pickup_id===pickupId);
+            const idx=full.findIndex(o=>(o.track||'').toLowerCase()===q||(o.code||'').toLowerCase()===q);
+            if(idx>=0&&idx>=pomVisible){
+              pomVisible=idx+1+POM_BATCH;
+              const body=wrap.querySelector('.modal-body');
+              if(body){body.innerHTML=renderBody();bind();}
+              card=wrap.querySelector(`[data-pomtrack="${q}"]`)||wrap.querySelector(`[data-pomcode="${q}"]`);
+            }
+          }
           if(card){
             wrap.querySelectorAll('.pom-found').forEach(c=>c.classList.remove('pom-found'));
             card.classList.add('pom-found');
@@ -6309,6 +6329,19 @@ async function pickupOrdersModal(pickupId){
             scanInp.value='';
           }
         };
+      }
+      // подгрузка следующей порции карточек при прокрутке вниз — для больших заявок (сотни заказов)
+      const sentinelEl=wrap.querySelector('#pom_sentinel');
+      if(sentinelEl){
+        const io=new IntersectionObserver(entries=>{
+          if(entries.some(e=>e.isIntersecting)){
+            io.disconnect();
+            pomVisible+=POM_BATCH;
+            const body=wrap.querySelector('.modal-body');
+            if(body){body.innerHTML=renderBody();bind();}
+          }
+        },{root:null,rootMargin:'500px'}); // начинаем подгружать чуть заранее, чтобы не было паузы при прокрутке
+        io.observe(sentinelEl);
       }
       wrap.querySelectorAll('[data-pomphotos]').forEach(box=>{
         const o=S.orders.find(x=>x.id===box.dataset.pomphotos);if(!o)return;
