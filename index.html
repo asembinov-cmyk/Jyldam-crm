@@ -8848,7 +8848,11 @@ function ketDocsStatusTable(dict){
 }
 // диагностика: показать, каких именно тех.кодов не хватает среди товаров, и сколько заказов на них висит —
 // вместо того чтобы просто показывать общую цифру «N заказов не привязано»
-function inboundUnmatchedModal(){
+async function inboundUnmatchedModal(){
+  if(!S.inbound_full_loaded){
+    toast('Загружаем весь список, чтобы проверить все заказы…');
+    try{await loadInbound();}catch(e){toast('Не удалось загрузить полный список');return;}
+  }
   const items=(S.inbound_items||[]).filter(it=>!it.matched||!it.product_id);
   if(!items.length){showInfo('Непривязанные коды','<div class="empty">Все позиции по всем заказам КЕТ привязаны к товарам. 🎉</div>');return;}
   const byCode=new Map(); // code -> {code, orders:Set, qty}
@@ -8951,10 +8955,16 @@ function inbColumnsInOrder(){return inbColOrder.map(k=>INB_COLUMNS.find(c=>c.key
 // фильтр по клику на конкретную колонку — {key: текст фильтра}
 let inbColFilters={};
 function inboundColFiltersActive(){return Object.values(inbColFilters).some(v=>v);}
+// текущая открытая функция закрытия попапа (если есть) — единый трекер на весь модуль. Раньше при
+// открытии второго фильтра (на другом столбце) первый лишь удалялся из DOM через querySelectorAll,
+// но его обработчик на document НЕ снимался и продолжал висеть — на любой следующий клик где угодно
+// он срабатывал и перерисовывал весь грид заново (отсюда «кидает в начало» и «поиск работает раз»).
+let _inbColFilterClose=null;
 // всплывающий фильтр по конкретной колонке — открывается по клику на заголовок столбца.
 // Крепится прямо к самому заголовку (position:relative на th + position:absolute на попап) —
 // не «улетает» в угол экрана, как было раньше с фиксированными координатами.
 function openInboundColFilter(th,key){
+  if(_inbColFilterClose){_inbColFilterClose();_inbColFilterClose=null;}
   document.querySelectorAll('.inb-col-filter-pop').forEach(p=>p.remove());
   const col=INB_COLUMNS.find(c=>c.key===key);
   const pop=document.createElement('div');
@@ -8987,11 +8997,13 @@ function openInboundColFilter(th,key){
       if(closed)return;closed=true;
       pop.remove();
       document.removeEventListener('click',onDocClick,{capture:true});
+      if(_inbColFilterClose===close)_inbColFilterClose=null;
       if(apply)applyDelivery(sel.value);
     };
     function onDocClick(ev){if(!pop.contains(ev.target)&&ev.target!==th)close(true);}
     sel.onchange=()=>close(true);
     document.addEventListener('click',onDocClick,{capture:true});
+    _inbColFilterClose=close;
     return;
   }
   pop.innerHTML=`<div class="inb-col-filter-box">
@@ -9018,6 +9030,7 @@ function openInboundColFilter(th,key){
     if(closed)return;closed=true;
     pop.remove();
     document.removeEventListener('click',onDocClick,{capture:true});
+    if(_inbColFilterClose===close)_inbColFilterClose=null;
     if(doApply)apply(inp.value.trim());
   };
   function onDocClick(ev){if(!pop.contains(ev.target)&&ev.target!==th)close(true);}
@@ -9025,6 +9038,7 @@ function openInboundColFilter(th,key){
   const clearBtn=pop.querySelector('#inbColFilterClear');
   if(clearBtn)clearBtn.onclick=()=>{inp.value='';close(true);};
   document.addEventListener('click',onDocClick,{capture:true});
+  _inbColFilterClose=close;
 }
 function drawInboundOrders(){
   const anyFilter=inboundHasActiveFilters()||inboundColFiltersActive();
@@ -9065,7 +9079,7 @@ function drawInboundOrders(){
         ${lazy?'<div class="hint" style="margin:0 20px 8px;color:var(--muted)">Страницы подгружаются по одной с сервера — открытие и листание быстрее</div>':''}
       <div class="filters">
         <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон… (можно вставить сразу несколько через пробел)" value="${esc(inbFilter.q)}">
-        <select id="inbpartner"><option value="">Все магазины</option>${[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.name||'—')}</option>`).join('')}</select>
+        <select id="inbpartner"><option value="">Все партнёры</option>${[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.name||'—')}</option>`).join('')}</select>
         <select id="inbdelivery"><option value="">Все типы доставки</option>
           <option value="courier" ${inbFilter.delivery==='courier'?'selected':''}>Курьерская</option>
           <option value="mail" ${inbFilter.delivery==='mail'?'selected':''}>Почтовая</option></select>
