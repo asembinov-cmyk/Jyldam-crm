@@ -3976,7 +3976,7 @@ function warehouseName(id){return ((S.warehouses||[]).find(w=>w.id===id)||{}).na
 
 let icFilter={date:'',wh:'',dest:'',transport:''};
 function renderIntercity(){
-  if(!isAdmin()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  if(!canMod('intercity')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
   const all=[...(S.shipments||[])].sort((a,b)=>(b.ship_date||b.created_at||'').localeCompare(a.ship_date||a.created_at||''));
   // применяем фильтры
@@ -4003,7 +4003,7 @@ function renderIntercity(){
   </div>`;
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Отправки межгород</h1><p>Учёт коробок, отправленных в другие города</p></div>
-      <div class="head-actions"><button class="btn primary" id="newShipment">＋ Создать отправку</button></div>
+      <div class="head-actions">${can('intercity','create')?'<button class="btn primary" id="newShipment">＋ Создать отправку</button>':''}</div>
     </div>
     ${totalsBar}
     <div class="ic-filters">
@@ -4035,15 +4035,15 @@ function renderIntercity(){
           <td data-label="Отправитель">${esc(s.sender_name||'—')}</td>
           <td data-label="" class="cell-actions"><div class="row-actions">
             <button class="btn sm ghost" data-icview="${s.id}">Заказы</button>
-            ${isAdmin()?`<button class="btn sm ghost" data-icedit="${s.id}">Изменить</button>`:''}
-            ${isAdmin()?`<button class="btn sm danger" data-icdel="${s.id}">Удалить</button>`:''}
+            ${can('intercity','edit')?`<button class="btn sm ghost" data-icedit="${s.id}">Изменить</button>`:''}
+            ${can('intercity','delete')?`<button class="btn sm danger" data-icdel="${s.id}">Удалить</button>`:''}
           </div></td>
         </tr>`;
       }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.date||icFilter.wh||icFilter.dest||icFilter.transport)?'Измените фильтры.':'Нажмите «Создать отправку».'}</div></td></tr>`}
       </tbody></table></div>
     </div>
     ${rows.length?totalsBar:''}`;
-  $('newShipment').onclick=()=>shipmentModal();
+  if($('newShipment'))$('newShipment').onclick=()=>shipmentModal();
   // фильтры
   if($('icfDate'))$('icfDate').onchange=e=>{icFilter.date=e.target.value;renderIntercity();};
   if($('icfWh'))$('icfWh').onchange=e=>{icFilter.wh=e.target.value;renderIntercity();};
@@ -4198,10 +4198,10 @@ function shipmentOrdersModal(id){
     <table class="ic-view-tbl"><thead><tr><th>Код</th><th>Клиент</th><th>Трек</th><th>Стоимость</th></tr></thead><tbody>${rows}</tbody></table>`);
 }
 
-// редактирование отправки (только админ): дата, склад, транспорт, вес, стоимость коробки
+// редактирование отправки: дата, склад, транспорт, вес, стоимость коробки
 // при изменении стоимости пересчитывается «за 1 заказ» и обновляется intercity_cost в заказах
 function shipmentEditModal(id){
-  if(!isAdmin())return;
+  if(!can('intercity','edit'))return;
   const s=(S.shipments||[]).find(x=>x.id===id);if(!s)return;
   const body=`
     <div class="form-grid">
