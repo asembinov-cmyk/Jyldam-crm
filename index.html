@@ -944,6 +944,28 @@
     .sidebar-backdrop.show{display:block}
     /* нижняя панель быстрых вкладок убрана на мобиле */
     .bottom-nav{display:none!important}
+    /* «Заказы партнёров» на мобильном — своя, более просторная карточная раскладка вместо
+       тесной «настольной» таблицы на 19 колонок. Плотные стили десктопа (мелкий шрифт, узкие
+       отступы) здесь намеренно перебиваются — на телефоне нужно крупнее и просторнее, а не гуще. */
+    #inboundTable tbody td{padding:11px 14px;font-size:14px;line-height:1.35}
+    #inboundTable tbody td::before{font-size:11px}
+    #inboundTable .wh-cat{font-size:12px}
+    #inboundTable .cell-time{font-size:11px}
+    #inboundTable .pill{padding:4px 10px;font-size:12.5px}
+    #inboundTable .ket-badge{padding:4px 9px;font-size:12px}
+    /* второстепенные поля прячем на телефоне — данные никуда не делись, просто не загромождают
+       карточку; полностью видно на компьютере или через фильтр по столбцу */
+    #inboundTable td[data-label="Отправитель ИП"],
+    #inboundTable td[data-label="Оператор логистики"],
+    #inboundTable td[data-label="Индекс"],
+    #inboundTable td[data-label="Вес"],
+    #inboundTable td[data-label="Всего звонков"],
+    #inboundTable td[data-label="Звонков сегодня"],
+    #inboundTable td[data-label="Склад"]{display:none}
+    /* самые важные поля — крупнее и заметнее остальных */
+    #inboundTable td[data-label="Штрих-код заказа"]{background:#f7f8fc;border-radius:10px 10px 0 0;margin:-6px -4px 4px;padding:12px 14px}
+    #inboundTable td[data-label="Штрих-код заказа"] strong{font-size:15px}
+    #inboundTable td[data-label="Сумма"]{font-weight:700}
     /* Адаптивная таблица заявок: строки -> карточки */
     .resp-table{border:0}
     .resp-table thead{display:none}
@@ -8897,6 +8919,8 @@ function ketDocsModal(){
 const INB_COLUMNS=[
   {key:'external_id',label:'Штрих-код заказа',text:o=>(o.external_id||'')+' '+(o.source||''),
     cell:o=>`<td data-label="Штрих-код заказа"><strong>${esc(o.external_id||'—')}</strong><div class="wh-cat">${esc(o.source||'')}</div></td>`},
+  {key:'created_at',label:'Дата',text:o=>fmtDate(o.created_at),
+    cell:o=>`<td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>`},
   {key:'client',label:'Клиент',text:o=>o.client||'',cell:o=>`<td data-label="Клиент">${esc(o.client||'—')}</td>`},
   {key:'phone',label:'Телефон',text:o=>o.phone||'',cell:o=>`<td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>`},
   {key:'city',label:'Город',text:o=>o.city||'',cell:o=>`<td data-label="Город">${esc(o.city||'—')}</td>`},
@@ -8918,11 +8942,9 @@ const INB_COLUMNS=[
   {key:'kz_code',label:'Трек номер',text:o=>o.kz_code||'',cell:o=>`<td data-label="Трек номер">${esc(o.kz_code||'—')}</td>`},
   {key:'stock',label:'Склад',text:o=>o.stock_written?'списан':'',
     cell:o=>`<td data-label="Склад">${o.stock_written?'<span class="ket-badge" style="background:#e6f4ea;color:#1a7f37">списан</span>':'<span class="wh-cat">—</span>'}</td>`},
-  {key:'created_at',label:'Дата',text:o=>fmtDate(o.created_at),
-    cell:o=>`<td data-label="Дата">${esc(fmtDate(o.created_at))}${o.created_at?`<small class="cell-time">${esc((fmtLogTime(o.created_at)||{}).time||'')}</small>`:''}</td>`},
 ];
 // порядок колонок — можно перетаскивать мышкой, запоминаем в браузере
-let inbColOrder=(()=>{try{const saved=JSON.parse(localStorage.getItem('inbColOrder')||'null');
+let inbColOrder=(()=>{try{const saved=JSON.parse(localStorage.getItem('inbColOrder_v2')||'null');
   if(Array.isArray(saved)&&saved.length===INB_COLUMNS.length&&saved.every(k=>INB_COLUMNS.some(c=>c.key===k)))return saved;}catch(e){}
   return INB_COLUMNS.map(c=>c.key);})();
 function inbColumnsInOrder(){return inbColOrder.map(k=>INB_COLUMNS.find(c=>c.key===k)).filter(Boolean);}
@@ -8957,10 +8979,19 @@ function openInboundColFilter(th,key){
       }
       inbPage=1;drawInboundOrders();
     };
-    sel.onchange=()=>{pop.remove();applyDelivery(sel.value);};
-    document.addEventListener('click',function closePop(ev){
-      if(!pop.contains(ev.target)&&ev.target!==th){pop.remove();document.removeEventListener('click',closePop);}
-    },{capture:true});
+    // единая функция закрытия — вызывается ЛЮБЫМ способом (выбор варианта, клик мимо), всегда
+    // снимает и попап, и обработчик на document. Раньше отдельные пути закрытия не всегда снимали
+    // обработчик, из-за чего он «зависал» и мешал следующему открытию фильтра.
+    let closed=false;
+    const close=(apply)=>{
+      if(closed)return;closed=true;
+      pop.remove();
+      document.removeEventListener('click',onDocClick,{capture:true});
+      if(apply)applyDelivery(sel.value);
+    };
+    function onDocClick(ev){if(!pop.contains(ev.target)&&ev.target!==th)close(true);}
+    sel.onchange=()=>close(true);
+    document.addEventListener('click',onDocClick,{capture:true});
     return;
   }
   pop.innerHTML=`<div class="inb-col-filter-box">
@@ -8980,12 +9011,20 @@ function openInboundColFilter(th,key){
     inbPage=1;
     drawInboundOrders();
   };
-  inp.onkeydown=e=>{if(e.key==='Enter'){pop.remove();apply(inp.value.trim());}if(e.key==='Escape')pop.remove();};
+  // единая функция закрытия — Escape/Enter/крестик/клик мимо все идут через неё, обработчик на
+  // document всегда корректно снимается, не остаётся «висеть» до следующего клика
+  let closed=false;
+  const close=(doApply)=>{
+    if(closed)return;closed=true;
+    pop.remove();
+    document.removeEventListener('click',onDocClick,{capture:true});
+    if(doApply)apply(inp.value.trim());
+  };
+  function onDocClick(ev){if(!pop.contains(ev.target)&&ev.target!==th)close(true);}
+  inp.onkeydown=e=>{if(e.key==='Enter')close(true);if(e.key==='Escape')close(false);};
   const clearBtn=pop.querySelector('#inbColFilterClear');
-  if(clearBtn)clearBtn.onclick=()=>{pop.remove();apply('');};
-  document.addEventListener('click',function closePop(ev){
-    if(!pop.contains(ev.target)&&ev.target!==th){pop.remove();apply(inp.value.trim());document.removeEventListener('click',closePop);}
-  },{capture:true});
+  if(clearBtn)clearBtn.onclick=()=>{inp.value='';close(true);};
+  document.addEventListener('click',onDocClick,{capture:true});
 }
 function drawInboundOrders(){
   const anyFilter=inboundHasActiveFilters()||inboundColFiltersActive();
@@ -9149,7 +9188,7 @@ function drawInboundOrders(){
       const from=inbColOrder.indexOf(_inbDragKey),to=inbColOrder.indexOf(toKey);
       if(from<0||to<0)return;
       inbColOrder.splice(from,1);inbColOrder.splice(to,0,_inbDragKey);
-      try{localStorage.setItem('inbColOrder',JSON.stringify(inbColOrder));}catch(e2){}
+      try{localStorage.setItem('inbColOrder_v2',JSON.stringify(inbColOrder));}catch(e2){}
       drawInboundOrders();
     };
     // клик по заголовку (не после перетаскивания) — фильтр по этому столбцу
