@@ -3977,22 +3977,44 @@ function intercityRollupDates(dateStr){
   }
   return dates;
 }
+// города, куда со склада Алматы заказы едут НЕ напрямую, а через Астану (сначала едут в Астану,
+// это занимает день, и уже оттуда дальше по городам вместе с астанинскими заказами). Поэтому:
+//  - при отправке СО СКЛАДА АЛМАТЫ в эти города заказов быть не должно вообще (их забирает Астана)
+//  - при отправке СО СКЛАДА АСТАНА в эти города — дополнительно подтягиваются заказы, забранные
+//    в Алматы НА ДЕНЬ РАНЬШЕ (успели доехать до Астаны только к этому дню)
+const INTERCITY_VIA_ASTANA_CITIES=['усть-каменогорск','семей','костанай','павлодар','петропавловск','караганды','кокшетау','сатпаев','жезказган','актобе','уральск','актау','атырау'];
 function ordersForIntercity(cityId,date,whId){
   const whCityId=whId?warehousePickupCityId(whId):null;
-  const cityNm=(courierCityName(cityId)||'').toLowerCase();
-  const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>cityNm.includes(n));
+  const whCityNm=(whCityId?cityName(whCityId):'').toLowerCase();
+  const destNm=(courierCityName(cityId)||'').toLowerCase();
+  const isViaAstana=INTERCITY_VIA_ASTANA_CITIES.some(n=>destNm.includes(n));
+  const isAlmatyWh=whCityNm.includes('алматы');
+  const isAstanaWh=whCityNm.includes('астана');
+  // со склада Алматы эти 13 городов не отправляем вообще — они едут через Астану
+  if(isAlmatyWh&&isViaAstana)return [];
+  const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>destNm.includes(n));
   const allowedDates=(date&&isLimited)?intercityRollupDates(date):null;
+  // для Астаны, отправляющей в один из транзитных городов, вычисляем «вчера» (когда эти заказы
+  // должны были быть забраны в Алматы, чтобы успеть доехать до Астаны к сегодняшней отправке)
+  let almatyCityId=null,transitPrevDate=null;
+  if(isAstanaWh&&isViaAstana&&date){
+    const almatyCity=(S.cities||[]).find(c=>(c.name||'').trim().toLowerCase().includes('алматы'));
+    almatyCityId=almatyCity?almatyCity.id:null;
+    const d=new Date(date+'T00:00:00');d.setDate(d.getDate()-1);
+    transitPrevDate=d.toISOString().slice(0,10);
+  }
   return (S.orders||[]).filter(o=>{
     if(!isCourierDelivery(o.delivery_id))return false;
     if(o.courier_city_id!==cityId)return false;
     if(o.intercity_shipment_id)return false;
+    const d=(o.pickup_date||o.created_at||'').slice(0,10);
+    const isTransitOrder=almatyCityId&&o.pickup_city_id===almatyCityId&&d===transitPrevDate;
     if(date){
-      const d=(o.pickup_date||o.created_at||'').slice(0,10);
-      if(allowedDates){if(!allowedDates.includes(d))return false;}
-      else{if(d!==date)return false;}
+      const matchesOwnDay=allowedDates?allowedDates.includes(d):d===date;
+      if(!matchesOwnDay&&!isTransitOrder)return false;
     }
-    // фильтр по складу: город забора заказа = город склада
-    if(whCityId&&o.pickup_city_id!==whCityId)return false;
+    // фильтр по складу: свой город забора, ИЛИ транзитный заказ из Алматы (для Астаны)
+    if(whCityId&&o.pickup_city_id!==whCityId&&!isTransitOrder)return false;
     return true;
   });
 }
@@ -4086,17 +4108,9 @@ function renderIntercity(){
 
 // города получения (курьерские), куда есть неотправленные курьерские заказы на дату (и склад, если задан)
 function destCitiesForDate(date,whId){
-  const whCityId=whId?warehousePickupCityId(whId):null;
-  const ids=new Set();
-  (S.orders||[]).forEach(o=>{
-    if(!isCourierDelivery(o.delivery_id))return;
-    if(o.intercity_shipment_id)return;
-    if(!o.courier_city_id)return;
-    if(date){const d=(o.pickup_date||o.created_at||'').slice(0,10);if(d!==date)return;}
-    if(whCityId&&o.pickup_city_id!==whCityId)return;
-    ids.add(o.courier_city_id);
-  });
-  return (S.courier_cities||[]).filter(c=>ids.has(c.id));
+  // используем ТУ ЖЕ функцию, что и сам список заказов — чтобы город появлялся в выпадающем меню
+  // ровно тогда, когда для него реально найдутся заказы (с учётом транзита через Астану и дней-доноров)
+  return (S.courier_cities||[]).filter(c=>ordersForIntercity(c.id,date,whId).length>0);
 }
 // форма создания отправки
 function shipmentModal(){
@@ -4175,13 +4189,18 @@ function shipmentModal(){
         <div class="ic-orders-list">
           ${list.map(o=>{
             const pd=(o.pickup_date||o.created_at||'').slice(0,10);
-            const rolled=pd&&pd!==date; // заказ подтянут из «дня-донора» — забор был не в тот же день, что отправка
+            const rolled=pd&&pd!==date; // заказ подтянут не с той же даты, что отправка
+            const pickupCityNm=o.pickup_city_id?cityName(o.pickup_city_id):'';
+            const whSel=($('s_wh')||{}).value||'';
+            const whCityNow=whSel?cityName(warehousePickupCityId(whSel)):'';
+            const isTransit=rolled&&pickupCityNm&&whCityNow&&pickupCityNm.toLowerCase()!==whCityNow.toLowerCase();
             return `<label class="ic-order-row">
             <input type="checkbox" data-icorder="${o.id}" checked>
             <span class="ic-o-code">${esc(o.code||o.id.slice(0,6))}</span>
             <span class="ic-o-client">${esc(o.client||o.sender||'—')}</span>
             <span class="ic-o-track">${esc(o.track||'')}</span>
-            ${rolled?`<span class="ic-o-rolled" title="Забор был ${esc(fmtDate(pd))}, подтянут к этой отправке">📅 забор ${esc(fmtDate(pd))}</span>`:''}
+            ${isTransit?`<span class="ic-o-rolled" title="Забран в ${esc(pickupCityNm)} ${esc(fmtDate(pd))}, транзитом через этот склад">🚚 транзит из ${esc(pickupCityNm)} ${esc(fmtDate(pd))}</span>`
+              :rolled?`<span class="ic-o-rolled" title="Забор был ${esc(fmtDate(pd))}, подтянут к этой отправке">📅 забор ${esc(fmtDate(pd))}</span>`:''}
           </label>`;}).join('')}
         </div>
         <div class="ic-calc-live" id="s_live"></div>`;
