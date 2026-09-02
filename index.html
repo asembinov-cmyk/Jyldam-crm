@@ -8642,6 +8642,7 @@ async function autoMatchInboundItems(){
     S.products.forEach(p=>{productKetSkuList(p).forEach(code=>byKetSku.set(normKetSku(code),p));});
     if(byKetSku.size){
       const toMatch=S.inbound_items.filter(it=>!(it.matched&&it.product_id)&&it.ket_sku&&byKetSku.has(normKetSku(it.ket_sku)));
+      if(toMatch.length>50)toast(`Привязываем ${toMatch.length} позиций к товарам, это может занять немного времени…`);
       await runInBatches(toMatch,20,async it=>{
         const prod=byKetSku.get(normKetSku(it.ket_sku));
         const upd=await dbUpdate('inbound_order_items',it.id,{product_id:prod.id,matched:true});
@@ -9169,7 +9170,13 @@ function drawInboundOrders(){
     try{await loadInbound({full:false});inbPage=1;drawInboundOrders();toast(`Показаны последние ${INBOUND_DEFAULT_DAYS} дней`);}
     finally{if(btn)btn.disabled=false;}
   };
-  if($('inbUnmatched'))$('inbUnmatched').onclick=()=>inboundUnmatchedModal();
+  if($('inbUnmatched'))$('inbUnmatched').onclick=async()=>{
+    const btn=$('inbUnmatched');
+    const origText=btn.textContent;
+    btn.disabled=true;btn.textContent='⏳ Проверяем…';
+    try{await inboundUnmatchedModal();}
+    finally{if(btn){btn.disabled=false;btn.textContent=origText;}}
+  };
   if($('inbExportXlsx'))$('inbExportXlsx').onclick=()=>exportInboundToExcel(inboundActionList());
   if($('inbPrintWaybills'))$('inbPrintWaybills').onclick=async()=>{
     const courierOnly=inboundActionList().filter(o=>inboundDeliveryType(o)==='courier');
