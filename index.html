@@ -5471,8 +5471,10 @@ function renderDashboard(){
   // подпись периода: 01.06.2026 – 30.06.2026
   const periodLabel=`${fmtDate(monthStr)} – ${fmtDate(monthEndStr)}`;
 
-  // 1) ОБЩЕЕ КОЛ-ВО ЗАКАЗОВ за месяц по ДАТЕ ЗАБОРА (pickup_date)
-  const ordersMonth=orders.filter(o=>inMonth(o.pickup_date)).length;
+  // 1) ОБЩЕЕ КОЛ-ВО ЗАКАЗОВ за месяц по ДАТЕ СОЗДАНИЯ (created_at) — как и в списке «Заказы»,
+  // чтобы цифры на дашборде и в самом списке совпадали (раньше считали по дате забора, из-за
+  // правила про 12:00 заказ мог «переехать» в другой месяц по одной дате, но не по другой)
+  const ordersMonth=orders.filter(o=>inMonth(o.created_at)).length;
   // 2) Заявки на забор: собрано за месяц (по дате забора) + сегодня ожидается
   const pkMonth=pickups.filter(p=>inMonth(p.pickup_date));
   const pkCollectedMonth=pkMonth.filter(p=>isCollectedStatus(p.status_id)).length;
@@ -5482,8 +5484,8 @@ function renderDashboard(){
   const pkCollMonth=pkMonth.filter(p=>isCollectedStatus(p.status_id));
   const cityAstana=pkCollMonth.filter(p=>isAstana(p.city_id)).length;
   const cityAlmaty=pkCollMonth.filter(p=>isAlmaty(p.city_id)).length;
-  // 4) Курьерская vs Почтовая за месяц (по дате забора заказа)
-  const ordMonth=orders.filter(o=>inMonth(o.pickup_date));
+  // 4) Курьерская vs Почтовая за месяц (по дате создания заказа — тот же принцип, что и в п.1)
+  const ordMonth=orders.filter(o=>inMonth(o.created_at));
   const delCourier=ordMonth.filter(o=>isCourierDelivery(o.delivery_id)).length;
   const delMail=ordMonth.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length;
   const delTotal=delCourier+delMail;
@@ -5491,7 +5493,7 @@ function renderDashboard(){
   const pctMail=delTotal?100-pctCourier:0;
   // 5) Финансы (выручка по order_sum) — сегодня и за месяц (по дате забора)
   const sumOf=arr=>arr.reduce((s,o)=>s+(parseFloat(o.order_sum)||0),0);
-  const revToday=sumOf(orders.filter(o=>(o.pickup_date||'').slice(0,10)===today));
+  const revToday=sumOf(orders.filter(o=>(o.created_at||'').slice(0,10)===today));
   const revMonth=sumOf(ordMonth);
   const fmtMoney=n=>{if(n>=1000000)return (n/1000000).toFixed(1).replace('.0','')+' млн';return Math.round(n).toLocaleString('ru-RU');};
   // SVG-донат курьерская/почтовая
