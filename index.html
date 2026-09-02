@@ -3987,19 +3987,21 @@ function renderIntercity(){
     if(icFilter.transport&&(s.transport||'')!==icFilter.transport)return false;
     return true;
   });
-  // итоги по отфильтрованному
-  const totalBoxes=rows.length;
-  const totalCost=rows.reduce((sum,s)=>sum+(parseFloat(s.box_cost)||0),0);
-  const totalOrders=rows.reduce((sum,s)=>sum+((s.order_ids||[]).length),0);
+  // а верхний блок — ВСЕГДА только за сегодня, независимо от того, какие фильтры выбраны ниже
+  const todayISO=localToday();
+  const todayRows=all.filter(s=>(s.ship_date||'').slice(0,10)===todayISO);
+  const todayBoxes=todayRows.length;
+  const todayCost=todayRows.reduce((sum,s)=>sum+(parseFloat(s.box_cost)||0),0);
+  const todayOrders=todayRows.reduce((sum,s)=>sum+((s.order_ids||[]).length),0);
   // города и склады для селектов (из имеющихся отправок)
   const usedWh=[...new Set(all.map(s=>s.warehouse_id).filter(Boolean))];
   const usedDest=[...new Set(all.map(s=>s.dest_city_id).filter(Boolean))];
   const usedTr=[...new Set(all.map(s=>s.transport).filter(Boolean))];
   const totalsBar=`<div class="ic-totals">
-    <div class="ic-total-item"><span>Коробок</span><b>${totalBoxes}</b></div>
-    <div class="ic-total-item"><span>Заказов в них</span><b>${totalOrders}</b></div>
-    <div class="ic-total-item ic-total-money"><span>Потрачено на отправку</span><b>${fmtMoney(totalCost)}</b></div>
-    ${icFilter.date?`<div class="ic-total-item"><span>За дату</span><b>${esc(fmtDate(icFilter.date))}</b></div>`:''}
+    <div class="ic-total-item"><span>Коробок</span><b>${todayBoxes}</b></div>
+    <div class="ic-total-item"><span>Заказов в них</span><b>${todayOrders}</b></div>
+    <div class="ic-total-item ic-total-money"><span>Потрачено на отправку</span><b>${fmtMoney(todayCost)}</b></div>
+    <div class="ic-total-item"><span>За дату</span><b>${esc(fmtDate(todayISO))}</b></div>
   </div>`;
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Отправки межгород</h1><p>Учёт коробок, отправленных в другие города</p></div>
@@ -4041,8 +4043,7 @@ function renderIntercity(){
         </tr>`;
       }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.date||icFilter.wh||icFilter.dest||icFilter.transport)?'Измените фильтры.':'Нажмите «Создать отправку».'}</div></td></tr>`}
       </tbody></table></div>
-    </div>
-    ${rows.length?totalsBar:''}`;
+    </div>`;
   if($('newShipment'))$('newShipment').onclick=()=>shipmentModal();
   // фильтры
   if($('icfDate'))$('icfDate').onchange=e=>{icFilter.date=e.target.value;renderIntercity();};
