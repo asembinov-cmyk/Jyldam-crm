@@ -3987,6 +3987,8 @@ function ordersForIntercity(cityId,date,whId){
   const whCityId=whId?warehousePickupCityId(whId):null;
   const whCityNm=(whCityId?cityName(whCityId):'').toLowerCase();
   const destNm=(courierCityName(cityId)||'').toLowerCase();
+  // отправка города самого в себя не имеет смысла (склад Астана → город получения Астана и т.п.)
+  if(whCityNm&&destNm&&whCityNm===destNm)return [];
   const isViaAstana=INTERCITY_VIA_ASTANA_CITIES.some(n=>destNm.includes(n));
   const isAlmatyWh=whCityNm.includes('алматы');
   const isAstanaWh=whCityNm.includes('астана');
