@@ -7843,9 +7843,30 @@ function partnerModal(id){
       const name=val('p_name').trim();
       const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null,
         tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null};
-      if(id){const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(S.partners.find(x=>x.id===id),u);}
+      let syncMsg='';
+      if(id){
+        const before=S.partners.find(x=>x.id===id);
+        const salesChanged=before&&before.sales_id!==row.sales_id;
+        const procChanged=before&&before.processor_id!==row.processor_id;
+        const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(before,u);
+        // менеджер/обработчик у партнёра сменился — подтягиваем это же на ВСЕ уже существующие
+        // заказы этого партнёра, а не только на новые (иначе старые заказы «зависают» на прежнем
+        // менеджере навсегда, и это приходится чинить руками)
+        if(salesChanged||procChanged){
+          const patch={};
+          if(salesChanged)patch.sales_id=row.sales_id;
+          if(procChanged)patch.processor_id=row.processor_id;
+          const {data:updated,error}=await sb.from('orders').update(patch).eq('partner_id',id).select('id');
+          if(error){console.error('sync orders manager',error);syncMsg=' (но не удалось обновить менеджера в заказах: '+error.message+')';}
+          else if(updated&&updated.length){
+            const idsSet=new Set(updated.map(x=>x.id));
+            S.orders.forEach(o=>{if(idsSet.has(o.id))Object.assign(o,patch);});
+            syncMsg=` · обновлён менеджер в ${updated.length} существующих заказах`;
+          }
+        }
+      }
       else{const u=await dbInsert('partners',row);if(!u)return false;S.partners.push(u);}
-      toast('Сохранено');renderPartnersPage();return true;});
+      toast('Сохранено'+syncMsg);renderPartnersPage();return true;});
   attachPhone('p_phone',p.phone);
   const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
 }
