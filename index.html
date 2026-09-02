@@ -504,6 +504,7 @@
   .ic-order-row input{width:17px;height:17px}
   .ic-o-code{font-weight:700}
   .ic-o-track{color:var(--muted);font-size:12px}
+  .ic-o-rolled{font-size:11px;background:#fff6df;color:#8a6d1a;padding:2px 8px;border-radius:20px;white-space:nowrap}
   .ic-calc-live{margin-top:10px;padding:10px 12px;background:rgba(37,70,201,.07);border-radius:10px;font-size:14px}
   .ic-view-head{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;font-size:14px}
   .ic-view-tbl{width:100%;border-collapse:collapse;font-size:14px}
@@ -3958,13 +3959,38 @@ function warehousePickupCityId(whId){
 
 // заказы, доступные для отправки межгородом:
 // курьерская доставка, город получения = cityId, дата забора = date, склад (город забора) = whId, ещё не в отправке
+// города, у которых отправка идёт не каждый день, а только по пн/ср/пт/вс — заказы, забор которых
+// пришёлся на «пропущенный» день, нужно подтягивать к ближайшему следующему дню отправки:
+// вторник → среда, четверг → пятница, суббота → воскресенье. Понедельник отдельно не донорит
+// никому — перед ним сразу воскресенье, тоже день отправки, разрыва нет.
+const INTERCITY_LIMITED_SCHEDULE_CITIES=['тараз','костанай','петропавловск'];
+// по дате ОТПРАВКИ возвращает список дат ЗАБОРА, заказы за которые нужно учитывать —
+// саму дату всегда, и день-донор перед ней, если он есть
+function intercityRollupDates(dateStr){
+  const d=new Date(dateStr+'T00:00:00');
+  const dow=d.getDay(); // 0=вс,1=пн,2=вт,3=ср,4=чт,5=пт,6=сб
+  const hasDonor=(dow===3)||(dow===5)||(dow===0); // ср←вт, пт←чт, вс←сб
+  const dates=[dateStr];
+  if(hasDonor){
+    const donor=new Date(d);donor.setDate(donor.getDate()-1);
+    dates.push(donor.toISOString().slice(0,10));
+  }
+  return dates;
+}
 function ordersForIntercity(cityId,date,whId){
   const whCityId=whId?warehousePickupCityId(whId):null;
+  const cityNm=(courierCityName(cityId)||'').toLowerCase();
+  const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>cityNm.includes(n));
+  const allowedDates=(date&&isLimited)?intercityRollupDates(date):null;
   return (S.orders||[]).filter(o=>{
     if(!isCourierDelivery(o.delivery_id))return false;
     if(o.courier_city_id!==cityId)return false;
     if(o.intercity_shipment_id)return false;
-    if(date){const d=(o.pickup_date||o.created_at||'').slice(0,10);if(d!==date)return false;}
+    if(date){
+      const d=(o.pickup_date||o.created_at||'').slice(0,10);
+      if(allowedDates){if(!allowedDates.includes(d))return false;}
+      else{if(d!==date)return false;}
+    }
     // фильтр по складу: город забора заказа = город склада
     if(whCityId&&o.pickup_city_id!==whCityId)return false;
     return true;
@@ -4147,12 +4173,16 @@ function shipmentModal(){
           <span class="hint">Дата забора: ${esc(fmtDate(date))} · снимите галочку, чтобы исключить заказ</span>
         </div>
         <div class="ic-orders-list">
-          ${list.map(o=>`<label class="ic-order-row">
+          ${list.map(o=>{
+            const pd=(o.pickup_date||o.created_at||'').slice(0,10);
+            const rolled=pd&&pd!==date; // заказ подтянут из «дня-донора» — забор был не в тот же день, что отправка
+            return `<label class="ic-order-row">
             <input type="checkbox" data-icorder="${o.id}" checked>
             <span class="ic-o-code">${esc(o.code||o.id.slice(0,6))}</span>
             <span class="ic-o-client">${esc(o.client||o.sender||'—')}</span>
             <span class="ic-o-track">${esc(o.track||'')}</span>
-          </label>`).join('')}
+            ${rolled?`<span class="ic-o-rolled" title="Забор был ${esc(fmtDate(pd))}, подтянут к этой отправке">📅 забор ${esc(fmtDate(pd))}</span>`:''}
+          </label>`;}).join('')}
         </div>
         <div class="ic-calc-live" id="s_live"></div>`;
       updateShipLive();
