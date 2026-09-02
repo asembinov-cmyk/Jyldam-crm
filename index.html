@@ -3990,7 +3990,7 @@ function renderIntercity(){
   // а верхний блок — ВСЕГДА только за сегодня, независимо от того, какие фильтры выбраны ниже
   const todayISO=localToday();
   const todayRows=all.filter(s=>(s.ship_date||'').slice(0,10)===todayISO);
-  const todayBoxes=todayRows.length;
+  const todayBoxes=todayRows.reduce((sum,s)=>sum+(parseInt(s.weight,10)||0),0); // weight в базе теперь хранит кол-во коробок
   const todayCost=todayRows.reduce((sum,s)=>sum+(parseFloat(s.box_cost)||0),0);
   const todayOrders=todayRows.reduce((sum,s)=>sum+((s.order_ids||[]).length),0);
   // города и склады для селектов (из имеющихся отправок)
@@ -4020,18 +4020,20 @@ function renderIntercity(){
       <div class="table-scroll">
       <table class="resp-table ic-table"><thead><tr>
         <th>Дата</th><th>Склад отправки</th><th>Город получения</th><th>Транспорт</th>
-        <th>Вес</th><th>Стоимость коробки</th><th>Заказов</th><th>За 1 заказ</th><th>Отправитель</th><th></th>
+        <th>Кол-во коробок</th><th>Общая сумма</th><th>За 1 коробку</th><th>Заказов</th><th>За 1 заказ</th><th>Отправитель</th><th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(s=>{
         const cnt=(s.order_ids||[]).length;
         const per=cnt?Math.round((s.box_cost||0)/cnt):0;
+        const perBox=s.weight?Math.round((s.box_cost||0)/s.weight):0; // весь тут — кол-во коробок (поле в базе исторически называется weight)
         return `<tr>
           <td data-label="Дата">${esc(fmtDate(s.ship_date))}</td>
           <td data-label="Склад отправки">${esc(s.warehouse_id?warehouseName(s.warehouse_id):cityName(s.warehouse_city_id))}</td>
           <td data-label="Город получения">${esc(courierCityName(s.dest_city_id))}</td>
           <td data-label="Транспорт">${esc(s.transport||'—')}</td>
-          <td data-label="Вес">${s.weight?esc(s.weight)+' кг':'—'}</td>
-          <td data-label="Стоимость коробки">${fmtMoney(s.box_cost)}</td>
+          <td data-label="Кол-во коробок">${s.weight?esc(s.weight):'—'}</td>
+          <td data-label="Общая сумма">${fmtMoney(s.box_cost)}</td>
+          <td data-label="За 1 коробку">${s.weight?fmtMoney(perBox):'—'}</td>
           <td data-label="Заказов">${cnt}</td>
           <td data-label="За 1 заказ">${fmtMoney(per)}</td>
           <td data-label="Отправитель">${esc(s.sender_name||'—')}</td>
@@ -4041,7 +4043,7 @@ function renderIntercity(){
             ${can('intercity','delete')?`<button class="btn sm danger" data-icdel="${s.id}">Удалить</button>`:''}
           </div></td>
         </tr>`;
-      }).join(''):`<tr><td colspan="10"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.date||icFilter.wh||icFilter.dest||icFilter.transport)?'Измените фильтры.':'Нажмите «Создать отправку».'}</div></td></tr>`}
+      }).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.date||icFilter.wh||icFilter.dest||icFilter.transport)?'Измените фильтры.':'Нажмите «Создать отправку».'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
   if($('newShipment'))$('newShipment').onclick=()=>shipmentModal();
@@ -4086,8 +4088,8 @@ function shipmentModal(){
         <span class="hint">Показаны города с заказами выбранного склада на дату.</span></div>
       <div class="field"><label>Тип транспорта</label>
         <select id="s_transport">${TRANSPORT_TYPES.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select></div>
-      <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="s_weight" placeholder="0"></div>
-      <div class="field"><label>Стоимость отправки коробки (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="s_cost" placeholder="0"></div>
+      <div class="field"><label>Кол-во коробок</label><input type="number" min="1" step="1" id="s_weight" placeholder="1"></div>
+      <div class="field"><label>Общая сумма отправки (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="s_cost" placeholder="0"></div>
     </div>
     <div id="s_orders_wrap" style="margin-top:8px">
       <div class="hint" style="padding:10px 0">Выберите город получения — подтянутся заказы для отправки.</div>
@@ -4102,12 +4104,14 @@ function shipmentModal(){
     const ids=pickedOrders.filter(id=>document.querySelector(`[data-icorder="${id}"]`)?.checked);
     if(!ids.length){toast('Нет заказов в коробке');return false;}
     const per=Math.round(cost/ids.length);
+    const boxCount=val('s_weight')?parseInt(val('s_weight'),10):null; // поле называется weight в базе (историческая причина), но теперь хранит кол-во коробок, не вес
+    const perBox=boxCount?Math.round(cost/boxCount):null;
     const row={
       ship_date:val('s_date')||localToday(),
       warehouse_id:wh,
       dest_city_id:dest,
       transport:val('s_transport')||'',
-      weight:val('s_weight')?parseFloat(val('s_weight')):null,
+      weight:boxCount,
       box_cost:cost,
       order_ids:ids,
       per_order:per,
@@ -4122,7 +4126,7 @@ function shipmentModal(){
       await dbUpdate('orders',oid,{intercity_cost:per,intercity_shipment_id:saved.id});
       const o=(S.orders||[]).find(x=>x.id===oid);if(o){o.intercity_cost=per;o.intercity_shipment_id=saved.id;}
     }
-    toast(`Отправка создана · ${ids.length} заказов · ${per.toLocaleString('ru-RU')} ₸/заказ`);
+    toast(`Отправка создана · ${ids.length} заказов${boxCount?` · ${boxCount} кор.`:''} · ${per.toLocaleString('ru-RU')} ₸/заказ${perBox?` · ${perBox.toLocaleString('ru-RU')} ₸/коробку`:''}`);
     renderIntercity();return true;
   },{wide:true});
   // обработчик выбора склада/города/даты — подтягиваем заказы
@@ -4192,14 +4196,14 @@ function shipmentOrdersModal(id){
   showInfo(`Отправка в ${courierCityName(s.dest_city_id)}`,`
     <div class="ic-view-head">
       <div>Дата: <b>${esc(fmtDate(s.ship_date))}</b></div>
-      <div>Транспорт: <b>${esc(s.transport||'—')}</b>${s.weight?` · Вес: <b>${esc(s.weight)} кг</b>`:''}</div>
-      <div>Стоимость коробки: <b>${Math.round(s.box_cost||0).toLocaleString('ru-RU')} ₸</b> · За 1 заказ: <b>${per.toLocaleString('ru-RU')} ₸</b></div>
+      <div>Транспорт: <b>${esc(s.transport||'—')}</b>${s.weight?` · Кол-во коробок: <b>${esc(s.weight)}</b>`:''}</div>
+      <div>Общая сумма: <b>${Math.round(s.box_cost||0).toLocaleString('ru-RU')} ₸</b> · За 1 заказ: <b>${per.toLocaleString('ru-RU')} ₸</b>${s.weight?` · За 1 коробку: <b>${Math.round((s.box_cost||0)/s.weight).toLocaleString('ru-RU')} ₸</b>`:''}</div>
       <div>Отправитель: <b>${esc(s.sender_name||'—')}</b></div>
     </div>
     <table class="ic-view-tbl"><thead><tr><th>Код</th><th>Клиент</th><th>Трек</th><th>Стоимость</th></tr></thead><tbody>${rows}</tbody></table>`);
 }
 
-// редактирование отправки: дата, склад, транспорт, вес, стоимость коробки
+// редактирование отправки: дата, склад, транспорт, кол-во коробок, общая сумма
 // при изменении стоимости пересчитывается «за 1 заказ» и обновляется intercity_cost в заказах
 function shipmentEditModal(id){
   if(!can('intercity','edit'))return;
@@ -4211,10 +4215,10 @@ function shipmentEditModal(id){
         <select id="se_wh"><option value="">—</option>${(S.warehouses||[]).map(w=>`<option value="${w.id}" ${s.warehouse_id===w.id?'selected':''}>${esc(w.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Тип транспорта</label>
         <select id="se_transport">${TRANSPORT_TYPES.map(t=>`<option value="${esc(t)}" ${s.transport===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
-      <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="se_weight" value="${s.weight!=null?esc(s.weight):''}" placeholder="0"></div>
-      <div class="field"><label>Стоимость отправки коробки (₸)</label><input type="number" min="0" step="0.01" id="se_cost" value="${s.box_cost!=null?esc(s.box_cost):''}" placeholder="0"></div>
+      <div class="field"><label>Кол-во коробок</label><input type="number" min="1" step="1" id="se_weight" value="${s.weight!=null?esc(s.weight):''}" placeholder="1"></div>
+      <div class="field"><label>Общая сумма отправки (₸)</label><input type="number" min="0" step="0.01" id="se_cost" value="${s.box_cost!=null?esc(s.box_cost):''}" placeholder="0"></div>
     </div>
-    <div class="hint" style="margin-top:8px">Заказов в коробке: ${(s.order_ids||[]).length}. При изменении стоимости пересчитается «за 1 заказ» и обновится в калькуляции.</div>`;
+    <div class="hint" style="margin-top:8px">Заказов в коробке: ${(s.order_ids||[]).length}. При изменении суммы пересчитается «за 1 заказ» и обновится в калькуляции.</div>`;
   showModal('Изменить отправку',body,async()=>{
     const cost=parseFloat(val('se_cost'))||0;
     const ids=s.order_ids||[];
@@ -4223,7 +4227,7 @@ function shipmentEditModal(id){
       ship_date:val('se_date')||s.ship_date,
       warehouse_id:val('se_wh')||null,
       transport:val('se_transport')||'',
-      weight:val('se_weight')?parseFloat(val('se_weight')):null,
+      weight:val('se_weight')?parseInt(val('se_weight'),10):null,
       box_cost:cost,
       per_order:per,
     };
