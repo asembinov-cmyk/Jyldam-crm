@@ -8724,12 +8724,26 @@ async function loadInbound(opts){
   _inboundFullHistory=full;
   try{
     const gteOpt=full?{}:{gte:{col:'created_at',val:inboundSinceISO()}};
-    const [orders,items,partners]=await Promise.all([
+    const [orders,partners]=await Promise.all([
       dbList('inbound_orders',Object.assign({order:'created_at',asc:false},gteOpt)),
-      dbList('inbound_order_items',gteOpt),
       dbList('inbound_partners',{order:'partner_name'}).catch(()=>[]),
     ]);
-    S.inbound_orders=orders||[];S.inbound_items=items||[];S.inbound_partners=partners||[];
+    S.inbound_orders=orders||[];S.inbound_partners=partners||[];
+    // позиции состава тянем ПО ID уже отфильтрованных заказов, а не по собственной дате — у самих
+    // позиций нет поля created_at, и раньше сюда ошибочно применялся тот же date-фильтр, что и для
+    // заказов — запрос падал и тихо возвращал пусто (отсюда «Непривязанные коды» показывали пустоту)
+    const ids=(orders||[]).map(o=>o.id);
+    let items=[];
+    if(ids.length){
+      const CHUNK=500; // пачками — чтобы не упереться в лимит размера IN-списка на больших объёмах
+      for(let i=0;i<ids.length;i+=CHUNK){
+        const chunkIds=ids.slice(i,i+CHUNK);
+        const {data,error}=await sb.from('inbound_order_items').select('*').in('inbound_order_id',chunkIds);
+        if(error){console.error('loadInbound items chunk',error);continue;}
+        if(data)items=items.concat(data);
+      }
+    }
+    S.inbound_items=items;
     S.inbound_full_loaded=true;
     _inboundPageCache.clear();
     await autoMatchInboundItems(); // подтягиваем всё, что уже можно привязать по сохранённым тех-названиям
@@ -8849,9 +8863,9 @@ function ketDocsStatusTable(dict){
 // диагностика: показать, каких именно тех.кодов не хватает среди товаров, и сколько заказов на них висит —
 // вместо того чтобы просто показывать общую цифру «N заказов не привязано»
 async function inboundUnmatchedModal(){
-  if(!S.inbound_full_loaded){
+  if(!S.inbound_full_loaded||!_inboundFullHistory){
     toast('Загружаем весь список, чтобы проверить все заказы…');
-    try{await loadInbound();}catch(e){toast('Не удалось загрузить полный список');return;}
+    try{await loadInbound({full:true});}catch(e){toast('Не удалось загрузить полный список');return;}
   }
   const items=(S.inbound_items||[]).filter(it=>!it.matched||!it.product_id);
   if(!items.length){showInfo('Непривязанные коды','<div class="empty">Все позиции по всем заказам КЕТ привязаны к товарам. 🎉</div>');return;}
