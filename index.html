@@ -1549,6 +1549,24 @@ async function callCreateUser(payload){
     return out;
   }catch(e){return {error:String(e&&e.message||e)};}
 }
+// удаление сотрудника ПОЛНОСТЬЮ — и карточка (profiles), и сама учётная запись входа (auth.users) —
+// через Edge Function, поскольку удалить учётную запись входа из браузера напрямую нельзя (это
+// защищено на уровне Supabase — нужен серверный service-role ключ, которого у браузера нет и не
+// должно быть). Без этого шага номер телефона/логин навсегда «занят», даже если карточку удалили.
+async function callDeleteUser(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/delete-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
 // смена пароля сотрудника через Edge Function set-password (только для админа)
 async function callSetPassword(payload){
   const {data:sess}=await sb.auth.getSession();
@@ -8286,8 +8304,16 @@ function changePassModal(id){
 }
 async function delStaff(id){
   const u=S.profiles.find(x=>x.id===id);
-  if(!confirm(`Удалить карточку сотрудника «${u?.full_name||u?.email||''}»?\n\nВнимание: это удалит профиль, но сам аккаунт входа в Supabase останется. Полное удаление аккаунта делается в Supabase → Authentication.`))return;
-  if(await dbDelete('profiles',id)){S.profiles=S.profiles.filter(x=>x.id!==id);toast('Профиль удалён');renderUsers();}
+  if(!confirm(`Удалить сотрудника «${u?.full_name||u?.email||''}»?\n\nБудут удалены и карточка, и учётная запись входа — номер телефона/email после этого можно будет использовать заново.`))return;
+  toast('Удаляем сотрудника…');
+  const out=await callDeleteUser({user_id:id});
+  if(out.error){
+    // если сама учётная запись входа уже не существовала (например, была создана без auth) —
+    // не блокируем удаление карточки из-за этого, просто предупреждаем
+    console.error('delete-user',out.error);
+    if(!confirm(`Не удалось удалить учётную запись входа (${out.error}).\n\nВсё равно удалить карточку сотрудника? (номер телефона может остаться «занятым»)`))return;
+  }
+  if(await dbDelete('profiles',id)){S.profiles=S.profiles.filter(x=>x.id!==id);toast('Сотрудник удалён полностью');renderUsers();}
 }
 function staffModal(id){
   const u=S.profiles.find(x=>x.id===id);if(!u)return;
