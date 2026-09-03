@@ -6550,24 +6550,35 @@ async function pickupOrdersModal(pickupId){
       // «Загрузить фото пачкой» — распределяет выбранные файлы по заказам, у которых ещё нет
       // ни одной фотографии (по порядку: первое фото → первый пустой заказ, и т.д.). Если фото
       // больше, чем пустых заказов — лишние просто не распределяются, об этом скажет тост.
+      // Грузим НЕБОЛЬШИМИ ПАЧКАМИ ПАРАЛЛЕЛЬНО (не по одному подряд) — иначе на 100+ фото это
+      // реально занимает несколько минут и выглядит как зависание без какого-либо прогресса.
       const bulkInp=wrap.querySelector('#pom_bulk_photo');
+      const bulkLabel=bulkInp?bulkInp.closest('label'):null;
       if(bulkInp)bulkInp.onchange=async e=>{
         const files=[...(bulkInp.files||[])];if(!files.length)return;
         const currentList=S.orders.filter(o=>o.pickup_id===pickupId);
         const emptyOrders=currentList.filter(o=>!pickupPhotos(o).length);
         if(!emptyOrders.length){toast('У всех заказов уже есть хотя бы одно фото');bulkInp.value='';return;}
         const n=Math.min(files.length,emptyOrders.length);
-        toast(`Загружаем ${n} фото…`);
-        let ok=0;
-        for(let i=0;i<n;i++){
-          const order=emptyOrders[i];
-          const r=await uploadPhoto('order/'+order.id,files[i]);
-          if(!r)continue;
-          const arr=pickupPhotos(order).concat([r]);
-          const u=await dbUpdate('orders',order.id,{photos:arr});
-          if(u){Object.assign(order,u);ok++;}
+        const pairs=[];for(let i=0;i<n;i++)pairs.push({order:emptyOrders[i],file:files[i]});
+        let ok=0,done=0;
+        const setProgress=()=>{if(bulkLabel)bulkLabel.childNodes[0].textContent=`⏳ Загружено ${done}/${n}…`;};
+        if(bulkLabel){bulkLabel.style.pointerEvents='none';bulkLabel.childNodes[0].textContent=`⏳ Загружено 0/${n}…`;}
+        const BATCH=5; // 5 фото одновременно — заметно быстрее одиночной загрузки, но не перегружает мобильный интернет
+        for(let i=0;i<pairs.length;i+=BATCH){
+          const chunk=pairs.slice(i,i+BATCH);
+          await Promise.all(chunk.map(async({order,file})=>{
+            const r=await uploadPhoto('order/'+order.id,file);
+            if(r){
+              const arr=pickupPhotos(order).concat([r]);
+              const u=await dbUpdate('orders',order.id,{photos:arr});
+              if(u){Object.assign(order,u);ok++;}
+            }
+            done++;setProgress();
+          }));
         }
         bulkInp.value='';
+        if(bulkLabel){bulkLabel.style.pointerEvents='';bulkLabel.childNodes[0].textContent='📷 Загрузить фото пачкой';}
         const leftover=files.length-n;
         toast(`Загружено фото: ${ok}${leftover?` · ещё ${leftover} не распределено (пустых заказов не хватило) — добавьте вручную`:''}`);
         const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
