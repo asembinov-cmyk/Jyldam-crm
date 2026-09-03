@@ -7430,6 +7430,15 @@ const PACKAGE_SIZE_LABELS={S:'S — малый',M:'M — средний',L:'L �
 function packageSizesFor(partner){
   const baseCourier=isExplicitNum(partner&&partner.tariff_courier)?+partner.tariff_courier:3000;
   const baseMail=isExplicitNum(partner&&partner.tariff_post)?+partner.tariff_post:1500;
+  // «Неприкосновенный» партнёр — своя фиксированная цена по тарифу, наша обычная сетка надбавок
+  // (S/M/L) на него не действует: любой размер пакета стоит одинаково, ровно по тарифу партнёра
+  if(partner&&partner.is_protected){
+    return {
+      S:{label:PACKAGE_SIZE_LABELS.S,courier:baseCourier,mail:baseMail},
+      M:{label:PACKAGE_SIZE_LABELS.M,courier:baseCourier,mail:baseMail},
+      L:{label:PACKAGE_SIZE_LABELS.L,courier:baseCourier,mail:baseMail},
+    };
+  }
   return {
     S:{label:PACKAGE_SIZE_LABELS.S,courier:baseCourier,mail:baseMail},
     M:{label:PACKAGE_SIZE_LABELS.M,courier:baseCourier+2000,mail:baseMail+500},
@@ -7469,7 +7478,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
-      <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?' — по тарифу '+esc(_initPartner.name):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
+      <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?(_initPartner.is_protected?' — 🔒 неприкосновенный, фиксированная цена по тарифу '+esc(_initPartner.name):' — по тарифу '+esc(_initPartner.name)):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
       <div class="field"><label>Тип доставки</label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field mail-only" id="postCityField" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Город (почтовая)</label><select id="o_postcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -7672,7 +7681,7 @@ function orderModal(id,readonly){
       const hintEl=$('o_size_hint');
       if(hintEl){
         const pt=findPartner();
-        hintEl.textContent=`Почта ${sizes.S.mail}/${sizes.M.mail}/${sizes.L.mail} · Курьер ${sizes.S.courier}/${sizes.M.courier}/${sizes.L.courier} ₸ (S/M/L)${pt?' — по тарифу '+pt.name:' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.`;
+        hintEl.textContent=`Почта ${sizes.S.mail}/${sizes.M.mail}/${sizes.L.mail} · Курьер ${sizes.S.courier}/${sizes.M.courier}/${sizes.L.courier} ₸ (S/M/L)${pt?(pt.is_protected?' — 🔒 неприкосновенный, фиксированная цена по тарифу '+pt.name:' — по тарифу '+pt.name):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.`;
       }
     };
     const sumEl=$('o_sum');if(sumEl)sumEl.oninput=()=>{sumTouched=true;};
@@ -7925,6 +7934,7 @@ function partnerModal(id){
       <div class="field"><label>Тариф · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
       <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
     </div>
+    <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     <div class="field"><label>QR-код / номер доступа в кабинет</label><input id="p_qr" value="${esc(p.qr_code||'')}" placeholder="например 1001"><small style="color:var(--muted);font-size:12px">Ссылка для партнёра: jyldam-crm.kz/?p=ЭТОТ_НОМЕР</small></div>`,
     async()=>{
       // проверка обязательных полей (кроме QR-кода)
@@ -7944,7 +7954,8 @@ function partnerModal(id){
       }
       const name=val('p_name').trim();
       const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null,
-        tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null};
+        tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null,
+        is_protected:!!($('p_protected')&&$('p_protected').checked)};
       let syncMsg='';
       if(id){
         const before=S.partners.find(x=>x.id===id);
