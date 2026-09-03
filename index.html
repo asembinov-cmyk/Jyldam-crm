@@ -6383,8 +6383,12 @@ async function pickupOrdersModal(pickupId){
     const shown=Math.min(pomVisible,list.length);
     const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
       <div style="color:var(--muted);font-size:14px">Создано <b>${list.length}</b>${wantNow?` из ${wantNow}`:''} заказ(ов) по магазину «${esc(p.name)}»${list.length>shown?` · показано ${shown}`:''}</div>
-      <button class="btn sm primary" id="pom_create">＋ Создать ещё заказ</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${canEditPhoto?`<label class="btn sm ghost" style="cursor:pointer">📷 Загрузить фото пачкой<input type="file" accept="image/*" multiple id="pom_bulk_photo" style="display:none"></label>`:''}
+        <button class="btn sm primary" id="pom_create">＋ Создать ещё заказ</button>
+      </div>
     </div>
+    ${canEditPhoto?`<div class="hint" style="margin:-4px 0 10px">Массовая загрузка: выберите сразу несколько фото — они по порядку встанут на заказы, у которых ещё нет ни одной фотографии.</div>`:''}
     ${list.some(o=>o.track)?`<div class="pom-scan"><input id="pom_scan_input" placeholder="📷 Отсканируйте штрих-код посылки, чтобы найти её заказ…" autocomplete="off"></div>`:''}`;
     if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Создать ещё заказ».</div>`;
     const cards=list.slice(0,shown).map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
@@ -6543,6 +6547,31 @@ async function pickupOrdersModal(pickupId){
         };
         inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
       });
+      // «Загрузить фото пачкой» — распределяет выбранные файлы по заказам, у которых ещё нет
+      // ни одной фотографии (по порядку: первое фото → первый пустой заказ, и т.д.). Если фото
+      // больше, чем пустых заказов — лишние просто не распределяются, об этом скажет тост.
+      const bulkInp=wrap.querySelector('#pom_bulk_photo');
+      if(bulkInp)bulkInp.onchange=async e=>{
+        const files=[...(bulkInp.files||[])];if(!files.length)return;
+        const currentList=S.orders.filter(o=>o.pickup_id===pickupId);
+        const emptyOrders=currentList.filter(o=>!pickupPhotos(o).length);
+        if(!emptyOrders.length){toast('У всех заказов уже есть хотя бы одно фото');bulkInp.value='';return;}
+        const n=Math.min(files.length,emptyOrders.length);
+        toast(`Загружаем ${n} фото…`);
+        let ok=0;
+        for(let i=0;i<n;i++){
+          const order=emptyOrders[i];
+          const r=await uploadPhoto('order/'+order.id,files[i]);
+          if(!r)continue;
+          const arr=pickupPhotos(order).concat([r]);
+          const u=await dbUpdate('orders',order.id,{photos:arr});
+          if(u){Object.assign(order,u);ok++;}
+        }
+        bulkInp.value='';
+        const leftover=files.length-n;
+        toast(`Загружено фото: ${ok}${leftover?` · ещё ${leftover} не распределено (пустых заказов не хватило) — добавьте вручную`:''}`);
+        const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
+      };
       // «Создать ещё заказ» — добавляет ОДИН новый заказ, увеличивает счётчик заявки
       const cb=wrap.querySelector('#pom_create');
       if(cb)cb.onclick=async()=>{
