@@ -6605,7 +6605,7 @@ function renderOrders(mode){
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
-      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
+      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isAdmin()&&ketSelected.size)?`<button class="btn danger" id="ordersDelSel">✕ Удалить выбранные (${ketSelected.size})</button>`:''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -6679,6 +6679,23 @@ function renderOrders(mode){
     finally{btn.disabled=false;btn.textContent=origLabel;}
   };
   // массовая отправка отмеченных заказов в KET
+  if($('ordersDelSel'))$('ordersDelSel').onclick=async()=>{
+    const ids=[...ketSelected];
+    if(!ids.length)return;
+    if(!confirm(`Удалить выбранные заказы (${ids.length} шт.)?\n\nЭто действие нельзя отменить.`))return;
+    const btn=$('ordersDelSel');btn.disabled=true;btn.textContent='Удаляем…';
+    let ok=0,fail=0;
+    for(const id of ids){
+      const o=S.orders.find(x=>x.id===id);if(!o)continue;
+      const done=await dbDelete('orders',id);
+      if(done){await logAction('delete','orders',{entity_id:id,entity_label:orderLabel(o)});S.orders=S.orders.filter(x=>x.id!==id);ok++;}
+      else fail++;
+      ketSelected.delete(id);
+    }
+    ketSelectAll=false;
+    toast(`Удалено заказов: ${ok}${fail?(', с ошибкой: '+fail):''}`);
+    renderOrders(ordersMode);
+  };
   if($('ketSendSel'))$('ketSendSel').onclick=async()=>{
     let list, source;
     if(ketSelected.size){
