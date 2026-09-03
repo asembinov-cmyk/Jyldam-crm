@@ -7161,6 +7161,7 @@ async function generateWaybillsPdf(items){
   return await outDoc.save();
 }
 async function printInboundWaybillsPdf(orders){
+  refreshInboundLookups();
   const items=orders.map(o=>{
     const its=inboundItemsFor(o.id);
     const composition=its.map(it=>{
@@ -7229,6 +7230,7 @@ function exportOrdersToExcel(){
 function exportInboundToExcel(rows){
   if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
   if(!rows.length){toast('Нет заказов для выгрузки');return;}
+  refreshInboundLookups();
   const data=rows.map(o=>({
     'Штрих-код заказа':o.external_id||'',
     'Источник':o.source||'',
@@ -8982,15 +8984,36 @@ async function renderInboundOrders(){
   }
   drawInboundOrders();
 }
-function inboundItemsFor(orderId){return (S.inbound_items||[]).filter(it=>it.inbound_order_id===orderId);}
+function inboundItemsFor(orderId){
+  // используем общий справочник «позиции по заказу», если он уже построен для текущей отрисовки —
+  // иначе (редкие разовые вызовы, например открытие карточки одного заказа) строим на лету
+  if(_inboundLookups)return _inboundLookups.itemsByOrder.get(orderId)||[];
+  return (S.inbound_items||[]).filter(it=>it.inbound_order_id===orderId);
+}
 function inboundPartnerName(id){return ((S.inbound_partners||[]).find(p=>p.id===id)||{}).partner_name||'—';}
+// быстрые справочники для определения партнёра заказа — строятся ОДИН РАЗ перед показом/фильтрацией
+// таблицы, а не заново перебором всех позиций/товаров под КАЖДУЮ строку (раньше именно это и было
+// причиной тормозов: на каждую строку — полный перебор тысяч позиций и тысяч товаров)
+let _inboundLookups=null;
+function refreshInboundLookups(){
+  const itemsByOrder=new Map();
+  (S.inbound_items||[]).forEach(it=>{
+    let arr=itemsByOrder.get(it.inbound_order_id);
+    if(!arr){arr=[];itemsByOrder.set(it.inbound_order_id,arr);}
+    arr.push(it);
+  });
+  const productById=new Map();
+  (S.products||[]).forEach(p=>productById.set(p.id,p));
+  _inboundLookups={itemsByOrder,productById};
+}
 // магазин (партнёр склада), которому принадлежит заказ КЕТ — определяем через привязанные товары
 // (в самом заказе от KET магазин не передаётся, только состав по кодам ket_sku)
 function inboundOrderShopIds(o){
   const ids=new Set();
+  const productById=_inboundLookups?_inboundLookups.productById:null;
   inboundItemsFor(o.id).forEach(it=>{
     if(!it.matched||!it.product_id)return;
-    const p=(S.products||[]).find(x=>x.id===it.product_id);
+    const p=productById?productById.get(it.product_id):(S.products||[]).find(x=>x.id===it.product_id);
     if(p&&p.partner_id)ids.add(p.partner_id);
   });
   return [...ids];
@@ -9010,6 +9033,7 @@ let inbPerPage=50;  // заказов КЕТ на страницу
 const inbSelected=new Set(); // id выбранных заказов КЕТ (для массовых действий, живёт между страницами)
 let inbSelectAll=false;      // отмечены ли «все на всех страницах»
 function filteredInbound(){
+  refreshInboundLookups();
   const q=inbFilter.q.toLowerCase().trim();
   return (S.inbound_orders||[]).filter(o=>{
     if(inbFilter.partner&&!inboundOrderShopIds(o).includes(inbFilter.partner))return false;
@@ -9239,6 +9263,7 @@ function openInboundColFilter(th,key){
   _inbColFilterClose=close;
 }
 function drawInboundOrders(){
+  refreshInboundLookups();
   const anyFilter=inboundHasActiveFilters()||inboundColFiltersActive();
   const lazy=!S.inbound_full_loaded&&!anyFilter; // быстрый режим: постранично с сервера, без полного набора в памяти
   const list=S.inbound_orders||[]; // в быстром режиме — только текущая страница; иначе — весь (отфильтрованный по дате) набор
