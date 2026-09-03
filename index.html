@@ -2055,7 +2055,7 @@ function applyRealtime(table,payload){
       const i=arr.findIndex(x=>x.id===row.id);
       if(i>=0)arr.splice(i,1);
     }
-    scheduleRtRender();
+    scheduleRtRender(table);
   }catch(e){console.warn('applyRealtime',e);}
 }
 // звук + всплывающее уведомление при новой заявке на забор (в т.ч. от партнёра из личного кабинета) —
@@ -2099,7 +2099,22 @@ function notifyNewPickup(p){
   }
 }
 // перерисовка с небольшой задержкой (чтобы не дёргать экран при пачке изменений)
-function scheduleRtRender(){
+let _rtInboundTimer=null,_rtInboundLastRun=0;
+function scheduleRtRender(table){
+  // заказы КЕТ прилетают ОЧЕНЬ часто (могут идти почти каждую секунду непрерывно) — если тут
+  // использовать обычный сброс таймера (debounce), а поток заказов не прерывается, обновление
+  // экрана может не сработать вообще никогда (таймер бы постоянно сбрасывался). Поэтому для этой
+  // таблицы — throttle: гарантированно не чаще раза в 4 секунды, но и не реже.
+  if(table==='inbound_orders'){
+    if(_rtInboundTimer)return; // уже запланировано — просто ждём
+    const wait=Math.max(0,4000-(Date.now()-_rtInboundLastRun));
+    _rtInboundTimer=setTimeout(()=>{
+      _rtInboundTimer=null;_rtInboundLastRun=Date.now();
+      if(!canAutoRefresh())return;
+      try{render();buildNav({skipTabFix:true});}catch(e){}
+    },wait);
+    return;
+  }
   if(_rtTimer)clearTimeout(_rtTimer);
   _rtTimer=setTimeout(()=>{
     _rtTimer=null;
