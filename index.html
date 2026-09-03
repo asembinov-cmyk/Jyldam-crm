@@ -2214,6 +2214,9 @@ function fmtDateTime(ts){if(!ts)return '';const d=new Date(ts);const p=n=>String
 /* ---------- ПРАВА ДОСТУПА ---------- */
 // can(module, action): module ∈ pickups|orders|directories|users; action ∈ view|create|edit|delete
 function can(mod,act){
+  if(isAdminBase())return true; // админу всегда доступно всё — даже если под новый модуль ещё не
+  // сохранены явные права в «Роли и права» (иначе кнопки создания/редактирования в свежедобавленных
+  // модулях могли не показываться даже у самого администратора)
   if(!S.myPerms)return false;
   const m=S.myPerms[mod];
   return !!(m&&m[act]);
@@ -8043,7 +8046,8 @@ function renderSettings(){
     ['couriers','Курьеры (заборщики)'],['order_couriers','Курьеры по заказам'],
     ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
     ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
-    ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки']];
+    ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки'],
+    ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории'],['fin_partners','Финансы · Партнёры']];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
     <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
@@ -8051,7 +8055,8 @@ function renderSettings(){
   $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;saveNav();renderSettings();});
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
-    delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses};
+    delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
+    fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_partners:dirFinancePartners};
   (map[S.dir]||dirCities)();
 }
 // отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
