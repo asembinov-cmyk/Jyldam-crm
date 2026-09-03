@@ -6322,6 +6322,11 @@ async function createOrdersFromPickup(pickupId,opts){
     // цикле (каждая ждала ответ сервера), и на партиях в сотни заказов это могло занимать больше
     // минуты и выглядело как зависание. Пакетная вставка — доли секунды даже на 500+ строк.
     const rows=[];
+    // по умолчанию всем автосозданным заказам сразу проставляем размер S (самый частый случай) и
+    // сумму по тарифу партнёра — курьеру останется вручную поменять только исключения (M/L), а не
+    // выбирать размер для каждого заказа с нуля
+    const defaultSizes=packageSizesFor(partner);
+    const defaultCost=courierDelivery?defaultSizes.S.courier:defaultSizes.S.mail;
     for(let i=0;i<need;i++){
       rows.push({
         code:genOrderCode(),
@@ -6340,7 +6345,8 @@ async function createOrdersFromPickup(pickupId,opts){
         status_id:baseStatus,
         sales_id:partner?partner.sales_id:(p.sales_id||null),
         processor_id:partner?partner.processor_id:(p.processor_id||null),
-        cost:partner?(courierDelivery?partner.tariff_courier:partner.tariff_post)||0:0,
+        size:'S', // по умолчанию — сотрудник/курьер меняет вручную, только если посылка реально M или L
+        cost:defaultCost, order_sum:defaultCost,
         // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — доставку он оплачивает сам
         // отдельно, не через сумму заказа — сразу помечаем заказ «Оплачено отправителем»
         paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)&&isExplicitZero(partner.tariff_post)),
