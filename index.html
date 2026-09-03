@@ -6399,8 +6399,7 @@ async function pickupOrdersModal(pickupId){
     if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Создать ещё заказ».</div>`;
     const cards=list.slice(0,shown).map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
-      <div class="pom-sub">${esc(o.client||'без клиента')} · ${o.phone?phoneLink(o.phone):'—'} · ${esc(deliveryName(o.delivery_id))||'—'}</div>
-      ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:'<div class="pom-track pom-track-empty">⚠ Штрих-код не привязан партнёром</div>'}
+      ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:''}
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${(isStaff()||isCourier())?`
       <div class="pom-sumrow"><span>Размер пакета</span><select class="pom-sum" data-pomsize="${o.id}" style="width:auto">
