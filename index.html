@@ -1939,7 +1939,7 @@ async function refreshForTab(tab){
       if(orders.length||!S.orders.length)S.orders=orders;
       if(pickups.length||!S.pickups.length)S.pickups=pickups;
     }else if(tab==='ket_orders'){
-      if(typeof loadInbound==='function'){try{await loadInbound();}catch(e){}}
+      if(typeof loadInbound==='function'){try{await loadInbound({skipMatch:true});}catch(e){}}
     }else if(tab==='partners'){
       const [partners,cities,districts,sales,processors,whp]=await Promise.all([
         dbList('partners',{order:'name'}),dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),
@@ -8862,7 +8862,12 @@ async function loadInbound(opts){
     S.inbound_items=items;
     S.inbound_full_loaded=true;
     _inboundPageCache.clear();
-    await autoMatchInboundItems(); // подтягиваем всё, что уже можно привязать по сохранённым тех-названиям
+    // автопривязка товаров может быть ДОЛГОЙ, если накопилось много позиций (сотни/тысячи —
+    // каждая требует отдельного запроса на сохранение). При простом открытии вкладки это не должно
+    // блокировать сам заход в модуль — запускаем в фоне, не дожидаясь. Дожидаемся только там, где
+    // результат реально нужен сразу (после импорта/привязки товара, в «Непривязанных кодах»).
+    if(opts.skipMatch){autoMatchInboundItems().catch(e=>console.error('autoMatch bg',e));}
+    else{await autoMatchInboundItems();}
   }catch(e){S.inbound_orders=[];S.inbound_items=[];S.inbound_partners=[];S.inbound_full_loaded=false;}
 }
 // «звонковый» статус (statuses) — новое измерение, которого раньше не было в вебхуке KET.
