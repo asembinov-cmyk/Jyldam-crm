@@ -3983,6 +3983,10 @@ function intercityRollupDates(dateStr){
 //  - при отправке СО СКЛАДА АСТАНА в эти города — дополнительно подтягиваются заказы, забранные
 //    в Алматы НА ДЕНЬ РАНЬШЕ (успели доехать до Астаны только к этому дню)
 const INTERCITY_VIA_ASTANA_CITIES=['усть-каменогорск','семей','костанай','павлодар','петропавловск','караганд','кокшетау','сатпаев','жезк','актобе','уральск','актау','атырау'];
+// со склада Алматы отправка идёт напрямую ТОЛЬКО в эти города — весь остальной список городов
+// не должен даже появляться в выборе при складе Алматы (едут через Астану транзитом, либо это
+// внутригородские, либо просто не обслуживаются напрямую с Алматы)
+const INTERCITY_ALMATY_ALLOWED_CITIES=['астана','шымкент','тараз','кызылорда','талдыкорган'];
 function ordersForIntercity(cityId,date,whId){
   const whCityId=whId?warehousePickupCityId(whId):null;
   const whCityNm=(whCityId?cityName(whCityId):'').toLowerCase();
@@ -3992,8 +3996,8 @@ function ordersForIntercity(cityId,date,whId){
   const isViaAstana=INTERCITY_VIA_ASTANA_CITIES.some(n=>destNm.includes(n));
   const isAlmatyWh=whCityNm.includes('алматы');
   const isAstanaWh=whCityNm.includes('астана');
-  // со склада Алматы эти 13 городов не отправляем вообще — они едут через Астану
-  if(isAlmatyWh&&isViaAstana)return [];
+  // со склада Алматы — только 5 разрешённых городов, все остальные исключаем целиком
+  if(isAlmatyWh&&!INTERCITY_ALMATY_ALLOWED_CITIES.some(n=>destNm.includes(n)))return [];
   const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>destNm.includes(n));
   const allowedDates=(date&&isLimited)?intercityRollupDates(date):null;
   // для Астаны, отправляющей в один из транзитных городов, вычисляем «вчера» (когда эти заказы
