@@ -3178,7 +3178,7 @@ function productModal(){
     logAction('create','products',{entity_id:saved.id,entity_label:name});
     if(payload.ket_sku){
       let matchedCount=0;
-      if(!S.inbound_full_loaded){try{await loadInbound();}catch(e){}}
+      if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}
       else matchedCount=await autoMatchInboundItems();
       if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
       if(S.tab==='ket_orders'&&typeof drawInboundOrders==='function')drawInboundOrders();
@@ -3308,7 +3308,7 @@ function productPanel(id){
           logAction('update','products',{entity_id:id,entity_label:name});
           if(payload.ket_sku){
             let matchedCount=0;
-            if(!S.inbound_full_loaded){try{await loadInbound();}catch(e){}}
+            if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}
             else matchedCount=await autoMatchInboundItems();
             if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
           }
@@ -3425,7 +3425,7 @@ function productImportKetModal(){
       if(saved){if(!S.products)S.products=[];S.products.unshift(saved);nameIndex.set(g.desc.toLowerCase().trim(),saved);g.codes.forEach(c=>codeIndex.set(normKetSku(c),saved));created++;}
     }
     logAction('create','products',{entity_label:`импорт KET: создано ${created}, обновлено ${updated}`});
-    if(!S.inbound_full_loaded){try{await loadInbound();}catch(e){}}else{try{await autoMatchInboundItems();}catch(e){}}
+    if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}else{try{await autoMatchInboundItems();}catch(e){}}
     let msg=`Создано товаров: ${created}, обновлено (добавлены коды): ${updated}`;
     if(noPartner)msg+=`. Пропущено без партнёра: ${noPartner} (${[...noPartnerNames].join(', ')})`;
     toast(msg);renderCash();return true;
@@ -3494,7 +3494,7 @@ async function startAssembly(code,asmType){
     return;
   }
   // 2) заказы из интеграции KET (Заказы → Заказы КЕТ) — состав уже привязан к товарам там
-  if(!S.inbound_full_loaded){try{await loadInbound();}catch(e){}}
+  if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}
   const inb=(S.inbound_orders||[]).find(o=>String(o.external_id||'')===code||String(o.id).slice(0,8)===code);
   if(inb){
     const inbType=inboundDeliveryType(inb);
@@ -9084,7 +9084,7 @@ function openInboundColFilter(th,key){
       inbFilter.delivery=val;
       if(inboundHasActiveFilters()&&!S.inbound_full_loaded){
         toast('Загружаем весь список для фильтра…');
-        try{await loadInbound();}catch(e){}
+        try{await loadInbound({full:true});}catch(e){}
       }
       inbPage=1;drawInboundOrders();
     };
@@ -9117,7 +9117,7 @@ function openInboundColFilter(th,key){
     if(!val)delete inbColFilters[key];
     if(inboundColFiltersActive()&&!S.inbound_full_loaded){
       toast('Загружаем весь список для фильтра…');
-      try{await loadInbound();}catch(e){}
+      try{await loadInbound({full:true});}catch(e){}
     }
     inbPage=1;
     drawInboundOrders();
@@ -9278,7 +9278,7 @@ function drawInboundOrders(){
     inbSelectAll=false;
     if(inboundHasActiveFilters()&&!S.inbound_full_loaded){
       toast('Загружаем весь список для фильтра…');
-      try{await loadInbound();}catch(e){}
+      try{await loadInbound({full:true});}catch(e){}
     }
     drawInboundOrders();
     if(fid){const el=$(fid);if(el){el.focus();try{el.setSelectionRange(pos,pos);}catch(e){}}}
@@ -9471,10 +9471,10 @@ function inboundMatchModal(id){
       done++;
     }
     if(!done){toast('Ничего не выбрано');return false;}
-    await loadInbound();
+    await loadInbound({full:true});
     const stillUnmatched=inboundItemsFor(id).some(it=>!it.matched);
     await dbUpdate('inbound_orders',id,{match_status:stillUnmatched?'unmatched':'matched'});
-    await loadInbound();
+    await loadInbound({full:true});
     toast(`Привязано позиций: ${done}`);
     drawInboundOrders();
     return true;
