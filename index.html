@@ -4041,12 +4041,16 @@ function renderIntercity(){
     if(icFilter.transport&&(s.transport||'')!==icFilter.transport)return false;
     return true;
   });
-  // а верхний блок — ВСЕГДА только за сегодня, независимо от того, какие фильтры выбраны ниже
+  // верхний блок: если выбран хоть один фильтр — считаем по нему (по тем же строкам, что и таблица
+  // снизу); если фильтров нет — по умолчанию за сегодня, как и раньше
+  const hasFilter=!!(icFilter.date||icFilter.wh||icFilter.dest||icFilter.transport);
   const todayISO=localToday();
-  const todayRows=all.filter(s=>(s.ship_date||'').slice(0,10)===todayISO);
-  const todayBoxes=todayRows.reduce((sum,s)=>sum+(parseInt(s.weight,10)||0),0); // weight в базе теперь хранит кол-во коробок
-  const todayCost=todayRows.reduce((sum,s)=>sum+(parseFloat(s.box_cost)||0),0);
-  const todayOrders=todayRows.reduce((sum,s)=>sum+((s.order_ids||[]).length),0);
+  const summaryRows=hasFilter?rows:all.filter(s=>(s.ship_date||'').slice(0,10)===todayISO);
+  const todayBoxes=summaryRows.reduce((sum,s)=>sum+(parseInt(s.weight,10)||0),0); // weight в базе теперь хранит кол-во коробок
+  const todayCost=summaryRows.reduce((sum,s)=>sum+(parseFloat(s.box_cost)||0),0);
+  const todayOrders=summaryRows.reduce((sum,s)=>sum+((s.order_ids||[]).length),0);
+  // подпись периода — если есть фильтр по дате, показываем её; если фильтр другой (без даты) — «по фильтру»; иначе — сегодня
+  const summaryPeriodLabel=icFilter.date?fmtDate(icFilter.date):(hasFilter?'по фильтру':fmtDate(todayISO));
   // города и склады для селектов (из имеющихся отправок)
   const usedWh=[...new Set(all.map(s=>s.warehouse_id).filter(Boolean))];
   const usedDest=[...new Set(all.map(s=>s.dest_city_id).filter(Boolean))];
@@ -4055,7 +4059,7 @@ function renderIntercity(){
     <div class="ic-total-item"><span>Коробок</span><b>${todayBoxes}</b></div>
     <div class="ic-total-item"><span>Заказов в них</span><b>${todayOrders}</b></div>
     <div class="ic-total-item ic-total-money"><span>Потрачено на отправку</span><b>${fmtMoney(todayCost)}</b></div>
-    <div class="ic-total-item"><span>За дату</span><b>${esc(fmtDate(todayISO))}</b></div>
+    <div class="ic-total-item"><span>За дату</span><b>${esc(summaryPeriodLabel)}</b></div>
   </div>`;
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Отправки межгород</h1><p>Учёт коробок, отправленных в другие города</p></div>
