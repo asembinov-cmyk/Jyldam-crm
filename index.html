@@ -1889,13 +1889,14 @@ async function loadAll(){
     dbList('wh_reservations',{order:'created_at',asc:false}).catch(()=>[]),
     dbList('finance_kassa',{order:'name'}).catch(()=>[]),
     dbList('finance_categories',{order:'name'}).catch(()=>[]),
+    dbList('finance_partners',{order:'name'}).catch(()=>[]),
     dbList('finance_entries',{order:'entry_date',asc:false}).catch(()=>[]),
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
   S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];S.wh_reservations=tail[11]||[];
-  S.finance_kassa=tail[12]||[];S.finance_categories=tail[13]||[];S.finance_entries=tail[14]||[];
+  S.finance_kassa=tail[12]||[];S.finance_categories=tail[13]||[];S.finance_partners=tail[14]||[];S.finance_entries=tail[15]||[];
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк за всё время) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем.
   // Сначала — быстрый узкий запрос ТОЛЬКО за сегодня (большинство экранов по умолчанию и
@@ -2917,6 +2918,7 @@ async function recalcPartnerBalances(partnerId){
 }
 function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||{}).name||'—';}
 function financeCategoryName(id){return ((S.finance_categories||[]).find(c=>c.id===id)||{}).name||'—';}
+function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===id)||{}).name||'—';}
 let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 function renderFinance(){
   if(!canMod('finance')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
@@ -2931,19 +2933,12 @@ function renderFinance(){
     if(finFilter.category&&e.category_id!==finFilter.category)return false;
     return true;
   });
-  const income=rows.filter(e=>e.type==='income').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-  const expense=rows.filter(e=>e.type==='expense').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Финансы</h1><p>Учёт проводок по кассам и партнёрам</p></div>
       <div class="head-actions">
-        ${can('finance','edit')?`<button class="btn ghost" id="finKassaBtn">⚙ Кассы</button><button class="btn ghost" id="finCatBtn">⚙ Категории</button>`:''}
+        ${can('finance','edit')?`<button class="btn ghost" id="finKassaBtn">⚙ Кассы</button><button class="btn ghost" id="finCatBtn">⚙ Категории</button><button class="btn ghost" id="finPartnerBtn">⚙ Партнёры</button>`:''}
         ${can('finance','create')?'<button class="btn primary" id="finNew">＋ Новая проводка</button>':''}
       </div>
-    </div>
-    <div class="stats stats-3">
-      <div class="stat"><div class="k">Приход</div><div class="v" style="color:#1a7f37">${fmtMoney(income)}</div></div>
-      <div class="stat"><div class="k">Расход</div><div class="v" style="color:#c0392b">${fmtMoney(expense)}</div></div>
-      <div class="stat"><div class="k">Итого</div><div class="v">${fmtMoney(income-expense)}</div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span></div>
@@ -2951,7 +2946,7 @@ function renderFinance(){
         <input type="date" id="finfDateFrom" value="${esc(finFilter.dateFrom)}" title="С даты">
         <input type="date" id="finfDateTo" value="${esc(finFilter.dateTo)}" title="По дату">
         <select id="finfKassa"><option value="">Касса: все</option>${(S.finance_kassa||[]).map(k=>`<option value="${k.id}" ${finFilter.kassa===k.id?'selected':''}>${esc(k.name)}</option>`).join('')}</select>
-        <select id="finfPartner"><option value="">Партнёр: все</option>${(S.partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${finFilter.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+        <select id="finfPartner"><option value="">Партнёр: все</option>${(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${finFilter.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
         <select id="finfType"><option value="">Тип: все</option><option value="income" ${finFilter.type==='income'?'selected':''}>Приход</option><option value="expense" ${finFilter.type==='expense'?'selected':''}>Расход</option></select>
         <select id="finfCategory"><option value="">Категория: все</option>${(S.finance_categories||[]).map(c=>`<option value="${c.id}" ${finFilter.category===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
         ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
@@ -2965,7 +2960,7 @@ function renderFinance(){
         <td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>
         <td data-label="Касса">${esc(financeKassaName(e.kassa_id))}</td>
         <td data-label="Остаток кассы">${e.kassa_balance!=null?fmtMoney(e.kassa_balance):'—'}</td>
-        <td data-label="Партнёр">${e.partner_id?esc(partnerName(e.partner_id)):'—'}</td>
+        <td data-label="Партнёр">${e.partner_id?esc(financePartnerName(e.partner_id)):'—'}</td>
         <td data-label="Остаток партнёра">${e.partner_id&&e.partner_balance!=null?fmtMoney(e.partner_balance):'—'}</td>
         <td data-label="Тип"><span class="pill ${e.type==='income'?'moss':'gold'}">${e.type==='income'?'Приход':'Расход'}</span></td>
         <td data-label="Сумма" style="color:${e.type==='income'?'#1a7f37':'#c0392b'};font-weight:600">${e.type==='income'?'+':'−'}${fmtMoney(e.amount)}</td>
@@ -2982,6 +2977,7 @@ function renderFinance(){
   if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
   if($('finKassaBtn'))$('finKassaBtn').onclick=()=>dirFinanceKassa();
   if($('finCatBtn'))$('finCatBtn').onclick=()=>dirFinanceCategories();
+  if($('finPartnerBtn'))$('finPartnerBtn').onclick=()=>dirFinancePartners();
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
   $('main').querySelectorAll('[data-findel]').forEach(b=>b.onclick=()=>delFinanceEntry(b.dataset.findel));
   const redraw=()=>renderFinance();
@@ -2998,7 +2994,7 @@ function financeEntryModal(id){
   if(id&&!e)return;
   const kassaOpts=(S.finance_kassa||[]).map(k=>`<option value="${k.id}" ${e&&e.kassa_id===k.id?'selected':''}>${esc(k.name)}</option>`).join('');
   const catOpts=(S.finance_categories||[]).map(c=>`<option value="${c.id}" ${e&&e.category_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
-  const partnerOpts=(S.partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${e&&e.partner_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
+  const partnerOpts=(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${e&&e.partner_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   const body=`
     <div class="form-grid">
       <div class="field"><label>Дата <span style="color:var(--rust)">*</span></label><input type="date" id="fe_date" value="${esc(e?(e.entry_date||'').slice(0,10):localToday())}"></div>
@@ -3077,6 +3073,19 @@ function financeCategoryModal(id){const c=id?S.finance_categories.find(x=>x.id==
       if(id){const u=await dbUpdate('finance_categories',id,{name});if(!u)return false;Object.assign(S.finance_categories.find(x=>x.id===id),u);}
       else{const u=await dbInsert('finance_categories',{name});if(!u)return false;S.finance_categories.push(u);}
       toast('Сохранено');dirFinanceCategories();return true;});}
+/* Справочник партнёров финансов — ОТДЕЛЬНЫЙ от общего справочника «Партнёры» (логистика/забор
+   заказов) — здесь партнёры именно для финансового учёта, свой собственный список */
+function dirFinancePartners(){
+  dirGrid({title:'Партнёры (финансы)',arrKey:'finance_partners',table:'finance_partners',modalFn:financePartnerModal,emptyText:'Нет партнёров',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[{key:'name',label:'Название',filter:'text',text:p=>p.name||'',cell:p=>`<strong>${esc(p.name)}</strong>`}]});
+}
+function financePartnerModal(id){const p=id?S.finance_partners.find(x=>x.id===id):{name:''};
+  showModal(id?'Партнёр':'Новый партнёр',`<div class="field"><label>Название</label><input id="fp_name" value="${esc(p.name)}"></div>`,
+    async()=>{const name=val('fp_name').trim();if(!name){toast('Укажите название');return false;}
+      if(id){const u=await dbUpdate('finance_partners',id,{name});if(!u)return false;Object.assign(S.finance_partners.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('finance_partners',{name});if(!u)return false;S.finance_partners.push(u);}
+      toast('Сохранено');dirFinancePartners();return true;});}
 /* ==================== /ФИНАНСЫ ==================== */
 function renderCash(){ // ключ модуля остался 'cash', но это Склад
   if(!isStaff()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
