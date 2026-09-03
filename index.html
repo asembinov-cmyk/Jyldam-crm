@@ -2113,6 +2113,9 @@ window.addEventListener('scroll',()=>{_lastScrollAt=Date.now();},{passive:true})
 function canAutoRefresh(){
   // открыта любая модалка/карточка — не трогаем (чтобы не сбросить ввод)
   if(document.querySelector('.overlay'))return false;
+  // открыт попап фильтра по столбцу (Заказы партнёров) — не трогаем, даже если фокус вдруг
+  // не на поле ввода (иначе фоновое обновление тихо ломает попап посреди работы с ним)
+  if(document.querySelector('.inb-col-filter-pop'))return false;
   // пользователь печатает/выбирает в каком-то поле — не трогаем
   const a=document.activeElement;
   if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return false;
@@ -9263,6 +9266,10 @@ function openInboundColFilter(th,key){
   _inbColFilterClose=close;
 }
 function drawInboundOrders(){
+  // если попап фильтра по столбцу ещё «числится» открытым (например, перерисовка вызвана не через
+  // штатное закрытие попапа) — сначала аккуратно закрываем его, чтобы не остался висеть обработчик
+  // на document, который иначе будет мешать следующему открытию/закрытию
+  if(_inbColFilterClose){const c=_inbColFilterClose;_inbColFilterClose=null;try{c(false);}catch(e){}}
   refreshInboundLookups();
   const anyFilter=inboundHasActiveFilters()||inboundColFiltersActive();
   const lazy=!S.inbound_full_loaded&&!anyFilter; // быстрый режим: постранично с сервера, без полного набора в памяти
