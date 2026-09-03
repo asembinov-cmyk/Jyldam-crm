@@ -5715,7 +5715,7 @@ function renderPickups(){
     <div class="page-head"><div><h1>${head}</h1><p>Карточки забора посылок из магазинов-партнёров</p></div>
       <div class="head-actions">
         ${(typeof Notification!=='undefined'&&Notification.permission==='default')?'<button class="btn ghost" id="pkNotifyEnable">🔔 Включить уведомления</button>':''}
-        ${isCourier()?`<button class="btn primary" id="pkRoute">🧭 Построить маршрут</button>`:''}
+        
         ${(can('pickups','create')&&!isCourier())?`<button class="btn primary" id="newPickup">＋ Создать карточку забора</button>`:''}
       </div>
     </div>
@@ -5992,11 +5992,11 @@ function drawCourierPickupCards(el,rows){
           <option value="">— нет —</option>${S.statuses.map(s=>`<option value="${s.id}" ${p.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div>
       <div class="cc-body">
-        <div class="cc-row"><span class="lbl">Дата</span><span class="vl">${esc(fmtDate(p.pickup_date))}${p.created_at?` · создана ${esc(fmtDateTime(p.created_at))}`:''}</span></div>
+        ${!isCourier()?`<div class="cc-row"><span class="lbl">Дата</span><span class="vl">${esc(fmtDate(p.pickup_date))}${p.created_at?` · создана ${esc(fmtDateTime(p.created_at))}`:''}</span></div>
         <div class="cc-row"><span class="lbl">Город</span><span class="vl">${esc(cityName(p.city_id))}</span></div>
-        <div class="cc-row"><span class="lbl">Район</span><span class="vl">${esc(districtName(p.district_id))}</span></div>
+        <div class="cc-row"><span class="lbl">Район</span><span class="vl">${esc(districtName(p.district_id))}</span></div>`:''}
         <div class="cc-row"><span class="lbl">Собрано заказов</span><span class="vl"><input type="number" min="0" class="qty-edit" data-pqty="${p.id}" value="${p.orders?esc(p.orders):''}" placeholder="—"></span></div>
-        ${(p.status_history&&p.status_history.length)?`<div class="cc-row"><span class="lbl">Статус изменён</span><span class="vl">${p.status_at?esc(fmtDateTime(p.status_at)):'—'} · <button class="link-btn" data-phist="${p.id}">история</button></span></div>`:''}
+        ${(!isCourier()&&p.status_history&&p.status_history.length)?`<div class="cc-row"><span class="lbl">Статус изменён</span><span class="vl">${p.status_at?esc(fmtDateTime(p.status_at)):'—'} · <button class="link-btn" data-phist="${p.id}">история</button></span></div>`:''}
         <div class="cc-actions">
           <button class="btn sm primary" data-pgen="${p.id}">Заказы и фото${ordersCountForPickup(p.id)?` (${ordersCountForPickup(p.id)}/${p.orders||0})`:p.orders?` (0/${p.orders})`:''}</button>
           ${!isCourier()?`<button class="btn sm ghost" data-pview="${p.id}">Открыть</button>`:''}
