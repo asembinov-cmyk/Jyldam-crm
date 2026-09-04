@@ -616,6 +616,7 @@
     border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;z-index:2000}
   .ac-item{padding:10px 14px;font-size:14px;cursor:pointer}
   .ac-item:hover,.ac-item:active{background:#f2f4f9}
+  .ac-item.ac-hi{background:#e8ecfb}
   .ac-empty{padding:10px 14px;font-size:13px;color:var(--muted)}
   .stats.stats-3{grid-template-columns:repeat(3,1fr)}
   .stats.stats-1{grid-template-columns:1fr;max-width:280px}
@@ -2951,26 +2952,33 @@ function bindSearchDropdown(inputId,items,onPick){
     drop.className='ac-dropdown';drop.style.display='none';
     wrap.appendChild(drop);
   }
+  let hiIdx=-1; // индекс подсвеченного стрелками пункта (-1 = ничего не подсвечено)
   const renderList=()=>{
     const q=inp.value.trim().toLowerCase();
     const matches=(q?items.filter(it=>(it.name||'').toLowerCase().includes(q)):items).slice(0,50);
+    hiIdx=matches.length?0:-1; // по умолчанию подсвечен первый — Enter/Tab сразу же его и возьмут
     if(!matches.length){drop.innerHTML=`<div class="ac-empty">${q?'Ничего не найдено':'Список пуст'}</div>`;}
-    else{drop.innerHTML=matches.map(it=>`<div class="ac-item" data-acid="${it.id}">${esc(it.name)}</div>`).join('');}
+    else{drop.innerHTML=matches.map((it,i)=>`<div class="ac-item${i===0?' ac-hi':''}" data-acid="${it.id}">${esc(it.name)}</div>`).join('');}
     const pick=item=>{
       inp.value=item?item.name:'';
       inp.dataset.selid=item?item.id:'';
       drop.style.display='none';
       if(onPick)onPick(item||null);
     };
+    const setHi=i=>{
+      const els=[...drop.querySelectorAll('[data-acid]')];
+      if(!els.length)return;
+      hiIdx=(i+els.length)%els.length; // по кругу — со дна списка снова наверх, и наоборот
+      els.forEach((el,idx)=>el.classList.toggle('ac-hi',idx===hiIdx));
+      els[hiIdx].scrollIntoView({block:'nearest'});
+    };
     drop.querySelectorAll('[data-acid]').forEach(el=>{
       // mousedown, а не click — срабатывает РАНЬШЕ blur поля, иначе список успевает закрыться
       // до того, как клик по нему засчитается
       el.onmousedown=ev=>{ev.preventDefault();pick(items.find(x=>x.id===el.dataset.acid));};
+      el.onmouseenter=()=>{const els=[...drop.querySelectorAll('[data-acid]')];setHi(els.indexOf(el));};
     });
-    // запоминаем первое совпадение — им управляет клавиша Tab/Enter (без стрелок, просто
-    // «то, что сейчас видно первым в списке»)
-    drop._firstMatch=matches[0]||null;
-    drop._pick=pick;
+    drop._matches=matches;drop._pick=pick;drop._setHi=setHi;drop._getHi=()=>hiIdx;
     drop.style.display='block';
   };
   // печатают заново — прежний выбор больше не действует, пока не выберут снова из списка
@@ -2978,11 +2986,15 @@ function bindSearchDropdown(inputId,items,onPick){
   inp.oninput=renderList;
   inp.onfocus=renderList;
   inp.onblur=()=>{setTimeout(()=>{drop.style.display='none';},120);};
-  // Tab (и Enter) — подхватывают то первое совпадение, что сейчас показано в списке, не заставляя
-  // руками кликать по нему мышкой/пальцем
+  // ↑/↓ — двигают подсветку по списку; Tab/Enter — выбирают ИМЕННО подсвеченный пункт (по
+  // умолчанию первый, если стрелками ничего не трогали)
   inp.onkeydown=ev=>{
-    if((ev.key==='Tab'||ev.key==='Enter')&&drop.style.display!=='none'&&drop._firstMatch){
-      drop._pick(drop._firstMatch);
+    if(drop.style.display==='none')return;
+    if(ev.key==='ArrowDown'){ev.preventDefault();drop._setHi((drop._getHi()<0?-1:drop._getHi())+1);return;}
+    if(ev.key==='ArrowUp'){ev.preventDefault();drop._setHi((drop._getHi()<0?1:drop._getHi())-1);return;}
+    if((ev.key==='Tab'||ev.key==='Enter')&&drop._matches&&drop._matches.length){
+      const idx=drop._getHi()>=0?drop._getHi():0;
+      drop._pick(drop._matches[idx]);
       if(ev.key==='Enter')ev.preventDefault(); // Enter не должен ещё и отправлять форму
       // Tab НЕ отменяем — фокус спокойно уходит на следующее поле, как обычно
     }
@@ -3010,6 +3022,7 @@ function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===
 let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 let finTab='entries'; // entries | summary
 let finPage=1;
+let finSort={col:null,dir:1}; // col: 'category'|'amount'; dir: 1=по возрастанию, -1=по убыванию
 const finPerPage=50;
 function renderFinance(){
   if(!canMod('finance')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
@@ -3024,6 +3037,13 @@ function renderFinance(){
     if(finFilter.category&&e.category_id!==finFilter.category)return false;
     return true;
   });
+  // сортировка по клику на заголовок столбца (Категория — по алфавиту, Сумма — по величине);
+  // без выбора сортировки список остаётся по дате (как отсортирован all)
+  if(finSort.col==='category'){
+    rows.sort((a,b)=>finSort.dir*financeCategoryName(a.category_id).localeCompare(financeCategoryName(b.category_id)));
+  }else if(finSort.col==='amount'){
+    rows.sort((a,b)=>finSort.dir*((parseFloat(a.amount)||0)-(parseFloat(b.amount)||0)));
+  }
   const totalPages=Math.max(1,Math.ceil(rows.length/finPerPage));
   if(finPage>totalPages)finPage=totalPages;
   if(finPage<1)finPage=1;
@@ -3066,7 +3086,8 @@ function renderFinance(){
   }
   $('main').innerHTML=head+`
     <div class="panel">
-      <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span>${can('finance','create')?'<button class="btn primary sm" id="finNew" style="margin-left:auto">＋ Новая проводка</button>':''}</div>
+      <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span></div>
+      ${can('finance','create')?'<div style="margin-bottom:12px"><button class="btn primary sm" id="finNew">＋ Новая проводка</button></div>':''}
       <div class="ic-filters">
         <input type="date" id="finfDateFrom" value="${esc(finFilter.dateFrom)}" title="С даты">
         <input type="date" id="finfDateTo" value="${esc(finFilter.dateTo)}" title="По дату">
@@ -3079,7 +3100,7 @@ function renderFinance(){
       <div class="table-scroll">
       <table class="resp-table"><thead><tr>
         <th>Дата</th><th>Касса</th><th>Остаток кассы</th><th>Партнёр</th><th>Остаток партнёра</th>
-        <th>Тип</th><th>Сумма</th><th>Категория</th><th>Комментарий</th><th>Менеджер</th><th></th>
+        <th>Тип</th><th class="fin-sortable" data-finsort="amount" style="cursor:pointer">Сумма${finSort.col==='amount'?(finSort.dir===1?' ▲':' ▼'):''}</th><th class="fin-sortable" data-finsort="category" style="cursor:pointer">Категория${finSort.col==='category'?(finSort.dir===1?' ▲':' ▼'):''}</th><th>Комментарий</th><th>Менеджер</th><th></th>
       </tr></thead><tbody>
       ${pageRows.length?pageRows.map(e=>`<tr>
         <td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>
@@ -3109,6 +3130,12 @@ function renderFinance(){
   $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
   if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
+  $('main').querySelectorAll('[data-finsort]').forEach(th=>th.onclick=()=>{
+    const col=th.dataset.finsort;
+    if(finSort.col===col)finSort.dir=-finSort.dir; // тот же столбец — переключаем направление
+    else finSort={col,dir:1}; // новый столбец — начинаем с возрастания (А→Я / по возрастанию суммы)
+    renderFinance();
+  });
   $('main').querySelectorAll('[data-findel]').forEach(b=>b.onclick=()=>delFinanceEntry(b.dataset.findel));
   if($('finPgFirst'))$('finPgFirst').onclick=()=>{finPage=1;renderFinance();};
   if($('finPgPrev'))$('finPgPrev').onclick=()=>{finPage=Math.max(1,finPage-1);renderFinance();};
