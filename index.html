@@ -1375,7 +1375,14 @@ async function dbListWhere(table,col,val){
 const AUTO_LOG_TABLES=new Set(['partners','cities','districts','couriers','order_couriers','sales_managers','processors','statuses','order_statuses','delivery_types','courier_cities','post_ips','profiles','roles','warehouses']);
 // карта таблица→ключ кэша в S (для поиска "до" и подписи)
 const TABLE_ARRKEY={partners:'partners',cities:'cities',districts:'districts',couriers:'couriers',order_couriers:'order_couriers',sales_managers:'sales',processors:'processors',statuses:'statuses',order_statuses:'orderStatuses',delivery_types:'delivery',courier_cities:'courier_cities',post_ips:'post_ips',profiles:'profiles',roles:'roles',warehouses:'warehouses'};
-function recLabel(rec){return rec?(rec.name||rec.fio||rec.full_name||rec.code||rec.email||('#'+rec.id)):'';}
+function recLabel(rec){
+  if(!rec)return '';
+  // проводка Финансов — своих полей name/fio нет, собираем подпись из даты+суммы+типа
+  if(rec.entry_date!=null&&rec.amount!=null&&(rec.type==='income'||rec.type==='expense')){
+    return `Проводка ${fmtDate(rec.entry_date)} · ${Math.round(rec.amount).toLocaleString('ru-RU')} ₸ (${rec.type==='income'?'приход':'расход'})`;
+  }
+  return rec.name||rec.fio||rec.full_name||rec.code||rec.email||('#'+rec.id);
+}
 function findCached(table,id){const k=TABLE_ARRKEY[table];const arr=k&&S[k];return Array.isArray(arr)?arr.find(x=>x&&x.id===id):null;}
 async function dbInsert(table,row){
   const {data,error}=await sb.from(table).insert(row).select().single();
@@ -1445,7 +1452,10 @@ const ENTITY_LABEL={
   orders:'Заказ',pickups:'Заявка на забор',partners:'Партнёр',cities:'Город',districts:'Район',
   couriers:'Курьер (заборщик)',order_couriers:'Курьер по заказам',sales_managers:'Менеджер по продажам',
   processors:'Обработчик',statuses:'Статус забора',order_statuses:'Статус заказа',delivery_types:'Тип доставки',
-  courier_cities:'Курьерский город',post_ips:'ИП для Почты',profiles:'Сотрудник',roles:'Роль',warehouses:'Склад отправки',auth:'Система'
+  courier_cities:'Курьерский город',post_ips:'ИП для Почты',profiles:'Сотрудник',roles:'Роль',warehouses:'Склад отправки',auth:'Система',
+  finance_entries:'Проводка',finance_kassa:'Касса',finance_categories:'Категория расхода',
+  finance_income_categories:'Категория прихода',finance_partners:'Партнёр (финансы)',
+  warehouse_partners:'Партнёр склада',products:'Товар',inbound_orders:'Заказ КЕТ',shipments:'Отправка межгород',
 };
 // человекочитаемые подписи полей (для детальных правок)
 const FIELD_LABEL={
@@ -3081,6 +3091,7 @@ let finPage=1;
 let finSummaryPage=1;
 let finSort={col:null,dir:1}; // col: 'category'|'amount'; dir: 1=по возрастанию, -1=по убыванию
 let finAddingNew=false; // показывать ли строку ввода новой проводки прямо в гриде (сверху)
+let _finEscHandler=null; // текущий обработчик Escape на весь документ (пока открыта строка создания)
 const finPerPage=50;
 function exportFinanceToExcel(rows){
   if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
@@ -3125,6 +3136,14 @@ async function refreshFinanceData(){
 }
 function renderFinance(){
   if(!canMod('finance')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  // Escape закрывает строку создания проводки, ГДЕ БЫ ни стоял фокус (даже если ни в одно поле
+  // ещё не кликали) — привязываем на весь документ, снимая предыдущий обработчик каждый раз,
+  // чтобы они не копились
+  if(_finEscHandler){document.removeEventListener('keydown',_finEscHandler);_finEscHandler=null;}
+  if(finAddingNew){
+    _finEscHandler=ev=>{if(ev.key==='Escape'&&S.tab==='finance'){finAddingNew=false;renderFinance();}};
+    document.addEventListener('keydown',_finEscHandler);
+  }
   const all=[...(S.finance_entries||[])].sort((a,b)=>(b.entry_date||'').localeCompare(a.entry_date||'')||(b.created_at||'').localeCompare(a.created_at||''));
   const rows=all.filter(e=>{
     if(finFilter.dateFrom&&(e.entry_date||'')<finFilter.dateFrom)return false;
@@ -3362,8 +3381,6 @@ function renderFinance(){
       const el=$(id);if(!el)return;
       el.addEventListener('keydown',ev=>{
         if(ev.key==='Enter'&&!ev.defaultPrevented){ev.preventDefault();saveInlineEntry();}
-        // Esc в любом поле строки — закрывает создание проводки без сохранения (как Отмена)
-        if(ev.key==='Escape'){finAddingNew=false;renderFinance();}
       });
     });
   }
