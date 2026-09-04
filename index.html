@@ -3015,12 +3015,7 @@ function renderFinance(){
   if(finPage<1)finPage=1;
   const pageRows=rows.slice((finPage-1)*finPerPage,finPage*finPerPage);
   const head=`
-    <div class="page-head"><div><h1>Финансы</h1><p>Учёт проводок по кассам и партнёрам</p></div>
-      <div class="head-actions">
-        ${can('finance','edit')?`<button class="btn ghost" id="finKassaBtn">⚙ Кассы</button><button class="btn ghost" id="finCatBtn">⚙ Категории расходов</button><button class="btn ghost" id="finIncCatBtn">⚙ Категории приходов</button><button class="btn ghost" id="finPartnerBtn">⚙ Партнёры</button>`:''}
-        ${can('finance','create')?'<button class="btn primary" id="finNew">＋ Новая проводка</button>':''}
-      </div>
-    </div>
+    <div class="page-head"><div><h1>Финансы</h1><p>Учёт проводок по кассам и партнёрам</p></div></div>
     <div class="subtabs">
       <button data-fintab="entries" class="${finTab==='entries'?'active':''}">Проводки</button>
       <button data-fintab="summary" class="${finTab==='summary'?'active':''}">Общая сводка</button>
@@ -3053,16 +3048,11 @@ function renderFinance(){
       </tbody></table></div>
     </div>`;
     $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
-    if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
-    if($('finKassaBtn'))$('finKassaBtn').onclick=()=>dirFinanceKassa();
-    if($('finCatBtn'))$('finCatBtn').onclick=()=>dirFinanceCategories();
-  if($('finIncCatBtn'))$('finIncCatBtn').onclick=()=>dirFinanceIncomeCategories();
-    if($('finPartnerBtn'))$('finPartnerBtn').onclick=()=>dirFinancePartners();
     return;
   }
   $('main').innerHTML=head+`
     <div class="panel">
-      <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span></div>
+      <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span>${can('finance','create')?'<button class="btn primary sm" id="finNew" style="margin-left:auto">＋ Новая проводка</button>':''}</div>
       <div class="ic-filters">
         <input type="date" id="finfDateFrom" value="${esc(finFilter.dateFrom)}" title="С даты">
         <input type="date" id="finfDateTo" value="${esc(finFilter.dateTo)}" title="По дату">
@@ -3104,10 +3094,6 @@ function renderFinance(){
     </div>`;
   $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
   if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
-  if($('finKassaBtn'))$('finKassaBtn').onclick=()=>dirFinanceKassa();
-  if($('finCatBtn'))$('finCatBtn').onclick=()=>dirFinanceCategories();
-  if($('finIncCatBtn'))$('finIncCatBtn').onclick=()=>dirFinanceIncomeCategories();
-  if($('finPartnerBtn'))$('finPartnerBtn').onclick=()=>dirFinancePartners();
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
   $('main').querySelectorAll('[data-findel]').forEach(b=>b.onclick=()=>delFinanceEntry(b.dataset.findel));
   if($('finPgFirst'))$('finPgFirst').onclick=()=>{finPage=1;renderFinance();};
