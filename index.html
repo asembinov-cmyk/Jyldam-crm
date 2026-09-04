@@ -3082,6 +3082,30 @@ let finSummaryPage=1;
 let finSort={col:null,dir:1}; // col: 'category'|'amount'; dir: 1=по возрастанию, -1=по убыванию
 let finAddingNew=false; // показывать ли строку ввода новой проводки прямо в гриде (сверху)
 const finPerPage=50;
+function exportFinanceToExcel(rows){
+  if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
+  if(!rows.length){toast('Нет проводок для выгрузки');return;}
+  const data=rows.map(e=>({
+    'Дата':fmtDate(e.entry_date),
+    'Касса':financeKassaName(e.kassa_id),
+    'Остаток кассы':e.kassa_balance!=null?Math.round(e.kassa_balance):'',
+    'Партнёр':e.partner_id?financePartnerName(e.partner_id):'',
+    'Остаток партнёра':e.partner_id&&e.partner_balance!=null?Math.round(e.partner_balance):'',
+    'Тип':e.type==='income'?'Приход':'Расход',
+    'Сумма':Math.round(e.amount||0),
+    'Категория':financeCategoryName(e.category_id),
+    'Комментарий':e.comment||'',
+    'Менеджер':e.manager_name||(e.manager_id?userNameById(e.manager_id):''),
+  }));
+  const ws=XLSX.utils.json_to_sheet(data);
+  const cols=Object.keys(data[0]||{});
+  ws['!cols']=cols.map(c=>({wch:c==='Комментарий'?28:(c==='Касса'||c==='Партнёр'||c==='Категория'||c==='Менеджер'?20:14)}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Проводки');
+  const today=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`Финансы_проводки_${today}.xlsx`);
+  toast(`Выгружено проводок: ${rows.length}`);
+}
 async function refreshFinanceData(){
   const btn=$('finRefresh');
   if(btn){btn.disabled=true;btn.textContent='Обновляем…';}
@@ -3181,7 +3205,10 @@ function renderFinance(){
   $('main').innerHTML=head+`
     <div class="panel">
       <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span></div>
-      ${can('finance','create')?'<div style="margin-bottom:12px"><button class="btn primary sm" id="finNew">＋ Новая проводка</button></div>':''}
+      <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
+        ${can('finance','create')?'<button class="btn primary sm" id="finNew">＋ Новая проводка</button>':''}
+        <button class="btn btn-excel sm" id="finExport">⬇ Скачать Excel</button>
+      </div>
       <div class="ic-filters">
         <input type="date" id="finfDateFrom" value="${esc(finFilter.dateFrom)}" title="С даты">
         <input type="date" id="finfDateTo" value="${esc(finFilter.dateTo)}" title="По дату">
@@ -3189,6 +3216,7 @@ function renderFinance(){
         <input id="finfPartner" autocomplete="off" placeholder="Партнёр: поиск…" value="${finFilter.partner?esc(financePartnerName(finFilter.partner)):''}">
         <select id="finfType"><option value="">Тип: все</option><option value="income" ${finFilter.type==='income'?'selected':''}>Приход</option><option value="expense" ${finFilter.type==='expense'?'selected':''}>Расход</option></select>
         <input id="finfCategory" autocomplete="off" placeholder="Категория: поиск…" value="${finFilter.category?esc(financeCategoryName(finFilter.category)):''}" style="position:relative">
+        <button class="btn ghost sm" id="finfToday">Сегодня</button>
         ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
       </div>
       <div class="table-scroll">
@@ -3225,6 +3253,7 @@ function renderFinance(){
   $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
   if($('finRefresh'))$('finRefresh').onclick=refreshFinanceData;
   if($('finNew'))$('finNew').onclick=()=>{finAddingNew=true;renderFinance();};
+  if($('finExport'))$('finExport').onclick=()=>exportFinanceToExcel(rows);
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
   // перетаскивание заголовков — меняет порядок столбцов; ручка справа — тянет ширину.
   // Оба сохраняются в браузере. Обычный клик по заголовку (без перетаскивания) — сортирует.
@@ -3333,6 +3362,8 @@ function renderFinance(){
       const el=$(id);if(!el)return;
       el.addEventListener('keydown',ev=>{
         if(ev.key==='Enter'&&!ev.defaultPrevented){ev.preventDefault();saveInlineEntry();}
+        // Esc в любом поле строки — закрывает создание проводки без сохранения (как Отмена)
+        if(ev.key==='Escape'){finAddingNew=false;renderFinance();}
       });
     });
   }
@@ -3354,6 +3385,7 @@ function renderFinance(){
   bindFilterSearch('finfKassa',(S.finance_kassa||[]).map(k=>({id:k.id,name:k.name})),'kassa');
   bindFilterSearch('finfPartner',(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>({id:p.id,name:p.name})),'partner');
   bindFilterSearch('finfCategory',[...(S.finance_categories||[]),...(S.finance_income_categories||[])].map(c=>({id:c.id,name:c.name})),'category');
+  if($('finfToday'))$('finfToday').onclick=()=>{finFilter.dateFrom=localToday();finFilter.dateTo=localToday();redraw();};
   if($('finfClear'))$('finfClear').onclick=()=>{finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};redraw();};
 }
 function financeEntryModal(id){
