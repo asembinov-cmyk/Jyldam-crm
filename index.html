@@ -3023,6 +3023,7 @@ let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 let finTab='entries'; // entries | summary
 let finPage=1;
 let finSort={col:null,dir:1}; // col: 'category'|'amount'; dir: 1=по возрастанию, -1=по убыванию
+let finAddingNew=false; // показывать ли строку ввода новой проводки прямо в гриде (сверху)
 const finPerPage=50;
 function renderFinance(){
   if(!canMod('finance')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
@@ -3102,6 +3103,22 @@ function renderFinance(){
         <th>Дата</th><th>Касса</th><th>Остаток кассы</th><th>Партнёр</th><th>Остаток партнёра</th>
         <th>Тип</th><th class="fin-sortable" data-finsort="amount" style="cursor:pointer">Сумма${finSort.col==='amount'?(finSort.dir===1?' ▲':' ▼'):''}</th><th class="fin-sortable" data-finsort="category" style="cursor:pointer">Категория${finSort.col==='category'?(finSort.dir===1?' ▲':' ▼'):''}</th><th>Комментарий</th><th>Менеджер</th><th></th>
       </tr></thead><tbody>
+      ${finAddingNew?`<tr class="fin-new-row">
+        <td data-label="Дата"><input type="date" id="fen_date" value="${localToday()}"></td>
+        <td data-label="Касса"><input id="fen_kassa" autocomplete="off" placeholder="Начните печатать…"></td>
+        <td data-label="Остаток кассы">—</td>
+        <td data-label="Партнёр"><input id="fen_partner" autocomplete="off" placeholder="Необязательно"></td>
+        <td data-label="Остаток партнёра">—</td>
+        <td data-label="Тип"><span id="fen_type_hint" style="color:var(--muted);font-size:12px">по категории</span></td>
+        <td data-label="Сумма"><input type="number" min="0" step="0.01" id="fen_amount" placeholder="0" style="width:100px"></td>
+        <td data-label="Категория"><input id="fen_cat" autocomplete="off" placeholder="Начните печатать…"></td>
+        <td data-label="Комментарий"><input id="fen_comment" autocomplete="off" placeholder="—"></td>
+        <td data-label="Менеджер">${esc((S.me&&(S.me.full_name||S.me.email))||'—')}</td>
+        <td data-label="" class="cell-actions"><div class="row-actions">
+          <button class="btn sm primary" id="fenSave">Сохранить</button>
+          <button class="btn sm ghost" id="fenCancel">Отмена</button>
+        </div></td>
+      </tr>`:''}
       ${pageRows.length?pageRows.map(e=>`<tr>
         <td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>
         <td data-label="Касса">${esc(financeKassaName(e.kassa_id))}</td>
@@ -3128,7 +3145,7 @@ function renderFinance(){
       </div>`:''}
     </div>`;
   $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
-  if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
+  if($('finNew'))$('finNew').onclick=()=>{finAddingNew=true;renderFinance();};
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
   $('main').querySelectorAll('[data-finsort]').forEach(th=>th.onclick=()=>{
     const col=th.dataset.finsort;
@@ -3136,6 +3153,46 @@ function renderFinance(){
     else finSort={col,dir:1}; // новый столбец — начинаем с возрастания (А→Я / по возрастанию суммы)
     renderFinance();
   });
+  if(finAddingNew){
+    // привязываем поиск-с-подсказками к строке ввода прямо в гриде — тот же механизм, что и в форме
+    bindSearchDropdown('fen_kassa',(S.finance_kassa||[]).map(k=>({id:k.id,name:k.name})));
+    bindSearchDropdown('fen_partner',(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>({id:p.id,name:p.name})));
+    const combinedCats=[
+      ...(S.finance_categories||[]).map(c=>({id:c.id,name:c.name,type:'expense'})),
+      ...(S.finance_income_categories||[]).map(c=>({id:c.id,name:c.name,type:'income'})),
+    ];
+    bindSearchDropdown('fen_cat',combinedCats,item=>{
+      const catEl=$('fen_cat');
+      catEl.dataset.seltype=item?item.type:'';
+      if($('fen_type_hint'))$('fen_type_hint').textContent=item?(item.type==='income'?'приход':'расход'):'по категории';
+    });
+    $('fen_cat').addEventListener('input',()=>{$('fen_cat').dataset.seltype='';if($('fen_type_hint'))$('fen_type_hint').textContent='по категории';});
+    if($('fenCancel'))$('fenCancel').onclick=()=>{finAddingNew=false;renderFinance();};
+    if($('fenSave'))$('fenSave').onclick=async()=>{
+      const date=val('fen_date');if(!date){toast('Укажите дату');return;}
+      const kassaId=($('fen_kassa')||{}).dataset&&$('fen_kassa').dataset.selid;
+      if(!kassaId){toast('Выберите кассу из списка');return;}
+      const amount=parseFloat(val('fen_amount'));if(!amount||amount<=0){toast('Укажите сумму больше нуля');return;}
+      const partnerId=(($('fen_partner')||{}).dataset&&$('fen_partner').dataset.selid)||null;
+      const catEl=$('fen_cat');
+      const categoryId=catEl.dataset.selid||'';
+      const type=catEl.dataset.seltype||'';
+      if(!categoryId||!type){toast('Выберите категорию из списка — по ней определится приход это или расход');return;}
+      const row={
+        entry_date:date,kassa_id:kassaId,partner_id:partnerId,type,amount,
+        category_id:categoryId,comment:val('fen_comment').trim()||null,
+        manager_id:(S.me&&S.me.id)||null,manager_name:(S.me&&(S.me.full_name||S.me.email))||'',
+      };
+      const btn=$('fenSave');btn.disabled=true;btn.textContent='Сохраняем…';
+      const u=await dbInsert('finance_entries',row);
+      if(!u){btn.disabled=false;btn.textContent='Сохранить';return;}
+      if(!S.finance_entries)S.finance_entries=[];S.finance_entries.push(u);
+      await recalcKassaBalances(kassaId);
+      if(partnerId)await recalcPartnerBalances(partnerId);
+      finAddingNew=false;
+      toast('Сохранено');renderFinance();
+    };
+  }
   $('main').querySelectorAll('[data-findel]').forEach(b=>b.onclick=()=>delFinanceEntry(b.dataset.findel));
   if($('finPgFirst'))$('finPgFirst').onclick=()=>{finPage=1;renderFinance();};
   if($('finPgPrev'))$('finPgPrev').onclick=()=>{finPage=Math.max(1,finPage-1);renderFinance();};
