@@ -2956,18 +2956,21 @@ function bindSearchDropdown(inputId,items,onPick){
     const matches=(q?items.filter(it=>(it.name||'').toLowerCase().includes(q)):items).slice(0,50);
     if(!matches.length){drop.innerHTML=`<div class="ac-empty">${q?'Ничего не найдено':'Список пуст'}</div>`;}
     else{drop.innerHTML=matches.map(it=>`<div class="ac-item" data-acid="${it.id}">${esc(it.name)}</div>`).join('');}
+    const pick=item=>{
+      inp.value=item?item.name:'';
+      inp.dataset.selid=item?item.id:'';
+      drop.style.display='none';
+      if(onPick)onPick(item||null);
+    };
     drop.querySelectorAll('[data-acid]').forEach(el=>{
       // mousedown, а не click — срабатывает РАНЬШЕ blur поля, иначе список успевает закрыться
       // до того, как клик по нему засчитается
-      el.onmousedown=ev=>{
-        ev.preventDefault();
-        const item=items.find(x=>x.id===el.dataset.acid);
-        inp.value=item?item.name:'';
-        inp.dataset.selid=item?item.id:'';
-        drop.style.display='none';
-        if(onPick)onPick(item||null);
-      };
+      el.onmousedown=ev=>{ev.preventDefault();pick(items.find(x=>x.id===el.dataset.acid));};
     });
+    // запоминаем первое совпадение — им управляет клавиша Tab/Enter (без стрелок, просто
+    // «то, что сейчас видно первым в списке»)
+    drop._firstMatch=matches[0]||null;
+    drop._pick=pick;
     drop.style.display='block';
   };
   // печатают заново — прежний выбор больше не действует, пока не выберут снова из списка
@@ -2975,6 +2978,15 @@ function bindSearchDropdown(inputId,items,onPick){
   inp.oninput=renderList;
   inp.onfocus=renderList;
   inp.onblur=()=>{setTimeout(()=>{drop.style.display='none';},120);};
+  // Tab (и Enter) — подхватывают то первое совпадение, что сейчас показано в списке, не заставляя
+  // руками кликать по нему мышкой/пальцем
+  inp.onkeydown=ev=>{
+    if((ev.key==='Tab'||ev.key==='Enter')&&drop.style.display!=='none'&&drop._firstMatch){
+      drop._pick(drop._firstMatch);
+      if(ev.key==='Enter')ev.preventDefault(); // Enter не должен ещё и отправлять форму
+      // Tab НЕ отменяем — фокус спокойно уходит на следующее поле, как обычно
+    }
+  };
 }
 function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||{}).name||'—';}
 function financeCategoryName(id){
