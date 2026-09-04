@@ -3251,10 +3251,9 @@ function renderFinance(){
           <button class="btn sm ghost" id="fenCancel">Отмена</button>
         </div></td>
       </tr>`:''}
-      ${pageRows.length?pageRows.map(e=>`<tr>
+      ${pageRows.length?pageRows.map(e=>`<tr data-finrow="${e.id}" ${can('finance','edit')?'style="cursor:pointer"':''}>
         ${finColumnsInOrder().map(c=>c.cell(e)).join('')}
         <td data-label="" class="cell-actions"><div class="row-actions">
-          ${can('finance','edit')?`<button class="btn sm ghost" data-finedit="${e.id}">Изменить</button>`:''}
           ${can('finance','delete')?`<button class="btn sm danger" data-findel="${e.id}">Удалить</button>`:''}
         </div></td>
       </tr>`).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет проводок</div>${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'Измените фильтры.':'Нажмите «Новая проводка».'}</div></td></tr>`}
@@ -3273,7 +3272,10 @@ function renderFinance(){
   if($('finRefresh'))$('finRefresh').onclick=refreshFinanceData;
   if($('finNew'))$('finNew').onclick=()=>{finAddingNew=true;renderFinance();};
   if($('finExport'))$('finExport').onclick=()=>exportFinanceToExcel(rows);
-  $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
+  if(can('finance','edit'))$('main').querySelectorAll('[data-finrow]').forEach(tr=>tr.ondblclick=e=>{
+    if(e.target.closest('button,input,select,a'))return;
+    financeEntryModal(tr.dataset.finrow);
+  });
   // перетаскивание заголовков — меняет порядок столбцов; ручка справа — тянет ширину.
   // Оба сохраняются в браузере. Обычный клик по заголовку (без перетаскивания) — сортирует.
   let _finDragKey=null,_finDidDrag=false;
