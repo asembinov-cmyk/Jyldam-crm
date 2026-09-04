@@ -612,6 +612,11 @@
   .stats.stats-5{grid-template-columns:repeat(5,1fr)}
   .simple-pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 10px;flex-wrap:wrap}
   .simple-pager-label{font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
+  .ac-dropdown{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--line);
+    border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;z-index:2000}
+  .ac-item{padding:10px 14px;font-size:14px;cursor:pointer}
+  .ac-item:hover,.ac-item:active{background:#f2f4f9}
+  .ac-empty{padding:10px 14px;font-size:13px;color:var(--muted)}
   .stats.stats-3{grid-template-columns:repeat(3,1fr)}
   .stats.stats-1{grid-template-columns:1fr;max-width:280px}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);display:flex;align-items:flex-start;gap:14px}
@@ -2921,6 +2926,42 @@ async function recalcPartnerBalances(partnerId){
     }
   }
 }
+// универсальный поиск-с-подсказками — заменяет ненадёжный <datalist> (плохо работает на мобильных)
+// собственным выпадающим списком под полем. inputId — id текстового поля, items — [{id,name}],
+// onPick(item|null) — вызывается при выборе (null, если поле очистили)
+function bindSearchDropdown(inputId,items,onPick){
+  const inp=document.getElementById(inputId);if(!inp)return;
+  // оборачиваем поле в свой собственный контейнер — чтобы выпадающий список позиционировался
+  // строго под этим полем, независимо от того, как устроен родитель (flex-ряд фильтров и т.п.)
+  const wrap=document.createElement('span');
+  wrap.style.cssText='position:relative;display:inline-block';
+  inp.parentElement.insertBefore(wrap,inp);
+  wrap.appendChild(inp);
+  const drop=document.createElement('div');
+  drop.className='ac-dropdown';drop.style.display='none';
+  wrap.appendChild(drop);
+  const renderList=()=>{
+    const q=inp.value.trim().toLowerCase();
+    const matches=(q?items.filter(it=>(it.name||'').toLowerCase().includes(q)):items).slice(0,50);
+    if(!matches.length){drop.innerHTML=`<div class="ac-empty">${q?'Ничего не найдено':'Список пуст'}</div>`;}
+    else{drop.innerHTML=matches.map(it=>`<div class="ac-item" data-acid="${it.id}">${esc(it.name)}</div>`).join('');}
+    drop.querySelectorAll('[data-acid]').forEach(el=>{
+      // mousedown, а не click — срабатывает РАНЬШЕ blur поля, иначе список успевает закрыться
+      // до того, как клик по нему засчитается
+      el.onmousedown=ev=>{
+        ev.preventDefault();
+        const item=items.find(x=>x.id===el.dataset.acid);
+        inp.value=item?item.name:'';
+        drop.style.display='none';
+        if(onPick)onPick(item||null);
+      };
+    });
+    drop.style.display='block';
+  };
+  inp.oninput=renderList;
+  inp.onfocus=renderList;
+  inp.onblur=()=>{setTimeout(()=>{drop.style.display='none';},120);};
+}
 function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||{}).name||'—';}
 function financeCategoryName(id){return ((S.finance_categories||[]).find(c=>c.id===id)||{}).name||'—';}
 function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===id)||{}).name||'—';}
@@ -2999,7 +3040,7 @@ function renderFinance(){
         <select id="finfKassa"><option value="">Касса: все</option>${(S.finance_kassa||[]).map(k=>`<option value="${k.id}" ${finFilter.kassa===k.id?'selected':''}>${esc(k.name)}</option>`).join('')}</select>
         <select id="finfPartner"><option value="">Партнёр: все</option>${(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${finFilter.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
         <select id="finfType"><option value="">Тип: все</option><option value="income" ${finFilter.type==='income'?'selected':''}>Приход</option><option value="expense" ${finFilter.type==='expense'?'selected':''}>Расход</option></select>
-        <select id="finfCategory"><option value="">Категория: все</option>${(S.finance_categories||[]).map(c=>`<option value="${c.id}" ${finFilter.category===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        <input id="finfCategory" autocomplete="off" placeholder="Категория: поиск…" value="${finFilter.category?esc(financeCategoryName(finFilter.category)):''}" style="position:relative">
         ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
       </div>
       <div class="table-scroll">
@@ -3049,14 +3090,17 @@ function renderFinance(){
   if($('finfKassa'))$('finfKassa').onchange=e=>{finFilter.kassa=e.target.value;redraw();};
   if($('finfPartner'))$('finfPartner').onchange=e=>{finFilter.partner=e.target.value;redraw();};
   if($('finfType'))$('finfType').onchange=e=>{finFilter.type=e.target.value;redraw();};
-  if($('finfCategory'))$('finfCategory').onchange=e=>{finFilter.category=e.target.value;redraw();};
+  bindSearchDropdown('finfCategory',(S.finance_categories||[]).map(c=>({id:c.id,name:c.name})),item=>{
+    finFilter.category=item?item.id:'';redraw();
+  });
+  const finfCatEl=$('finfCategory');
+  if(finfCatEl)finfCatEl.addEventListener('blur',()=>{if(!finfCatEl.value.trim()&&finFilter.category){finFilter.category='';redraw();}});
   if($('finfClear'))$('finfClear').onclick=()=>{finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};redraw();};
 }
 function financeEntryModal(id){
   const e=id?(S.finance_entries||[]).find(x=>x.id===id):null;
   if(id&&!e)return;
   const kassaOpts=(S.finance_kassa||[]).map(k=>`<option value="${k.id}" ${e&&e.kassa_id===k.id?'selected':''}>${esc(k.name)}</option>`).join('');
-  const catOpts=(S.finance_categories||[]).map(c=>`<option value="${c.id}" ${e&&e.category_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
   const partnerOpts=(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${e&&e.partner_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   const body=`
     <div class="form-grid">
@@ -3068,7 +3112,7 @@ function financeEntryModal(id){
         <option value="expense" ${e&&e.type==='expense'?'selected':''}>Расход</option>
       </select></div>
       <div class="field"><label>Сумма (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="fe_amount" value="${e&&e.amount!=null?esc(e.amount):''}" placeholder="0"></div>
-      <div class="field"><label>Категория</label><select id="fe_cat"><option value="">—</option>${catOpts}</select></div>
+      <div class="field"><label>Категория</label><input id="fe_cat" autocomplete="off" placeholder="Начните печатать…" value="${e&&e.category_id?esc(financeCategoryName(e.category_id)):''}"><small style="color:var(--muted);font-size:12px">Если такой категории ещё нет — впишите новое название, она создастся сама</small></div>
       <div class="field full"><label>Комментарий</label><textarea id="fe_comment" rows="2">${esc(e?e.comment||'':'')}</textarea></div>
     </div>
     ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—'}${e.partner_id?` · Остаток партнёра: ${e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—'}`:''}</div>`:''}`;
@@ -3078,9 +3122,21 @@ function financeEntryModal(id){
     const amount=parseFloat(val('fe_amount'));if(!amount||amount<=0){toast('Укажите сумму больше нуля');return false;}
     const type=val('fe_type');
     const partnerId=val('fe_partner')||null;
+    // категория — по введённому названию ищем совпадение (без учёта регистра); если такой ещё
+    // нет — создаём новую категорию тут же, не нужно отдельно заходить в «⚙ Категории»
+    const catName=val('fe_cat').trim();
+    let categoryId=null;
+    if(catName){
+      const found=(S.finance_categories||[]).find(c=>(c.name||'').trim().toLowerCase()===catName.toLowerCase());
+      if(found)categoryId=found.id;
+      else{
+        const nc=await dbInsert('finance_categories',{name:catName});
+        if(nc){if(!S.finance_categories)S.finance_categories=[];S.finance_categories.push(nc);categoryId=nc.id;}
+      }
+    }
     const row={
       entry_date:date,kassa_id:kassaId,partner_id:partnerId,type,amount,
-      category_id:val('fe_cat')||null,comment:val('fe_comment').trim()||null,
+      category_id:categoryId,comment:val('fe_comment').trim()||null,
     };
     // старые значения кассы/партнёра — если их поменяли, нужно пересчитать остатки и там, и там
     const prevKassaId=e?e.kassa_id:null,prevPartnerId=e?e.partner_id:null;
@@ -3100,6 +3156,9 @@ function financeEntryModal(id){
     if(prevPartnerId&&prevPartnerId!==partnerId)await recalcPartnerBalances(prevPartnerId);
     toast('Сохранено');renderFinance();return true;
   });
+  setTimeout(()=>{
+    bindSearchDropdown('fe_cat',(S.finance_categories||[]).map(c=>({id:c.id,name:c.name})));
+  },0);
 }
 async function delFinanceEntry(id){
   const e=(S.finance_entries||[]).find(x=>x.id===id);if(!e)return;
