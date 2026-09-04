@@ -1896,6 +1896,7 @@ async function loadAll(){
     dbList('wh_reservations',{order:'created_at',asc:false}).catch(()=>[]),
     dbList('finance_kassa',{order:'name'}).catch(()=>[]),
     dbList('finance_categories',{order:'name'}).catch(()=>[]),
+    dbList('finance_income_categories',{order:'name'}).catch(()=>[]),
     dbList('finance_partners',{order:'name'}).catch(()=>[]),
     dbList('finance_entries',{order:'entry_date',asc:false}).catch(()=>[]),
   ]);
@@ -1903,7 +1904,7 @@ async function loadAll(){
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
   S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];S.wh_reservations=tail[11]||[];
-  S.finance_kassa=tail[12]||[];S.finance_categories=tail[13]||[];S.finance_partners=tail[14]||[];S.finance_entries=tail[15]||[];
+  S.finance_kassa=tail[12]||[];S.finance_categories=tail[13]||[];S.finance_income_categories=tail[14]||[];S.finance_partners=tail[15]||[];S.finance_entries=tail[16]||[];
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк за всё время) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем.
   // Сначала — быстрый узкий запрос ТОЛЬКО за сегодня (большинство экранов по умолчанию и
@@ -2933,13 +2934,21 @@ function bindSearchDropdown(inputId,items,onPick){
   const inp=document.getElementById(inputId);if(!inp)return;
   // оборачиваем поле в свой собственный контейнер — чтобы выпадающий список позиционировался
   // строго под этим полем, независимо от того, как устроен родитель (flex-ряд фильтров и т.п.)
-  const wrap=document.createElement('span');
-  wrap.style.cssText='position:relative;display:inline-block';
-  inp.parentElement.insertBefore(wrap,inp);
-  wrap.appendChild(inp);
-  const drop=document.createElement('div');
-  drop.className='ac-dropdown';drop.style.display='none';
-  wrap.appendChild(drop);
+  // если функцию вызывают ПОВТОРНО на том же поле (например, список категорий сменился из-за
+  // выбора другого Типа) — переиспользуем уже готовую обёртку, а не плодим новые вложенные
+  let wrap=inp.parentElement,drop;
+  if(wrap&&wrap.classList&&wrap.classList.contains('ac-wrap')){
+    drop=wrap.querySelector('.ac-dropdown');
+  }else{
+    wrap=document.createElement('span');
+    wrap.className='ac-wrap';
+    wrap.style.cssText='position:relative;display:inline-block';
+    inp.parentElement.insertBefore(wrap,inp);
+    wrap.appendChild(inp);
+    drop=document.createElement('div');
+    drop.className='ac-dropdown';drop.style.display='none';
+    wrap.appendChild(drop);
+  }
   const renderList=()=>{
     const q=inp.value.trim().toLowerCase();
     const matches=(q?items.filter(it=>(it.name||'').toLowerCase().includes(q)):items).slice(0,50);
@@ -2963,7 +2972,23 @@ function bindSearchDropdown(inputId,items,onPick){
   inp.onblur=()=>{setTimeout(()=>{drop.style.display='none';},120);};
 }
 function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||{}).name||'—';}
-function financeCategoryName(id){return ((S.finance_categories||[]).find(c=>c.id===id)||{}).name||'—';}
+function financeCategoryName(id){
+  const exp=(S.finance_categories||[]).find(c=>c.id===id);if(exp)return exp.name;
+  const inc=(S.finance_income_categories||[]).find(c=>c.id===id);if(inc)return inc.name;
+  return '—';
+}
+/* Справочник категорий ПРИХОДА — отдельный от категорий расхода */
+function dirFinanceIncomeCategories(){
+  dirGrid({title:'Категории приходов',arrKey:'finance_income_categories',table:'finance_income_categories',modalFn:financeIncomeCategoryModal,emptyText:'Нет категорий',
+    sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    cols:[{key:'name',label:'Название',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`}]});
+}
+function financeIncomeCategoryModal(id){const c=id?S.finance_income_categories.find(x=>x.id===id):{name:''};
+  showModal(id?'Категория прихода':'Новая категория прихода',`<div class="field"><label>Название</label><input id="fic_name" value="${esc(c.name)}"></div>`,
+    async()=>{const name=val('fic_name').trim();if(!name){toast('Укажите название');return false;}
+      if(id){const u=await dbUpdate('finance_income_categories',id,{name});if(!u)return false;Object.assign(S.finance_income_categories.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('finance_income_categories',{name});if(!u)return false;S.finance_income_categories.push(u);}
+      toast('Сохранено');dirFinanceIncomeCategories();return true;});}
 function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===id)||{}).name||'—';}
 let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 let finTab='entries'; // entries | summary
@@ -2989,7 +3014,7 @@ function renderFinance(){
   const head=`
     <div class="page-head"><div><h1>Финансы</h1><p>Учёт проводок по кассам и партнёрам</p></div>
       <div class="head-actions">
-        ${can('finance','edit')?`<button class="btn ghost" id="finKassaBtn">⚙ Кассы</button><button class="btn ghost" id="finCatBtn">⚙ Категории</button><button class="btn ghost" id="finPartnerBtn">⚙ Партнёры</button>`:''}
+        ${can('finance','edit')?`<button class="btn ghost" id="finKassaBtn">⚙ Кассы</button><button class="btn ghost" id="finCatBtn">⚙ Категории расходов</button><button class="btn ghost" id="finIncCatBtn">⚙ Категории приходов</button><button class="btn ghost" id="finPartnerBtn">⚙ Партнёры</button>`:''}
         ${can('finance','create')?'<button class="btn primary" id="finNew">＋ Новая проводка</button>':''}
       </div>
     </div>
@@ -3028,6 +3053,7 @@ function renderFinance(){
     if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
     if($('finKassaBtn'))$('finKassaBtn').onclick=()=>dirFinanceKassa();
     if($('finCatBtn'))$('finCatBtn').onclick=()=>dirFinanceCategories();
+  if($('finIncCatBtn'))$('finIncCatBtn').onclick=()=>dirFinanceIncomeCategories();
     if($('finPartnerBtn'))$('finPartnerBtn').onclick=()=>dirFinancePartners();
     return;
   }
@@ -3077,6 +3103,7 @@ function renderFinance(){
   if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
   if($('finKassaBtn'))$('finKassaBtn').onclick=()=>dirFinanceKassa();
   if($('finCatBtn'))$('finCatBtn').onclick=()=>dirFinanceCategories();
+  if($('finIncCatBtn'))$('finIncCatBtn').onclick=()=>dirFinanceIncomeCategories();
   if($('finPartnerBtn'))$('finPartnerBtn').onclick=()=>dirFinancePartners();
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
   $('main').querySelectorAll('[data-findel]').forEach(b=>b.onclick=()=>delFinanceEntry(b.dataset.findel));
@@ -3090,7 +3117,7 @@ function renderFinance(){
   if($('finfKassa'))$('finfKassa').onchange=e=>{finFilter.kassa=e.target.value;redraw();};
   if($('finfPartner'))$('finfPartner').onchange=e=>{finFilter.partner=e.target.value;redraw();};
   if($('finfType'))$('finfType').onchange=e=>{finFilter.type=e.target.value;redraw();};
-  bindSearchDropdown('finfCategory',(S.finance_categories||[]).map(c=>({id:c.id,name:c.name})),item=>{
+  bindSearchDropdown('finfCategory',[...(S.finance_categories||[]),...(S.finance_income_categories||[])].map(c=>({id:c.id,name:c.name})),item=>{
     finFilter.category=item?item.id:'';redraw();
   });
   const finfCatEl=$('finfCategory');
@@ -3112,7 +3139,7 @@ function financeEntryModal(id){
         <option value="expense" ${e&&e.type==='expense'?'selected':''}>Расход</option>
       </select></div>
       <div class="field"><label>Сумма (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="fe_amount" value="${e&&e.amount!=null?esc(e.amount):''}" placeholder="0"></div>
-      <div class="field"><label>Категория</label><input id="fe_cat" autocomplete="off" placeholder="Начните печатать…" value="${e&&e.category_id?esc(financeCategoryName(e.category_id)):''}"><small style="color:var(--muted);font-size:12px">Если такой категории ещё нет — впишите новое название, она создастся сама</small></div>
+      <div class="field"><label>Категория <span id="fe_cat_hint" style="color:var(--muted);font-weight:400">(${(!e||e.type==='income')?'приход':'расход'})</span></label><input id="fe_cat" autocomplete="off" placeholder="Начните печатать…" value="${e&&e.category_id?esc(financeCategoryName(e.category_id)):''}"><small style="color:var(--muted);font-size:12px">Если такой категории ещё нет — впишите новое название, она создастся сама</small></div>
       <div class="field full"><label>Комментарий</label><textarea id="fe_comment" rows="2">${esc(e?e.comment||'':'')}</textarea></div>
     </div>
     ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—'}${e.partner_id?` · Остаток партнёра: ${e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—'}`:''}</div>`:''}`;
@@ -3122,16 +3149,19 @@ function financeEntryModal(id){
     const amount=parseFloat(val('fe_amount'));if(!amount||amount<=0){toast('Укажите сумму больше нуля');return false;}
     const type=val('fe_type');
     const partnerId=val('fe_partner')||null;
-    // категория — по введённому названию ищем совпадение (без учёта регистра); если такой ещё
-    // нет — создаём новую категорию тут же, не нужно отдельно заходить в «⚙ Категории»
+    // категория — по введённому названию ищем совпадение (без учёта регистра) в таблице,
+    // соответствующей выбранному Типу (расход/приход — это РАЗНЫЕ справочники); если такой
+    // категории ещё нет — создаём её тут же, в нужной таблице, не нужно отдельно заходить в «⚙»
     const catName=val('fe_cat').trim();
+    const catTable=type==='income'?'finance_income_categories':'finance_categories';
+    const catArrKey=type==='income'?'finance_income_categories':'finance_categories';
     let categoryId=null;
     if(catName){
-      const found=(S.finance_categories||[]).find(c=>(c.name||'').trim().toLowerCase()===catName.toLowerCase());
+      const found=(S[catArrKey]||[]).find(c=>(c.name||'').trim().toLowerCase()===catName.toLowerCase());
       if(found)categoryId=found.id;
       else{
-        const nc=await dbInsert('finance_categories',{name:catName});
-        if(nc){if(!S.finance_categories)S.finance_categories=[];S.finance_categories.push(nc);categoryId=nc.id;}
+        const nc=await dbInsert(catTable,{name:catName});
+        if(nc){if(!S[catArrKey])S[catArrKey]=[];S[catArrKey].push(nc);categoryId=nc.id;}
       }
     }
     const row={
@@ -3157,7 +3187,14 @@ function financeEntryModal(id){
     toast('Сохранено');renderFinance();return true;
   });
   setTimeout(()=>{
-    bindSearchDropdown('fe_cat',(S.finance_categories||[]).map(c=>({id:c.id,name:c.name})));
+    const catList=()=>(val('fe_type')==='income'?(S.finance_income_categories||[]):(S.finance_categories||[])).map(c=>({id:c.id,name:c.name}));
+    bindSearchDropdown('fe_cat',catList());
+    const typeEl=$('fe_type');
+    if(typeEl)typeEl.onchange=()=>{
+      $('fe_cat').value=''; // при смене типа старая категория (из другого справочника) больше не подходит
+      if($('fe_cat_hint'))$('fe_cat_hint').textContent=`(${typeEl.value==='income'?'приход':'расход'})`;
+      bindSearchDropdown('fe_cat',catList());
+    };
   },0);
 }
 async function delFinanceEntry(id){
@@ -3185,7 +3222,7 @@ function financeKassaModal(id){const k=id?S.finance_kassa.find(x=>x.id===id):{na
       toast('Сохранено');dirFinanceKassa();return true;});}
 /* Справочник категорий */
 function dirFinanceCategories(){
-  dirGrid({title:'Категории',arrKey:'finance_categories',table:'finance_categories',modalFn:financeCategoryModal,emptyText:'Нет категорий',
+  dirGrid({title:'Категории расходов',arrKey:'finance_categories',table:'finance_categories',modalFn:financeCategoryModal,emptyText:'Нет категорий',
     sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
     cols:[{key:'name',label:'Название',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`}]});
 }
@@ -8166,7 +8203,7 @@ function renderSettings(){
     ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
     ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
     ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки'],
-    ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории'],['fin_partners','Финансы · Партнёры']];
+    ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории расходов'],['fin_income_categories','Финансы · Категории приходов'],['fin_partners','Финансы · Партнёры']];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
     <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
@@ -8175,7 +8212,7 @@ function renderSettings(){
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
-    fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_partners:dirFinancePartners};
+    fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners};
   (map[S.dir]||dirCities)();
 }
 // отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
