@@ -627,7 +627,6 @@
   .fin-col-resize{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:5}
   .fin-col-resize:hover,.fin-col-resize.fin-resizing{background:rgba(37,70,201,.25)}
   .fin-table{table-layout:fixed}
-  .fin-table td,.fin-table th{overflow:hidden;text-overflow:ellipsis}
   .fin-new-row td{background:#fbfbfe;padding-top:10px;padding-bottom:10px}
   .fin-new-row input{width:100%;box-sizing:border-box;padding:11px 13px;font-size:14px;
     border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink)}
@@ -3040,7 +3039,7 @@ let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 // без ₸ — используется и в конфигурации колонок (FIN_COLUMNS), и внутри renderFinance
 const fmtNum=n=>Math.round(n||0).toLocaleString('ru-RU');
 const FIN_COLUMNS=[
-  {key:'date',label:'Дата',sortable:'date',width:120,
+  {key:'date',label:'Дата',sortable:'date',width:150,
     cell:e=>`<td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>`,
     newCell:()=>`<td data-label="Дата"><input type="date" id="fen_date" value="${localToday()}"></td>`},
   {key:'kassa',label:'Касса',width:170,
@@ -3193,7 +3192,7 @@ function renderFinance(){
         ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
       </div>
       <div class="table-scroll">
-      <table class="resp-table fin-table" id="finTable"><colgroup>${finColumnsInOrder().map(c=>`<col style="width:${finColWidth(c.key)}px">`).join('')}<col style="width:170px"></colgroup>
+      <table class="resp-table fin-table" id="finTable"><colgroup>${finColumnsInOrder().map(c=>`<col style="width:${finColWidth(c.key)}px">`).join('')}<col style="width:220px"></colgroup>
       <thead><tr>
         ${finColumnsInOrder().map(c=>`<th draggable="true" class="fin-th${c.sortable?' fin-sortable':''}" data-finkey="${c.key}" ${c.sortable?`data-finsort="${c.sortable}"`:''} title="Перетащите — переставить столбец${c.sortable?' · нажмите — сортировать':''}">${esc(c.label)}${finSort.col===c.sortable?(finSort.dir===1?' ▲':' ▼'):''}<span class="fin-col-resize" data-finresize="${c.key}"></span></th>`).join('')}
         <th></th>
