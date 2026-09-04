@@ -3137,12 +3137,8 @@ function financeEntryModal(id){
       <div class="field"><label>Дата <span style="color:var(--rust)">*</span></label><input type="date" id="fe_date" value="${esc(e?(e.entry_date||'').slice(0,10):localToday())}"></div>
       <div class="field"><label>Касса <span style="color:var(--rust)">*</span></label><input id="fe_kassa" autocomplete="off" placeholder="Начните печатать…" value="${e&&e.kassa_id?esc(financeKassaName(e.kassa_id)):''}" data-selid="${e&&e.kassa_id?esc(e.kassa_id):''}"></div>
       <div class="field"><label>Партнёр</label><input id="fe_partner" autocomplete="off" placeholder="— без партнёра — (необязательно)" value="${e&&e.partner_id?esc(financePartnerName(e.partner_id)):''}" data-selid="${e&&e.partner_id?esc(e.partner_id):''}"></div>
-      <div class="field"><label>Тип <span style="color:var(--rust)">*</span></label><select id="fe_type">
-        <option value="income" ${(!e||e.type==='income')?'selected':''}>Приход</option>
-        <option value="expense" ${e&&e.type==='expense'?'selected':''}>Расход</option>
-      </select></div>
+      <div class="field"><label>Категория <span style="color:var(--rust)">*</span> <span id="fe_cat_hint" style="color:var(--muted);font-weight:400"></span></label><input id="fe_cat" autocomplete="off" placeholder="Начните печатать…" value="${e&&e.category_id?esc(financeCategoryName(e.category_id)):''}" data-selid="${e&&e.category_id?esc(e.category_id):''}" data-seltype="${e?esc(e.type):''}"><small style="color:var(--muted);font-size:12px">Тип (приход/расход) определится сам — по выбранной категории. Если нужной категории ещё нет — сначала добавьте её через «⚙ Категории расходов»/«⚙ Категории приходов».</small></div>
       <div class="field"><label>Сумма (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="fe_amount" value="${e&&e.amount!=null?esc(e.amount):''}" placeholder="0"></div>
-      <div class="field"><label>Категория <span id="fe_cat_hint" style="color:var(--muted);font-weight:400">(${(!e||e.type==='income')?'приход':'расход'})</span></label><input id="fe_cat" autocomplete="off" placeholder="Начните печатать…" value="${e&&e.category_id?esc(financeCategoryName(e.category_id)):''}"><small style="color:var(--muted);font-size:12px">Если такой категории ещё нет — впишите новое название, она создастся сама</small></div>
       <div class="field full"><label>Комментарий</label><textarea id="fe_comment" rows="2">${esc(e?e.comment||'':'')}</textarea></div>
     </div>
     ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—'}${e.partner_id?` · Остаток партнёра: ${e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—'}`:''}</div>`:''}`;
@@ -3151,23 +3147,13 @@ function financeEntryModal(id){
     const kassaId=($('fe_kassa')||{}).dataset&&$('fe_kassa').dataset.selid;
     if(!kassaId){toast('Выберите кассу из списка (начните печатать и выберите вариант)');return false;}
     const amount=parseFloat(val('fe_amount'));if(!amount||amount<=0){toast('Укажите сумму больше нуля');return false;}
-    const type=val('fe_type');
     const partnerId=(($('fe_partner')||{}).dataset&&$('fe_partner').dataset.selid)||null;
-    // категория — по введённому названию ищем совпадение (без учёта регистра) в таблице,
-    // соответствующей выбранному Типу (расход/приход — это РАЗНЫЕ справочники); если такой
-    // категории ещё нет — создаём её тут же, в нужной таблице, не нужно отдельно заходить в «⚙»
-    const catName=val('fe_cat').trim();
-    const catTable=type==='income'?'finance_income_categories':'finance_categories';
-    const catArrKey=type==='income'?'finance_income_categories':'finance_categories';
-    let categoryId=null;
-    if(catName){
-      const found=(S[catArrKey]||[]).find(c=>(c.name||'').trim().toLowerCase()===catName.toLowerCase());
-      if(found)categoryId=found.id;
-      else{
-        const nc=await dbInsert(catTable,{name:catName});
-        if(nc){if(!S[catArrKey])S[catArrKey]=[];S[catArrKey].push(nc);categoryId=nc.id;}
-      }
-    }
+    // категория обязательна — и по ней же определяется Тип (приход/расход): смотря, из какого
+    // справочника выбрана категория, из того и тип. Отдельного поля «Тип» в форме больше нет.
+    const catEl=$('fe_cat');
+    const categoryId=catEl.dataset.selid||'';
+    const type=catEl.dataset.seltype||'';
+    if(!categoryId||!type){toast('Выберите категорию из списка — по ней определится приход это или расход');return false;}
     const row={
       entry_date:date,kassa_id:kassaId,partner_id:partnerId,type,amount,
       category_id:categoryId,comment:val('fe_comment').trim()||null,
@@ -3191,16 +3177,23 @@ function financeEntryModal(id){
     toast('Сохранено');renderFinance();return true;
   });
   setTimeout(()=>{
-    const catList=()=>(val('fe_type')==='income'?(S.finance_income_categories||[]):(S.finance_categories||[])).map(c=>({id:c.id,name:c.name}));
-    bindSearchDropdown('fe_cat',catList());
+    // объединённый список: категории расхода и прихода вместе, каждая помечена своим типом —
+    // по выбору сразу понятно, приход это или расход, без отдельного поля «Тип»
+    const combinedCats=[
+      ...(S.finance_categories||[]).map(c=>({id:c.id,name:c.name,type:'expense'})),
+      ...(S.finance_income_categories||[]).map(c=>({id:c.id,name:c.name,type:'income'})),
+    ];
+    bindSearchDropdown('fe_cat',combinedCats,item=>{
+      const catEl=$('fe_cat');
+      catEl.dataset.seltype=item?item.type:'';
+      if($('fe_cat_hint'))$('fe_cat_hint').textContent=item?`(${item.type==='income'?'приход':'расход'})`:'';
+    });
+    // печатают заново — прежний тип тоже больше не действует, пока не выберут категорию снова
+    $('fe_cat').addEventListener('input',()=>{$('fe_cat').dataset.seltype='';if($('fe_cat_hint'))$('fe_cat_hint').textContent='';});
+    // при открытии формы редактирования — сразу показываем тип уже сохранённой проводки
+    if(e&&$('fe_cat_hint'))$('fe_cat_hint').textContent=`(${e.type==='income'?'приход':'расход'})`;
     bindSearchDropdown('fe_kassa',(S.finance_kassa||[]).map(k=>({id:k.id,name:k.name})));
     bindSearchDropdown('fe_partner',(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>({id:p.id,name:p.name})));
-    const typeEl=$('fe_type');
-    if(typeEl)typeEl.onchange=()=>{
-      $('fe_cat').value=''; // при смене типа старая категория (из другого справочника) больше не подходит
-      if($('fe_cat_hint'))$('fe_cat_hint').textContent=`(${typeEl.value==='income'?'приход':'расход'})`;
-      bindSearchDropdown('fe_cat',catList());
-    };
   },0);
 }
 async function delFinanceEntry(id){
