@@ -3050,7 +3050,7 @@ let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 const fmtNum=n=>Math.round(n||0).toLocaleString('ru-RU');
 const FIN_COLUMNS=[
   {key:'date',label:'Дата',sortable:'date',width:150,
-    cell:e=>`<td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>`,
+    cell:e=>`<td data-label="Дата">${esc(fmtDate(e.entry_date))}${e.created_at?`<small class="cell-time">${esc((fmtLogTime(e.created_at)||{}).time||'')}</small>`:''}</td>`,
     newCell:()=>`<td data-label="Дата"><input type="date" id="fen_date" value="${localToday()}"></td>`},
   {key:'kassa',label:'Касса',width:170,
     cell:e=>`<td data-label="Касса">${esc(financeKassaName(e.kassa_id))}</td>`,
@@ -3236,7 +3236,7 @@ function renderFinance(){
         <select id="finfType"><option value="">Тип: все</option><option value="income" ${finFilter.type==='income'?'selected':''}>Приход</option><option value="expense" ${finFilter.type==='expense'?'selected':''}>Расход</option></select>
         <input id="finfCategory" autocomplete="off" placeholder="Категория: поиск…" value="${finFilter.category?esc(financeCategoryName(finFilter.category)):''}" style="position:relative">
         <button class="btn ghost sm" id="finfToday">Сегодня</button>
-        ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
+        ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category||finSort.col)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
       </div>
       <div class="table-scroll">
       <table class="resp-table fin-table" id="finTable"><colgroup>${finColumnsInOrder().map(c=>`<col style="width:${finColWidth(c.key)}px">`).join('')}<col style="width:220px"></colgroup>
@@ -3405,7 +3405,7 @@ function renderFinance(){
   bindFilterSearch('finfPartner',(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>({id:p.id,name:p.name})),'partner');
   bindFilterSearch('finfCategory',[...(S.finance_categories||[]),...(S.finance_income_categories||[])].map(c=>({id:c.id,name:c.name})),'category');
   if($('finfToday'))$('finfToday').onclick=()=>{finFilter.dateFrom=localToday();finFilter.dateTo=localToday();redraw();};
-  if($('finfClear'))$('finfClear').onclick=()=>{finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};redraw();};
+  if($('finfClear'))$('finfClear').onclick=()=>{finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};finSort={col:null,dir:1};redraw();};
 }
 function financeEntryModal(id){
   const e=id?(S.finance_entries||[]).find(x=>x.id===id):null;
