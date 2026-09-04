@@ -3609,6 +3609,7 @@ function renderWhProductsPager(total,totalPages,startIdx,shownCount){
   bar.id='whProdPager';bar.className='orders-pager';
   {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
+    <button class="op-btn" id="whProdRefreshBtn" title="Подтянуть свежие данные">🔄</button>
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
     <div class="op-perpage">
       <span>На странице:</span>
@@ -3627,6 +3628,12 @@ function renderWhProductsPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-whprodpage="last" ${whProdPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
   document.body.appendChild(bar);
+  const whProdRefreshBtn=bar.querySelector('#whProdRefreshBtn');
+  if(whProdRefreshBtn)whProdRefreshBtn.onclick=async()=>{
+    whProdRefreshBtn.disabled=true;whProdRefreshBtn.textContent='…';
+    try{await refreshForTab(S.tab);renderWhProducts();toast('Обновлено');}
+    finally{if(whProdRefreshBtn){whProdRefreshBtn.disabled=false;whProdRefreshBtn.textContent='🔄';}}
+  };
   const ppBtn=bar.querySelector('#whProdPerPageBtn'), ppMenu=bar.querySelector('#whProdPerPageMenu');
   if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
   bar.querySelectorAll('[data-whprodpp]').forEach(b=>b.onclick=()=>{
@@ -6447,6 +6454,7 @@ function renderPickupsPager(total,totalPages,startIdx,shownCount){
   bar.id='pickupsPager';bar.className='orders-pager';
   {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
+    <button class="op-btn" id="ppRefreshBtn" title="Подтянуть свежие данные">🔄</button>
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
     <div class="op-perpage">
       <span>На странице:</span>
@@ -6465,6 +6473,12 @@ function renderPickupsPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-ppage="last" ${pickupsPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
   document.body.appendChild(bar);
+  const ppRefreshBtn=bar.querySelector('#ppRefreshBtn');
+  if(ppRefreshBtn)ppRefreshBtn.onclick=async()=>{
+    ppRefreshBtn.disabled=true;ppRefreshBtn.textContent='…';
+    try{await refreshForTab(S.tab);drawPickups();toast('Обновлено');}
+    finally{if(ppRefreshBtn){ppRefreshBtn.disabled=false;ppRefreshBtn.textContent='🔄';}}
+  };
   const ppBtn=bar.querySelector('#ppPerPageBtn'), ppMenu=bar.querySelector('#ppPerPageMenu');
   if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
   bar.querySelectorAll('[data-ppp]').forEach(b=>b.onclick=()=>{
@@ -7914,6 +7928,7 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
   bar.id='ordersPager';bar.className='orders-pager';
   {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
+    <button class="op-btn" id="opRefreshBtn" title="Подтянуть свежие данные">🔄</button>
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
     <div class="op-perpage">
       <span>На странице:</span>
@@ -7932,6 +7947,12 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-opage="last" ${ordersPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
   document.body.appendChild(bar);
+  const opRefreshBtn=bar.querySelector('#opRefreshBtn');
+  if(opRefreshBtn)opRefreshBtn.onclick=async()=>{
+    opRefreshBtn.disabled=true;opRefreshBtn.textContent='…';
+    try{await refreshForTab(S.tab);drawOrders();toast('Обновлено');}
+    finally{if(opRefreshBtn){opRefreshBtn.disabled=false;opRefreshBtn.textContent='🔄';}}
+  };
   // выбор количества на странице
   const ppBtn=bar.querySelector('#opPerPageBtn'), ppMenu=bar.querySelector('#opPerPageMenu');
   if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
@@ -9971,6 +9992,7 @@ function renderInboundPager(total,totalPages,startIdx,shownCount){
   bar.id='inboundPager';bar.className='orders-pager';
   {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
+    <button class="op-btn" id="inbFloatRefreshBtn" title="Подтянуть свежие данные">🔄</button>
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
     <div class="op-perpage">
       <span>На странице:</span>
@@ -9989,6 +10011,12 @@ function renderInboundPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-inbpage="last" ${inbPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
   document.body.appendChild(bar);
+  const inbFloatRefreshBtn=bar.querySelector('#inbFloatRefreshBtn');
+  if(inbFloatRefreshBtn)inbFloatRefreshBtn.onclick=async()=>{
+    inbFloatRefreshBtn.disabled=true;inbFloatRefreshBtn.textContent='…';
+    try{await loadInbound();drawInboundOrders();toast('Обновлено');}
+    finally{if(inbFloatRefreshBtn){inbFloatRefreshBtn.disabled=false;inbFloatRefreshBtn.textContent='🔄';}}
+  };
   const ppBtn=bar.querySelector('#inbPerPageBtn'), ppMenu=bar.querySelector('#inbPerPageMenu');
   if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
   bar.querySelectorAll('[data-inbpp]').forEach(b=>b.onclick=async()=>{
