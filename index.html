@@ -550,6 +550,9 @@
   #inboundTable .inb-th-dragging{opacity:.4}
   #inboundTable .inb-th-over{box-shadow:inset 2px 0 0 var(--rust)}
   #inboundTable .inb-th-filtered{color:var(--rust)}
+  #inboundTable .inb-col-resize{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:5}
+  #inboundTable .inb-col-resize:hover,#inboundTable .inb-col-resize.inb-resizing{background:rgba(37,70,201,.25)}
+  .inb-table{table-layout:fixed}
   .inb-col-filter-pop{position:absolute;top:100%;left:0;margin-top:4px;z-index:9000;filter:drop-shadow(0 10px 24px rgba(20,30,60,.25))}
   .inb-col-filter-box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;gap:6px;align-items:center}
   .inb-col-filter-box input{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;width:200px}
@@ -3034,6 +3037,8 @@ function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===
 let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 // столбцы таблицы проводок — можно перетаскивать (менять порядок) и тянуть за правый край
 // (менять ширину), как в Excel. Порядок и ширины запоминаются в браузере.
+// без ₸ — используется и в конфигурации колонок (FIN_COLUMNS), и внутри renderFinance
+const fmtNum=n=>Math.round(n||0).toLocaleString('ru-RU');
 const FIN_COLUMNS=[
   {key:'date',label:'Дата',sortable:'date',width:120,
     cell:e=>`<td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>`,
@@ -3097,7 +3102,6 @@ async function refreshFinanceData(){
 }
 function renderFinance(){
   if(!canMod('finance')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
-  const fmtNum=n=>Math.round(n||0).toLocaleString('ru-RU'); // для грида — без ₸, по просьбе
   const all=[...(S.finance_entries||[])].sort((a,b)=>(b.entry_date||'').localeCompare(a.entry_date||'')||(b.created_at||'').localeCompare(a.created_at||''));
   const rows=all.filter(e=>{
     if(finFilter.dateFrom&&(e.entry_date||'')<finFilter.dateFrom)return false;
@@ -9811,6 +9815,12 @@ let inbColOrder=(()=>{try{const saved=JSON.parse(localStorage.getItem('inbColOrd
   if(Array.isArray(saved)&&saved.length===INB_COLUMNS.length&&saved.every(k=>INB_COLUMNS.some(c=>c.key===k)))return saved;}catch(e){}
   return INB_COLUMNS.map(c=>c.key);})();
 function inbColumnsInOrder(){return inbColOrder.map(k=>INB_COLUMNS.find(c=>c.key===k)).filter(Boolean);}
+// ширины столбцов — можно тянуть за правый край мышкой, запоминаем в браузере
+const INB_COL_DEFAULT_WIDTHS={external_id:160,created_at:130,client:150,phone:150,city:110,index:90,
+  weight:90,amount:110,delivery:130,shop:170,ket_status:170,return_status:170,calls_total:110,
+  calls_today:120,logistics_operator:170,sender_ip:150,kz_code:150,stock:110};
+let inbColWidths=(()=>{try{return JSON.parse(localStorage.getItem('inbColWidths')||'{}')||{};}catch(e){return {};}})();
+function inbColWidth(key){return inbColWidths[key]||INB_COL_DEFAULT_WIDTHS[key]||140;}
 // фильтр по клику на конкретную колонку — {key: текст фильтра}
 let inbColFilters={};
 function inboundColFiltersActive(){return Object.values(inbColFilters).some(v=>v);}
@@ -9957,10 +9967,10 @@ function drawInboundOrders(){
         <input type="date" id="inbdateto" value="${esc(inbFilter.dateTo)}" title="По дату">
         ${anyFilter?`<button class="btn ghost sm" id="inbclear" style="align-self:flex-end">Сбросить фильтры</button>`:''}
       </div>
-      <div class="table-scroll" id="inboundTable"><table class="resp-table"><thead><tr>
+      <div class="table-scroll" id="inboundTable"><table class="resp-table inb-table"><colgroup>${admin?'<col style="width:34px">':''}${inbColumnsInOrder().map(c=>`<col style="width:${inbColWidth(c.key)}px">`).join('')}<col style="width:160px"></colgroup><thead><tr>
         ${admin?'<th style="width:34px"><input type="checkbox" id="inbChkAll" title="Выбрать все"></th>':''}
         ${inbColumnsInOrder().map(c=>{const active=c.key==='delivery'?!!inbFilter.delivery:!!inbColFilters[c.key];
-          return `<th draggable="true" class="inb-th ${active?'inb-th-filtered':''}" data-colkey="${c.key}" title="Перетащите, чтобы переставить · нажмите, чтобы найти по столбцу">${esc(c.label)}${active?' 🔎':''}</th>`;}).join('')}
+          return `<th draggable="true" class="inb-th ${active?'inb-th-filtered':''}" data-colkey="${c.key}" title="Перетащите, чтобы переставить · нажмите, чтобы найти по столбцу">${esc(c.label)}${active?' 🔎':''}<span class="inb-col-resize" data-inbresize="${c.key}"></span></th>`;}).join('')}
         <th></th>
       </tr></thead><tbody>
       ${rows.length?rows.map(o=>{
@@ -10060,7 +10070,11 @@ function drawInboundOrders(){
   // перетаскивание заголовков столбцов мышкой — меняет порядок колонок, запоминается в браузере
   let _inbDragKey=null,_inbDidDrag=false;
   $('main').querySelectorAll('.inb-th').forEach(th=>{
-    th.ondragstart=e=>{_inbDragKey=th.dataset.colkey;_inbDidDrag=false;e.dataTransfer.effectAllowed='move';th.classList.add('inb-th-dragging');};
+    th.ondragstart=e=>{
+      // если тянут именно за ручку изменения ширины — это не перетаскивание столбца
+      if(e.target.classList.contains('inb-col-resize')){e.preventDefault();return;}
+      _inbDragKey=th.dataset.colkey;_inbDidDrag=false;e.dataTransfer.effectAllowed='move';th.classList.add('inb-th-dragging');
+    };
     th.ondragend=()=>{th.classList.remove('inb-th-dragging');$('main').querySelectorAll('.inb-th').forEach(x=>x.classList.remove('inb-th-over'));};
     th.ondragover=e=>{e.preventDefault();if(th.dataset.colkey!==_inbDragKey)th.classList.add('inb-th-over');};
     th.ondragleave=()=>th.classList.remove('inb-th-over');
@@ -10079,6 +10093,33 @@ function drawInboundOrders(){
     th.onclick=()=>{
       if(_inbDidDrag){_inbDidDrag=false;return;}
       openInboundColFilter(th,th.dataset.colkey);
+    };
+    // ручка изменения ширины — тянем мышкой вправо/влево, как в Excel
+    const handle=th.querySelector('.inb-col-resize');
+    if(handle)handle.onmousedown=ev=>{
+      ev.preventDefault();ev.stopPropagation();
+      const key=handle.dataset.inbresize;
+      const startX=ev.clientX;const startW=inbColWidth(key);
+      handle.classList.add('inb-resizing');
+      const onMove=mv=>{
+        const w=Math.max(70,startW+(mv.clientX-startX));
+        inbColWidths[key]=w;
+        const table=document.querySelector('#inboundTable table');
+        if(table){
+          const idx=inbColumnsInOrder().findIndex(c=>c.key===key);
+          const offset=admin?1:0; // если есть чекбокс-колонка — сдвиг на 1
+          const col=table.querySelector('colgroup').children[idx+offset];
+          if(col)col.style.width=w+'px';
+        }
+      };
+      const onUp=()=>{
+        handle.classList.remove('inb-resizing');
+        document.removeEventListener('mousemove',onMove);
+        document.removeEventListener('mouseup',onUp);
+        try{localStorage.setItem('inbColWidths',JSON.stringify(inbColWidths));}catch(e3){}
+      };
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
     };
   });
 }
