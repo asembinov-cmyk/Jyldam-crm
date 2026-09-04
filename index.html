@@ -3026,6 +3026,18 @@ function bindSearchDropdown(inputId,items,onPick){
 }
 function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||{}).name||'—';}
 function isKassaTechnical(id){return !!((S.finance_kassa||[]).find(k=>k.id===id)||{}).is_technical;}
+// текущий остаток — берём из САМОЙ СВЕЖЕЙ (по дате, затем по времени) проводки этой кассы/партнёра;
+// если проводок ещё не было — остаток 0
+function currentKassaBalance(kassaId){
+  const rows=(S.finance_entries||[]).filter(e=>e.kassa_id===kassaId)
+    .sort((a,b)=>(b.entry_date||'').localeCompare(a.entry_date||'')||(b.created_at||'').localeCompare(a.created_at||''));
+  return rows.length?(rows[0].kassa_balance||0):0;
+}
+function currentPartnerBalance(partnerId){
+  const rows=(S.finance_entries||[]).filter(e=>e.partner_id===partnerId)
+    .sort((a,b)=>(b.entry_date||'').localeCompare(a.entry_date||'')||(b.created_at||'').localeCompare(a.created_at||''));
+  return rows.length?(rows[0].partner_balance||0):0;
+}
 function financeCategoryName(id){
   const exp=(S.finance_categories||[]).find(c=>c.id===id);if(exp)return exp.name;
   const inc=(S.finance_income_categories||[]).find(c=>c.id===id);if(inc)return inc.name;
@@ -3196,13 +3208,11 @@ function renderFinance(){
     <div class="panel">
       <div class="panel-head"><h2>Общая сводка по партнёрам</h2><span class="count">${summaryRows.length}</span></div>
       <div class="table-scroll">
-      <table class="resp-table"><thead><tr><th>Партнёр</th><th>Текущий остаток</th><th>Проводок</th><th>Последняя проводка</th></tr></thead><tbody>
+      <table class="resp-table"><thead><tr><th>Партнёр</th><th>Текущий остаток</th></tr></thead><tbody>
       ${summaryPageRows.length?summaryPageRows.map(s=>`<tr>
         <td data-label="Партнёр"><strong>${esc(s.partner.name)}</strong></td>
         <td data-label="Текущий остаток" style="font-weight:700;color:${s.balance>0?'#1a7f37':(s.balance<0?'#c0392b':'inherit')}">${fmtNum(s.balance)}</td>
-        <td data-label="Проводок">${s.count}</td>
-        <td data-label="Последняя проводка">${s.lastDate?esc(fmtDate(s.lastDate)):'—'}</td>
-      </tr>`).join(''):`<tr><td colspan="4"><div class="empty"><div class="big">Нет партнёров</div>Добавьте партнёра через «⚙ Партнёры».</div></td></tr>`}
+      </tr>`).join(''):`<tr><td colspan="2"><div class="empty"><div class="big">Нет партнёров</div>Добавьте партнёра через «⚙ Партнёры».</div></td></tr>`}
       </tbody></table></div>
       <div class="simple-pager">
         <button class="btn sm ghost" id="finRefresh" title="Подтянуть свежие данные — полезно, если с модулем работает ещё кто-то">🔄 Обновить</button>
@@ -3227,6 +3237,7 @@ function renderFinance(){
       <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span></div>
       <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
         ${can('finance','create')?'<button class="btn primary sm" id="finNew">＋ Новая проводка</button>':''}
+        ${can('finance','create')?'<button class="btn ghost sm" id="finSetBalance">🎯 Задать остаток</button>':''}
         <button class="btn btn-excel sm" id="finExport">⬇ Скачать Excel</button>
       </div>
       <div class="ic-filters">
@@ -3272,6 +3283,7 @@ function renderFinance(){
   $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
   if($('finRefresh'))$('finRefresh').onclick=refreshFinanceData;
   if($('finNew'))$('finNew').onclick=()=>{finAddingNew=true;renderFinance();};
+  if($('finSetBalance'))$('finSetBalance').onclick=()=>financeSetBalanceModal();
   if($('finExport'))$('finExport').onclick=()=>exportFinanceToExcel(rows);
   if(can('finance','edit'))$('main').querySelectorAll('[data-finrow]').forEach(tr=>tr.ondblclick=e=>{
     if(e.target.closest('button,input,select,a'))return;
@@ -3407,6 +3419,84 @@ function renderFinance(){
   bindFilterSearch('finfCategory',[...(S.finance_categories||[]),...(S.finance_income_categories||[])].map(c=>({id:c.id,name:c.name})),'category');
   if($('finfToday'))$('finfToday').onclick=()=>{finFilter.dateFrom=localToday();finFilter.dateTo=localToday();redraw();};
   if($('finfClear'))$('finfClear').onclick=()=>{finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};finSort={col:null,dir:1};redraw();};
+}
+function financeSetBalanceModal(){
+  const body=`
+    <div class="form-grid">
+      <div class="field"><label>Что задаём <span style="color:var(--rust)">*</span></label><select id="fsb_target">
+        <option value="kassa">Остаток кассы</option>
+        <option value="partner">Остаток партнёра</option>
+      </select></div>
+      <div class="field"><label>Дата <span style="color:var(--rust)">*</span></label><input type="date" id="fsb_date" value="${localToday()}"></div>
+      <div class="field"><label>Касса <span style="color:var(--rust)">*</span></label><input id="fsb_kassa" autocomplete="off" placeholder="Начните печатать…"><small style="color:var(--muted);font-size:12px">Проводка всё равно создаётся через кассу — например, через техническую «Ввод»</small></div>
+      <div class="field" id="fsb_partner_field"><label>Партнёр <span style="color:var(--rust)">*</span></label><input id="fsb_partner" autocomplete="off" placeholder="Начните печатать…"></div>
+      <div class="field"><label>Целевой остаток (₸) <span style="color:var(--rust)">*</span></label><input type="number" step="0.01" id="fsb_amount" placeholder="например -15000"><small style="color:var(--muted);font-size:12px">Можно отрицательное число. Сумма прихода/расхода посчитается сама — как разница между текущим остатком и этим числом.</small></div>
+      <div class="field"><label>Категория <span style="color:var(--rust)">*</span></label><input id="fsb_cat" autocomplete="off" placeholder="Начните печатать…"><small style="color:var(--muted);font-size:12px">Например «Корректировка остатка» — если такой категории ещё нет, сначала добавьте через «⚙ Категории».</small></div>
+      <div class="field full"><label>Комментарий</label><textarea id="fsb_comment" rows="2" placeholder="например: сверка на 04.09"></textarea></div>
+    </div>
+    <div class="hint" id="fsb_preview" style="margin-top:6px">Выберите кассу/партнёра — тут покажется, какая проводка получится.</div>`;
+  showModal('Задать остаток',body,async()=>{
+    const target=val('fsb_target');
+    const date=val('fsb_date');if(!date){toast('Укажите дату');return false;}
+    const kassaId=($('fsb_kassa')||{}).dataset&&$('fsb_kassa').dataset.selid;
+    if(!kassaId){toast('Выберите кассу из списка');return false;}
+    const partnerId=($('fsb_partner')||{}).dataset&&$('fsb_partner').dataset.selid;
+    if(target==='partner'&&!partnerId){toast('Выберите партнёра из списка');return false;}
+    const targetVal=val('fsb_amount').trim();
+    if(targetVal===''||isNaN(parseFloat(targetVal))){toast('Укажите целевой остаток');return false;}
+    const targetBalance=parseFloat(targetVal);
+    const current=target==='kassa'?currentKassaBalance(kassaId):currentPartnerBalance(partnerId);
+    const diff=targetBalance-current;
+    if(Math.abs(diff)<0.005){toast('Остаток уже такой — менять нечего');return false;}
+    const type=diff>0?'income':'expense';
+    const amount=Math.abs(diff);
+    const catEl=$('fsb_cat');
+    const categoryId=catEl.dataset.selid||'';
+    const catType=catEl.dataset.seltype||'';
+    if(!categoryId){toast('Выберите категорию из списка');return false;}
+    // категория для корректировки может быть из любого справочника (расход/приход) — тип самой
+    // проводки уже определён разницей остатков, а не категорией (в отличие от обычной проводки)
+    const row={
+      entry_date:date,kassa_id:kassaId,partner_id:target==='partner'?partnerId:(partnerId||null),
+      type,amount,category_id:categoryId,
+      comment:val('fsb_comment').trim()||`Корректировка остатка ${target==='kassa'?'кассы':'партнёра'} до ${targetBalance.toLocaleString('ru-RU')} ₸`,
+      manager_id:(S.me&&S.me.id)||null,manager_name:(S.me&&(S.me.full_name||S.me.email))||'',
+    };
+    const u=await dbInsert('finance_entries',row);if(!u)return false;
+    if(!S.finance_entries)S.finance_entries=[];S.finance_entries.push(u);
+    await recalcKassaBalances(kassaId);
+    if(row.partner_id)await recalcPartnerBalances(row.partner_id);
+    toast('Остаток обновлён');renderFinance();return true;
+  });
+  setTimeout(()=>{
+    const targetEl=$('fsb_target');
+    const partnerField=$('fsb_partner_field');
+    const updatePartnerVisibility=()=>{if(partnerField)partnerField.style.display=targetEl.value==='partner'?'':'none';};
+    updatePartnerVisibility();
+    const updatePreview=()=>{
+      const prev=$('fsb_preview');if(!prev)return;
+      const target=targetEl.value;
+      const kassaId=($('fsb_kassa')||{}).dataset&&$('fsb_kassa').dataset.selid;
+      const partnerId=($('fsb_partner')||{}).dataset&&$('fsb_partner').dataset.selid;
+      const targetVal=val('fsb_amount').trim();
+      if((target==='kassa'&&!kassaId)||(target==='partner'&&!partnerId)||targetVal===''||isNaN(parseFloat(targetVal))){
+        prev.textContent='Выберите кассу/партнёра и укажите остаток — тут покажется, какая проводка получится.';return;
+      }
+      const current=target==='kassa'?currentKassaBalance(kassaId):currentPartnerBalance(partnerId);
+      const diff=parseFloat(targetVal)-current;
+      if(Math.abs(diff)<0.005){prev.textContent=`Текущий остаток уже ${current.toLocaleString('ru-RU')} ₸ — менять нечего.`;return;}
+      prev.textContent=`Текущий остаток: ${current.toLocaleString('ru-RU')} ₸ → создастся ${diff>0?'приход':'расход'} на ${Math.abs(diff).toLocaleString('ru-RU')} ₸, чтобы получилось ${parseFloat(targetVal).toLocaleString('ru-RU')} ₸.`;
+    };
+    targetEl.onchange=()=>{updatePartnerVisibility();updatePreview();};
+    if($('fsb_amount'))$('fsb_amount').addEventListener('input',updatePreview);
+    bindSearchDropdown('fsb_kassa',(S.finance_kassa||[]).map(k=>({id:k.id,name:k.name})),updatePreview);
+    bindSearchDropdown('fsb_partner',(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>({id:p.id,name:p.name})),updatePreview);
+    const combinedCats=[
+      ...(S.finance_categories||[]).map(c=>({id:c.id,name:c.name,type:'expense'})),
+      ...(S.finance_income_categories||[]).map(c=>({id:c.id,name:c.name,type:'income'})),
+    ];
+    bindSearchDropdown('fsb_cat',combinedCats,item=>{$('fsb_cat').dataset.seltype=item?item.type:'';});
+  },0);
 }
 function financeEntryModal(id){
   const e=id?(S.finance_entries||[]).find(x=>x.id===id):null;
