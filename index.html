@@ -617,6 +617,10 @@
   .ac-item{padding:10px 14px;font-size:14px;cursor:pointer}
   .ac-item:hover,.ac-item:active{background:#f2f4f9}
   .ac-item.ac-hi{background:#e8ecfb}
+  .fin-new-row td{background:#fbfbfe;padding-top:10px;padding-bottom:10px}
+  .fin-new-row input{width:100%;box-sizing:border-box;padding:11px 13px;font-size:14px;
+    border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink)}
+  .fin-new-row input:focus{outline:2px solid rgba(37,70,201,.3);border-color:var(--rust);background:var(--card)}
   .ac-empty{padding:10px 14px;font-size:13px;color:var(--muted)}
   .stats.stats-3{grid-template-columns:repeat(3,1fr)}
   .stats.stats-1{grid-template-columns:1fr;max-width:280px}
@@ -3146,7 +3150,7 @@ function renderFinance(){
         <td data-label="Партнёр"><input id="fen_partner" autocomplete="off" placeholder="Необязательно"></td>
         <td data-label="Остаток партнёра">—</td>
         <td data-label="Тип"><span id="fen_type_hint" style="color:var(--muted);font-size:12px">по категории</span></td>
-        <td data-label="Сумма"><input type="number" min="0" step="0.01" id="fen_amount" placeholder="0" style="width:100px"></td>
+        <td data-label="Сумма"><input type="number" min="0" step="0.01" id="fen_amount" placeholder="0"></td>
         <td data-label="Категория"><input id="fen_cat" autocomplete="off" placeholder="Начните печатать…"></td>
         <td data-label="Комментарий"><input id="fen_comment" autocomplete="off" placeholder="—"></td>
         <td data-label="Менеджер">${esc((S.me&&(S.me.full_name||S.me.email))||'—')}</td>
@@ -3207,7 +3211,10 @@ function renderFinance(){
     });
     $('fen_cat').addEventListener('input',()=>{$('fen_cat').dataset.seltype='';if($('fen_type_hint'))$('fen_type_hint').textContent='по категории';});
     if($('fenCancel'))$('fenCancel').onclick=()=>{finAddingNew=false;renderFinance();};
-    if($('fenSave'))$('fenSave').onclick=async()=>{
+    // сохранение вынесено в отдельную функцию — вызывается и кнопкой, и клавишей Enter из любого
+    // поля строки. Проверка обязательных полей та же самая в обоих случаях — по Enter «мимо»
+    // проверки не проскочить, если что-то не заполнено, просто ничего не произойдёт (с тостом-подсказкой)
+    const saveInlineEntry=async()=>{
       const date=val('fen_date');if(!date){toast('Укажите дату');return;}
       const kassaId=($('fen_kassa')||{}).dataset&&$('fen_kassa').dataset.selid;
       if(!kassaId){toast('Выберите кассу из списка');return;}
@@ -3222,15 +3229,25 @@ function renderFinance(){
         category_id:categoryId,comment:val('fen_comment').trim()||null,
         manager_id:(S.me&&S.me.id)||null,manager_name:(S.me&&(S.me.full_name||S.me.email))||'',
       };
-      const btn=$('fenSave');btn.disabled=true;btn.textContent='Сохраняем…';
+      const btn=$('fenSave');if(btn){btn.disabled=true;btn.textContent='Сохраняем…';}
       const u=await dbInsert('finance_entries',row);
-      if(!u){btn.disabled=false;btn.textContent='Сохранить';return;}
+      if(!u){if(btn){btn.disabled=false;btn.textContent='Сохранить';}return;}
       if(!S.finance_entries)S.finance_entries=[];S.finance_entries.push(u);
       await recalcKassaBalances(kassaId);
       if(partnerId)await recalcPartnerBalances(partnerId);
       finAddingNew=false;
       toast('Сохранено');renderFinance();
     };
+    if($('fenSave'))$('fenSave').onclick=saveInlineEntry;
+    // Enter в любом поле строки — тоже сохраняет (если поисковые поля Кассы/Партнёра/Категории в
+    // этот момент сами не «съели» Enter для выбора подсказки — тогда сначала выбирается подсказка,
+    // а уже следующий Enter сохранит проводку)
+    ['fen_date','fen_kassa','fen_partner','fen_cat','fen_amount','fen_comment'].forEach(id=>{
+      const el=$(id);if(!el)return;
+      el.addEventListener('keydown',ev=>{
+        if(ev.key==='Enter'&&!ev.defaultPrevented){ev.preventDefault();saveInlineEntry();}
+      });
+    });
   }
   $('main').querySelectorAll('[data-findel]').forEach(b=>b.onclick=()=>delFinanceEntry(b.dataset.findel));
   if($('finPgFirst'))$('finPgFirst').onclick=()=>{finPage=1;renderFinance();};
