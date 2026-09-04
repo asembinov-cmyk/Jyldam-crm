@@ -3025,6 +3025,7 @@ function bindSearchDropdown(inputId,items,onPick){
   };
 }
 function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||{}).name||'—';}
+function isKassaTechnical(id){return !!((S.finance_kassa||[]).find(k=>k.id===id)||{}).is_technical;}
 function financeCategoryName(id){
   const exp=(S.finance_categories||[]).find(c=>c.id===id);if(exp)return exp.name;
   const inc=(S.finance_income_categories||[]).find(c=>c.id===id);if(inc)return inc.name;
@@ -3053,10 +3054,10 @@ const FIN_COLUMNS=[
     cell:e=>`<td data-label="Дата">${esc(fmtDate(e.entry_date))}${e.created_at?`<small class="cell-time">${esc((fmtLogTime(e.created_at)||{}).time||'')}</small>`:''}</td>`,
     newCell:()=>`<td data-label="Дата"><input type="date" id="fen_date" value="${localToday()}"></td>`},
   {key:'kassa',label:'Касса',width:170,
-    cell:e=>`<td data-label="Касса">${esc(financeKassaName(e.kassa_id))}</td>`,
+    cell:e=>`<td data-label="Касса">${esc(financeKassaName(e.kassa_id))}${isKassaTechnical(e.kassa_id)?' <span class="wh-cat">⚙</span>':''}</td>`,
     newCell:()=>`<td data-label="Касса"><input id="fen_kassa" autocomplete="off" placeholder="Начните печатать…"></td>`},
   {key:'kassa_balance',label:'Остаток кассы',width:150,
-    cell:e=>`<td data-label="Остаток кассы">${e.kassa_balance!=null?fmtNum(e.kassa_balance):'—'}</td>`,
+    cell:e=>`<td data-label="Остаток кассы">${isKassaTechnical(e.kassa_id)?'<span class="wh-cat">не показывается</span>':(e.kassa_balance!=null?fmtNum(e.kassa_balance):'—')}</td>`,
     newCell:()=>`<td data-label="Остаток кассы">—</td>`},
   {key:'partner',label:'Партнёр',width:170,
     cell:e=>`<td data-label="Партнёр">${e.partner_id?esc(financePartnerName(e.partner_id)):'—'}</td>`,
@@ -3099,7 +3100,7 @@ function exportFinanceToExcel(rows){
   const data=rows.map(e=>({
     'Дата':fmtDate(e.entry_date),
     'Касса':financeKassaName(e.kassa_id),
-    'Остаток кассы':e.kassa_balance!=null?Math.round(e.kassa_balance):'',
+    'Остаток кассы':isKassaTechnical(e.kassa_id)?'':(e.kassa_balance!=null?Math.round(e.kassa_balance):''),
     'Партнёр':e.partner_id?financePartnerName(e.partner_id):'',
     'Остаток партнёра':e.partner_id&&e.partner_balance!=null?Math.round(e.partner_balance):'',
     'Тип':e.type==='income'?'Приход':'Расход',
@@ -3419,7 +3420,7 @@ function financeEntryModal(id){
       <div class="field"><label>Сумма (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="fe_amount" value="${e&&e.amount!=null?esc(e.amount):''}" placeholder="0"></div>
       <div class="field full"><label>Комментарий</label><textarea id="fe_comment" rows="2">${esc(e?e.comment||'':'')}</textarea></div>
     </div>
-    ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—'}${e.partner_id?` · Остаток партнёра: ${e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—'}`:''}</div>`:''}`;
+    ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${isKassaTechnical(e.kassa_id)?'не показывается (техническая касса)':(e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—')}${e.partner_id?` · Остаток партнёра: ${e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—'}`:''}</div>`:''}`;
   showModal(id?'Изменить проводку':'Новая проводка',body,async()=>{
     const date=val('fe_date');if(!date){toast('Укажите дату');return false;}
     const kassaId=($('fe_kassa')||{}).dataset&&$('fe_kassa').dataset.selid;
@@ -3489,13 +3490,15 @@ async function delFinanceEntry(id){
 function dirFinanceKassa(){
   dirGrid({title:'Кассы',arrKey:'finance_kassa',table:'finance_kassa',modalFn:financeKassaModal,emptyText:'Нет касс',
     sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
-    cols:[{key:'name',label:'Название',filter:'text',text:k=>k.name||'',cell:k=>`<strong>${esc(k.name)}</strong>`}]});
+    cols:[{key:'name',label:'Название',filter:'text',text:k=>k.name||'',cell:k=>`<strong>${esc(k.name)}</strong>${k.is_technical?' <span class="wh-cat">⚙ техническая</span>':''}`}]});
 }
-function financeKassaModal(id){const k=id?S.finance_kassa.find(x=>x.id===id):{name:''};
-  showModal(id?'Касса':'Новая касса',`<div class="field"><label>Название</label><input id="fk_name" value="${esc(k.name)}"></div>`,
+function financeKassaModal(id){const k=id?S.finance_kassa.find(x=>x.id===id):{name:'',is_technical:false};
+  showModal(id?'Касса':'Новая касса',`<div class="field"><label>Название</label><input id="fk_name" value="${esc(k.name)}"></div>
+    <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="fk_tech" ${k.is_technical?'checked':''}> Техническая касса <span class="pom-paidhint">(например «Ввод» — для обнуления/корректировки остатка партнёра; её собственный остаток не имеет смысла и не будет показываться в таблице)</span></label>`,
     async()=>{const name=val('fk_name').trim();if(!name){toast('Укажите название');return false;}
-      if(id){const u=await dbUpdate('finance_kassa',id,{name});if(!u)return false;Object.assign(S.finance_kassa.find(x=>x.id===id),u);}
-      else{const u=await dbInsert('finance_kassa',{name});if(!u)return false;S.finance_kassa.push(u);}
+      const row={name,is_technical:!!($('fk_tech')&&$('fk_tech').checked)};
+      if(id){const u=await dbUpdate('finance_kassa',id,row);if(!u)return false;Object.assign(S.finance_kassa.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('finance_kassa',row);if(!u)return false;S.finance_kassa.push(u);}
       toast('Сохранено');dirFinanceKassa();return true;});}
 /* Справочник категорий */
 function dirFinanceCategories(){
