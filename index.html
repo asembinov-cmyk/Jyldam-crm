@@ -3026,6 +3026,7 @@ function bindSearchDropdown(inputId,items,onPick){
 }
 function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||{}).name||'—';}
 function isKassaTechnical(id){return !!((S.finance_kassa||[]).find(k=>k.id===id)||{}).is_technical;}
+function isFinPartnerTechnical(id){return !!((S.finance_partners||[]).find(p=>p.id===id)||{}).is_technical;}
 // текущий остаток — берём из САМОЙ СВЕЖЕЙ (по дате, затем по времени) проводки этой кассы/партнёра;
 // если проводок ещё не было — остаток 0
 function currentKassaBalance(kassaId){
@@ -3072,10 +3073,10 @@ const FIN_COLUMNS=[
     cell:e=>`<td data-label="Остаток кассы">${isKassaTechnical(e.kassa_id)?'<span class="wh-cat">не показывается</span>':(e.kassa_balance!=null?fmtNum(e.kassa_balance):'—')}</td>`,
     newCell:()=>`<td data-label="Остаток кассы">—</td>`},
   {key:'partner',label:'Партнёр',width:170,
-    cell:e=>`<td data-label="Партнёр">${e.partner_id?esc(financePartnerName(e.partner_id)):'—'}</td>`,
+    cell:e=>`<td data-label="Партнёр">${e.partner_id?esc(financePartnerName(e.partner_id))+(isFinPartnerTechnical(e.partner_id)?' <span class="wh-cat">⚙</span>':''):'—'}</td>`,
     newCell:()=>`<td data-label="Партнёр"><input id="fen_partner" autocomplete="off" placeholder="Необязательно"></td>`},
   {key:'partner_balance',label:'Остаток партнёра',width:160,
-    cell:e=>`<td data-label="Остаток партнёра">${e.partner_id&&e.partner_balance!=null?fmtNum(e.partner_balance):'—'}</td>`,
+    cell:e=>`<td data-label="Остаток партнёра">${!e.partner_id?'—':(isFinPartnerTechnical(e.partner_id)?'<span class="wh-cat">не показывается</span>':(e.partner_balance!=null?fmtNum(e.partner_balance):'—'))}</td>`,
     newCell:()=>`<td data-label="Остаток партнёра">—</td>`},
   {key:'type',label:'Тип',width:110,
     cell:e=>`<td data-label="Тип"><span class="pill ${e.type==='income'?'moss':'gold'}">${e.type==='income'?'Приход':'Расход'}</span></td>`,
@@ -3114,7 +3115,7 @@ function exportFinanceToExcel(rows){
     'Касса':financeKassaName(e.kassa_id),
     'Остаток кассы':isKassaTechnical(e.kassa_id)?'':(e.kassa_balance!=null?Math.round(e.kassa_balance):''),
     'Партнёр':e.partner_id?financePartnerName(e.partner_id):'',
-    'Остаток партнёра':e.partner_id&&e.partner_balance!=null?Math.round(e.partner_balance):'',
+    'Остаток партнёра':(!e.partner_id||isFinPartnerTechnical(e.partner_id))?'':(e.partner_balance!=null?Math.round(e.partner_balance):''),
     'Тип':e.type==='income'?'Приход':'Расход',
     'Сумма':Math.round(e.amount||0),
     'Категория':financeCategoryName(e.category_id),
@@ -3204,14 +3205,27 @@ function renderFinance(){
     if(finSummaryPage>sTotalPages)finSummaryPage=sTotalPages;
     if(finSummaryPage<1)finSummaryPage=1;
     const summaryPageRows=summaryRows.slice((finSummaryPage-1)*finPerPage,finSummaryPage*finPerPage);
+    // балансы касс — отдельно от партнёров; касс обычно немного, показываем все разом без страниц
+    const kassaRows=[...(S.finance_kassa||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''))
+      .map(k=>({kassa:k,balance:currentKassaBalance(k.id)}));
     $('main').innerHTML=head+`
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>Общая сводка по кассам</h2><span class="count">${kassaRows.length}</span></div>
+      <div class="table-scroll">
+      <table class="resp-table"><thead><tr><th>Касса</th><th>Текущий остаток</th></tr></thead><tbody>
+      ${kassaRows.length?kassaRows.map(k=>`<tr>
+        <td data-label="Касса"><strong>${esc(k.kassa.name)}</strong>${k.kassa.is_technical?' <span class="wh-cat">⚙ техническая</span>':''}</td>
+        <td data-label="Текущий остаток">${k.kassa.is_technical?'<span class="wh-cat">не показывается</span>':`<span style="font-weight:700;color:${k.balance>0?'#1a7f37':(k.balance<0?'#c0392b':'inherit')}">${fmtNum(k.balance)}</span>`}</td>
+      </tr>`).join(''):`<tr><td colspan="2"><div class="empty"><div class="big">Нет касс</div>Добавьте кассу через «⚙ Кассы».</div></td></tr>`}
+      </tbody></table></div>
+    </div>
     <div class="panel">
       <div class="panel-head"><h2>Общая сводка по партнёрам</h2><span class="count">${summaryRows.length}</span></div>
       <div class="table-scroll">
       <table class="resp-table"><thead><tr><th>Партнёр</th><th>Текущий остаток</th></tr></thead><tbody>
       ${summaryPageRows.length?summaryPageRows.map(s=>`<tr>
-        <td data-label="Партнёр"><strong>${esc(s.partner.name)}</strong></td>
-        <td data-label="Текущий остаток" style="font-weight:700;color:${s.balance>0?'#1a7f37':(s.balance<0?'#c0392b':'inherit')}">${fmtNum(s.balance)}</td>
+        <td data-label="Партнёр"><strong>${esc(s.partner.name)}</strong>${s.partner.is_technical?' <span class="wh-cat">⚙ технический</span>':''}</td>
+        <td data-label="Текущий остаток">${s.partner.is_technical?'<span class="wh-cat">не показывается</span>':`<span style="font-weight:700;color:${s.balance>0?'#1a7f37':(s.balance<0?'#c0392b':'inherit')}">${fmtNum(s.balance)}</span>`}</td>
       </tr>`).join(''):`<tr><td colspan="2"><div class="empty"><div class="big">Нет партнёров</div>Добавьте партнёра через «⚙ Партнёры».</div></td></tr>`}
       </tbody></table></div>
       <div class="simple-pager">
@@ -3518,7 +3532,7 @@ function financeEntryModal(id){
       <div class="field"><label>Сумма (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" step="0.01" id="fe_amount" value="${e&&e.amount!=null?esc(e.amount):''}" placeholder="0"></div>
       <div class="field full"><label>Комментарий</label><textarea id="fe_comment" rows="2">${esc(e?e.comment||'':'')}</textarea></div>
     </div>
-    ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${isKassaTechnical(e.kassa_id)?'не показывается (техническая касса)':(e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—')}${e.partner_id?` · Остаток партнёра: ${e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—'}`:''}</div>`:''}`;
+    ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${isKassaTechnical(e.kassa_id)?'не показывается (техническая касса)':(e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—')}${e.partner_id?` · Остаток партнёра: ${isFinPartnerTechnical(e.partner_id)?'не показывается (технический партнёр)':(e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—')}`:''}</div>`:''}`;
   showModal(id?'Изменить проводку':'Новая проводка',body,async()=>{
     const date=val('fe_date');if(!date){toast('Укажите дату');return false;}
     const kassaId=($('fe_kassa')||{}).dataset&&$('fe_kassa').dataset.selid;
@@ -3615,13 +3629,15 @@ function financeCategoryModal(id){const c=id?S.finance_categories.find(x=>x.id==
 function dirFinancePartners(){
   dirGrid({title:'Партнёры (финансы)',arrKey:'finance_partners',table:'finance_partners',modalFn:financePartnerModal,emptyText:'Нет партнёров',
     sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
-    cols:[{key:'name',label:'Название',filter:'text',text:p=>p.name||'',cell:p=>`<strong>${esc(p.name)}</strong>`}]});
+    cols:[{key:'name',label:'Название',filter:'text',text:p=>p.name||'',cell:p=>`<strong>${esc(p.name)}</strong>${p.is_technical?' <span class="wh-cat">⚙ технический</span>':''}`}]});
 }
-function financePartnerModal(id){const p=id?S.finance_partners.find(x=>x.id===id):{name:''};
-  showModal(id?'Партнёр':'Новый партнёр',`<div class="field"><label>Название</label><input id="fp_name" value="${esc(p.name)}"></div>`,
+function financePartnerModal(id){const p=id?S.finance_partners.find(x=>x.id===id):{name:'',is_technical:false};
+  showModal(id?'Партнёр':'Новый партнёр',`<div class="field"><label>Название</label><input id="fp_name" value="${esc(p.name)}"></div>
+    <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="fp_tech" ${p.is_technical?'checked':''}> Технический партнёр <span class="pom-paidhint">(например «Без партнёра» — заглушка, а не реальный партнёр; его остаток не имеет смысла и не будет показываться в таблице)</span></label>`,
     async()=>{const name=val('fp_name').trim();if(!name){toast('Укажите название');return false;}
-      if(id){const u=await dbUpdate('finance_partners',id,{name});if(!u)return false;Object.assign(S.finance_partners.find(x=>x.id===id),u);}
-      else{const u=await dbInsert('finance_partners',{name});if(!u)return false;S.finance_partners.push(u);}
+      const row={name,is_technical:!!($('fp_tech')&&$('fp_tech').checked)};
+      if(id){const u=await dbUpdate('finance_partners',id,row);if(!u)return false;Object.assign(S.finance_partners.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('finance_partners',row);if(!u)return false;S.finance_partners.push(u);}
       toast('Сохранено');dirFinancePartners();return true;});}
 /* ==================== /ФИНАНСЫ ==================== */
 function renderCash(){ // ключ модуля остался 'cash', но это Склад
