@@ -617,6 +617,14 @@
   .ac-item{padding:10px 14px;font-size:14px;cursor:pointer}
   .ac-item:hover,.ac-item:active{background:#f2f4f9}
   .ac-item.ac-hi{background:#e8ecfb}
+  .fin-th{position:relative;cursor:grab;user-select:none;white-space:nowrap}
+  .fin-th.fin-sortable{cursor:pointer}
+  .fin-th.fin-dragging{opacity:.4}
+  .fin-th.fin-dragover{box-shadow:inset 2px 0 0 var(--rust)}
+  .fin-col-resize{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:5}
+  .fin-col-resize:hover,.fin-col-resize.fin-resizing{background:rgba(37,70,201,.25)}
+  .fin-table{table-layout:fixed}
+  .fin-table td,.fin-table th{overflow:hidden;text-overflow:ellipsis}
   .fin-new-row td{background:#fbfbfe;padding-top:10px;padding-bottom:10px}
   .fin-new-row input{width:100%;box-sizing:border-box;padding:11px 13px;font-size:14px;
     border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink)}
@@ -3024,6 +3032,46 @@ function financeIncomeCategoryModal(id){const c=id?S.finance_income_categories.f
       toast('Сохранено');dirFinanceIncomeCategories();return true;});}
 function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===id)||{}).name||'—';}
 let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
+// столбцы таблицы проводок — можно перетаскивать (менять порядок) и тянуть за правый край
+// (менять ширину), как в Excel. Порядок и ширины запоминаются в браузере.
+const FIN_COLUMNS=[
+  {key:'date',label:'Дата',sortable:'date',width:120,
+    cell:e=>`<td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>`,
+    newCell:()=>`<td data-label="Дата"><input type="date" id="fen_date" value="${localToday()}"></td>`},
+  {key:'kassa',label:'Касса',width:170,
+    cell:e=>`<td data-label="Касса">${esc(financeKassaName(e.kassa_id))}</td>`,
+    newCell:()=>`<td data-label="Касса"><input id="fen_kassa" autocomplete="off" placeholder="Начните печатать…"></td>`},
+  {key:'kassa_balance',label:'Остаток кассы',width:150,
+    cell:e=>`<td data-label="Остаток кассы">${e.kassa_balance!=null?fmtNum(e.kassa_balance):'—'}</td>`,
+    newCell:()=>`<td data-label="Остаток кассы">—</td>`},
+  {key:'partner',label:'Партнёр',width:170,
+    cell:e=>`<td data-label="Партнёр">${e.partner_id?esc(financePartnerName(e.partner_id)):'—'}</td>`,
+    newCell:()=>`<td data-label="Партнёр"><input id="fen_partner" autocomplete="off" placeholder="Необязательно"></td>`},
+  {key:'partner_balance',label:'Остаток партнёра',width:160,
+    cell:e=>`<td data-label="Остаток партнёра">${e.partner_id&&e.partner_balance!=null?fmtNum(e.partner_balance):'—'}</td>`,
+    newCell:()=>`<td data-label="Остаток партнёра">—</td>`},
+  {key:'type',label:'Тип',width:110,
+    cell:e=>`<td data-label="Тип"><span class="pill ${e.type==='income'?'moss':'gold'}">${e.type==='income'?'Приход':'Расход'}</span></td>`,
+    newCell:()=>`<td data-label="Тип"><span id="fen_type_hint" style="color:var(--muted);font-size:12px">по категории</span></td>`},
+  {key:'amount',label:'Сумма',sortable:'amount',width:130,
+    cell:e=>`<td data-label="Сумма" style="color:${e.type==='income'?'#1a7f37':'#c0392b'};font-weight:600">${e.type==='income'?'+':'−'}${fmtNum(e.amount)}</td>`,
+    newCell:()=>`<td data-label="Сумма"><input type="number" min="0" step="0.01" id="fen_amount" placeholder="0"></td>`},
+  {key:'category',label:'Категория',sortable:'category',width:170,
+    cell:e=>`<td data-label="Категория">${esc(financeCategoryName(e.category_id))}</td>`,
+    newCell:()=>`<td data-label="Категория"><input id="fen_cat" autocomplete="off" placeholder="Начните печатать…"></td>`},
+  {key:'comment',label:'Комментарий',width:200,
+    cell:e=>`<td data-label="Комментарий">${esc(e.comment||'—')}</td>`,
+    newCell:()=>`<td data-label="Комментарий"><input id="fen_comment" autocomplete="off" placeholder="—"></td>`},
+  {key:'manager',label:'Менеджер',width:150,
+    cell:e=>`<td data-label="Менеджер">${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'}</td>`,
+    newCell:()=>`<td data-label="Менеджер">${esc((S.me&&(S.me.full_name||S.me.email))||'—')}</td>`},
+];
+let finColOrder=(()=>{try{const saved=JSON.parse(localStorage.getItem('finColOrder')||'null');
+  if(Array.isArray(saved)&&saved.length===FIN_COLUMNS.length&&saved.every(k=>FIN_COLUMNS.some(c=>c.key===k)))return saved;}catch(e){}
+  return FIN_COLUMNS.map(c=>c.key);})();
+let finColWidths=(()=>{try{return JSON.parse(localStorage.getItem('finColWidths')||'{}')||{};}catch(e){return {};}})();
+function finColumnsInOrder(){return finColOrder.map(k=>FIN_COLUMNS.find(c=>c.key===k)).filter(Boolean);}
+function finColWidth(key){const c=FIN_COLUMNS.find(x=>x.key===key);return finColWidths[key]||( c?c.width:140);}
 let finTab='entries'; // entries | summary
 let finPage=1;
 let finSummaryPage=1;
@@ -3060,12 +3108,14 @@ function renderFinance(){
     if(finFilter.category&&e.category_id!==finFilter.category)return false;
     return true;
   });
-  // сортировка по клику на заголовок столбца (Категория — по алфавиту, Сумма — по величине);
-  // без выбора сортировки список остаётся по дате (как отсортирован all)
+  // сортировка по клику на заголовок столбца (Дата/Категория — по возрастанию-убыванию,
+  // Сумма — по величине); без выбора сортировки список остаётся по дате (как отсортирован all)
   if(finSort.col==='category'){
     rows.sort((a,b)=>finSort.dir*financeCategoryName(a.category_id).localeCompare(financeCategoryName(b.category_id)));
   }else if(finSort.col==='amount'){
     rows.sort((a,b)=>finSort.dir*((parseFloat(a.amount)||0)-(parseFloat(b.amount)||0)));
+  }else if(finSort.col==='date'){
+    rows.sort((a,b)=>finSort.dir*((a.entry_date||'').localeCompare(b.entry_date||'')||(a.created_at||'').localeCompare(b.created_at||'')));
   }
   const totalPages=Math.max(1,Math.ceil(rows.length/finPerPage));
   if(finPage>totalPages)finPage=totalPages;
@@ -3139,37 +3189,20 @@ function renderFinance(){
         ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
       </div>
       <div class="table-scroll">
-      <table class="resp-table"><thead><tr>
-        <th>Дата</th><th>Касса</th><th>Остаток кассы</th><th>Партнёр</th><th>Остаток партнёра</th>
-        <th>Тип</th><th class="fin-sortable" data-finsort="amount" style="cursor:pointer">Сумма${finSort.col==='amount'?(finSort.dir===1?' ▲':' ▼'):''}</th><th class="fin-sortable" data-finsort="category" style="cursor:pointer">Категория${finSort.col==='category'?(finSort.dir===1?' ▲':' ▼'):''}</th><th>Комментарий</th><th>Менеджер</th><th></th>
+      <table class="resp-table fin-table" id="finTable"><colgroup>${finColumnsInOrder().map(c=>`<col style="width:${finColWidth(c.key)}px">`).join('')}<col style="width:170px"></colgroup>
+      <thead><tr>
+        ${finColumnsInOrder().map(c=>`<th draggable="true" class="fin-th${c.sortable?' fin-sortable':''}" data-finkey="${c.key}" ${c.sortable?`data-finsort="${c.sortable}"`:''} title="Перетащите — переставить столбец${c.sortable?' · нажмите — сортировать':''}">${esc(c.label)}${finSort.col===c.sortable?(finSort.dir===1?' ▲':' ▼'):''}<span class="fin-col-resize" data-finresize="${c.key}"></span></th>`).join('')}
+        <th></th>
       </tr></thead><tbody>
       ${finAddingNew?`<tr class="fin-new-row">
-        <td data-label="Дата"><input type="date" id="fen_date" value="${localToday()}"></td>
-        <td data-label="Касса"><input id="fen_kassa" autocomplete="off" placeholder="Начните печатать…"></td>
-        <td data-label="Остаток кассы">—</td>
-        <td data-label="Партнёр"><input id="fen_partner" autocomplete="off" placeholder="Необязательно"></td>
-        <td data-label="Остаток партнёра">—</td>
-        <td data-label="Тип"><span id="fen_type_hint" style="color:var(--muted);font-size:12px">по категории</span></td>
-        <td data-label="Сумма"><input type="number" min="0" step="0.01" id="fen_amount" placeholder="0"></td>
-        <td data-label="Категория"><input id="fen_cat" autocomplete="off" placeholder="Начните печатать…"></td>
-        <td data-label="Комментарий"><input id="fen_comment" autocomplete="off" placeholder="—"></td>
-        <td data-label="Менеджер">${esc((S.me&&(S.me.full_name||S.me.email))||'—')}</td>
+        ${finColumnsInOrder().map(c=>c.newCell()).join('')}
         <td data-label="" class="cell-actions"><div class="row-actions">
           <button class="btn sm primary" id="fenSave">Сохранить</button>
           <button class="btn sm ghost" id="fenCancel">Отмена</button>
         </div></td>
       </tr>`:''}
       ${pageRows.length?pageRows.map(e=>`<tr>
-        <td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>
-        <td data-label="Касса">${esc(financeKassaName(e.kassa_id))}</td>
-        <td data-label="Остаток кассы">${e.kassa_balance!=null?fmtNum(e.kassa_balance):'—'}</td>
-        <td data-label="Партнёр">${e.partner_id?esc(financePartnerName(e.partner_id)):'—'}</td>
-        <td data-label="Остаток партнёра">${e.partner_id&&e.partner_balance!=null?fmtNum(e.partner_balance):'—'}</td>
-        <td data-label="Тип"><span class="pill ${e.type==='income'?'moss':'gold'}">${e.type==='income'?'Приход':'Расход'}</span></td>
-        <td data-label="Сумма" style="color:${e.type==='income'?'#1a7f37':'#c0392b'};font-weight:600">${e.type==='income'?'+':'−'}${fmtNum(e.amount)}</td>
-        <td data-label="Категория">${esc(financeCategoryName(e.category_id))}</td>
-        <td data-label="Комментарий">${esc(e.comment||'—')}</td>
-        <td data-label="Менеджер">${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'}</td>
+        ${finColumnsInOrder().map(c=>c.cell(e)).join('')}
         <td data-label="" class="cell-actions"><div class="row-actions">
           ${can('finance','edit')?`<button class="btn sm ghost" data-finedit="${e.id}">Изменить</button>`:''}
           ${can('finance','delete')?`<button class="btn sm danger" data-findel="${e.id}">Удалить</button>`:''}
@@ -3190,11 +3223,62 @@ function renderFinance(){
   if($('finRefresh'))$('finRefresh').onclick=refreshFinanceData;
   if($('finNew'))$('finNew').onclick=()=>{finAddingNew=true;renderFinance();};
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
-  $('main').querySelectorAll('[data-finsort]').forEach(th=>th.onclick=()=>{
-    const col=th.dataset.finsort;
-    if(finSort.col===col)finSort.dir=-finSort.dir; // тот же столбец — переключаем направление
-    else finSort={col,dir:1}; // новый столбец — начинаем с возрастания (А→Я / по возрастанию суммы)
-    renderFinance();
+  // перетаскивание заголовков — меняет порядок столбцов; ручка справа — тянет ширину.
+  // Оба сохраняются в браузере. Обычный клик по заголовку (без перетаскивания) — сортирует.
+  let _finDragKey=null,_finDidDrag=false;
+  $('main').querySelectorAll('.fin-th').forEach(th=>{
+    th.ondragstart=e=>{
+      // если тянут именно за ручку изменения ширины — это не перетаскивание столбца
+      if(e.target.classList.contains('fin-col-resize')){e.preventDefault();return;}
+      _finDragKey=th.dataset.finkey;_finDidDrag=false;e.dataTransfer.effectAllowed='move';th.classList.add('fin-dragging');
+    };
+    th.ondragend=()=>{th.classList.remove('fin-dragging');$('main').querySelectorAll('.fin-th').forEach(x=>x.classList.remove('fin-dragover'));};
+    th.ondragover=e=>{e.preventDefault();if(th.dataset.finkey!==_finDragKey)th.classList.add('fin-dragover');};
+    th.ondragleave=()=>th.classList.remove('fin-dragover');
+    th.ondrop=e=>{
+      e.preventDefault();th.classList.remove('fin-dragover');
+      const toKey=th.dataset.finkey;
+      if(!_finDragKey||_finDragKey===toKey)return;
+      _finDidDrag=true;
+      const from=finColOrder.indexOf(_finDragKey),to=finColOrder.indexOf(toKey);
+      if(from<0||to<0)return;
+      finColOrder.splice(from,1);finColOrder.splice(to,0,_finDragKey);
+      try{localStorage.setItem('finColOrder',JSON.stringify(finColOrder));}catch(e2){}
+      renderFinance();
+    };
+    th.onclick=()=>{
+      if(_finDidDrag){_finDidDrag=false;return;}
+      const col=th.dataset.finsort;if(!col)return;
+      if(finSort.col===col)finSort.dir=-finSort.dir; // тот же столбец — переключаем направление
+      else finSort={col,dir:1}; // новый столбец — начинаем с возрастания
+      renderFinance();
+    };
+    // ручка изменения ширины — тянем мышкой вправо/влево
+    const handle=th.querySelector('.fin-col-resize');
+    if(handle)handle.onmousedown=ev=>{
+      ev.preventDefault();ev.stopPropagation();
+      const key=handle.dataset.finresize;
+      const startX=ev.clientX;const startW=finColWidth(key);
+      handle.classList.add('fin-resizing');
+      const onMove=mv=>{
+        const w=Math.max(70,startW+(mv.clientX-startX));
+        finColWidths[key]=w;
+        const table=$('finTable');
+        if(table){
+          const idx=finColOrder.indexOf(key);
+          const col=table.querySelector('colgroup').children[idx];
+          if(col)col.style.width=w+'px';
+        }
+      };
+      const onUp=()=>{
+        handle.classList.remove('fin-resizing');
+        document.removeEventListener('mousemove',onMove);
+        document.removeEventListener('mouseup',onUp);
+        try{localStorage.setItem('finColWidths',JSON.stringify(finColWidths));}catch(e3){}
+      };
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+    };
   });
   if(finAddingNew){
     // привязываем поиск-с-подсказками к строке ввода прямо в гриде — тот же механизм, что и в форме
