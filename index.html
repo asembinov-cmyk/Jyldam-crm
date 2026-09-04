@@ -610,6 +610,8 @@
 
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
   .stats.stats-5{grid-template-columns:repeat(5,1fr)}
+  .simple-pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 10px;flex-wrap:wrap}
+  .simple-pager-label{font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
   .stats.stats-3{grid-template-columns:repeat(3,1fr)}
   .stats.stats-1{grid-template-columns:1fr;max-width:280px}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);display:flex;align-items:flex-start;gap:14px}
@@ -2923,6 +2925,9 @@ function financeKassaName(id){return ((S.finance_kassa||[]).find(k=>k.id===id)||
 function financeCategoryName(id){return ((S.finance_categories||[]).find(c=>c.id===id)||{}).name||'—';}
 function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===id)||{}).name||'—';}
 let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
+let finTab='entries'; // entries | summary
+let finPage=1;
+const finPerPage=50;
 function renderFinance(){
   if(!canMod('finance')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
@@ -2936,13 +2941,56 @@ function renderFinance(){
     if(finFilter.category&&e.category_id!==finFilter.category)return false;
     return true;
   });
-  $('main').innerHTML=`
+  const totalPages=Math.max(1,Math.ceil(rows.length/finPerPage));
+  if(finPage>totalPages)finPage=totalPages;
+  if(finPage<1)finPage=1;
+  const pageRows=rows.slice((finPage-1)*finPerPage,finPage*finPerPage);
+  const head=`
     <div class="page-head"><div><h1>Финансы</h1><p>Учёт проводок по кассам и партнёрам</p></div>
       <div class="head-actions">
         ${can('finance','edit')?`<button class="btn ghost" id="finKassaBtn">⚙ Кассы</button><button class="btn ghost" id="finCatBtn">⚙ Категории</button><button class="btn ghost" id="finPartnerBtn">⚙ Партнёры</button>`:''}
         ${can('finance','create')?'<button class="btn primary" id="finNew">＋ Новая проводка</button>':''}
       </div>
     </div>
+    <div class="subtabs">
+      <button data-fintab="entries" class="${finTab==='entries'?'active':''}">Проводки</button>
+      <button data-fintab="summary" class="${finTab==='summary'?'active':''}">Общая сводка</button>
+    </div>`;
+  if(finTab==='summary'){
+    // общая сводка: по каждому партнёру — текущий остаток (последняя проводка по дате/времени),
+    // сколько всего проводок, дата последней. Показываем ВСЕХ партнёров, даже с нулём проводок.
+    const byPartner=new Map();
+    (S.finance_partners||[]).forEach(p=>byPartner.set(p.id,{partner:p,count:0,lastDate:null,balance:0}));
+    all.forEach(e=>{
+      if(!e.partner_id)return;
+      let s=byPartner.get(e.partner_id);
+      if(!s){s={partner:{id:e.partner_id,name:financePartnerName(e.partner_id)},count:0,lastDate:null,balance:0};byPartner.set(e.partner_id,s);}
+      s.count++;
+      // all уже отсортирован по убыванию даты — первая встреченная запись для партнёра и есть самая свежая
+      if(!s.lastDate){s.lastDate=e.entry_date;s.balance=e.partner_balance!=null?e.partner_balance:s.balance;}
+    });
+    const summaryRows=[...byPartner.values()].sort((a,b)=>(a.partner.name||'').localeCompare(b.partner.name||''));
+    $('main').innerHTML=head+`
+    <div class="panel">
+      <div class="panel-head"><h2>Общая сводка по партнёрам</h2><span class="count">${summaryRows.length}</span></div>
+      <div class="table-scroll">
+      <table class="resp-table"><thead><tr><th>Партнёр</th><th>Текущий остаток</th><th>Проводок</th><th>Последняя проводка</th></tr></thead><tbody>
+      ${summaryRows.length?summaryRows.map(s=>`<tr>
+        <td data-label="Партнёр"><strong>${esc(s.partner.name)}</strong></td>
+        <td data-label="Текущий остаток" style="font-weight:700;color:${s.balance>0?'#1a7f37':(s.balance<0?'#c0392b':'inherit')}">${fmtMoney(s.balance)}</td>
+        <td data-label="Проводок">${s.count}</td>
+        <td data-label="Последняя проводка">${s.lastDate?esc(fmtDate(s.lastDate)):'—'}</td>
+      </tr>`).join(''):`<tr><td colspan="4"><div class="empty"><div class="big">Нет партнёров</div>Добавьте партнёра через «⚙ Партнёры».</div></td></tr>`}
+      </tbody></table></div>
+    </div>`;
+    $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
+    if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
+    if($('finKassaBtn'))$('finKassaBtn').onclick=()=>dirFinanceKassa();
+    if($('finCatBtn'))$('finCatBtn').onclick=()=>dirFinanceCategories();
+    if($('finPartnerBtn'))$('finPartnerBtn').onclick=()=>dirFinancePartners();
+    return;
+  }
+  $('main').innerHTML=head+`
     <div class="panel">
       <div class="panel-head"><h2>Проводки</h2><span class="count">${rows.length}</span></div>
       <div class="ic-filters">
@@ -2959,7 +3007,7 @@ function renderFinance(){
         <th>Дата</th><th>Касса</th><th>Остаток кассы</th><th>Партнёр</th><th>Остаток партнёра</th>
         <th>Тип</th><th>Сумма</th><th>Категория</th><th>Комментарий</th><th>Менеджер</th><th></th>
       </tr></thead><tbody>
-      ${rows.length?rows.map(e=>`<tr>
+      ${pageRows.length?pageRows.map(e=>`<tr>
         <td data-label="Дата">${esc(fmtDate(e.entry_date))}</td>
         <td data-label="Касса">${esc(financeKassaName(e.kassa_id))}</td>
         <td data-label="Остаток кассы">${e.kassa_balance!=null?fmtMoney(e.kassa_balance):'—'}</td>
@@ -2976,14 +3024,26 @@ function renderFinance(){
         </div></td>
       </tr>`).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет проводок</div>${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'Измените фильтры.':'Нажмите «Новая проводка».'}</div></td></tr>`}
       </tbody></table></div>
+      ${rows.length>finPerPage?`<div class="simple-pager">
+        <button class="btn sm ghost" id="finPgFirst" ${finPage<=1?'disabled':''}>« В начало</button>
+        <button class="btn sm ghost" id="finPgPrev" ${finPage<=1?'disabled':''}>‹ Назад</button>
+        <span class="simple-pager-label">Стр. ${finPage} / ${totalPages} · ${rows.length} проводок</span>
+        <button class="btn sm ghost" id="finPgNext" ${finPage>=totalPages?'disabled':''}>Вперёд ›</button>
+        <button class="btn sm ghost" id="finPgLast" ${finPage>=totalPages?'disabled':''}>В конец »</button>
+      </div>`:''}
     </div>`;
+  $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
   if($('finNew'))$('finNew').onclick=()=>financeEntryModal();
   if($('finKassaBtn'))$('finKassaBtn').onclick=()=>dirFinanceKassa();
   if($('finCatBtn'))$('finCatBtn').onclick=()=>dirFinanceCategories();
   if($('finPartnerBtn'))$('finPartnerBtn').onclick=()=>dirFinancePartners();
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
   $('main').querySelectorAll('[data-findel]').forEach(b=>b.onclick=()=>delFinanceEntry(b.dataset.findel));
-  const redraw=()=>renderFinance();
+  if($('finPgFirst'))$('finPgFirst').onclick=()=>{finPage=1;renderFinance();};
+  if($('finPgPrev'))$('finPgPrev').onclick=()=>{finPage=Math.max(1,finPage-1);renderFinance();};
+  if($('finPgNext'))$('finPgNext').onclick=()=>{finPage=Math.min(totalPages,finPage+1);renderFinance();};
+  if($('finPgLast'))$('finPgLast').onclick=()=>{finPage=totalPages;renderFinance();};
+  const redraw=()=>{finPage=1;renderFinance();};
   if($('finfDateFrom'))$('finfDateFrom').onchange=e=>{finFilter.dateFrom=e.target.value;redraw();};
   if($('finfDateTo'))$('finfDateTo').onchange=e=>{finFilter.dateTo=e.target.value;redraw();};
   if($('finfKassa'))$('finfKassa').onchange=e=>{finFilter.kassa=e.target.value;redraw();};
