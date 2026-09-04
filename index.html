@@ -2961,12 +2961,15 @@ function bindSearchDropdown(inputId,items,onPick){
         ev.preventDefault();
         const item=items.find(x=>x.id===el.dataset.acid);
         inp.value=item?item.name:'';
+        inp.dataset.selid=item?item.id:'';
         drop.style.display='none';
         if(onPick)onPick(item||null);
       };
     });
     drop.style.display='block';
   };
+  // печатают заново — прежний выбор больше не действует, пока не выберут снова из списка
+  inp.addEventListener('input',()=>{inp.dataset.selid='';});
   inp.oninput=renderList;
   inp.onfocus=renderList;
   inp.onblur=()=>{setTimeout(()=>{drop.style.display='none';},120);};
@@ -3063,8 +3066,8 @@ function renderFinance(){
       <div class="ic-filters">
         <input type="date" id="finfDateFrom" value="${esc(finFilter.dateFrom)}" title="С даты">
         <input type="date" id="finfDateTo" value="${esc(finFilter.dateTo)}" title="По дату">
-        <select id="finfKassa"><option value="">Касса: все</option>${(S.finance_kassa||[]).map(k=>`<option value="${k.id}" ${finFilter.kassa===k.id?'selected':''}>${esc(k.name)}</option>`).join('')}</select>
-        <select id="finfPartner"><option value="">Партнёр: все</option>${(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${finFilter.partner===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+        <input id="finfKassa" autocomplete="off" placeholder="Касса: поиск…" value="${finFilter.kassa?esc(financeKassaName(finFilter.kassa)):''}">
+        <input id="finfPartner" autocomplete="off" placeholder="Партнёр: поиск…" value="${finFilter.partner?esc(financePartnerName(finFilter.partner)):''}">
         <select id="finfType"><option value="">Тип: все</option><option value="income" ${finFilter.type==='income'?'selected':''}>Приход</option><option value="expense" ${finFilter.type==='expense'?'selected':''}>Расход</option></select>
         <input id="finfCategory" autocomplete="off" placeholder="Категория: поиск…" value="${finFilter.category?esc(financeCategoryName(finFilter.category)):''}" style="position:relative">
         ${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'<button class="btn ghost sm" id="finfClear">✕ Сбросить</button>':''}
@@ -3114,26 +3117,26 @@ function renderFinance(){
   const redraw=()=>{finPage=1;renderFinance();};
   if($('finfDateFrom'))$('finfDateFrom').onchange=e=>{finFilter.dateFrom=e.target.value;redraw();};
   if($('finfDateTo'))$('finfDateTo').onchange=e=>{finFilter.dateTo=e.target.value;redraw();};
-  if($('finfKassa'))$('finfKassa').onchange=e=>{finFilter.kassa=e.target.value;redraw();};
-  if($('finfPartner'))$('finfPartner').onchange=e=>{finFilter.partner=e.target.value;redraw();};
   if($('finfType'))$('finfType').onchange=e=>{finFilter.type=e.target.value;redraw();};
-  bindSearchDropdown('finfCategory',[...(S.finance_categories||[]),...(S.finance_income_categories||[])].map(c=>({id:c.id,name:c.name})),item=>{
-    finFilter.category=item?item.id:'';redraw();
-  });
-  const finfCatEl=$('finfCategory');
-  if(finfCatEl)finfCatEl.addEventListener('blur',()=>{if(!finfCatEl.value.trim()&&finFilter.category){finFilter.category='';redraw();}});
+  // общий хелпер для полей-фильтров с поиском: выбор из списка ставит id, очистка поля — снимает фильтр
+  const bindFilterSearch=(inputId,items,filterKey)=>{
+    bindSearchDropdown(inputId,items,item=>{finFilter[filterKey]=item?item.id:'';redraw();});
+    const el=$(inputId);
+    if(el)el.addEventListener('blur',()=>{if(!el.value.trim()&&finFilter[filterKey]){finFilter[filterKey]='';redraw();}});
+  };
+  bindFilterSearch('finfKassa',(S.finance_kassa||[]).map(k=>({id:k.id,name:k.name})),'kassa');
+  bindFilterSearch('finfPartner',(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>({id:p.id,name:p.name})),'partner');
+  bindFilterSearch('finfCategory',[...(S.finance_categories||[]),...(S.finance_income_categories||[])].map(c=>({id:c.id,name:c.name})),'category');
   if($('finfClear'))$('finfClear').onclick=()=>{finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};redraw();};
 }
 function financeEntryModal(id){
   const e=id?(S.finance_entries||[]).find(x=>x.id===id):null;
   if(id&&!e)return;
-  const kassaOpts=(S.finance_kassa||[]).map(k=>`<option value="${k.id}" ${e&&e.kassa_id===k.id?'selected':''}>${esc(k.name)}</option>`).join('');
-  const partnerOpts=(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${e&&e.partner_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   const body=`
     <div class="form-grid">
       <div class="field"><label>Дата <span style="color:var(--rust)">*</span></label><input type="date" id="fe_date" value="${esc(e?(e.entry_date||'').slice(0,10):localToday())}"></div>
-      <div class="field"><label>Касса <span style="color:var(--rust)">*</span></label><select id="fe_kassa"><option value="">—</option>${kassaOpts}</select></div>
-      <div class="field"><label>Партнёр</label><select id="fe_partner"><option value="">— без партнёра —</option>${partnerOpts}</select></div>
+      <div class="field"><label>Касса <span style="color:var(--rust)">*</span></label><input id="fe_kassa" autocomplete="off" placeholder="Начните печатать…" value="${e&&e.kassa_id?esc(financeKassaName(e.kassa_id)):''}" data-selid="${e&&e.kassa_id?esc(e.kassa_id):''}"></div>
+      <div class="field"><label>Партнёр</label><input id="fe_partner" autocomplete="off" placeholder="— без партнёра — (необязательно)" value="${e&&e.partner_id?esc(financePartnerName(e.partner_id)):''}" data-selid="${e&&e.partner_id?esc(e.partner_id):''}"></div>
       <div class="field"><label>Тип <span style="color:var(--rust)">*</span></label><select id="fe_type">
         <option value="income" ${(!e||e.type==='income')?'selected':''}>Приход</option>
         <option value="expense" ${e&&e.type==='expense'?'selected':''}>Расход</option>
@@ -3145,10 +3148,11 @@ function financeEntryModal(id){
     ${e?`<div class="hint" style="margin-top:6px">Менеджер: ${esc(e.manager_name||(e.manager_id?userNameById(e.manager_id):''))||'—'} · Остаток кассы на момент проводки: ${e.kassa_balance!=null?Math.round(e.kassa_balance).toLocaleString('ru-RU')+' ₸':'—'}${e.partner_id?` · Остаток партнёра: ${e.partner_balance!=null?Math.round(e.partner_balance).toLocaleString('ru-RU')+' ₸':'—'}`:''}</div>`:''}`;
   showModal(id?'Изменить проводку':'Новая проводка',body,async()=>{
     const date=val('fe_date');if(!date){toast('Укажите дату');return false;}
-    const kassaId=val('fe_kassa');if(!kassaId){toast('Выберите кассу');return false;}
+    const kassaId=($('fe_kassa')||{}).dataset&&$('fe_kassa').dataset.selid;
+    if(!kassaId){toast('Выберите кассу из списка (начните печатать и выберите вариант)');return false;}
     const amount=parseFloat(val('fe_amount'));if(!amount||amount<=0){toast('Укажите сумму больше нуля');return false;}
     const type=val('fe_type');
-    const partnerId=val('fe_partner')||null;
+    const partnerId=(($('fe_partner')||{}).dataset&&$('fe_partner').dataset.selid)||null;
     // категория — по введённому названию ищем совпадение (без учёта регистра) в таблице,
     // соответствующей выбранному Типу (расход/приход — это РАЗНЫЕ справочники); если такой
     // категории ещё нет — создаём её тут же, в нужной таблице, не нужно отдельно заходить в «⚙»
@@ -3189,6 +3193,8 @@ function financeEntryModal(id){
   setTimeout(()=>{
     const catList=()=>(val('fe_type')==='income'?(S.finance_income_categories||[]):(S.finance_categories||[])).map(c=>({id:c.id,name:c.name}));
     bindSearchDropdown('fe_cat',catList());
+    bindSearchDropdown('fe_kassa',(S.finance_kassa||[]).map(k=>({id:k.id,name:k.name})));
+    bindSearchDropdown('fe_partner',(S.finance_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>({id:p.id,name:p.name})));
     const typeEl=$('fe_type');
     if(typeEl)typeEl.onchange=()=>{
       $('fe_cat').value=''; // при смене типа старая категория (из другого справочника) больше не подходит
