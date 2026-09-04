@@ -3364,7 +3364,9 @@ function renderFinance(){
     // сохранение вынесено в отдельную функцию — вызывается и кнопкой, и клавишей Enter из любого
     // поля строки. Проверка обязательных полей та же самая в обоих случаях — по Enter «мимо»
     // проверки не проскочить, если что-то не заполнено, просто ничего не произойдёт (с тостом-подсказкой)
+    let _finSaving=false; // защита от повторного запуска, пока идёт сохранение (двойной Enter/клик)
     const saveInlineEntry=async()=>{
+      if(_finSaving)return; // уже сохраняем — игнорируем повторный вызов
       const date=val('fen_date');if(!date){toast('Укажите дату');return;}
       const kassaId=($('fen_kassa')||{}).dataset&&$('fen_kassa').dataset.selid;
       if(!kassaId){toast('Выберите кассу из списка');return;}
@@ -3379,14 +3381,20 @@ function renderFinance(){
         category_id:categoryId,comment:val('fen_comment').trim()||null,
         manager_id:(S.me&&S.me.id)||null,manager_name:(S.me&&(S.me.full_name||S.me.email))||'',
       };
+      _finSaving=true;
       const btn=$('fenSave');if(btn){btn.disabled=true;btn.textContent='Сохраняем…';}
-      const u=await dbInsert('finance_entries',row);
-      if(!u){if(btn){btn.disabled=false;btn.textContent='Сохранить';}return;}
-      if(!S.finance_entries)S.finance_entries=[];S.finance_entries.push(u);
-      await recalcKassaBalances(kassaId);
-      if(partnerId)await recalcPartnerBalances(partnerId);
-      finAddingNew=false;
-      toast('Сохранено');renderFinance();
+      try{
+        const u=await dbInsert('finance_entries',row);
+        if(!u)return;
+        if(!S.finance_entries)S.finance_entries=[];S.finance_entries.push(u);
+        await recalcKassaBalances(kassaId);
+        if(partnerId)await recalcPartnerBalances(partnerId);
+        finAddingNew=false;
+        toast('Сохранено');renderFinance();
+      }finally{
+        _finSaving=false;
+        if(btn){btn.disabled=false;btn.textContent='Сохранить';}
+      }
     };
     if($('fenSave'))$('fenSave').onclick=saveInlineEntry;
     // Enter в любом поле строки — тоже сохраняет (если поисковые поля Кассы/Партнёра/Категории в
