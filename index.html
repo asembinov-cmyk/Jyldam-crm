@@ -3022,9 +3022,27 @@ function financePartnerName(id){return ((S.finance_partners||[]).find(p=>p.id===
 let finFilter={dateFrom:'',dateTo:'',kassa:'',partner:'',type:'',category:''};
 let finTab='entries'; // entries | summary
 let finPage=1;
+let finSummaryPage=1;
 let finSort={col:null,dir:1}; // col: 'category'|'amount'; dir: 1=по возрастанию, -1=по убыванию
 let finAddingNew=false; // показывать ли строку ввода новой проводки прямо в гриде (сверху)
 const finPerPage=50;
+async function refreshFinanceData(){
+  const btn=$('finRefresh');
+  if(btn){btn.disabled=true;btn.textContent='Обновляем…';}
+  try{
+    const [kassa,cats,incomeCats,partners,entries]=await Promise.all([
+      dbList('finance_kassa',{order:'name'}).catch(()=>S.finance_kassa||[]),
+      dbList('finance_categories',{order:'name'}).catch(()=>S.finance_categories||[]),
+      dbList('finance_income_categories',{order:'name'}).catch(()=>S.finance_income_categories||[]),
+      dbList('finance_partners',{order:'name'}).catch(()=>S.finance_partners||[]),
+      dbList('finance_entries',{order:'entry_date',asc:false}).catch(()=>S.finance_entries||[]),
+    ]);
+    S.finance_kassa=kassa;S.finance_categories=cats;S.finance_income_categories=incomeCats;
+    S.finance_partners=partners;S.finance_entries=entries;
+    toast('Обновлено');
+  }catch(e){toast('Не удалось обновить');}
+  finally{renderFinance();}
+}
 function renderFinance(){
   if(!canMod('finance')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const fmtNum=n=>Math.round(n||0).toLocaleString('ru-RU'); // для грида — без ₸, по просьбе
@@ -3069,20 +3087,38 @@ function renderFinance(){
       if(!s.lastDate){s.lastDate=e.entry_date;s.balance=e.partner_balance!=null?e.partner_balance:s.balance;}
     });
     const summaryRows=[...byPartner.values()].sort((a,b)=>(a.partner.name||'').localeCompare(b.partner.name||''));
+    const sTotalPages=Math.max(1,Math.ceil(summaryRows.length/finPerPage));
+    if(finSummaryPage>sTotalPages)finSummaryPage=sTotalPages;
+    if(finSummaryPage<1)finSummaryPage=1;
+    const summaryPageRows=summaryRows.slice((finSummaryPage-1)*finPerPage,finSummaryPage*finPerPage);
     $('main').innerHTML=head+`
     <div class="panel">
       <div class="panel-head"><h2>Общая сводка по партнёрам</h2><span class="count">${summaryRows.length}</span></div>
       <div class="table-scroll">
       <table class="resp-table"><thead><tr><th>Партнёр</th><th>Текущий остаток</th><th>Проводок</th><th>Последняя проводка</th></tr></thead><tbody>
-      ${summaryRows.length?summaryRows.map(s=>`<tr>
+      ${summaryPageRows.length?summaryPageRows.map(s=>`<tr>
         <td data-label="Партнёр"><strong>${esc(s.partner.name)}</strong></td>
         <td data-label="Текущий остаток" style="font-weight:700;color:${s.balance>0?'#1a7f37':(s.balance<0?'#c0392b':'inherit')}">${fmtNum(s.balance)}</td>
         <td data-label="Проводок">${s.count}</td>
         <td data-label="Последняя проводка">${s.lastDate?esc(fmtDate(s.lastDate)):'—'}</td>
       </tr>`).join(''):`<tr><td colspan="4"><div class="empty"><div class="big">Нет партнёров</div>Добавьте партнёра через «⚙ Партнёры».</div></td></tr>`}
       </tbody></table></div>
+      <div class="simple-pager">
+        <button class="btn sm ghost" id="finRefresh" title="Подтянуть свежие данные — полезно, если с модулем работает ещё кто-то">🔄 Обновить</button>
+        ${summaryRows.length>finPerPage?`
+        <button class="btn sm ghost" id="finSPgFirst" ${finSummaryPage<=1?'disabled':''}>« В начало</button>
+        <button class="btn sm ghost" id="finSPgPrev" ${finSummaryPage<=1?'disabled':''}>‹ Назад</button>
+        <span class="simple-pager-label">Стр. ${finSummaryPage} / ${sTotalPages} · ${summaryRows.length} партнёров</span>
+        <button class="btn sm ghost" id="finSPgNext" ${finSummaryPage>=sTotalPages?'disabled':''}>Вперёд ›</button>
+        <button class="btn sm ghost" id="finSPgLast" ${finSummaryPage>=sTotalPages?'disabled':''}>В конец »</button>`:''}
+      </div>
     </div>`;
     $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
+    if($('finRefresh'))$('finRefresh').onclick=refreshFinanceData;
+    if($('finSPgFirst'))$('finSPgFirst').onclick=()=>{finSummaryPage=1;renderFinance();};
+    if($('finSPgPrev'))$('finSPgPrev').onclick=()=>{finSummaryPage=Math.max(1,finSummaryPage-1);renderFinance();};
+    if($('finSPgNext'))$('finSPgNext').onclick=()=>{finSummaryPage=Math.min(sTotalPages,finSummaryPage+1);renderFinance();};
+    if($('finSPgLast'))$('finSPgLast').onclick=()=>{finSummaryPage=sTotalPages;renderFinance();};
     return;
   }
   $('main').innerHTML=head+`
@@ -3136,15 +3172,18 @@ function renderFinance(){
         </div></td>
       </tr>`).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет проводок</div>${(finFilter.dateFrom||finFilter.dateTo||finFilter.kassa||finFilter.partner||finFilter.type||finFilter.category)?'Измените фильтры.':'Нажмите «Новая проводка».'}</div></td></tr>`}
       </tbody></table></div>
-      ${rows.length>finPerPage?`<div class="simple-pager">
+      <div class="simple-pager">
+        <button class="btn sm ghost" id="finRefresh" title="Подтянуть свежие данные — полезно, если с модулем работает ещё кто-то">🔄 Обновить</button>
+        ${rows.length>finPerPage?`
         <button class="btn sm ghost" id="finPgFirst" ${finPage<=1?'disabled':''}>« В начало</button>
         <button class="btn sm ghost" id="finPgPrev" ${finPage<=1?'disabled':''}>‹ Назад</button>
         <span class="simple-pager-label">Стр. ${finPage} / ${totalPages} · ${rows.length} проводок</span>
         <button class="btn sm ghost" id="finPgNext" ${finPage>=totalPages?'disabled':''}>Вперёд ›</button>
-        <button class="btn sm ghost" id="finPgLast" ${finPage>=totalPages?'disabled':''}>В конец »</button>
-      </div>`:''}
+        <button class="btn sm ghost" id="finPgLast" ${finPage>=totalPages?'disabled':''}>В конец »</button>`:''}
+      </div>
     </div>`;
   $('main').querySelectorAll('[data-fintab]').forEach(b=>b.onclick=()=>{finTab=b.dataset.fintab;renderFinance();});
+  if($('finRefresh'))$('finRefresh').onclick=refreshFinanceData;
   if($('finNew'))$('finNew').onclick=()=>{finAddingNew=true;renderFinance();};
   $('main').querySelectorAll('[data-finedit]').forEach(b=>b.onclick=()=>financeEntryModal(b.dataset.finedit));
   $('main').querySelectorAll('[data-finsort]').forEach(th=>th.onclick=()=>{
