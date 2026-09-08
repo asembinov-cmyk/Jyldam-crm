@@ -2396,13 +2396,13 @@ function buildNav(opts){
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
-    if(isAdmin()||canMod('ket_orders'))main.push({k:'ket_orders',label:'Заказы партнёров',icon:'handshake'});
     if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];
     if(canMod('courier'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
     if(canMod('mail'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
     if(canMod('intercity'))delivery.push({k:'intercity',label:'Отправки межгород',icon:'intercity'});
+    if(isAdmin()||canMod('ket_orders'))delivery.push({k:'ket_orders',label:'Заказы партнёров',icon:'handshake'});
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
 
     // раздел «Деньги»
@@ -5633,32 +5633,32 @@ function renderCalcSummary(){
     </div>
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по типу доставки</h3>
-      <table class="calc-courier-tbl"><thead><tr><th>Тип</th><th>Заказов</th><th>Выручка</th><th>Расходы</th><th>Прибыль</th></tr></thead>
+      <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr><th>Тип</th><th>Заказов</th><th>Выручка</th><th>Расходы</th><th>Прибыль</th></tr></thead>
         <tbody>
           <tr><td>Курьерская</td><td>${courSum.cnt}</td><td>${fmtMoney(courSum.rev)}</td><td>${fmtMoney(courSum.cost)}</td><td><b style="color:${courSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(courSum.profit)}</b></td></tr>
           <tr><td>Почтовая</td><td>${postSum.cnt}</td><td>${fmtMoney(postSum.rev)}</td><td>${fmtMoney(postSum.cost)}</td><td><b style="color:${postSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(postSum.profit)}</b></td></tr>
           <tr style="border-top:2px solid var(--line)"><td><b>Всего (общий котёл)</b></td><td><b>${courSum.cnt+postSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
-        </tbody></table>
+        </tbody></table></div>
     </div>
     ${paidBySenderSum.cnt?`<div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Из них «Оплачено отправителем»</h3>
       <p class="calc-note">Партнёр платит за доставку сам, напрямую (например раз в месяц) — сумма заказа в CRM стоит 0. Ниже — сколько эти заказы условно «весят» в общей выручке/прибыли выше (уже учтено, не добавляется сверху) и сколько на них реально потрачено.</p>
-      <table class="calc-courier-tbl"><thead><tr><th>Заказов</th><th>Условная выручка</th><th>Расходы</th><th>Условная прибыль</th></tr></thead>
-        <tbody><tr><td>${paidBySenderSum.cnt}</td><td>${fmtMoney(paidBySenderSum.rev)}</td><td>${fmtMoney(paidBySenderSum.cost)}</td><td><b style="color:${(paidBySenderSum.rev-paidBySenderSum.cost)<0?'#c0392b':'#2e7d32'}">${fmtMoney(paidBySenderSum.rev-paidBySenderSum.cost)}</b></td></tr></tbody></table>
+      <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr><th>Заказов</th><th>Условная выручка</th><th>Расходы</th><th>Условная прибыль</th></tr></thead>
+        <tbody><tr><td>${paidBySenderSum.cnt}</td><td>${fmtMoney(paidBySenderSum.rev)}</td><td>${fmtMoney(paidBySenderSum.cost)}</td><td><b style="color:${(paidBySenderSum.rev-paidBySenderSum.cost)<0?'#c0392b':'#2e7d32'}">${fmtMoney(paidBySenderSum.rev-paidBySenderSum.cost)}</b></td></tr></tbody></table></div>
     </div>`:''}
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по статьям расходов</h3>
       <p class="calc-note">Сколько всего потрачено за месяц по каждой статье — курьерские и почтовые заказы вместе.</p>
-      ${expenseRows.length?`<table class="calc-courier-tbl"><thead><tr><th>Статья</th><th>Сумма</th><th>Доля</th></tr></thead>
+      ${expenseRows.length?`<div class="table-scroll"><table class="calc-courier-tbl"><thead><tr><th>Статья</th><th>Сумма</th><th>Доля</th></tr></thead>
         <tbody>${expenseRows.map(r=>`<tr><td>${esc(r.label)}</td><td><b>${fmtMoney(r.amount)}</b></td><td>${totCost>0?(r.amount/totCost*100).toFixed(1):'0'}%</td></tr>`).join('')}
-        <tr style="border-top:2px solid var(--line)"><td><b>Итого расходы</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b>100%</b></td></tr></tbody></table>`
+        <tr style="border-top:2px solid var(--line)"><td><b>Итого расходы</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b>100%</b></td></tr></tbody></table></div>`
         :'<div class="empty"><div class="big">Нет данных</div>За этот месяц нет заказов.</div>'}
     </div>
     <div class="panel calc-panel">
       <h3 class="calc-h">Заработок курьеров доставки</h3>
       <p class="calc-note">Считается по нормативу «Курьер» города заказа, для заказов, присвоенных курьеру в этом месяце.</p>
-      ${courierRows.length?`<table class="calc-courier-tbl"><thead><tr><th>Курьер</th><th>Заказов</th><th>Заработок</th></tr></thead>
-        <tbody>${courierRows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.count}</td><td><b>${fmtMoney(r.earn)}</b></td></tr>`).join('')}</tbody></table>`
+      ${courierRows.length?`<div class="table-scroll"><table class="calc-courier-tbl"><thead><tr><th>Курьер</th><th>Заказов</th><th>Заработок</th></tr></thead>
+        <tbody>${courierRows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.count}</td><td><b>${fmtMoney(r.earn)}</b></td></tr>`).join('')}</tbody></table></div>`
         :'<div class="empty"><div class="big">Нет данных</div>За этот месяц нет заказов с назначенным курьером.</div>'}
     </div>`;
   $('calcSumMonth').onchange=e=>{calcSummaryMonth.month=parseInt(e.target.value,10);renderCalcSummary();};
