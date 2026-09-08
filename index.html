@@ -9919,12 +9919,32 @@ function inboundTodayStartISO(){return new Date(localToday()+'T00:00:00').toISOS
 function inboundTomorrowStartISO(){const d=new Date(localToday()+'T00:00:00');d.setDate(d.getDate()+1);return d.toISOString();}
 // есть ли активный поиск/фильтр — при них нужен полный набор данных, постраничная подгрузка отключается
 function inboundHasActiveFilters(){return !!(inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.callStatus||inbFilter.statusKz||inbFilter.dateFrom||inbFilter.dateTo);}
+// если активен ТОЛЬКО диапазон дат (без остальных фильтров) — можно обойтись быстрым серверным
+// запросом по этому диапазону, не выкачивая всю историю целиком. Остальные фильтры (поиск,
+// партнёр, статусы) требуют полной загрузки для локального сопоставления.
+function inboundOnlyDateFilterActive(){
+  return !!(inbFilter.dateFrom||inbFilter.dateTo)
+    &&!(inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.callStatus||inbFilter.statusKz);
+}
+// границы для серверного запроса created_at — явный диапазон дат из фильтра, иначе «сегодня»,
+// иначе последние N дней / вся история
+function inboundQueryDateBounds(){
+  if(inbFilter.dateFrom||inbFilter.dateTo){
+    const gte=inbFilter.dateFrom?new Date(inbFilter.dateFrom+'T00:00:00').toISOString():null;
+    const lt=inbFilter.dateTo?(()=>{const d=new Date(inbFilter.dateTo+'T00:00:00');d.setDate(d.getDate()+1);return d.toISOString();})():null;
+    return {gte,lt};
+  }
+  if(_inboundTodayOnly)return {gte:inboundTodayStartISO(),lt:inboundTomorrowStartISO()};
+  if(!_inboundFullHistory)return {gte:inboundSinceISO(),lt:null};
+  return {gte:null,lt:null};
+}
 let _inboundCounts={total:0,courier:0,mail:0,unmatched:0}; // точные счётчики с сервера (для карточек статистики и пагинации в быстром режиме)
 let _inboundPageCache=new Map(); // page → {orders,items}, чтобы не перезапрашивать уже открытую страницу
 async function loadInboundCounts(){
+  const bounds=inboundQueryDateBounds();
   const build=()=>{let q=sb.from('inbound_orders').select('id',{count:'exact',head:true});
-    if(_inboundTodayOnly)q=q.gte('created_at',inboundTodayStartISO()).lt('created_at',inboundTomorrowStartISO());
-    else if(!_inboundFullHistory)q=q.gte('created_at',inboundSinceISO());
+    if(bounds.gte)q=q.gte('created_at',bounds.gte);
+    if(bounds.lt)q=q.lt('created_at',bounds.lt);
     return q;};
   try{
     const [tot,cou,mai]=await Promise.all([build(),build().is('index',null),build().not('index','is',null)]);
@@ -9941,14 +9961,16 @@ async function loadInboundAllTimeTotal(){
   }catch(e){console.error('loadInboundAllTimeTotal',e);}
 }
 // быстрая загрузка ОДНОЙ страницы прямо с сервера (без выкачивания всей таблицы) — то, что открывает
-// модуль почти мгновенно, даже когда заказов уже многие тысячи
+// модуль почти мгновенно, даже когда заказов уже многие тысячи. Теперь используется и когда
+// активен ТОЛЬКО фильтр по дате — не нужно из-за него выкачивать всю историю целиком.
 async function loadInboundPage(page){
   if(_inboundPageCache.has(page))return _inboundPageCache.get(page);
   const from=(page-1)*inbPerPage,to=from+inbPerPage-1;
   try{
     let q=sb.from('inbound_orders').select('*').order('created_at',{ascending:false}).range(from,to);
-    if(_inboundTodayOnly)q=q.gte('created_at',inboundTodayStartISO()).lt('created_at',inboundTomorrowStartISO());
-    else if(!_inboundFullHistory)q=q.gte('created_at',inboundSinceISO());
+    const bounds=inboundQueryDateBounds();
+    if(bounds.gte)q=q.gte('created_at',bounds.gte);
+    if(bounds.lt)q=q.lt('created_at',bounds.lt);
     const {data:orders,error}=await q;
     if(error)throw error;
     const ids=(orders||[]).map(o=>o.id);
@@ -9966,7 +9988,8 @@ async function loadInboundPage(page){
 // нужную страницу с сервера; если уже есть полный набор (или включён поиск/фильтр) — просто нарезаем locally
 async function gotoInboundPage(page){
   inbPage=Math.max(1,page);
-  if(!S.inbound_full_loaded&&!inboundHasActiveFilters()){
+  const dateOnly=inboundOnlyDateFilterActive()&&!inboundColFiltersActive();
+  if(!S.inbound_full_loaded&&(!inboundHasActiveFilters()||dateOnly)){
     const pg=await loadInboundPage(inbPage);
     S.inbound_orders=pg.orders;S.inbound_items=pg.items;
     // привязка тут больше не запускается — она либо уже произошла при сохранении товара
@@ -10392,7 +10415,10 @@ function drawInboundOrders(){
   if(_inbColFilterClose){const c=_inbColFilterClose;_inbColFilterClose=null;try{c(false);}catch(e){}}
   refreshInboundLookups();
   const anyFilter=inboundHasActiveFilters()||inboundColFiltersActive();
-  const lazy=!S.inbound_full_loaded&&!anyFilter; // быстрый режим: постранично с сервера, без полного набора в памяти
+  // если единственный активный фильтр — диапазон дат (без остальных полей, без фильтров по
+  // столбцу) — можно оставаться в быстром постраничном режиме, сервер сам применит эти границы
+  const dateOnlyFilter=inboundOnlyDateFilterActive()&&!inboundColFiltersActive();
+  const lazy=!S.inbound_full_loaded&&(!anyFilter||dateOnlyFilter); // быстрый режим: постранично с сервера, без полного набора в памяти
   const list=S.inbound_orders||[]; // в быстром режиме — только текущая страница; иначе — весь (отфильтрованный по дате) набор
   const allRows=lazy?list:filteredInbound();
   const totalCount=lazy?_inboundCounts.total:allRows.length;
@@ -10424,7 +10450,7 @@ function drawInboundOrders(){
     <div class="panel">
       <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(allRows.length+' / '+totalCount):totalCount}</span>
         ${admin&&inbSelected.size?`<button class="btn danger sm" id="inbDelSel" style="margin-left:auto">✕ Удалить выбранные (${inbSelected.size})</button>`:''}</div>
-        ${lazy?`<div class="hint" style="margin:0 20px 8px;color:var(--muted)">${_inboundTodayOnly?'Показаны заказы только за сегодня':'Показаны последние '+INBOUND_DEFAULT_DAYS+' дней'} — страницы подгружаются по одной с сервера</div>`:''}
+        ${lazy?`<div class="hint" style="margin:0 20px 8px;color:var(--muted)">${dateOnlyFilter?'Показаны заказы за выбранный период':(_inboundTodayOnly?'Показаны заказы только за сегодня':'Показаны последние '+INBOUND_DEFAULT_DAYS+' дней')} — страницы подгружаются по одной с сервера</div>`:''}
       <div class="filters">
         <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон… (можно вставить сразу несколько через пробел)" value="${esc(inbFilter.q)}">
         <select id="inbpartner"><option value="">Все партнёры</option>${[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.name||'—')}</option>`).join('')}</select>
@@ -10526,7 +10552,16 @@ function drawInboundOrders(){
     const active=document.activeElement;const fid=active&&active.id;const pos=active&&active.selectionStart;
     inbPage=1; // при смене фильтра — на первую страницу
     inbSelectAll=false;
-    if(inboundHasActiveFilters()&&!S.inbound_full_loaded){
+    const dateOnly=inboundOnlyDateFilterActive()&&!inboundColFiltersActive();
+    if(dateOnly&&!S.inbound_full_loaded){
+      // только дата — быстрый серверный запрос по этому диапазону, не тянем всю историю
+      _inboundPageCache.clear();
+      try{
+        await loadInboundCounts();
+        const pg=await loadInboundPage(1);
+        S.inbound_orders=pg.orders;S.inbound_items=pg.items;
+      }catch(e){}
+    }else if(inboundHasActiveFilters()&&!S.inbound_full_loaded){
       toast('Загружаем весь список для фильтра…');
       try{await loadInbound({full:true});}catch(e){}
     }
