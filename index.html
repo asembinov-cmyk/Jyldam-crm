@@ -545,6 +545,8 @@
   #inboundTable td[data-label="Индекс"],#inboundTable th[data-colkey="index"]{min-width:64px;white-space:nowrap}
   .pickup-row-qr td{background:#fff6df!important}
   .pickup-row-qr:hover td{background:#fdecc4!important}
+  .order-row-api td{background:#e8f4ff!important}
+  .order-row-api:hover td{background:#d3e9ff!important}
   #inboundTable .inb-th{cursor:pointer;user-select:none;position:relative}
   #inboundTable .inb-th:hover{background:var(--card)}
   #inboundTable .inb-th-dragging{opacity:.4}
@@ -8099,7 +8101,7 @@ function drawOrders(){
       const photoCell=ph.length
         ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" loading="lazy" decoding="async" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
         : '<span style="color:var(--line)">—</span>';
-      return `<tr data-orow="${o.id}" style="cursor:pointer">
+      return `<tr data-orow="${o.id}" style="cursor:pointer" class="${o.via_integration?'order-row-api':''}" title="${o.via_integration?'Пришёл от партнёра напрямую через API-интеграцию':''}">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
@@ -8834,7 +8836,15 @@ function partnerModal(id){
       <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
     </div>
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
-    <div class="field"><label>QR-код / номер доступа в кабинет</label><input id="p_qr" value="${esc(p.qr_code||'')}" placeholder="например 1001"><small style="color:var(--muted);font-size:12px">Ссылка для партнёра: jyldam-crm.kz/?p=ЭТОТ_НОМЕР</small></div>`,
+    <div class="field"><label>QR-код / номер доступа в кабинет</label><input id="p_qr" value="${esc(p.qr_code||'')}" placeholder="например 1001"><small style="color:var(--muted);font-size:12px">Ссылка для партнёра: jyldam-crm.kz/?p=ЭТОТ_НОМЕР</small></div>
+    ${id?`<div class="field"><label>Приём заказов по API</label>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="wh-cat">${p.api_token_hash?'✅ токен настроен':'токен не выдан'}</span>
+        <button type="button" class="btn ghost sm" id="p_gen_token">🔑 ${p.api_token_hash?'Перевыпустить токен':'Выдать токен'}</button>
+      </div>
+      <small style="color:var(--muted);font-size:12px">Партнёр сможет присылать готовые заказы напрямую через API — они автоматически попадут в «Заказы заборов» с заявкой на забор, выделены другим цветом. Перевыпуск токена отзывает старый — если у партнёра уже настроена интеграция, старый токен перестанет работать.</small>
+      <div id="p_token_reveal"></div>
+    </div>`:''}`,
     async()=>{
       // проверка обязательных полей (кроме QR-кода)
       const req=[
@@ -8881,6 +8891,28 @@ function partnerModal(id){
       toast('Сохранено'+syncMsg);renderPartnersPage();return true;});
   attachPhone('p_phone',p.phone);
   const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
+  const genBtn=$('p_gen_token');
+  if(genBtn)genBtn.onclick=async()=>{
+    if(p.api_token_hash&&!confirm('Старый токен перестанет работать, если у партнёра уже настроена интеграция. Продолжить?'))return;
+    genBtn.disabled=true;genBtn.textContent='Генерируем…';
+    // случайный токен — 32 байта в hex; хешируем тем же способом (sha256), что и на сервере,
+    // сохраняем только хеш — сам токен нигде не хранится, показываем один раз
+    const bytes=crypto.getRandomValues(new Uint8Array(32));
+    const token=Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const hashBuf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));
+    const hash=Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const u=await dbUpdate('partners',id,{api_token_hash:hash});
+    genBtn.disabled=false;genBtn.textContent='🔑 Перевыпустить токен';
+    if(!u){toast('Не удалось сохранить токен');return;}
+    Object.assign(p,u);
+    const reveal=$('p_token_reveal');
+    if(reveal)reveal.innerHTML=`<div class="hint" style="margin-top:8px;border-color:var(--rust)">
+      <b>Новый токен (покажется только сейчас, потом нигде не сохранён):</b><br>
+      <code style="user-select:all;word-break:break-all;font-size:13px">${esc(token)}</code><br>
+      <small style="color:var(--muted)">Отдайте это партнёру для настройки интеграции — вместе с адресом приёма заказов.</small>
+    </div>`;
+    toast('Токен выдан');
+  };
 }
 /* Города */
 function dirCities(){
