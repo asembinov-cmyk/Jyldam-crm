@@ -81,6 +81,7 @@
   .btn.primary{background:var(--rust);border-color:var(--rust-dk);color:#fff}
   .btn.primary:hover{background:var(--rust-dk)}
   .btn.ghost{background:transparent}
+  .btn.ghost.active{background:var(--rust);color:#fff;border-color:var(--rust)}
   .btn.sm{padding:6px 11px;font-size:12.5px;border-radius:8px}
   .btn.danger{color:#c0392b;border-color:#e3b0a8}
   .btn.danger:hover{background:#c0392b;color:#fff;border-color:#c0392b}
@@ -3808,6 +3809,15 @@ function whPartnerName(id){return ((S.warehouse_partners||[]).find(x=>x.id===id)
 
 let whQuickFilter='all'; // all | stock | nostock | reserved
 let _whProdSearchTimer=null;
+// отдельный лёгкий счётчик «требуют привязки» — раньше показывался в самих «Заказах партнёров»,
+// теперь живёт здесь, на складе (где эта привязка и происходит). Не завязан на дату/окно.
+let _whUnmatchedCount=null;
+async function loadWhUnmatchedCount(){
+  try{
+    const {count}=await sb.from('inbound_orders').select('id',{count:'exact',head:true}).eq('match_status','unmatched');
+    _whUnmatchedCount=count||0;
+  }catch(e){console.error('loadWhUnmatchedCount',e);}
+}
 function renderWhProducts(){
   const all=(S.products||[]).filter(p=>{
     if(whPartner&&p.partner_id!==whPartner)return false;
@@ -3841,6 +3851,7 @@ function renderWhProducts(){
         k==='all'?allProds.length:k==='stock'?allProds.filter(p=>productStock(p)>0).length:k==='nostock'?allProds.filter(p=>productStock(p)<=0).length:
         allProds.filter(p=>productReserved(p.id)>0).length
       })</button>`).join('')}
+      ${canMod('ket_orders')?`<button id="whUnmatchedBtn" class="${_whUnmatchedCount?'':''}" style="${_whUnmatchedCount?'color:var(--rust)':''}" title="Позиции заказов КЕТ, которым ещё не найден товар">🔍 Требуют привязки (КЕТ): ${_whUnmatchedCount!=null?_whUnmatchedCount:'…'}</button>`:''}
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Товары</h2><span class="count">${all.length}</span></div>
@@ -3876,6 +3887,12 @@ function renderWhProducts(){
   if($('whAddProduct'))$('whAddProduct').onclick=()=>productModal();
   if($('whImport'))$('whImport').onclick=()=>productImportModal();
   if($('whImportKet'))$('whImportKet').onclick=()=>productImportKetModal();
+  if($('whUnmatchedBtn'))$('whUnmatchedBtn').onclick=async()=>{
+    const btn=$('whUnmatchedBtn');const orig=btn.textContent;btn.disabled=true;btn.textContent='⏳ Проверяем…';
+    try{await inboundUnmatchedModal();}
+    finally{if(btn){btn.disabled=false;btn.textContent=orig;}}
+  };
+  if(_whUnmatchedCount==null)loadWhUnmatchedCount().then(()=>{if(S.tab==='cash'&&whSub==='products')renderWhProducts();}).catch(()=>{});
   $('whContent').querySelectorAll('[data-whedit]').forEach(b=>b.onclick=()=>productPanel(b.dataset.whedit));
   $('whContent').querySelectorAll('[data-whlabel]').forEach(b=>b.onclick=()=>productLabelModal(b.dataset.whlabel));
   $('whContent').querySelectorAll('[data-whrow]').forEach(tr=>tr.ondblclick=e=>{
@@ -9893,18 +9910,35 @@ async function autoMatchInboundItems(){
 let _inboundFullHistory=false; // false = грузим только последние N дней (быстро), true = вся история (по запросу)
 const INBOUND_DEFAULT_DAYS=60;
 function inboundSinceISO(){const d=new Date();d.setDate(d.getDate()-INBOUND_DEFAULT_DAYS);return d.toISOString();}
+// по умолчанию модуль показывает только СЕГОДНЯШНИЕ заказы — тянуть сразу всё смысла нет, это и
+// была основная нагрузка. «Все даты» (или явный выбор дат в фильтре) переключает на прежнее
+// поведение (последние 60 дней / полная история). Обе границы — по местному дню, как и остальная
+// система (localToday()).
+let _inboundTodayOnly=true;
+function inboundTodayStartISO(){return new Date(localToday()+'T00:00:00').toISOString();}
+function inboundTomorrowStartISO(){const d=new Date(localToday()+'T00:00:00');d.setDate(d.getDate()+1);return d.toISOString();}
 // есть ли активный поиск/фильтр — при них нужен полный набор данных, постраничная подгрузка отключается
 function inboundHasActiveFilters(){return !!(inbFilter.q||inbFilter.partner||inbFilter.delivery||inbFilter.status||inbFilter.callStatus||inbFilter.statusKz||inbFilter.dateFrom||inbFilter.dateTo);}
 let _inboundCounts={total:0,courier:0,mail:0,unmatched:0}; // точные счётчики с сервера (для карточек статистики и пагинации в быстром режиме)
 let _inboundPageCache=new Map(); // page → {orders,items}, чтобы не перезапрашивать уже открытую страницу
 async function loadInboundCounts(){
   const build=()=>{let q=sb.from('inbound_orders').select('id',{count:'exact',head:true});
-    if(!_inboundFullHistory)q=q.gte('created_at',inboundSinceISO());
+    if(_inboundTodayOnly)q=q.gte('created_at',inboundTodayStartISO()).lt('created_at',inboundTomorrowStartISO());
+    else if(!_inboundFullHistory)q=q.gte('created_at',inboundSinceISO());
     return q;};
   try{
-    const [tot,cou,mai,unm]=await Promise.all([build(),build().is('index',null),build().not('index','is',null),build().eq('match_status','unmatched')]);
-    _inboundCounts={total:tot.count||0,courier:cou.count||0,mail:mai.count||0,unmatched:unm.count||0};
+    const [tot,cou,mai]=await Promise.all([build(),build().is('index',null),build().not('index','is',null)]);
+    _inboundCounts={total:tot.count||0,courier:cou.count||0,mail:mai.count||0};
   }catch(e){console.error('loadInboundCounts',e);}
+}
+// отдельный лёгкий счётчик «всего в системе за всё время», не завязан на текущий режим/фильтр —
+// запускается один раз при открытии модуля, показывается в уголке для общей картины
+let _inboundAllTimeTotal=null;
+async function loadInboundAllTimeTotal(){
+  try{
+    const {count}=await sb.from('inbound_orders').select('id',{count:'exact',head:true});
+    _inboundAllTimeTotal=count||0;
+  }catch(e){console.error('loadInboundAllTimeTotal',e);}
 }
 // быстрая загрузка ОДНОЙ страницы прямо с сервера (без выкачивания всей таблицы) — то, что открывает
 // модуль почти мгновенно, даже когда заказов уже многие тысячи
@@ -9913,7 +9947,8 @@ async function loadInboundPage(page){
   const from=(page-1)*inbPerPage,to=from+inbPerPage-1;
   try{
     let q=sb.from('inbound_orders').select('*').order('created_at',{ascending:false}).range(from,to);
-    if(!_inboundFullHistory)q=q.gte('created_at',inboundSinceISO());
+    if(_inboundTodayOnly)q=q.gte('created_at',inboundTodayStartISO()).lt('created_at',inboundTomorrowStartISO());
+    else if(!_inboundFullHistory)q=q.gte('created_at',inboundSinceISO());
     const {data:orders,error}=await q;
     if(error)throw error;
     const ids=(orders||[]).map(o=>o.id);
@@ -10008,8 +10043,9 @@ function ketSendLabel(s){return s==null||s===''?'—':(KET_SEND_STATUS[String(s)
 function ketKzLabel(s){return s==null||s===''?'—':(KET_STATUS_KZ[String(s)]||('код '+s));}
 async function renderInboundOrders(){
   if(!isAdmin()&&!canMod('ket_orders')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
-  // открытие модуля: сразу тянем только первую страницу (быстро), полную историю подгружаем в фоне —
-  // нужна для точного поиска/фильтров/диагностики, но не должна тормозить сам факт открытия
+  // открытие модуля: по умолчанию показываем только СЕГОДНЯШНИЕ заказы — тянуть больше смысла нет
+  // (это и было основной нагрузкой). Более широкий набор подгружается только когда реально нужен —
+  // при поиске/фильтре (см. redraw() ниже) или по явному нажатию «Все даты».
   if(!S.inbound_orders){
     $('main').innerHTML='<div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div><div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
     try{
@@ -10019,10 +10055,12 @@ async function renderInboundOrders(){
       S.inbound_orders=pg.orders;S.inbound_items=pg.items;
       // раньше здесь всегда гонялась полная привязка — теперь основная привязка происходит
       // точечно при сохранении товара (см. matchInboundItemsForCodes), а тут уже не нужна на
-      // каждый заход; фоновая подстраховка ниже (loadInbound → skipMatch) всё равно подхватит
+      // каждый заход
     }catch(e){S.inbound_orders=[];S.inbound_items=[];}
     drawInboundOrders();
-    loadInbound().then(()=>{if(S.tab==='ket_orders'&&!inboundHasActiveFilters())drawInboundOrders();}).catch(()=>{});
+    // лёгкий счётчик «всего в системе за всё время» — один быстрый count-запрос, не тянет сами
+    // заказы, только для уголка статистики
+    loadInboundAllTimeTotal().then(()=>{if(S.tab==='ket_orders')drawInboundOrders();}).catch(()=>{});
     return;
   }
   drawInboundOrders();
@@ -10357,7 +10395,6 @@ function drawInboundOrders(){
   const lazy=!S.inbound_full_loaded&&!anyFilter; // быстрый режим: постранично с сервера, без полного набора в памяти
   const list=S.inbound_orders||[]; // в быстром режиме — только текущая страница; иначе — весь (отфильтрованный по дате) набор
   const allRows=lazy?list:filteredInbound();
-  const unmatched=lazy?_inboundCounts.unmatched:list.filter(o=>o.match_status==='unmatched').length;
   const totalCount=lazy?_inboundCounts.total:allRows.length;
   const courierCount=lazy?_inboundCounts.courier:list.filter(o=>inboundDeliveryType(o)==='courier').length;
   const mailCount=lazy?_inboundCounts.mail:list.filter(o=>inboundDeliveryType(o)==='mail').length;
@@ -10373,22 +10410,21 @@ function drawInboundOrders(){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
-        <button class="btn ghost sm" id="inbRefresh" title="Заново загрузить все заказы КЕТ из базы">🔄 Обновить</button>
         <button class="btn ghost sm" id="inbUnmatched" title="Показать, каких товаров не хватает">🔍 Непривязанные коды</button>
         <button class="btn btn-excel" id="inbExportXlsx">⬇ Выгрузить Excel</button>
         <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
         <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
       </div></div>
     <div class="stats stats-4">
-      <div class="stat"><div class="k">Всего</div><div class="v">${totalCount}</div></div>
-      <div class="stat"><div class="k">Требуют привязки</div><div class="v" style="${unmatched?'color:var(--rust)':''}">${unmatched}</div></div>
+      <div class="stat"><div class="k">Заказов сегодня</div><div class="v">${totalCount}</div></div>
       <div class="stat"><div class="k">Курьерских заказов</div><div class="v">${courierCount}</div></div>
       <div class="stat"><div class="k">Почтовых заказов</div><div class="v">${mailCount}</div></div>
+      <div class="stat"><div class="k">Всего в системе</div><div class="v">${_inboundAllTimeTotal!=null?_inboundAllTimeTotal:'…'}</div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(allRows.length+' / '+totalCount):totalCount}</span>
         ${admin&&inbSelected.size?`<button class="btn danger sm" id="inbDelSel" style="margin-left:auto">✕ Удалить выбранные (${inbSelected.size})</button>`:''}</div>
-        ${lazy?'<div class="hint" style="margin:0 20px 8px;color:var(--muted)">Страницы подгружаются по одной с сервера — открытие и листание быстрее</div>':''}
+        ${lazy?`<div class="hint" style="margin:0 20px 8px;color:var(--muted)">${_inboundTodayOnly?'Показаны заказы только за сегодня':'Показаны последние '+INBOUND_DEFAULT_DAYS+' дней'} — страницы подгружаются по одной с сервера</div>`:''}
       <div class="filters">
         <input class="search" id="inbq" placeholder="Поиск: № заказа, ФИО, телефон… (можно вставить сразу несколько через пробел)" value="${esc(inbFilter.q)}">
         <select id="inbpartner"><option value="">Все партнёры</option>${[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${p.id}" ${inbFilter.partner===p.id?'selected':''}>${esc(p.name||'—')}</option>`).join('')}</select>
@@ -10403,6 +10439,8 @@ function drawInboundOrders(){
         <span class="fdate-lbl">Дата прихода заказа:</span>
         <input type="date" id="inbdatefrom" value="${esc(inbFilter.dateFrom)}" title="С даты">
         <input type="date" id="inbdateto" value="${esc(inbFilter.dateTo)}" title="По дату">
+        <button class="btn ghost sm ${_inboundTodayOnly&&!inbFilter.dateFrom&&!inbFilter.dateTo?'active':''}" id="inbToday">Сегодня</button>
+        <button class="btn ghost sm ${!_inboundTodayOnly&&S.inbound_full_loaded?'active':''}" id="inbAllDates">Все даты</button>
         ${anyFilter?`<button class="btn ghost sm" id="inbclear" style="align-self:flex-end">Сбросить фильтры</button>`:''}
       </div>
       <div class="table-scroll" id="inboundTable"><table class="resp-table inb-table"><colgroup>${admin?'<col style="width:34px">':''}${inbColumnsInOrder().map(c=>`<col style="width:${inbColWidth(c.key)}px">`).join('')}<col style="width:160px"></colgroup><thead><tr>
@@ -10452,20 +10490,19 @@ function drawInboundOrders(){
     catch(e){console.error(e);toast('Не удалось сформировать бланки: '+(e&&e.message||e));}
     finally{btn.disabled=false;btn.textContent=origLabel;}
   };
-  if($('inbRefresh'))$('inbRefresh').onclick=async()=>{
-    const btn=$('inbRefresh');btn.disabled=true;btn.textContent='Обновляем…';
-    try{await loadInbound();drawInboundOrders();toast('Обновлено');}
-    finally{btn.disabled=false;btn.textContent='🔄 Обновить';}
+  if($('inbToday'))$('inbToday').onclick=async()=>{
+    const btn=$('inbToday');btn.disabled=true;
+    _inboundTodayOnly=true;S.inbound_full_loaded=false;_inboundPageCache.clear();
+    inbFilter.dateFrom='';inbFilter.dateTo='';inbPage=1;
+    try{await loadInboundCounts();const pg=await loadInboundPage(1);S.inbound_orders=pg.orders;S.inbound_items=pg.items;}
+    catch(e){}
+    finally{if(btn)btn.disabled=false;drawInboundOrders();}
   };
-  if($('inbFullHistory'))$('inbFullHistory').onclick=async()=>{
-    const btn=$('inbFullHistory');btn.disabled=true;btn.textContent='Загружаем всю историю…';
+  if($('inbAllDates'))$('inbAllDates').onclick=async()=>{
+    const btn=$('inbAllDates');btn.disabled=true;btn.textContent='Загружаем всю историю…';
+    _inboundTodayOnly=false;
     try{await loadInbound({full:true});inbPage=1;drawInboundOrders();toast('Загружена вся история');}
-    finally{if(btn)btn.disabled=false;}
-  };
-  if($('inbLimitHistory'))$('inbLimitHistory').onclick=async()=>{
-    const btn=$('inbLimitHistory');btn.disabled=true;
-    try{await loadInbound({full:false});inbPage=1;drawInboundOrders();toast(`Показаны последние ${INBOUND_DEFAULT_DAYS} дней`);}
-    finally{if(btn)btn.disabled=false;}
+    finally{if(btn){btn.disabled=false;btn.textContent='Все даты';}}
   };
   if($('inbUnmatched'))$('inbUnmatched').onclick=async()=>{
     const btn=$('inbUnmatched');
@@ -10502,8 +10539,8 @@ function drawInboundOrders(){
   if($('inbstatus'))$('inbstatus').onchange=e=>{inbFilter.status=e.target.value;redraw();};
   if($('inbcallstatus'))$('inbcallstatus').onchange=e=>{inbFilter.callStatus=e.target.value;redraw();};
   if($('inbstatuskz'))$('inbstatuskz').onchange=e=>{inbFilter.statusKz=e.target.value;redraw();};
-  if($('inbdatefrom'))$('inbdatefrom').onchange=e=>{inbFilter.dateFrom=e.target.value;redraw();};
-  if($('inbdateto'))$('inbdateto').onchange=e=>{inbFilter.dateTo=e.target.value;redraw();};
+  if($('inbdatefrom'))$('inbdatefrom').onchange=e=>{inbFilter.dateFrom=e.target.value;_inboundTodayOnly=false;redraw();};
+  if($('inbdateto'))$('inbdateto').onchange=e=>{inbFilter.dateTo=e.target.value;_inboundTodayOnly=false;redraw();};
   if($('inbclear'))$('inbclear').onclick=()=>{inbFilter={q:'',partner:'',delivery:'',status:'',callStatus:'',statusKz:'',dateFrom:'',dateTo:''};inbColFilters={};inbPage=1;inbSelectAll=false;drawInboundOrders();};
   // перетаскивание заголовков столбцов мышкой — меняет порядок колонок, запоминается в браузере
   let _inbDragKey=null,_inbDidDrag=false;
