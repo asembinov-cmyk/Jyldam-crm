@@ -2423,7 +2423,7 @@ function buildNav(opts){
     const team=[];
     if(canMod('users'))team.push({k:'users',label:'Сотрудники',icon:'users'});
     if(canMod('settings'))team.push({k:'settings',label:'Настройки',icon:'settings'});
-    if(isAdmin())team.push({k:'apidocs',label:'Документация API',icon:'history',href:'api-docs.html'});
+    // (пункт «Документация API» перенесён в Настройки)
     if(team.length)groups.push({title:'Команда и настройки',items:team});
   }else{
     // курьер: только свои разделы, без групп
@@ -8770,7 +8770,8 @@ function renderSettings(){
     ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
     ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
     ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки'],
-    ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории расходов'],['fin_income_categories','Финансы · Категории приходов'],['fin_partners','Финансы · Партнёры']];
+    ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории расходов'],['fin_income_categories','Финансы · Категории приходов'],['fin_partners','Финансы · Партнёры'],
+    ['apidocs','Документация API']];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
     <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
@@ -8779,8 +8780,23 @@ function renderSettings(){
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
-    fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners};
+    fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners,
+    apidocs:renderApiDocsSettings};
   (map[S.dir]||dirCities)();
+}
+// вкладка «Документация API» в Настройках — две ссылки на документацию по интеграциям,
+// раньше «Документация API КЕТ» была отдельным пунктом бокового меню (ссылка на api-docs.html)
+function renderApiDocsSettings(){
+  $('dirContent').innerHTML=`
+    <div class="panel">
+      <div class="panel-head"><h2>Документация API</h2></div>
+      <div style="display:flex;flex-direction:column;gap:10px;padding:4px 16px 18px">
+        <button class="btn ghost" id="docsKetBtn" style="justify-content:flex-start">📄 Документация API КЕТ</button>
+        <button class="btn ghost" id="docsPartnerBtn" style="justify-content:flex-start">📄 Документация API «Заказы заборов» (партнёрская интеграция)</button>
+      </div>
+    </div>`;
+  if($('docsKetBtn'))$('docsKetBtn').onclick=()=>ketDocsModal();
+  if($('docsPartnerBtn'))$('docsPartnerBtn').onclick=()=>partnerApiDocsModal();
 }
 // отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
 let partnersTab='delivery'; // delivery | warehouse
@@ -10087,6 +10103,42 @@ async function inboundUnmatchedModal(){
     </tbody></table></div>
     <div class="hint" style="margin-top:10px">Это коды, которых нет ни у одного товара в «Склад → Товары» (поле «Коды KET»). Заведите товар с таким кодом (или добавьте код существующему товару) — привязка произойдёт автоматически при следующей загрузке/обновлении.</div>`;
   showInfo('Непривязанные коды',body,{wide:true});
+}
+function partnerApiDocsModal(){
+  const body=`
+  <div style="max-height:70vh;overflow-y:auto;line-height:1.55">
+    <p class="hint">Приём заказов напрямую от обычного партнёра «Заказов заборов» (не КЕТ) — через Edge Function <code>receive-order-direct</code>.</p>
+
+    <h3 class="calc-h">1. Общая схема</h3>
+    <p>Партнёр присылает POST-запрос с готовыми данными заказа (ФИО получателя, телефон, адрес, город, размер). Сервер сам находит или создаёт <b>сегодняшнюю заявку на забор</b> этого партнёра и создаёт в ней готовый заказ — вручную ничего создавать не нужно.</p>
+    <p class="hint" style="color:var(--rust)">⚠️ Код самой Edge Function фронтенд CRM не видит и не редактирует — правки только через деплой файла напрямую в Supabase.</p>
+
+    <h3 class="calc-h">2. Авторизация</h3>
+    <p>Отдельный секретный токен на каждого партнёра — выдаётся в карточке партнёра («Партнёры» → нужный партнёр → блок «Приём заказов по API» → кнопка «Выдать токен»). В базе хранится только хеш токена, сам токен показывается один раз в момент выдачи.</p>
+
+    <h3 class="calc-h">3. Формат запроса (JSON, POST)</h3>
+    <pre style="background:#f5f5f7;padding:10px;border-radius:8px;font-size:12px;overflow-x:auto">{
+  "secret": "токен партнёра",
+  "client": "ФИО получателя",
+  "phone": "телефон получателя",
+  "address": "адрес доставки",
+  "city": "город доставки (должен совпадать с курьерским городом в CRM)",
+  "size": "S | M | L (необязательно, по умолчанию S)",
+  "external_id": "свой ID заказа у партнёра (рекомендуется — защита от задвоения)",
+  "comment": "любой комментарий (необязательно)"
+}</pre>
+
+    <h3 class="calc-h">4. Что происходит на сервере</h3>
+    <p>1) Проверка токена. 2) Проверка обязательных полей. 3) Если пришёл повторно тот же <code>external_id</code> от этого же партнёра — заказ не дублируется, возвращается уже существующий. 4) Поиск сегодняшней заявки этого партнёра (по <code>partner_id</code>+<code>pickup_date</code>) — если нет, создаётся новая. 5) Город доставки ищется в справочнике «Курьерские города» по названию. 6) Сумма заказа считается по тарифу партнёра, той же сеткой S/M/L, что и везде в CRM. 7) Заказ помечается <code>via_integration=true</code> — в «Заказы заборов» такие заказы выделены <b>голубым</b> цветом (заявки по QR — жёлтым).</p>
+
+    <h3 class="calc-h">5. Ответ</h3>
+    <p><b>Успех:</b> <code>{"success": true, "order_id": "...", "order_code": "...", "pickup_id": "..."}</code></p>
+    <p><b>Ошибка:</b> <code>{"success": false, "error": "текст"}</code></p>
+
+    <h3 class="calc-h">6. Известные ограничения</h3>
+    <p>Город доставки должен буква в букву (без учёта регистра) совпадать с названием в справочнике «Курьерские города» — иначе запрос отклоняется с ошибкой. Нет доступа к коду Edge Function — все выводы о её поведении сделаны по тому, что она должна делать по постановке задачи.</p>
+  </div>`;
+  showInfo('Документация: API «Заказы заборов»',body,{wide:true});
 }
 function ketDocsModal(){
   const body=`
