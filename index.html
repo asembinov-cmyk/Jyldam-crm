@@ -10422,8 +10422,8 @@ function drawInboundOrders(){
   const list=S.inbound_orders||[]; // в быстром режиме — только текущая страница; иначе — весь (отфильтрованный по дате) набор
   const allRows=lazy?list:filteredInbound();
   const totalCount=lazy?_inboundCounts.total:allRows.length;
-  const courierCount=lazy?_inboundCounts.courier:list.filter(o=>inboundDeliveryType(o)==='courier').length;
-  const mailCount=lazy?_inboundCounts.mail:list.filter(o=>inboundDeliveryType(o)==='mail').length;
+  const courierCount=lazy?_inboundCounts.courier:allRows.filter(o=>inboundDeliveryType(o)==='courier').length;
+  const mailCount=lazy?_inboundCounts.mail:allRows.filter(o=>inboundDeliveryType(o)==='mail').length;
   // пагинация — как в «Заказах» и «Заявках на забор»
   const totalPages=Math.max(1,Math.ceil(totalCount/inbPerPage));
   if(inbPage>totalPages)inbPage=totalPages;
