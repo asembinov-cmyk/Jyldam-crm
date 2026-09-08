@@ -5868,9 +5868,10 @@ async function partnerCallCourier(partner){
     if(afterNoon)nowLocal.setDate(nowLocal.getDate()+1);
     const tzOff=nowLocal.getTimezoneOffset();
     const today=new Date(nowLocal.getTime()-tzOff*60000).toISOString().slice(0,10);
-    // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — значит доставку он оплачивает сам
-    // отдельно, не через сумму заказа. Такие заказы сразу помечаем «Оплачено отправителем»
-    const zeroTariffs=isExplicitZero(partner.tariff_courier)&&isExplicitZero(partner.tariff_post);
+    // эта заявка всегда курьерская (кнопка «Вызвать курьера» в кабинете) — если у партнёра именно
+    // курьерский тариф стоит ровно 0, он оплачивает эту доставку сам отдельно, не через сумму
+    // заказа. Почтовый тариф тут ни при чём — заявка не почтовая.
+    const zeroTariffs=isExplicitZero(partner.tariff_courier);
     // строим заготовки заказов на клиенте (без pickup_id — его проставит функция)
     const orderRows=[];
     for(let i=0;i<cnt;i++){
@@ -7158,9 +7159,11 @@ async function createOrdersFromPickup(pickupId,opts){
         processor_id:partner?partner.processor_id:(p.processor_id||null),
         size:'S', // по умолчанию — сотрудник/курьер меняет вручную, только если посылка реально M или L
         cost:defaultCost, order_sum:defaultCost,
-        // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — доставку он оплачивает сам
-        // отдельно, не через сумму заказа — сразу помечаем заказ «Оплачено отправителем»
-        paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)&&isExplicitZero(partner.tariff_post)),
+        // эти заказы всегда курьерские (курьер забирает у партнёра) — если у партнёра именно
+        // курьерский тариф стоит ровно 0, он оплачивает эту доставку сам отдельно, не через сумму
+        // заказа — сразу помечаем «Оплачено отправителем». Почтовый тариф тут ни при чём — заказ
+        // не почтовый.
+        paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)),
         index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
       });
     }
@@ -8539,10 +8542,14 @@ function orderModal(id,readonly){
       return S.partners.find(x=>(x.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name)||null;
     };
     const applyTariff=()=>{
-      // если у партнёра оба тарифа (почта и курьер) стоят ровно 0 — доставку он оплачивает сам отдельно,
-      // не через сумму заказа — сразу ставим «Оплачено отправителем» (если ещё не отмечено вручную)
+      // если у партнёра тариф ИМЕННО ПО ЭТОМУ ТИПУ ДОСТАВКИ (курьер или почта — какой сейчас выбран
+      // у заказа) стоит ровно 0 — эту доставку он оплачивает сам отдельно, не через сумму заказа —
+      // сразу ставим «Оплачено отправителем» (если ещё не отмечено вручную). Другой тариф (не
+      // относящийся к этому заказу) на это никак не влияет — раньше ошибочно проверялись оба сразу.
       const ptForPaid=findPartner();
-      if(ptForPaid&&paidChk&&!paidChk.checked&&isExplicitZero(ptForPaid.tariff_courier)&&isExplicitZero(ptForPaid.tariff_post)){
+      const courierForPaid=isCourierDelivery($('o_delivery').value);
+      const relevantTariff=courierForPaid?ptForPaid&&ptForPaid.tariff_courier:ptForPaid&&ptForPaid.tariff_post;
+      if(ptForPaid&&paidChk&&!paidChk.checked&&isExplicitZero(relevantTariff)){
         paidChk.checked=true;paidChk.onchange();
       }
       // «Физ лицо Астана» / «Физ лицо Алматы» — это конкретные клиенты, адрес у них всегда один и
