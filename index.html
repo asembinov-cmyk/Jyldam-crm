@@ -3981,9 +3981,7 @@ function productModal(){
     if(!S.products)S.products=[];S.products.unshift(saved);
     logAction('create','products',{entity_id:saved.id,entity_label:name});
     if(payload.ket_sku){
-      let matchedCount=0;
-      if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}
-      else matchedCount=await autoMatchInboundItems();
+      const matchedCount=await matchInboundItemsForCodes(saved.id,productKetSkuList(payload));
       if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
       if(S.tab==='ket_orders'&&typeof drawInboundOrders==='function')drawInboundOrders();
     }
@@ -4111,9 +4109,7 @@ function productPanel(id){
           const i=(S.products||[]).findIndex(x=>x.id===id);if(i>=0)Object.assign(S.products[i],saved);
           logAction('update','products',{entity_id:id,entity_label:name});
           if(payload.ket_sku){
-            let matchedCount=0;
-            if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}
-            else matchedCount=await autoMatchInboundItems();
+            const matchedCount=await matchInboundItemsForCodes(id,productKetSkuList(payload));
             if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
           }
           toast('Товар изменён');ov.remove();renderCash();
@@ -9822,6 +9818,42 @@ async function runInBatches(list,batchSize,worker){
     await Promise.all(list.slice(i,i+batchSize).map(worker));
   }
 }
+// лёгкая ТОЧЕЧНАЯ привязка — только позиции с указанными тех-названиями, без пересканирования
+// всех товаров и без принудительной подгрузки полной истории. Вызывается при сохранении товара
+// на складе — единственное место, где НОВАЯ привязка вообще может появиться (кроме самого
+// поступления заказа от KET). Полная функция autoMatchInboundItems() остаётся для явных действий
+// пользователя (кнопка «Обновить», экран «Непривязанные коды») — на каждый заход в «Заказы
+// партнёров» она больше не гоняется, это и было основной нагрузкой.
+async function matchInboundItemsForCodes(productId,ketSkuCodes){
+  if(!productId||!ketSkuCodes||!ketSkuCodes.length||!S.inbound_items||!S.inbound_items.length)return 0;
+  const normSet=new Set(ketSkuCodes.map(normKetSku));
+  const toMatch=S.inbound_items.filter(it=>!(it.matched&&it.product_id)&&it.ket_sku&&normSet.has(normKetSku(it.ket_sku)));
+  if(!toMatch.length)return 0;
+  let matchedCount=0;
+  await runInBatches(toMatch,20,async it=>{
+    const upd=await dbUpdate('inbound_order_items',it.id,{product_id:productId,matched:true});
+    if(upd){Object.assign(it,upd);matchedCount++;}
+  });
+  // проверяем на «весь заказ теперь привязан» только те заказы, которых реально коснулись —
+  // не все заказы в системе, как делала полная версия
+  const affectedOrderIds=new Set(toMatch.map(it=>it.inbound_order_id));
+  const itemsByOrder=new Map();
+  S.inbound_items.forEach(it=>{
+    if(!affectedOrderIds.has(it.inbound_order_id))return;
+    if(!itemsByOrder.has(it.inbound_order_id))itemsByOrder.set(it.inbound_order_id,[]);
+    itemsByOrder.get(it.inbound_order_id).push(it);
+  });
+  const ordersToFlip=(S.inbound_orders||[]).filter(order=>{
+    if(!affectedOrderIds.has(order.id)||order.match_status==='matched')return false;
+    const its=itemsByOrder.get(order.id);
+    return its&&its.length>0&&!its.some(x=>!x.matched||!x.product_id);
+  });
+  await runInBatches(ordersToFlip,20,async order=>{
+    const upd=await dbUpdate('inbound_orders',order.id,{match_status:'matched'});
+    if(upd)Object.assign(order,upd);
+  });
+  return matchedCount;
+}
 async function autoMatchInboundItems(){
   if(!S.inbound_items||!S.inbound_items.length)return 0;
   let matchedCount=0;
@@ -9902,7 +9934,8 @@ async function gotoInboundPage(page){
   if(!S.inbound_full_loaded&&!inboundHasActiveFilters()){
     const pg=await loadInboundPage(inbPage);
     S.inbound_orders=pg.orders;S.inbound_items=pg.items;
-    try{await autoMatchInboundItems();}catch(e){}
+    // привязка тут больше не запускается — она либо уже произошла при сохранении товара
+    // (см. matchInboundItemsForCodes), либо подхватится фоновой подстраховкой полной загрузки
   }
   drawInboundOrders();
   const t=$('inboundTable');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
@@ -9984,7 +10017,9 @@ async function renderInboundOrders(){
       await loadInboundCounts();
       const pg=await loadInboundPage(1);
       S.inbound_orders=pg.orders;S.inbound_items=pg.items;
-      try{await autoMatchInboundItems();}catch(e){}
+      // раньше здесь всегда гонялась полная привязка — теперь основная привязка происходит
+      // точечно при сохранении товара (см. matchInboundItemsForCodes), а тут уже не нужна на
+      // каждый заход; фоновая подстраховка ниже (loadInbound → skipMatch) всё равно подхватит
     }catch(e){S.inbound_orders=[];S.inbound_items=[];}
     drawInboundOrders();
     loadInbound().then(()=>{if(S.tab==='ket_orders'&&!inboundHasActiveFilters())drawInboundOrders();}).catch(()=>{});
