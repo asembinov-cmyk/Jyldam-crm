@@ -5329,8 +5329,16 @@ function calcOrder(o){
   const P=orderPeriodStr(o); // период месяца заказа
   const cityId=orderCalcCity(o);
   const snap=(o.calc&&typeof o.calc==='object')?o.calc:null;
-  // выручка = сумма заказа (если не задана — 0)
-  const revenue=(o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0;
+  // выручка = сумма заказа. Если включено «Оплачено отправителем» (order_sum принудительно 0,
+  // потому что партнёр платит за доставку сам, напрямую, минуя систему) — берём вместо этого ту
+  // сумму, которая была бы обычной ценой заказа (она сохраняется в order_sum_orig в момент
+  // включения галочки) — иначе такие заказы выглядели бы чистым убытком, хотя по факту денег
+  // партнёр платит ровно столько же, просто не через сумму заказа в CRM.
+  const isPaidBySender=!!o.paid_by_sender;
+  const notionalRevenue=isPaidBySender&&o.order_sum_orig!=null&&o.order_sum_orig!==''?(parseFloat(o.order_sum_orig)||0):0;
+  const revenue=isPaidBySender
+    ? notionalRevenue
+    : ((o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0);
   const monthOrders=ordersInOrderMonth(o);
   // тип доставки: курьерская или почтовая
   const isCourierType=isCourierDelivery(o.delivery_id);
@@ -5379,7 +5387,7 @@ function calcOrder(o){
   const profit=revenue-totalCost;
   const margin=revenue>0?(profit/revenue*100):0;
   const roi=totalCost>0?(profit/totalCost*100):0;
-  return {revenue,items,totalCost,profit,margin,roi,cityId,monthOrders,isCourierType,period:P2};
+  return {revenue,items,totalCost,profit,margin,roi,cityId,monthOrders,isCourierType,period:P2,isPaidBySender,notionalRevenue};
 }
 // цвет индикации прибыли: red/yellow/green
 function calcProfitColor(profit,period){
@@ -5577,6 +5585,10 @@ function renderCalcSummary(){
   const cour=calcs.filter(x=>x.c.isCourierType), post=calcs.filter(x=>!x.c.isCourierType);
   const sumBlock=arr=>({cnt:arr.length,rev:arr.reduce((s,x)=>s+x.c.revenue,0),cost:arr.reduce((s,x)=>s+x.c.totalCost,0),profit:arr.reduce((s,x)=>s+(x.c.revenue-x.c.totalCost),0)});
   const courSum=sumBlock(cour), postSum=sumBlock(post);
+  // заказы «Оплачено отправителем» — их выручка (условная, по сохранённой исходной сумме) уже
+  // учтена в totRevenue/totProfit выше; здесь просто выделяем её отдельно для прозрачности
+  const paidBySenderCalcs=calcs.filter(x=>x.c.isPaidBySender);
+  const paidBySenderSum={cnt:paidBySenderCalcs.length,rev:paidBySenderCalcs.reduce((s,x)=>s+x.c.notionalRevenue,0),cost:paidBySenderCalcs.reduce((s,x)=>s+x.c.totalCost,0)};
   // заработок курьеров доставки: courier-норматив города заказа, по order_courier_id
   const byCourier={};
   calcs.forEach(({o,c})=>{
@@ -5628,6 +5640,12 @@ function renderCalcSummary(){
           <tr style="border-top:2px solid var(--line)"><td><b>Всего (общий котёл)</b></td><td><b>${courSum.cnt+postSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
         </tbody></table>
     </div>
+    ${paidBySenderSum.cnt?`<div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Из них «Оплачено отправителем»</h3>
+      <p class="calc-note">Партнёр платит за доставку сам, напрямую (например раз в месяц) — сумма заказа в CRM стоит 0. Ниже — сколько эти заказы условно «весят» в общей выручке/прибыли выше (уже учтено, не добавляется сверху) и сколько на них реально потрачено.</p>
+      <table class="calc-courier-tbl"><thead><tr><th>Заказов</th><th>Условная выручка</th><th>Расходы</th><th>Условная прибыль</th></tr></thead>
+        <tbody><tr><td>${paidBySenderSum.cnt}</td><td>${fmtMoney(paidBySenderSum.rev)}</td><td>${fmtMoney(paidBySenderSum.cost)}</td><td><b style="color:${(paidBySenderSum.rev-paidBySenderSum.cost)<0?'#c0392b':'#2e7d32'}">${fmtMoney(paidBySenderSum.rev-paidBySenderSum.cost)}</b></td></tr></tbody></table>
+    </div>`:''}
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по статьям расходов</h3>
       <p class="calc-note">Сколько всего потрачено за месяц по каждой статье — курьерские и почтовые заказы вместе.</p>
@@ -5975,6 +5993,7 @@ async function partnerCallCourier(partner){
         sales_id:partner.sales_id||null,processor_id:partner.processor_id||null,
         order_sum:zeroTariffs?0:(partner.tariff_courier||null),cost:zeroTariffs?0:(partner.tariff_courier||0),
         paid_by_sender:zeroTariffs,
+        order_sum_orig:(zeroTariffs&&partner.direct_pay_amount!=null)?partner.direct_pay_amount:null,
         created_at:new Date().toISOString(),
       });
     }
@@ -7254,8 +7273,10 @@ async function createOrdersFromPickup(pickupId,opts){
         // эти заказы всегда курьерские (курьер забирает у партнёра) — если у партнёра именно
         // курьерский тариф стоит ровно 0, он оплачивает эту доставку сам отдельно, не через сумму
         // заказа — сразу помечаем «Оплачено отправителем». Почтовый тариф тут ни при чём — заказ
-        // не почтовый.
+        // не почтовый. order_sum_orig подтягиваем из карточки партнёра (условная сумма при прямой
+        // оплате) — иначе Калькуляции неоткуда взять «условную выручку» по этим заказам.
         paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)),
+        order_sum_orig:(partner&&isExplicitZero(partner.tariff_courier)&&partner.direct_pay_amount!=null)?partner.direct_pay_amount:null,
         index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
       });
     }
@@ -7391,8 +7412,15 @@ async function pickupOrdersModal(pickupId){
           try{
             let patch;
             if(v){
-              // запоминаем исходную сумму и обнуляем
-              patch={paid_by_sender:true,order_sum_orig:(o.order_sum!=null?o.order_sum:0),order_sum:0,cost:0};
+              // запоминаем исходную сумму и обнуляем — если сумма уже 0 (например, тариф партнёра
+              // и так 0), пытаемся подтянуть условную сумму из карточки партнёра, чтобы не потерять
+              // её для Калькуляции
+              let orig=(o.order_sum!=null?o.order_sum:0);
+              if(!orig){
+                const pt=(S.partners||[]).find(x=>x.id===o.partner_id);
+                if(pt&&pt.direct_pay_amount!=null)orig=pt.direct_pay_amount;
+              }
+              patch={paid_by_sender:true,order_sum_orig:orig,order_sum:0,cost:0};
             }else{
               // возвращаем исходную сумму
               const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
@@ -8507,7 +8535,10 @@ function orderModal(id,readonly){
       if($('o_paidorder')){
         const paidNow=$('o_paidorder').checked;
         if(paidNow){
-          if(!o||!o.paid_by_sender){row.order_sum_orig=(row.order_sum!=null?row.order_sum:0);} // запоминаем при первом включении
+          // берём именно то, что было ДО обнуления (dataset.prevsum) — поле o_sum на момент
+          // сохранения уже показывает 0, читать его напрямую сюда нельзя
+          const prevSum=$('o_paidorder').dataset.prevsum;
+          if(!o||!o.paid_by_sender){row.order_sum_orig=(prevSum!=null&&prevSum!=='')?(parseFloat(prevSum)||0):0;} // запоминаем при первом включении
           else{row.order_sum_orig=(o.order_sum_orig!=null?o.order_sum_orig:0);}
           row.paid_by_sender=true;row.order_sum=0;row.cost=0;
         }else{
@@ -8690,7 +8721,15 @@ function orderModal(id,readonly){
       paidChk.dataset.prevsum=(d.order_sum!=null&&d.order_sum!=='')?String(d.order_sum):''; // помним сумму до обнуления
       paidChk.onchange=()=>{
         const se=$('o_sum');if(!se)return;
-        if(paidChk.checked){paidChk.dataset.prevsum=se.value;se.value='0';se.disabled=true;sumTouched=true;}
+        if(paidChk.checked){
+          // если поле суммы пустое (например, только что автоматически поставили галочку из-за
+          // нулевого тарифа) — подставляем условную сумму из карточки партнёра, а не оставляем пусто
+          if(!se.value.trim()){
+            const pt=findPartner();
+            if(pt&&pt.direct_pay_amount!=null)se.value=pt.direct_pay_amount;
+          }
+          paidChk.dataset.prevsum=se.value;se.value='0';se.disabled=true;sumTouched=true;
+        }
         else{se.disabled=false;se.value=paidChk.dataset.prevsum||'';sumTouched=(se.value!=='');}
       };
     }
@@ -8935,6 +8974,7 @@ function partnerModal(id){
       <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
     </div>
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
+    <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
     <div class="field"><label>QR-код / номер доступа в кабинет</label><input id="p_qr" value="${esc(p.qr_code||'')}" placeholder="например 1001"><small style="color:var(--muted);font-size:12px">Ссылка для партнёра: jyldam-crm.kz/?p=ЭТОТ_НОМЕР</small></div>
     ${id?`<div class="field"><label>Приём заказов по API</label>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -8963,6 +9003,7 @@ function partnerModal(id){
       const name=val('p_name').trim();
       const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null,
         tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null,
+        direct_pay_amount:val('p_direct_pay')!==''?parseFloat(val('p_direct_pay')):null,
         is_protected:!!($('p_protected')&&$('p_protected').checked)};
       let syncMsg='';
       if(id){
