@@ -4833,6 +4833,44 @@ function ordersForIntercity(cityId,date,whId){
 function warehouseName(id){return ((S.warehouses||[]).find(w=>w.id===id)||{}).name||'—';}
 
 let icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:''};
+// заказы, которые должны ехать межгородом (город получения ≠ город забора), но ещё не привязаны
+// ни к одной отправке (intercity_cost пуст) — «висят в воздухе». Группируем по городу
+// забора+получения+дате, чтобы сразу было видно, где и что копится, а не листать по одному.
+function findUnassignedIntercityOrders(){
+  const groups={};
+  (S.orders||[]).forEach(o=>{
+    if(!isCourierDelivery(o.delivery_id))return;
+    if(o.intercity_cost!=null&&o.intercity_cost!==0&&o.intercity_cost!=='')return; // уже привязан
+    if(!o.courier_city_id)return; // город получения не указан — не про межгород, отдельная проблема
+    const pickupNm=cityName(o.pickup_city_id)||'—';
+    const destNm=courierCityName(o.courier_city_id)||'—';
+    if(pickupNm.trim().toLowerCase()===destNm.trim().toLowerCase())return; // свой город — не межгород
+    const dateStr=(o.pickup_date||'').slice(0,10);
+    const key=pickupNm+'→'+destNm+'@'+dateStr;
+    if(!groups[key])groups[key]={pickup:pickupNm,dest:destNm,date:dateStr,orders:[]};
+    groups[key].orders.push(o);
+  });
+  return Object.values(groups).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+}
+function unassignedIntercityOrdersModal(){
+  const groups=findUnassignedIntercityOrders();
+  const totalOrders=groups.reduce((s,g)=>s+g.orders.length,0);
+  const body=groups.length?`
+    <p class="hint" style="margin-bottom:10px">Всего заказов без привязки к отправке: <b>${totalOrders}</b> (по данным, загруженным сейчас в CRM). Если заказ уже реально уехал — создайте под него отправку или привяжите к уже существующей.</p>
+    <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Город забора</th><th>Город получения</th><th>Дата забора</th><th>Кол-во заказов</th><th>Коды заказов</th>
+    </tr></thead><tbody>
+      ${groups.map(g=>`<tr>
+        <td data-label="Город забора">${esc(g.pickup)}</td>
+        <td data-label="Город получения">${esc(g.dest)}</td>
+        <td data-label="Дата забора">${esc(fmtDate(g.date))}</td>
+        <td data-label="Кол-во заказов"><b>${g.orders.length}</b></td>
+        <td data-label="Коды заказов" style="font-family:monospace;font-size:12px">${g.orders.slice(0,8).map(o=>esc(o.code)).join(', ')}${g.orders.length>8?` … ещё ${g.orders.length-8}`:''}</td>
+      </tr>`).join('')}
+    </tbody></table></div>`
+    :'<div class="empty"><div class="big">Непривязанных заказов нет</div>Все межгородние заказы уже привязаны к отправкам.</div>';
+  showModal('🔍 Непривязанные заказы',body,null,{readonly:true,wide:true,closeLabel:'Закрыть'});
+}
 function renderIntercity(){
   if(!canMod('intercity')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
@@ -4870,11 +4908,33 @@ function renderIntercity(){
     <div class="ic-total-item ic-total-money"><span>Потрачено на отправку</span><b>${fmtMoney(todayCost)}</b></div>
     <div class="ic-total-item"><span>За период</span><b>${esc(summaryPeriodLabel)}</b></div>
   </div>`;
+  // сводка «потрачено по городам за месяц» — считаем по ТЕКУЩЕМУ календарному месяцу, отдельно
+  // от применённых фильтров (это просто общая картина за месяц, а не завязано на фильтр)
+  const nowMonth=localToday().slice(0,7);
+  const monthShipments=all.filter(s=>(s.ship_date||'').slice(0,7)===nowMonth);
+  const byCityCost={};
+  monthShipments.forEach(s=>{
+    const name=courierCityName(s.dest_city_id)||'—';
+    byCityCost[name]=(byCityCost[name]||0)+(parseFloat(s.box_cost)||0);
+  });
+  const cityCostRows=Object.entries(byCityCost).sort((a,b)=>b[1]-a[1]);
+  const monthNamesIC=['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+  const nowMonthLabel=`${monthNamesIC[parseInt(nowMonth.slice(5,7),10)-1]} ${nowMonth.slice(0,4)}`;
+  const cityCostBar=cityCostRows.length?`<div class="panel" style="margin-bottom:14px">
+    <div class="panel-head"><h2>Потрачено по городам за ${esc(nowMonthLabel)}</h2><span class="count">${fmtMoney(cityCostRows.reduce((s,r)=>s+r[1],0))}</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 16px 14px">
+      ${cityCostRows.map(([name,sum])=>`<div class="wh-cat" style="font-size:13px;padding:6px 12px">${esc(name)}: <b>${fmtMoney(sum)}</b></div>`).join('')}
+    </div>
+  </div>`:'';
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Отправки межгород</h1><p>Учёт коробок, отправленных в другие города</p></div>
-      <div class="head-actions">${can('intercity','create')?'<button class="btn primary" id="newShipment">＋ Создать отправку</button>':''}</div>
+      <div class="head-actions">
+        <button class="btn ghost" id="icUnassigned">🔍 Непривязанные заказы</button>
+        ${can('intercity','create')?'<button class="btn primary" id="newShipment">＋ Создать отправку</button>':''}
+      </div>
     </div>
     ${totalsBar}
+    ${cityCostBar}
     <div class="ic-filters">
       <input type="date" id="icfDateFrom" value="${esc(icFilter.dateFrom)}" title="С даты">
       <input type="date" id="icfDateTo" value="${esc(icFilter.dateTo)}" title="По дату">
@@ -4915,6 +4975,7 @@ function renderIntercity(){
       </tbody></table></div>
     </div>`;
   if($('newShipment'))$('newShipment').onclick=()=>shipmentModal();
+  if($('icUnassigned'))$('icUnassigned').onclick=()=>unassignedIntercityOrdersModal();
   // фильтры
   if($('icfDateFrom'))$('icfDateFrom').onchange=e=>{icFilter.dateFrom=e.target.value;renderIntercity();};
   if($('icfDateTo'))$('icfDateTo').onchange=e=>{icFilter.dateTo=e.target.value;renderIntercity();};
@@ -5532,7 +5593,7 @@ function renderCalcSummary(){
   const EXPENSE_LABELS={
     courier:'Курьер (доставка)',pack:'Пакеты',post_pack:'Пакеты',gofra:'Гофра',post_gofra:'Гофра',
     blank:'Бланки (печать наклеек)',post_blank:'Бланки (печать наклеек)',sms:'SMS-уведомления',post_sms:'SMS-уведомления',
-    freight:'Межгород / доставка груза',post_freight:'Межгород / доставка груза',
+    freight:'Межгород / доставка груза',post_freight:'Доставка почтой (Казпочта)',
     admin_courier:'ЗП администратора курьеров',fund_logist:'Фонд ЗП менеджера заказов',
     fund_pickers:'Фонд ЗП заборщиков',salary_processor:'ЗП обработчиков',sales_manager:'ЗП менеджеров по продажам',
   };
