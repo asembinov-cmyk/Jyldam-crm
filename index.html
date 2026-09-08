@@ -5520,6 +5520,22 @@ function renderCalcSummary(){
   const courierRows=Object.entries(byCourier)
     .map(([cid,v])=>({name:orderCourierName(cid),count:v.count,earn:v.earn}))
     .sort((a,b)=>b.earn-a.earn);
+  // разбивка по каждой статье расходов — курьерский и почтовый аналог одной и той же статьи
+  // (например pack/post_pack — оба «Пакет») объединяем в одну строку, чтобы видеть общую сумму
+  const EXPENSE_LABELS={
+    courier:'Курьер (доставка)',pack:'Пакеты',post_pack:'Пакеты',gofra:'Гофра',post_gofra:'Гофра',
+    blank:'Бланки (печать наклеек)',post_blank:'Бланки (печать наклеек)',sms:'SMS-уведомления',post_sms:'SMS-уведомления',
+    freight:'Межгород / доставка груза',post_freight:'Межгород / доставка груза',
+    admin_courier:'ЗП администратора курьеров',fund_logist:'Фонд ЗП менеджера заказов',
+    fund_pickers:'Фонд ЗП заборщиков',salary_processor:'ЗП обработчиков',sales_manager:'ЗП менеджеров по продажам',
+  };
+  const byExpense={};
+  calcs.forEach(({c})=>c.items.forEach(it=>{
+    const label=EXPENSE_LABELS[it.key]||it.label;
+    if(!byExpense[label])byExpense[label]={label,amount:0};
+    byExpense[label].amount+=(it.amount||0);
+  }));
+  const expenseRows=Object.values(byExpense).sort((a,b)=>b.amount-a.amount);
   const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
   const profitColor=totProfit<0?'#c0392b':(totProfit<calcMinProfit()*monthOrders.length?'#c08a2d':'#2e7d32');
   $('calcContent').innerHTML=`
@@ -5543,6 +5559,14 @@ function renderCalcSummary(){
           <tr><td>Почтовая</td><td>${postSum.cnt}</td><td>${fmtMoney(postSum.rev)}</td><td>${fmtMoney(postSum.cost)}</td><td><b style="color:${postSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(postSum.profit)}</b></td></tr>
           <tr style="border-top:2px solid var(--line)"><td><b>Всего (общий котёл)</b></td><td><b>${courSum.cnt+postSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
         </tbody></table>
+    </div>
+    <div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Разбивка по статьям расходов</h3>
+      <p class="calc-note">Сколько всего потрачено за месяц по каждой статье — курьерские и почтовые заказы вместе.</p>
+      ${expenseRows.length?`<table class="calc-courier-tbl"><thead><tr><th>Статья</th><th>Сумма</th><th>Доля</th></tr></thead>
+        <tbody>${expenseRows.map(r=>`<tr><td>${esc(r.label)}</td><td><b>${fmtMoney(r.amount)}</b></td><td>${totCost>0?(r.amount/totCost*100).toFixed(1):'0'}%</td></tr>`).join('')}
+        <tr style="border-top:2px solid var(--line)"><td><b>Итого расходы</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b>100%</b></td></tr></tbody></table>`
+        :'<div class="empty"><div class="big">Нет данных</div>За этот месяц нет заказов.</div>'}
     </div>
     <div class="panel calc-panel">
       <h3 class="calc-h">Заработок курьеров доставки</h3>
