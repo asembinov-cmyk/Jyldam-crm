@@ -5514,9 +5514,15 @@ function calcPartnerParseFile(file,cb){
 }
 async function renderCalcPartner(){
   if(_calcGlobalPerKg==null)await loadCalcGlobalPerKg();
+  let calcPartnersLoadError='';
   if(!S.calc_partners){
     $('calcContent').innerHTML='<div class="empty"><div class="big">Загрузка…</div></div>';
-    try{S.calc_partners=await dbList('calc_partners',{order:'name'});}catch(e){S.calc_partners=[];}
+    try{S.calc_partners=await dbList('calc_partners',{order:'name'});}
+    catch(e){S.calc_partners=[];calcPartnersLoadError='Не удалось загрузить список партнёров — скорее всего, таблица calc_partners ещё не создана в базе. Выполните add_calc_partners_table.sql в Supabase.';}
+  }
+  if(calcPartnersLoadError){
+    $('calcContent').innerHTML=`<div class="empty"><div class="big">Таблица не найдена</div>${esc(calcPartnersLoadError)}</div>`;
+    return;
   }
   const partner=calcPartnerId?(S.calc_partners||[]).find(p=>p.id===calcPartnerId):null;
   const partnersSorted=[...(S.calc_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
@@ -5559,8 +5565,8 @@ async function renderCalcPartner(){
       <h3 class="calc-h">Файл с заказами</h3>
       <p class="calc-note">Excel/CSV с одной строкой на заказ — нужен хотя бы один столбец с весом в кг (в идеале с заголовком «Вес»).</p>
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <label class="btn ghost sm" for="cpFile" style="${partner?'':'opacity:.5;pointer-events:none'}">📎 Выбрать файл</label>
-        <input type="file" id="cpFile" accept=".xlsx,.xls,.csv" style="position:absolute;width:1px;height:1px;opacity:0" ${partner?'':'disabled'}>
+        <input type="file" id="cpFile" accept=".xlsx,.xls,.csv">
+        <span class="hint" style="font-size:12px">(можно выбрать файл заранее, партнёр нужен только для самого расчёта)</span>
         ${calcPartnerFileName?`<span class="wh-cat">${esc(calcPartnerFileName)} — ${calcPartnerWeights?calcPartnerWeights.length+' заказов':''}</span>`:''}
       </div>
       ${!partner?'<div class="hint" style="margin-top:8px;color:var(--rust)">Сначала выберите или добавьте партнёра</div>':''}
