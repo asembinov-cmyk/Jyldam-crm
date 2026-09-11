@@ -5410,8 +5410,9 @@ function calcProfitColor(profit,period){
 }
 
 let calcSub='courier'; // подвкладка раздела Калькуляция: courier | mail | summary | partner
-// состояние вкладки «Расчёт партнёра» — отдельная логика, не связана с остальной Калькуляцией
-let calcPartnerId=''; // выбранный партнёр
+// состояние вкладки «Расчёт партнёра» — отдельная логика, свой отдельный список партнёров
+// (S.calc_partners), НЕ связанный с обычными партнёрами CRM (S.partners)
+let calcPartnerId=''; // выбранный партнёр (из S.calc_partners)
 let calcPartnerWeights=null; // веса заказов из загруженного файла (массив чисел, кг)
 let calcPartnerFileName='';
 let calcPartnerFileError='';
@@ -5465,8 +5466,8 @@ async function saveCalcGlobalPerKg(val){
 function calcPartnerOrderCharge(weight,partner,perKgCharge){
   const totalKg=Math.max(1,Math.ceil(parseFloat(weight)||0));
   const extraKg=Math.max(0,totalKg-CALC_PARTNER_BASE_WEIGHT);
-  const charge=(parseFloat(partner.calc_base_price)||0)+extraKg*(perKgCharge||0);
-  const margin=(parseFloat(partner.calc_base_margin)||0)+extraKg*(parseFloat(partner.calc_per_kg_margin)||0);
+  const charge=(parseFloat(partner.base_price)||0)+extraKg*(perKgCharge||0);
+  const margin=(parseFloat(partner.base_margin)||0)+extraKg*(parseFloat(partner.per_kg_margin)||0);
   return {totalKg,extraKg,charge,margin};
 }
 // читает файл (xlsx/csv/xls) — ищет столбец с весом по названию заголовка (вес/kg/weight),
@@ -5513,8 +5514,12 @@ function calcPartnerParseFile(file,cb){
 }
 async function renderCalcPartner(){
   if(_calcGlobalPerKg==null)await loadCalcGlobalPerKg();
-  const partner=calcPartnerId?(S.partners||[]).find(p=>p.id===calcPartnerId):null;
-  const partnersSorted=[...(S.partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  if(!S.calc_partners){
+    $('calcContent').innerHTML='<div class="empty"><div class="big">Загрузка…</div></div>';
+    try{S.calc_partners=await dbList('calc_partners',{order:'name'});}catch(e){S.calc_partners=[];}
+  }
+  const partner=calcPartnerId?(S.calc_partners||[]).find(p=>p.id===calcPartnerId):null;
+  const partnersSorted=[...(S.calc_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
   // сам расчёт — если партнёр выбран и файл загружен
   let breakdown=[],totalOrders=0,totalCharge=0,totalMargin=0;
@@ -5530,8 +5535,8 @@ async function renderCalcPartner(){
   }
   $('calcContent').innerHTML=`
     <div class="panel calc-panel" style="margin-bottom:18px">
-      <h3 class="calc-h">Настройка партнёра</h3>
-      <p class="calc-note">Своя логика расчёта — не связана с остальной Калькуляцией. Базовый вес (${CALC_PARTNER_BASE_WEIGHT} кг) и надбавка за доп. кг ниже — общие для всех партнёров; базовая цена и доли «наше» — свои у каждого (задаются в карточке партнёра).</p>
+      <h3 class="calc-h">Партнёр для расчёта</h3>
+      <p class="calc-note">Свой отдельный список — не связан с партнёрами из «Заказов заборов». Надбавка за доп. кг ниже — общая для всех; база и доли «наше» — свои у каждого партнёра из этого списка.</p>
       <div class="form-grid">
         <div class="field"><label>Партнёр</label><select id="cpPartner">
           <option value="">— выберите партнёра —</option>
@@ -5541,20 +5546,24 @@ async function renderCalcPartner(){
           <input type="number" min="0" id="cpPerKg" value="${_calcGlobalPerKg}">
           <small style="color:var(--muted);font-size:12px">Одна на все — сохраняется сразу для всех расчётов, не только для этого партнёра</small></div>
       </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn ghost sm" id="cpAddPartner">＋ Новый партнёр</button>
+        ${partner?'<button class="btn ghost sm" id="cpEditPartner">✎ Изменить</button><button class="btn danger sm" id="cpDelPartner">🗑 Удалить</button>':''}
+      </div>
       ${partner?`<div class="hint" style="margin-top:10px">
-        База (до ${CALC_PARTNER_BASE_WEIGHT} кг): <b>${fmtMoney(partner.calc_base_price)}</b>, наше с базы: <b>${fmtMoney(partner.calc_base_margin)}</b>,
-        наше с каждого доп. кг: <b>${fmtMoney(partner.calc_per_kg_margin)}</b>
-        ${(partner.calc_base_price==null&&partner.calc_base_margin==null&&partner.calc_per_kg_margin==null)?' — <span style="color:var(--rust)">не заданы, откройте карточку партнёра</span>':''}
+        База (то, что партнёр платит нам за первые ${CALC_PARTNER_BASE_WEIGHT} кг): <b>${fmtMoney(partner.base_price)}</b> · наше с базы: <b>${fmtMoney(partner.base_margin)}</b> ·
+        наше с каждого доп. кг: <b>${fmtMoney(partner.per_kg_margin)}</b>
       </div>`:''}
     </div>
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Файл с заказами</h3>
       <p class="calc-note">Excel/CSV с одной строкой на заказ — нужен хотя бы один столбец с весом в кг (в идеале с заголовком «Вес»).</p>
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <input type="file" id="cpFile" accept=".xlsx,.xls,.csv" ${partner?'':'disabled'}>
+        <label class="btn ghost sm" for="cpFile" style="${partner?'':'opacity:.5;pointer-events:none'}">📎 Выбрать файл</label>
+        <input type="file" id="cpFile" accept=".xlsx,.xls,.csv" style="position:absolute;width:1px;height:1px;opacity:0" ${partner?'':'disabled'}>
         ${calcPartnerFileName?`<span class="wh-cat">${esc(calcPartnerFileName)} — ${calcPartnerWeights?calcPartnerWeights.length+' заказов':''}</span>`:''}
       </div>
-      ${!partner?'<div class="hint" style="margin-top:8px;color:var(--rust)">Сначала выберите партнёра</div>':''}
+      ${!partner?'<div class="hint" style="margin-top:8px;color:var(--rust)">Сначала выберите или добавьте партнёра</div>':''}
       ${calcPartnerFileError?`<div class="hint" style="margin-top:8px;color:var(--rust)">${esc(calcPartnerFileError)}</div>`:''}
     </div>
     ${breakdown.length?`
@@ -5581,6 +5590,16 @@ async function renderCalcPartner(){
     if(ok2)toast('Сохранено');
     renderCalcPartner();
   };
+  if($('cpAddPartner'))$('cpAddPartner').onclick=()=>calcPartnerModal();
+  if($('cpEditPartner'))$('cpEditPartner').onclick=()=>calcPartnerModal(calcPartnerId);
+  if($('cpDelPartner'))$('cpDelPartner').onclick=async()=>{
+    if(!confirm(`Удалить партнёра «${partner.name}» из списка расчёта?`))return;
+    const okDel=await dbDelete('calc_partners',calcPartnerId);
+    if(!okDel){toast('Не удалось удалить');return;}
+    S.calc_partners=(S.calc_partners||[]).filter(p=>p.id!==calcPartnerId);
+    calcPartnerId='';calcPartnerWeights=null;calcPartnerFileName='';
+    toast('Удалено');renderCalcPartner();
+  };
   if($('cpFile'))$('cpFile').onchange=e=>{
     const file=e.target.files&&e.target.files[0];if(!file)return;
     calcPartnerFileError='';
@@ -5600,6 +5619,34 @@ async function renderCalcPartner(){
     XLSX.utils.book_append_sheet(wb,ws,'Расчёт');
     XLSX.writeFile(wb,`Расчёт_${(partner.name||'партнёр').replace(/[^\wа-яА-ЯёЁ]+/g,'_')}_${localToday()}.xlsx`);
   };
+}
+// форма партнёра ИМЕННО для «Расчёта партнёра» — свой отдельный список (calc_partners),
+// никак не связанный с обычными партнёрами CRM
+function calcPartnerModal(id){
+  const p=id?(S.calc_partners||[]).find(x=>x.id===id):{name:'',base_price:'',base_margin:'',per_kg_margin:''};
+  showModal(id?'Партнёр (расчёт)':'Новый партнёр (расчёт)',`
+    <div class="field"><label>Название</label><input id="cpm_name" value="${esc(p.name)}" placeholder="например Казпочта"></div>
+    <div class="field"><label>База — сколько партнёр платит нам за первые ${CALC_PARTNER_BASE_WEIGHT} кг (₸)</label><input type="number" min="0" id="cpm_base" value="${esc(p.base_price)}" placeholder="например 1030"></div>
+    <div class="field"><label>Наше с базы (₸)</label><input type="number" min="0" id="cpm_base_margin" value="${esc(p.base_margin)}" placeholder="например 30"></div>
+    <div class="field"><label>Наше с каждого доп. кг сверх базы (₸)</label><input type="number" min="0" id="cpm_perkg_margin" value="${esc(p.per_kg_margin)}" placeholder="например 10"></div>
+  `,async()=>{
+    const name=val('cpm_name').trim();if(!name){toast('Укажите название');return false;}
+    const row={
+      name,
+      base_price:val('cpm_base')!==''?parseFloat(val('cpm_base')):null,
+      base_margin:val('cpm_base_margin')!==''?parseFloat(val('cpm_base_margin')):null,
+      per_kg_margin:val('cpm_perkg_margin')!==''?parseFloat(val('cpm_perkg_margin')):null,
+    };
+    if(id){
+      const u=await dbUpdate('calc_partners',id,row);if(!u)return false;
+      Object.assign((S.calc_partners||[]).find(x=>x.id===id),u);
+    }else{
+      const u=await dbInsert('calc_partners',row);if(!u)return false;
+      if(!S.calc_partners)S.calc_partners=[];S.calc_partners.push(u);
+      calcPartnerId=u.id;
+    }
+    toast('Сохранено');renderCalcPartner();return true;
+  });
 }
 function renderCalcNorms(type){
   type=type||'courier';
@@ -9174,13 +9221,6 @@ function partnerModal(id){
     </div>
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
-    <div class="field"><label>Расчёт партнёра — своя отдельная логика (по весу)</label>
-      <div class="form-grid">
-        <div><label style="font-size:12px;color:var(--muted)">База за первые 2 кг (₸)</label><input type="number" min="0" id="p_calc_base" value="${esc(p.calc_base_price)}" placeholder="например 1000"></div>
-        <div><label style="font-size:12px;color:var(--muted)">Наше с базы (₸)</label><input type="number" min="0" id="p_calc_base_margin" value="${esc(p.calc_base_margin)}" placeholder="например 100"></div>
-        <div><label style="font-size:12px;color:var(--muted)">Наше с каждого доп. кг (₸)</label><input type="number" min="0" id="p_calc_perkg_margin" value="${esc(p.calc_per_kg_margin)}" placeholder="например 30"></div>
-      </div>
-      <small style="color:var(--muted);font-size:12px">Используется только во вкладке «Калькуляция → Расчёт партнёра» — отдельно от тарифов выше.</small></div>
     <div class="field"><label>QR-код / номер доступа в кабинет</label><input id="p_qr" value="${esc(p.qr_code||'')}" placeholder="например 1001"><small style="color:var(--muted);font-size:12px">Ссылка для партнёра: jyldam-crm.kz/?p=ЭТОТ_НОМЕР</small></div>
     ${id?`<div class="field"><label>Приём заказов по API</label>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -9210,9 +9250,6 @@ function partnerModal(id){
       const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null,
         tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null,
         direct_pay_amount:val('p_direct_pay')!==''?parseFloat(val('p_direct_pay')):null,
-        calc_base_price:val('p_calc_base')!==''?parseFloat(val('p_calc_base')):null,
-        calc_base_margin:val('p_calc_base_margin')!==''?parseFloat(val('p_calc_base_margin')):null,
-        calc_per_kg_margin:val('p_calc_perkg_margin')!==''?parseFloat(val('p_calc_perkg_margin')):null,
         is_protected:!!($('p_protected')&&$('p_protected').checked)};
       let syncMsg='';
       if(id){
