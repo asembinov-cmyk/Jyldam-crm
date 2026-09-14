@@ -7473,7 +7473,8 @@ function pickupModal(id,readonly){
       <div class="field"><label>Дата</label><input type="date" id="m_date" value="${esc(d.pickup_date||'')}" ${dis}></div>
       <div class="field"><label>Город</label><select id="m_city" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Наименование (партнёр)</label><input id="m_name" list="plist" value="${esc(d.name)}" ${dis} autocomplete="off"><datalist id="plist">${S.partners.map(pt=>`<option value="${esc(pt.name)}">`).join('')}</datalist></div>
-      <div class="field full"><label>Адрес</label><input id="m_address" value="${esc(d.address)}" ${dis}></div>
+      <div class="field full"><label>Адрес <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забираем)</span></label><input id="m_address" value="${esc(d.address)}" ${dis}></div>
+      <div class="field full" id="m_delivery_addr_field" style="${isFizlicoName(d.name)?'':'display:none'}"><label>Адрес доставки <span style="color:var(--muted);font-weight:400;font-size:11px">(куда везём — подставится в заказы из этой заявки)</span></label><input id="m_delivery_addr" value="${esc(d.delivery_address||'')}" ${dis}></div>
       <div class="field"><label>Номер телефона</label><input id="m_phone" inputmode="numeric" ${dis}></div>
       <div class="field"><label>Район</label><select id="m_district" ${dis}><option value="">—</option>${dOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.district_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Курьер <span style="color:var(--rust)">*</span></label><select id="m_courier" ${dis}><option value="">— выберите курьера —</option>${cOpts(d.city_id).map(x=>`<option value="${x.id}" ${d.courier_id===x.id?'selected':''}>${esc(x.fio)}</option>`).join('')}</select></div>
@@ -7492,6 +7493,7 @@ function pickupModal(id,readonly){
       // статус: у новой заявки — «Новый»; у существующей — сохраняем текущий
       const newStatus=p?(p.status_id||defaultPickupStatusId()):defaultPickupStatusId();
       const row={pickup_date:val('m_date')||null,city_id:val('m_city')||null,name,address:val('m_address').trim(),
+        delivery_address:$('m_delivery_addr')?(val('m_delivery_addr').trim()||null):null,
         phone:phoneVal('m_phone'),district_id:val('m_district')||null,courier_id:val('m_courier')||null,
         orders:(p?(parseInt(p.orders||'0',10)||0):0),sales_id:val('m_sales')||null,processor_id:val('m_proc')||null,
         give_packets:$('m_packets')?$('m_packets').checked:false,
@@ -7555,7 +7557,16 @@ function pickupModal(id,readonly){
       if(pt.city_id){cs.value=pt.city_id;cs.onchange();}
       if(pt.district_id)$('m_district').value=pt.district_id;
       if(pt.sales_id)$('m_sales').value=pt.sales_id;
-      if(pt.processor_id)$('m_proc').value=pt.processor_id;}saveDraft();};
+      if(pt.processor_id)$('m_proc').value=pt.processor_id;}
+      const deliveryField=$('m_delivery_addr_field');
+      if(deliveryField)deliveryField.style.display=isFizlicoName(e.target.value)?'':'none';
+      saveDraft();};
+    $('m_name').addEventListener('input',e=>{
+      const deliveryField=$('m_delivery_addr_field');
+      if(deliveryField)deliveryField.style.display=isFizlicoName(e.target.value)?'':'none';
+    });
+    // на случай, если поле уже что-то содержит при открытии (существующая заявка) — проверяем сразу
+    if($('m_delivery_addr_field'))$('m_delivery_addr_field').style.display=isFizlicoName(val('m_name'))?'':'none';
   }
 }
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
@@ -7588,11 +7599,15 @@ const _creatingOrders={}; // защита от параллельного соз
 // у кого реально стоит 0. Именно это раньше приводило к тому, что «Оплачено отправителем»
 // проставлялось почти всем заказам подряд.
 function isExplicitZero(v){return v!=null&&v!==''&&+v===0;}
-function isFizlicoPartner(partner){
-  // убираем кавычки любого вида (обычные, «ёлочки», типографские) — партнёр может быть записан
-  // и как "Физ лицо Алматы", и как Физ лицо "Алматы"/«Алматы» — считаем это одним и тем же
-  const n=(partner&&partner.name||'').trim().toLowerCase().replace(/["«»""'']/g,'').replace(/\s+/g,' ').trim();
+// «Физ лицо Астана» / «Физ лицо Алматы» — проверка по самому названию (строкой), не только по
+// объекту партнёра — пригодится там, где имя вводится текстом (например, в заявке на забор),
+// не обязательно выбрано из справочника партнёров
+function isFizlicoName(name){
+  const n=(name||'').trim().toLowerCase().replace(/["«»‘’'']/g,'').replace(/\s+/g,' ').trim();
   return n==='физ лицо астана'||n==='физ лицо алматы';
+}
+function isFizlicoPartner(partner){
+  return isFizlicoName(partner&&partner.name);
 }
 async function createOrdersFromPickup(pickupId,opts){
   opts=opts||{};
@@ -7635,9 +7650,12 @@ async function createOrdersFromPickup(pickupId,opts){
         sender:partner?partner.name:(p.name||''),
         pickup_date:p.pickup_date||null,
         phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
-        // для «Физ лицо Астана» / «Физ лицо Алматы» — это не магазины, а конкретные клиенты,
-        // адрес у них один и тот же всегда, поэтому подтягиваем его из карточки партнёра автоматически
-        address:(partner&&isFizlicoPartner(partner))?(partner.address||''):'', // иначе адрес доставки клиента заполняется вручную, не адрес магазина
+        // для «Физ лицо Астана» / «Физ лицо Алматы» — это не магазины, а конкретные клиенты.
+        // В самой заявке для них два разных адреса: «Адрес» (откуда забрали — идёт в
+        // fizlico_pickup_address) и «Адрес доставки» (куда везём — идёт в обычный address).
+        // Для обычных партнёров всё как раньше — адрес доставки клиента заполняется вручную.
+        address:isFizlicoName(p.name)?(p.delivery_address||''):'',
+        fizlico_pickup_address:isFizlicoName(p.name)?(p.address||(partner&&partner.address)||''):null,
         client:'',weight:null,qty:1,
         delivery_id:courierDelivery?courierDelivery.id:null,
         courier_city_id:null,
