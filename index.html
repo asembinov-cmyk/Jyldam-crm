@@ -1662,6 +1662,22 @@ async function callKelesuSyncHistory(payload){
     return out;
   }catch(e){return {success:false,error:String(e&&e.message||e)};}
 }
+// получение реального трек-номера у Казпочты (Edge Function kazpost-get-barcode) — по одному
+// заказу; функция сама сохраняет полученный трек-код прямо в заказ, тут только вызов
+async function callKazpostGetBarcode(orderId){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/kazpost-get-barcode`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify({order_id:orderId}),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
+    return out;
+  }catch(e){return {success:false,error:String(e&&e.message||e)};}
+}
 // смена пароля сотрудника через Edge Function set-password (только для админа)
 async function callSetPassword(payload){
   const {data:sess}=await sb.auth.getSession();
@@ -7951,7 +7967,7 @@ function renderOrders(mode){
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
-      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isAdmin()&&ketSelected.size)?`<button class="btn danger" id="ordersDelSel">✕ Удалить выбранные (${ketSelected.size})</button>`:''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
+      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isAdmin()&&ketSelected.size)?`<button class="btn danger" id="ordersDelSel">✕ Удалить выбранные (${ketSelected.size})</button>`:''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -8041,6 +8057,48 @@ function renderOrders(mode){
     ketSelectAll=false;
     toast(`Удалено заказов: ${ok}${fail?(', с ошибкой: '+fail):''}`);
     renderOrders(ordersMode);
+  };
+  if($('kazpostAssignSel'))$('kazpostAssignSel').onclick=async()=>{
+    let list,source;
+    if(ketSelected.size){
+      list=[...ketSelected].map(id=>S.orders.find(o=>o.id===id)).filter(Boolean);
+      source='отмеченные';
+    }else if(of.pickupCity){
+      list=filteredOrders();
+      source='по фильтру «Город забора: '+cityName(of.pickupCity)+'»';
+    }else{
+      toast('Отметьте галочками заказы или выберите фильтр «Город забора»');return;
+    }
+    // только почтовые — курьерские трек-номер у Казпочты не запрашивают
+    const skippedCourier=list.filter(o=>isCourierDelivery(o.delivery_id)).length;
+    list=list.filter(o=>!isCourierDelivery(o.delivery_id));
+    if(!list.length){toast(skippedCourier?'В выборке только курьерские заказы — трек-номер для них не нужен':'Нет заказов для присвоения трек-номера');return;}
+    const already=list.filter(o=>o.track).length;
+    let msg=`Получить трек-номер у Казпочты для заказов: ${list.length} (${source})?`;
+    if(skippedCourier)msg+=`\n(${skippedCourier} курьерских заказов из выборки пропущено — им трек-номер не нужен)`;
+    if(already)msg+=`\n(у ${already} уже есть трек-код — будет заменён на новый)`;
+    if(!confirm(msg))return;
+    const b=$('kazpostAssignSel');b.disabled=true;const origLabel=b.textContent;
+    const assignOne=async(o)=>{
+      try{
+        const r=await callKazpostGetBarcode(o.id);
+        if(r&&r.success){o.track=r.barcode;return {ok:true};}
+        return {ok:false,reason:`${o.code}: ${r&&r.error||'неизвестная ошибка'}`};
+      }catch(e){return {ok:false,reason:`${o.code}: ${String(e&&e.message||e)}`};}
+    };
+    const BATCH=5; // Казпочта — внешний медленный сервис, шлём по 5 параллельно, не больше
+    let ok=0,fail=0;const errs=[];
+    for(let i=0;i<list.length;i+=BATCH){
+      const chunk=list.slice(i,i+BATCH);
+      b.textContent=`Получаем… ${Math.min(i+BATCH,list.length)}/${list.length}`;
+      const results=await Promise.all(chunk.map(o=>assignOne(o).then(res=>({o,res}))));
+      results.forEach(({res})=>{if(res.ok)ok++;else{fail++;errs.push(res.reason);}});
+    }
+    b.disabled=false;b.textContent=origLabel;
+    toast(`Трек-номер присвоен: ${ok}${fail?(', с ошибкой: '+fail):''}`);
+    if(errs.length)alert('Не удалось получить трек-номер:\n\n'+errs.join('\n'));
+    ketSelected.clear();ketSelectAll=false;
+    renderOrders();
   };
   if($('ketSendSel'))$('ketSendSel').onclick=async()=>{
     let list, source;
@@ -8916,7 +8974,12 @@ function orderModal(id,readonly){
       <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="o_weight" value="${esc(d.weight)}" ${dis}></div>
-      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label><input id="o_track" value="${esc(d.track)}" ${dis}></div>
+      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label>
+        <div style="display:flex;gap:8px">
+          <input id="o_track" value="${esc(d.track)}" ${dis} style="flex:1">
+          ${(o&&o.id&&!ro)?`<button type="button" class="btn ghost sm" id="o_kazpost_btn" style="white-space:nowrap">📮 Получить трек</button>`:''}
+        </div>
+      </div>
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Дата доставки</label><input type="date" id="o_deliver" min="${localToday()}" value="${esc(d.deliver_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
@@ -9014,6 +9077,18 @@ function orderModal(id,readonly){
       finally{oChatSyncBtn.disabled=false;oChatSyncBtn.textContent='🔄 Загрузить историю';}
     };
   }
+  if($('o_kazpost_btn'))$('o_kazpost_btn').onclick=async()=>{
+    const btn=$('o_kazpost_btn');btn.disabled=true;btn.textContent='⏳ Получаем…';
+    try{
+      const res=await callKazpostGetBarcode(o.id);
+      if(res&&res.success){
+        o.track=res.barcode;
+        const trackEl=$('o_track');if(trackEl)trackEl.value=res.barcode;
+        toast(`Трек-номер получен: ${res.barcode}`);
+      }else{toast('Не удалось получить трек-номер: '+(res&&res.error||'ошибка'));}
+    }catch(e){toast('Не удалось получить трек-номер');}
+    finally{btn.disabled=false;btn.textContent='📮 Получить трек';}
+  };
   if(o&&o.id){
     const bindBig=()=>{
       const pc=$('o_photos');if(!pc)return;
