@@ -5485,30 +5485,48 @@ function calcPartnerParseFile(file,cb){
       const sheet=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});
       if(!rows.length){cb(null,'Файл пустой');return;}
-      const headerRow=(rows[0]||[]).map(h=>String(h||'').trim());
-      const headerLower=headerRow.map(h=>h.toLowerCase());
-      let weightCol=headerLower.findIndex(h=>/вес|weight|\bkg\b|кг/i.test(h));
-      let startRow=1;
+      // ищем строку с заголовками в первых 5 строках файла — не только в самой первой (часто
+      // выше настоящей таблицы стоит строка-название вроде «Всего РПО»)
+      let headerRowIdx=-1,weightCol=-1;
+      for(let r=0;r<Math.min(5,rows.length);r++){
+        const cells=(rows[r]||[]).map(h=>String(h||'').toLowerCase().trim());
+        const idx=cells.findIndex(h=>/вес|weight|\bkg\b|кг/i.test(h));
+        if(idx>=0){headerRowIdx=r;weightCol=idx;break;}
+      }
+      const headerRow=headerRowIdx>=0?(rows[headerRowIdx]||[]).map(h=>String(h||'').trim()):(rows[0]||[]).map(h=>String(h||'').trim());
+      let startRow=headerRowIdx>=0?headerRowIdx+1:1;
       let autoDetected=weightCol>=0;
       if(weightCol<0){
         // явного заголовка «Вес» нет — ищем столбец, где большинство значений похожи на ВЕС
-        // (число в разумных границах 0.05–200 кг), а не просто любое число (иначе можно
-        // случайно схватить № заказа, телефон или сумму)
+        // (число в разумных границах 0.05–200 кг). Среди подходящих отдаём предпочтение
+        // столбцу с ДРОБНЫМИ значениями (2.436, 1.874…) — вес обычно дробный, а строго
+        // последовательные целые (1, 2, 3, 4…) — это почти наверняка № по порядку, не вес.
         const width=Math.max(...rows.slice(0,50).map(r=>r.length));
-        let best=-1,bestScore=0;
+        let best=-1,bestScore=-1;
         for(let c=0;c<width;c++){
           const vals=rows.slice(0,50).map(r=>r[c]);
-          const plausible=vals.filter(v=>{
-            if(v===''||v==null)return false;
+          const nums=vals.map(v=>{
+            if(v===''||v==null)return null;
             const n=parseFloat(String(v).replace(',','.'));
-            return !isNaN(n)&&n>=0.05&&n<=200;
-          }).length;
-          if(plausible>bestScore){bestScore=plausible;best=c;}
+            return isNaN(n)?null:n;
+          }).filter(n=>n!=null);
+          const plausible=nums.filter(n=>n>=0.05&&n<=200).length;
+          if(plausible<1)continue;
+          const hasDecimals=nums.some(n=>n%1!==0);
+          // похоже на строго последовательный номер по порядку (1,2,3,4…) — почти наверняка не вес
+          const looksSequential=nums.length>3&&nums.every((n,i)=>i===0||n===nums[i-1]+1);
+          let score=plausible;
+          if(hasDecimals)score+=1000; // сильный приоритет столбцу с дробными значениями
+          if(looksSequential)score-=1000; // и сильный штраф явному порядковому номеру
+          if(score>bestScore){bestScore=score;best=c;}
         }
         if(best<0||bestScore<1){cb(null,'Не удалось найти столбец с весом — добавьте в файл заголовок «Вес» над нужной колонкой',null);return;}
         weightCol=best;
-        // если самая первая строка тоже похожа на число — значит, заголовка нет вообще, читаем с 0-й строки
-        startRow=(rows[0][weightCol]!==''&&!isNaN(parseFloat(String(rows[0][weightCol]).replace(',','.'))))?0:1;
+        headerRow[weightCol]=headerRow[weightCol]||'';
+        // начало данных — первая строка, где в этом столбце реально стоит число (сколько бы
+        // строк-заголовков/названий ни было выше)
+        const firstNumRow=rows.findIndex(r=>r[weightCol]!==''&&r[weightCol]!=null&&!isNaN(parseFloat(String(r[weightCol]).replace(',','.'))));
+        startRow=firstNumRow>=0?firstNumRow:1;
       }
       const weights=[];
       for(let i=startRow;i<rows.length;i++){
@@ -5535,7 +5553,10 @@ function calcPartnerParseFile(file,cb){
 // чтения самого файла) — используется, когда автоопределение ошиблось
 function calcPartnerWeightsFromCol(meta,col){
   const weights=[];
-  const startRow=(meta.rows[0][col]!==''&&!isNaN(parseFloat(String(meta.rows[0][col]).replace(',','.'))))?0:1;
+  // находим первую строку, где в ЭТОМ столбце реально стоит число — это и есть начало данных
+  // (сколько бы строк-заголовков/названий ни было выше)
+  let startRow=meta.rows.findIndex(r=>r[col]!==''&&r[col]!=null&&!isNaN(parseFloat(String(r[col]).replace(',','.'))));
+  if(startRow<0)startRow=0;
   for(let i=startRow;i<meta.rows.length;i++){
     const raw=meta.rows[i][col];
     if(raw===''||raw==null)continue;
