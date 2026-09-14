@@ -7589,7 +7589,9 @@ const _creatingOrders={}; // защита от параллельного соз
 // проставлялось почти всем заказам подряд.
 function isExplicitZero(v){return v!=null&&v!==''&&+v===0;}
 function isFizlicoPartner(partner){
-  const n=(partner&&partner.name||'').trim().toLowerCase().replace(/\s+/g,' ');
+  // убираем кавычки любого вида (обычные, «ёлочки», типографские) — партнёр может быть записан
+  // и как "Физ лицо Алматы", и как Физ лицо "Алматы"/«Алматы» — считаем это одним и тем же
+  const n=(partner&&partner.name||'').trim().toLowerCase().replace(/["«»""'']/g,'').replace(/\s+/g,' ').trim();
   return n==='физ лицо астана'||n==='физ лицо алматы';
 }
 async function createOrdersFromPickup(pickupId,opts){
