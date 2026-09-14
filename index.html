@@ -5416,6 +5416,7 @@ let calcPartnerId=''; // выбранный партнёр (из S.calc_partners
 let calcPartnerWeights=null; // веса заказов из загруженного файла (массив чисел, кг)
 let calcPartnerFileName='';
 let calcPartnerFileError='';
+let calcPartnerFileMeta=null; // {rows,headerRow,weightCol,autoDetected,usedHeaderName,avgWeight,maxWeight,sample} — для проверки и ручного выбора столбца
 const CALC_PARTNER_BASE_WEIGHT=2; // базовый вес в кг — фиксированный, одинаковый для всех партнёров
 let _calcGlobalPerKg=null; // надбавка партнёру за доп. кг — общая для всех, из базы
 // выбранный период нормативов (год-месяц). По умолчанию текущий.
@@ -5471,7 +5472,10 @@ function calcPartnerOrderCharge(weight,partner,perKgCharge){
   return {totalKg,extraKg,charge,margin};
 }
 // читает файл (xlsx/csv/xls) — ищет столбец с весом по названию заголовка (вес/kg/weight),
-// если не нашли по названию — берёт первый столбец, где большинство значений похожи на числа
+// если не нашли по названию — берёт столбец, где большинство значений похожи на числа В
+// РАЗУМНЫХ ДЛЯ ВЕСА ГРАНИЦАХ (0.05–200 кг) — чтобы случайно не схватить № заказа/телефон/сумму.
+// Возвращает не только сами веса, но и что было определено — чтобы это можно было проверить
+// глазами и выбрать другой столбец вручную, если автоопределение ошиблось.
 function calcPartnerParseFile(file,cb){
   if(!window.XLSX){cb(null,'Библиотека для чтения файлов ещё загружается, попробуйте снова через пару секунд');return;}
   const reader=new FileReader();
@@ -5481,19 +5485,27 @@ function calcPartnerParseFile(file,cb){
       const sheet=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});
       if(!rows.length){cb(null,'Файл пустой');return;}
-      const header=(rows[0]||[]).map(h=>String(h||'').toLowerCase().trim());
-      let weightCol=header.findIndex(h=>/вес|weight|\bkg\b|кг/i.test(h));
+      const headerRow=(rows[0]||[]).map(h=>String(h||'').trim());
+      const headerLower=headerRow.map(h=>h.toLowerCase());
+      let weightCol=headerLower.findIndex(h=>/вес|weight|\bkg\b|кг/i.test(h));
       let startRow=1;
+      let autoDetected=weightCol>=0;
       if(weightCol<0){
-        // явного заголовка нет — ищем столбец, где большинство значений похожи на числа
-        const width=Math.max(...rows.slice(0,30).map(r=>r.length));
+        // явного заголовка «Вес» нет — ищем столбец, где большинство значений похожи на ВЕС
+        // (число в разумных границах 0.05–200 кг), а не просто любое число (иначе можно
+        // случайно схватить № заказа, телефон или сумму)
+        const width=Math.max(...rows.slice(0,50).map(r=>r.length));
         let best=-1,bestScore=0;
         for(let c=0;c<width;c++){
-          const vals=rows.slice(0,30).map(r=>r[c]);
-          const numeric=vals.filter(v=>v!==''&&v!=null&&!isNaN(parseFloat(String(v).replace(',','.')))).length;
-          if(numeric>bestScore){bestScore=numeric;best=c;}
+          const vals=rows.slice(0,50).map(r=>r[c]);
+          const plausible=vals.filter(v=>{
+            if(v===''||v==null)return false;
+            const n=parseFloat(String(v).replace(',','.'));
+            return !isNaN(n)&&n>=0.05&&n<=200;
+          }).length;
+          if(plausible>bestScore){bestScore=plausible;best=c;}
         }
-        if(best<0||bestScore<1){cb(null,'Не удалось найти столбец с весом — добавьте в файл заголовок «Вес» над нужной колонкой');return;}
+        if(best<0||bestScore<1){cb(null,'Не удалось найти столбец с весом — добавьте в файл заголовок «Вес» над нужной колонкой',null);return;}
         weightCol=best;
         // если самая первая строка тоже похожа на число — значит, заголовка нет вообще, читаем с 0-й строки
         startRow=(rows[0][weightCol]!==''&&!isNaN(parseFloat(String(rows[0][weightCol]).replace(',','.'))))?0:1;
@@ -5505,12 +5517,32 @@ function calcPartnerParseFile(file,cb){
         const w=parseFloat(String(raw).replace(',','.'));
         if(!isNaN(w)&&w>0)weights.push(w);
       }
-      if(!weights.length){cb(null,'В файле не нашлось ни одной строки с весом больше 0');return;}
-      cb(weights,null);
-    }catch(err){cb(null,'Не удалось прочитать файл: '+err.message);}
+      if(!weights.length){cb(null,'В файле не нашлось ни одной строки с весом больше 0',null);return;}
+      const meta={
+        rows,headerRow,weightCol,autoDetected,
+        usedHeaderName:autoDetected?headerRow[weightCol]:null,
+        avgWeight:weights.reduce((s,w)=>s+w,0)/weights.length,
+        maxWeight:Math.max(...weights),
+        sample:weights.slice(0,5),
+      };
+      cb(weights,null,meta);
+    }catch(err){cb(null,'Не удалось прочитать файл: '+err.message,null);}
   };
-  reader.onerror=()=>cb(null,'Не удалось прочитать файл');
+  reader.onerror=()=>cb(null,'Не удалось прочитать файл',null);
   reader.readAsBinaryString(file);
+}
+// пересчитать веса из уже прочитанного файла, но по вручную выбранному столбцу (без повторного
+// чтения самого файла) — используется, когда автоопределение ошиблось
+function calcPartnerWeightsFromCol(meta,col){
+  const weights=[];
+  const startRow=(meta.rows[0][col]!==''&&!isNaN(parseFloat(String(meta.rows[0][col]).replace(',','.'))))?0:1;
+  for(let i=startRow;i<meta.rows.length;i++){
+    const raw=meta.rows[i][col];
+    if(raw===''||raw==null)continue;
+    const w=parseFloat(String(raw).replace(',','.'));
+    if(!isNaN(w)&&w>0)weights.push(w);
+  }
+  return weights;
 }
 async function renderCalcPartner(){
   if(_calcGlobalPerKg==null)await loadCalcGlobalPerKg();
@@ -5571,7 +5603,21 @@ async function renderCalcPartner(){
       </div>
       ${!partner?'<div class="hint" style="margin-top:8px;color:var(--rust)">Сначала выберите или добавьте партнёра</div>':''}
       ${calcPartnerFileError?`<div class="hint" style="margin-top:8px;color:var(--rust)">${esc(calcPartnerFileError)}</div>`:''}
+      ${calcPartnerFileMeta?`<div class="hint" style="margin-top:10px;padding:10px;background:#f5f5f7;border-radius:8px">
+        <b>Столбец с весом:</b> ${calcPartnerFileMeta.autoDetected?`«${esc(calcPartnerFileMeta.usedHeaderName)}» (найден по заголовку)`:`столбец №${calcPartnerFileMeta.weightCol+1} — заголовка «Вес» не нашлось, определён по числам`}
+        · средний вес: <b>${calcPartnerFileMeta.avgWeight.toFixed(2)} кг</b>, макс: <b>${calcPartnerFileMeta.maxWeight} кг</b>
+        · первые значения: ${calcPartnerFileMeta.sample.join(', ')} кг
+        <div style="margin-top:8px">
+          <label style="font-size:12px;color:var(--muted)">Если столбец определён неверно — выберите нужный вручную:</label>
+          <select id="cpWeightColOverride" style="margin-left:8px">
+            ${calcPartnerFileMeta.headerRow.map((h,i)=>`<option value="${i}" ${i===calcPartnerFileMeta.weightCol?'selected':''}>${esc(h||('Столбец '+(i+1)))}</option>`).join('')}
+          </select>
+        </div>
+      </div>`:''}
     </div>
+    ${(calcPartnerFileMeta&&calcPartnerFileMeta.avgWeight>50)?`<div class="panel calc-panel" style="margin-bottom:18px;border-color:var(--rust)">
+      <p class="calc-note" style="color:var(--rust)">⚠️ Средний вес получился ${calcPartnerFileMeta.avgWeight.toFixed(0)} кг — это очень много для обычных посылок. Похоже, распознан не тот столбец (например, номер заказа или сумма вместо веса). Проверьте выбор столбца выше.</p>
+    </div>`:''}
     ${breakdown.length?`
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Итог по ${esc(partner.name)}</h3>
@@ -5590,7 +5636,7 @@ async function renderCalcPartner(){
         </tbody></table></div>
       <div style="margin-top:12px"><button class="btn btn-excel sm" id="cpExport">⬇ Выгрузить в Excel</button></div>
     </div>`:''}`;
-  if($('cpPartner'))$('cpPartner').onchange=e=>{calcPartnerId=e.target.value;calcPartnerWeights=null;calcPartnerFileName='';calcPartnerFileError='';renderCalcPartner();};
+  if($('cpPartner'))$('cpPartner').onchange=e=>{calcPartnerId=e.target.value;renderCalcPartner();};
   if($('cpPerKg'))$('cpPerKg').onchange=async e=>{
     const ok2=await saveCalcGlobalPerKg(e.target.value);
     if(ok2)toast('Сохранено');
@@ -5603,17 +5649,31 @@ async function renderCalcPartner(){
     const okDel=await dbDelete('calc_partners',calcPartnerId);
     if(!okDel){toast('Не удалось удалить');return;}
     S.calc_partners=(S.calc_partners||[]).filter(p=>p.id!==calcPartnerId);
-    calcPartnerId='';calcPartnerWeights=null;calcPartnerFileName='';
+    calcPartnerId='';calcPartnerWeights=null;calcPartnerFileName='';calcPartnerFileMeta=null;
     toast('Удалено');renderCalcPartner();
   };
   if($('cpFile'))$('cpFile').onchange=e=>{
     const file=e.target.files&&e.target.files[0];if(!file)return;
-    calcPartnerFileError='';
-    calcPartnerParseFile(file,(weights,error)=>{
-      if(error){calcPartnerFileError=error;calcPartnerWeights=null;calcPartnerFileName='';}
-      else{calcPartnerWeights=weights;calcPartnerFileName=file.name;}
+    calcPartnerFileError='';calcPartnerFileMeta=null;
+    calcPartnerParseFile(file,(weights,error,meta)=>{
+      if(error){calcPartnerFileError=error;calcPartnerWeights=null;calcPartnerFileName='';calcPartnerFileMeta=null;}
+      else{calcPartnerWeights=weights;calcPartnerFileName=file.name;calcPartnerFileMeta=meta;}
       renderCalcPartner();
     });
+  };
+  if($('cpWeightColOverride'))$('cpWeightColOverride').onchange=e=>{
+    const col=parseInt(e.target.value,10);
+    const newWeights=calcPartnerWeightsFromCol(calcPartnerFileMeta,col);
+    if(!newWeights.length){toast('В этом столбце не нашлось весов больше 0');return;}
+    calcPartnerWeights=newWeights;
+    calcPartnerFileMeta={
+      ...calcPartnerFileMeta,weightCol:col,autoDetected:true,
+      usedHeaderName:calcPartnerFileMeta.headerRow[col]||('Столбец '+(col+1)),
+      avgWeight:newWeights.reduce((s,w)=>s+w,0)/newWeights.length,
+      maxWeight:Math.max(...newWeights),
+      sample:newWeights.slice(0,5),
+    };
+    renderCalcPartner();
   };
   if($('cpExport'))$('cpExport').onclick=()=>{
     if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
