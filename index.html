@@ -6065,12 +6065,16 @@ function showModal(title,bodyHtml,onSave,opts={}){
   ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}${opts.mid?' modal-mid':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
   document.body.appendChild(ov);
+  // плавающая панель пагинации (z-index:8000) перекрывает модальные окна (z-index:100) —
+  // прячем её, пока открыта карточка, возвращаем обратно при закрытии
+  document.querySelectorAll('.orders-pager').forEach(p=>{if(p.style.display!=='none'){p.dataset.hiddenByModal='1';p.style.display='none';}});
+  const restorePagers=()=>{document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});};
   // жёсткое закрытие — всегда работает (крестик, Escape, клик мимо): выход без сохранения
-  const forceClose=()=>{ov.remove();};
+  const forceClose=()=>{ov.remove();restorePagers();};
   // закрытие с проверкой (кнопка Сохранить/Закрыть): beforeClose может запретить
   const close=()=>{
     if(typeof opts.beforeClose==='function'&&opts.beforeClose()===false)return;
-    ov.remove();
+    ov.remove();restorePagers();
   };
   ov.querySelector('.x').onclick=forceClose;         // крестик — всегда закрывает
   if(ov.querySelector('[data-cancel]'))ov.querySelector('[data-cancel]').onclick=forceClose;
@@ -6086,7 +6090,7 @@ function showModal(title,bodyHtml,onSave,opts={}){
 }
 function showInfo(title,bodyHtml,opts){return showModal(title,bodyHtml,null,Object.assign({readonly:true},opts||{}));}
 // закрыть самую верхнюю открытую модалку (используется для перехода «карточка товара» → «операция/резерв»)
-function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.length)ovs[ovs.length-1].remove();}
+function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.length){ovs[ovs.length-1].remove();document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});}}
 
 /* автологин / спец-кабинеты по ссылке */
 (async()=>{
