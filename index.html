@@ -1648,6 +1648,22 @@ async function loadPhoneChat(phone,boxId){
 }
 // обёртка для обратной совместимости — карточка партнёра использует блок p_chat_box
 async function loadPartnerChat(phone){return loadPhoneChat(phone,'p_chat_box');}
+// подтягивает историю переписки из Kelesu (Edge Function kelesu-sync-history) — нужно для
+// сообщений, которые были ДО подключения вебхука и поэтому отсутствуют в нашей базе
+async function callKelesuSyncHistory(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/kelesu-sync-history`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
+    return out;
+  }catch(e){return {success:false,error:String(e&&e.message||e)};}
+}
 // смена пароля сотрудника через Edge Function set-password (только для админа)
 async function callSetPassword(payload){
   const {data:sess}=await sb.auth.getSession();
@@ -8850,8 +8866,9 @@ function orderModal(id,readonly){
             ${o.ket_id?`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}
             <button type="button" class="btn sm ${o.ket_id?'ghost':''}" data-ketsend="${o.id}">${o.ket_id?'Отправить повторно':'Отправить в KET'}</button>
           </div></div>`:''}
-        ${(o&&o.id&&o.phone)?`<div class="field full" style="margin-top:14px"><label>💬 Переписка с получателем (WhatsApp)</label>
-          <div id="o_chat_box" style="border:1px solid var(--line);border-radius:10px;max-height:260px;overflow-y:auto;padding:10px;background:#fafafa;display:flex;flex-direction:column">
+        ${(o&&o.id&&o.phone)?`<div class="field full" style="margin-top:14px"><label>💬 Переписка с получателем (WhatsApp) <button type="button" class="btn ghost sm" id="o_chat_sync" style="margin-left:8px">🔄 Загрузить историю</button></label>
+          <small style="color:var(--muted);font-size:12px">Новые сообщения приходят сами; старую переписку (до подключения) нужно подтянуть кнопкой выше — один раз</small>
+          <div id="o_chat_box" style="border:1px solid var(--line);border-radius:10px;max-height:260px;overflow-y:auto;padding:10px;background:#fafafa;display:flex;flex-direction:column;margin-top:6px">
             <div class="hint">Загрузка…</div>
           </div>
           ${!ro?`<div style="display:flex;gap:8px;margin-top:8px">
@@ -8961,6 +8978,19 @@ function orderModal(id,readonly){
       oChatSendBtn.onclick=doOrderSend;
       oChatInput.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();doOrderSend();}});
     }
+    const oChatSyncBtn=$('o_chat_sync');
+    if(oChatSyncBtn)oChatSyncBtn.onclick=async()=>{
+      oChatSyncBtn.disabled=true;oChatSyncBtn.textContent='⏳ Загружаем…';
+      try{
+        const res=await callKelesuSyncHistory({phone:o.phone});
+        if(res&&res.success){
+          if(res.chat_found)toast(`Загружено сообщений: ${res.imported}`);
+          else toast('В Kelesu не нашлось чата с этим номером');
+          await loadPhoneChat(o.phone,'o_chat_box');
+        }else{toast('Не удалось загрузить историю: '+(res&&res.error||'ошибка'));}
+      }catch(e){toast('Не удалось загрузить историю');}
+      finally{oChatSyncBtn.disabled=false;oChatSyncBtn.textContent='🔄 Загрузить историю';}
+    };
   }
   if(o&&o.id){
     const bindBig=()=>{
@@ -9390,8 +9420,9 @@ function partnerModal(id){
       <small style="color:var(--muted);font-size:12px">Партнёр сможет присылать готовые заказы напрямую через API — они автоматически попадут в «Заказы заборов» с заявкой на забор, выделены другим цветом. Перевыпуск токена отзывает старый — если у партнёра уже настроена интеграция, старый токен перестанет работать.</small>
       <div id="p_token_reveal"></div>
     </div>
-    <div class="field"><label>💬 Переписка (WhatsApp)</label>
-      <div id="p_chat_box" style="border:1px solid var(--line);border-radius:10px;max-height:320px;overflow-y:auto;padding:10px;background:#fafafa;display:flex;flex-direction:column">
+    <div class="field"><label>💬 Переписка (WhatsApp) <button type="button" class="btn ghost sm" id="p_chat_sync" style="margin-left:8px">🔄 Загрузить историю</button></label>
+      <small style="color:var(--muted);font-size:12px">Новые сообщения приходят сами; старую переписку (до подключения) нужно подтянуть кнопкой выше — один раз</small>
+      <div id="p_chat_box" style="border:1px solid var(--line);border-radius:10px;max-height:320px;overflow-y:auto;padding:10px;background:#fafafa;display:flex;flex-direction:column;margin-top:6px">
         <div class="hint">Загрузка…</div>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
@@ -9484,6 +9515,19 @@ function partnerModal(id){
     };
     if(chatSendBtn)chatSendBtn.onclick=doSend;
     if(chatInput)chatInput.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();doSend();}});
+    const chatSyncBtn=$('p_chat_sync');
+    if(chatSyncBtn)chatSyncBtn.onclick=async()=>{
+      chatSyncBtn.disabled=true;chatSyncBtn.textContent='⏳ Загружаем…';
+      try{
+        const res=await callKelesuSyncHistory({phone:p.phone});
+        if(res&&res.success){
+          if(res.chat_found)toast(`Загружено сообщений: ${res.imported}`);
+          else toast('В Kelesu не нашлось чата с этим номером');
+          await loadPartnerChat(p.phone);
+        }else{toast('Не удалось загрузить историю: '+(res&&res.error||'ошибка'));}
+      }catch(e){toast('Не удалось загрузить историю');}
+      finally{chatSyncBtn.disabled=false;chatSyncBtn.textContent='🔄 Загрузить историю';}
+    };
   }
 }
 /* Города */
