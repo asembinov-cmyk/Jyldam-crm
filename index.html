@@ -1646,8 +1646,6 @@ async function loadPhoneChat(phone,boxId){
     const box3=$(boxId);if(box3)box3.innerHTML='<div class="hint" style="color:var(--rust)">Не удалось загрузить переписку — возможно, таблица kelesu_messages ещё не создана</div>';
   }
 }
-// обёртка для обратной совместимости — карточка партнёра использует блок p_chat_box
-async function loadPartnerChat(phone){return loadPhoneChat(phone,'p_chat_box');}
 // подтягивает историю переписки из Kelesu (Edge Function kelesu-sync-history) — нужно для
 // сообщений, которые были ДО подключения вебхука и поэтому отсутствуют в нашей базе
 async function callKelesuSyncHistory(payload){
@@ -8516,6 +8514,7 @@ function exportOrdersToExcel(){
       'Тип доставки':o.delivery_id?deliveryName(o.delivery_id):'',
       'Город':city||'',
       'Адрес':o.address||'',
+      'Откуда забрали (физ. лицо)':o.fizlico_pickup_address||'',
       'Статус':o.status_id?((orderStatusObj(o.status_id)||{}).name||''):'',
       'Трек-код':o.track||'',
       'Индекс':o.index||'',
@@ -8528,7 +8527,7 @@ function exportOrdersToExcel(){
   const ws=XLSX.utils.json_to_sheet(data);
   // ширины колонок
   const cols=Object.keys(data[0]||{});
-  ws['!cols']=cols.map(c=>({wch:c==='Адрес'?28:(c==='Отправитель'||c==='ФИО клиента'||c==='Партнёр'?20:14)}));
+  ws['!cols']=cols.map(c=>({wch:(c==='Адрес'||c==='Откуда забрали (физ. лицо)')?28:(c==='Отправитель'||c==='ФИО клиента'||c==='Партнёр'?20:14)}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Заказы');
   // имя файла с датой и режимом
@@ -8883,6 +8882,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Дата забора</label><input type="date" id="o_pickup" value="${esc(d.pickup_date||'')}" ${dis}></div>
       <div class="field"><label>Отправитель</label><input id="o_sender" list="partnersList" autocomplete="off" value="${esc(d.sender)}" ${dis}><datalist id="partnersList">${S.partners.map(p=>`<option value="${esc(p.name)}"></option>`).join('')}</datalist></div>
       <div class="field"><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field full" id="fizlicoPickupAddrField" style="${(_initPartner&&isFizlicoPartner(_initPartner))?'':'display:none'}"><label>Адрес откуда забрали (физ. лицо)</label><input id="o_fizlico_pickup_addr" value="${esc(d.fizlico_pickup_address||'')}" placeholder="реальный адрес, где забрали посылку у этого клиента" ${dis}></div>
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
@@ -8910,6 +8910,7 @@ function orderModal(id,readonly){
       const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
         weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),phone:phoneDigits,
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
+        fizlico_pickup_address:$('o_fizlico_pickup_addr')?val('o_fizlico_pickup_addr').trim()||null:null,
         pickup_city_id:val('o_pickupcity')||null,
         city_id:!isCourierDelivery(val('o_delivery'))?(val('o_postcity')||null):null,
         order_sum:(val('o_sum')!==''?parseFloat(val('o_sum')):null),
@@ -9101,6 +9102,11 @@ function orderModal(id,readonly){
         const addrEl=$('o_address');
         if(addrEl&&!addrEl.value.trim())addrEl.value=ptForPaid.address||'';
       }
+      // показываем поле «Адрес откуда забрали (физ. лицо)» только для этих двух партнёров —
+      // у обычных партнёров реальный адрес забора и так известен из их карточки, а тут он
+      // каждый раз разный (реальный клиент), поэтому вводится отдельно, вручную
+      const fizlicoField=$('fizlicoPickupAddrField');
+      if(fizlicoField)fizlicoField.style.display=(ptForPaid&&isFizlicoPartner(ptForPaid))?'':'none';
       if(sumTouched)return; // не перезаписываем введённую вручную сумму
       // если выбран размер пакета — считаем по нему, это приоритетнее общего тарифа партнёра
       const sizeEl=$('o_size');
@@ -9419,16 +9425,6 @@ function partnerModal(id){
       </div>
       <small style="color:var(--muted);font-size:12px">Партнёр сможет присылать готовые заказы напрямую через API — они автоматически попадут в «Заказы заборов» с заявкой на забор, выделены другим цветом. Перевыпуск токена отзывает старый — если у партнёра уже настроена интеграция, старый токен перестанет работать.</small>
       <div id="p_token_reveal"></div>
-    </div>
-    <div class="field"><label>💬 Переписка (WhatsApp) <button type="button" class="btn ghost sm" id="p_chat_sync" style="margin-left:8px">🔄 Загрузить историю</button></label>
-      <small style="color:var(--muted);font-size:12px">Новые сообщения приходят сами; старую переписку (до подключения) нужно подтянуть кнопкой выше — один раз</small>
-      <div id="p_chat_box" style="border:1px solid var(--line);border-radius:10px;max-height:320px;overflow-y:auto;padding:10px;background:#fafafa;display:flex;flex-direction:column;margin-top:6px">
-        <div class="hint">Загрузка…</div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <input id="p_chat_input" placeholder="Написать сообщение…" style="flex:1">
-        <button type="button" class="btn primary sm" id="p_chat_send">Отправить</button>
-      </div>
     </div>`:''}`,
     async()=>{
       // проверка обязательных полей (кроме QR-кода)
@@ -9499,36 +9495,6 @@ function partnerModal(id){
     </div>`;
     toast('Токен выдан');
   };
-  // переписка WhatsApp через Kelesu — сопоставляется с партнёром по телефону
-  if(id&&p.phone){
-    loadPartnerChat(p.phone);
-    const chatSendBtn=$('p_chat_send'),chatInput=$('p_chat_input');
-    const doSend=async()=>{
-      const text=chatInput.value.trim();if(!text)return;
-      chatSendBtn.disabled=true;
-      try{
-        const res=await callKelesuSend({phone:p.phone,text});
-        if(res&&res.success){chatInput.value='';await loadPartnerChat(p.phone);}
-        else{toast('Не удалось отправить: '+(res&&res.error||'ошибка'));}
-      }catch(e){toast('Не удалось отправить сообщение');}
-      finally{chatSendBtn.disabled=false;}
-    };
-    if(chatSendBtn)chatSendBtn.onclick=doSend;
-    if(chatInput)chatInput.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();doSend();}});
-    const chatSyncBtn=$('p_chat_sync');
-    if(chatSyncBtn)chatSyncBtn.onclick=async()=>{
-      chatSyncBtn.disabled=true;chatSyncBtn.textContent='⏳ Загружаем…';
-      try{
-        const res=await callKelesuSyncHistory({phone:p.phone});
-        if(res&&res.success){
-          if(res.chat_found)toast(`Загружено сообщений: ${res.imported}`);
-          else toast('В Kelesu не нашлось чата с этим номером');
-          await loadPartnerChat(p.phone);
-        }else{toast('Не удалось загрузить историю: '+(res&&res.error||'ошибка'));}
-      }catch(e){toast('Не удалось загрузить историю');}
-      finally{chatSyncBtn.disabled=false;chatSyncBtn.textContent='🔄 Загрузить историю';}
-    };
-  }
 }
 /* Города */
 function dirCities(){
