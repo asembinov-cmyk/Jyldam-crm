@@ -9098,11 +9098,13 @@ function orderModal(id,readonly){
       if(ptForPaid&&paidChk&&!paidChk.checked&&isExplicitZero(relevantTariff)){
         paidChk.checked=true;paidChk.onchange();
       }
-      // «Физ лицо Астана» / «Физ лицо Алматы» — это конкретные клиенты, адрес у них всегда один и
-      // тот же, подставляем из карточки партнёра (только если поле ещё пустое — не затираем ручной ввод)
-      if(ptForPaid&&isFizlicoPartner(ptForPaid)){
-        const addrEl=$('o_address');
-        if(addrEl&&!addrEl.value.trim())addrEl.value=ptForPaid.address||'';
+      // «Физ лицо Астана» / «Физ лицо Алматы» — это конкретные клиенты. Адрес из карточки партнёра
+      // (их обычный, зарегистрированный адрес) подставляем как ЗАГОТОВКУ в «Адрес откуда забрали» —
+      // сотрудник может поправить вручную, если реально забрали в другом месте (только если поле
+      // ещё пустое — не затираем то, что уже ввели руками)
+      const fizlicoAddrEl=$('o_fizlico_pickup_addr');
+      if(ptForPaid&&isFizlicoPartner(ptForPaid)&&fizlicoAddrEl&&!fizlicoAddrEl.value.trim()){
+        fizlicoAddrEl.value=ptForPaid.address||'';
       }
       // показываем поле «Адрес откуда забрали (физ. лицо)» только для этих двух партнёров —
       // у обычных партнёров реальный адрес забора и так известен из их карточки, а тут он
@@ -9186,6 +9188,10 @@ function orderModal(id,readonly){
       ss.onchange=pullPartner;
       ss.oninput=pullPartner; // выбор из выпадающей подсказки
     }
+    // сразу при открытии карточки — не только при изменении полей — чтобы автоподстановка
+    // (адрес физ.лица, «Оплачено отправителем» и т.п.) сработала и для УЖЕ существующих заказов,
+    // не только при ручном перевыборе отправителя
+    applyTariff();
     setTimeout(applyTariff,0); // первичная подстановка суммы из тарифа при открытии
   }
 }
