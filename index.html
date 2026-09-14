@@ -1622,14 +1622,14 @@ async function callKelesuSend(payload){
 }
 // загружает и отрисовывает переписку WhatsApp с этим телефоном (карточка партнёра) —
 // сопоставление идёт по последним 10 цифрам номера (normPhone), независимо от формата
-async function loadPartnerChat(phone){
-  const box=$('p_chat_box');if(!box)return;
+async function loadPhoneChat(phone,boxId){
+  const box=$(boxId);if(!box)return;
   const norm=normPhone(phone);
   if(!norm){box.innerHTML='<div class="hint">Нет телефона для поиска переписки</div>';return;}
   try{
     const {data,error}=await sb.from('kelesu_messages').select('*').eq('phone_norm',norm).order('created_at',{ascending:true}).limit(200);
     if(error)throw error;
-    const box2=$('p_chat_box');if(!box2)return; // модалка могла уже закрыться, пока грузили
+    const box2=$(boxId);if(!box2)return; // модалка могла уже закрыться, пока грузили
     if(!data||!data.length){box2.innerHTML='<div class="hint">Переписки пока нет</div>';return;}
     box2.innerHTML=data.map(m=>{
       const out=m.direction==='outbound';
@@ -1643,9 +1643,11 @@ async function loadPartnerChat(phone){
     }).join('');
     box2.scrollTop=box2.scrollHeight;
   }catch(e){
-    const box3=$('p_chat_box');if(box3)box3.innerHTML='<div class="hint" style="color:var(--rust)">Не удалось загрузить переписку — возможно, таблица kelesu_messages ещё не создана</div>';
+    const box3=$(boxId);if(box3)box3.innerHTML='<div class="hint" style="color:var(--rust)">Не удалось загрузить переписку — возможно, таблица kelesu_messages ещё не создана</div>';
   }
 }
+// обёртка для обратной совместимости — карточка партнёра использует блок p_chat_box
+async function loadPartnerChat(phone){return loadPhoneChat(phone,'p_chat_box');}
 // смена пароля сотрудника через Edge Function set-password (только для админа)
 async function callSetPassword(payload){
   const {data:sess}=await sb.auth.getSession();
@@ -8848,6 +8850,15 @@ function orderModal(id,readonly){
             ${o.ket_id?`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}
             <button type="button" class="btn sm ${o.ket_id?'ghost':''}" data-ketsend="${o.id}">${o.ket_id?'Отправить повторно':'Отправить в KET'}</button>
           </div></div>`:''}
+        ${(o&&o.id&&o.phone)?`<div class="field full" style="margin-top:14px"><label>💬 Переписка с получателем (WhatsApp)</label>
+          <div id="o_chat_box" style="border:1px solid var(--line);border-radius:10px;max-height:260px;overflow-y:auto;padding:10px;background:#fafafa;display:flex;flex-direction:column">
+            <div class="hint">Загрузка…</div>
+          </div>
+          ${!ro?`<div style="display:flex;gap:8px;margin-top:8px">
+            <input id="o_chat_input" placeholder="Написать получателю…" style="flex:1">
+            <button type="button" class="btn primary sm" id="o_chat_send">Отправить</button>
+          </div>`:''}
+        </div>`:''}
       </div>
       <div class="oform-col">
     <div class="grid2">
@@ -8931,6 +8942,26 @@ function orderModal(id,readonly){
     // обновляем пометку прямо в открытой карточке
     if(ok){const box=kb.parentElement;if(box){box.querySelector('div').outerHTML=`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id||'')}</strong>${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`;kb.textContent='Отправить повторно';kb.classList.add('ghost');}}
   };}
+  // переписка с получателем заказа (WhatsApp через Kelesu) — по телефону ИМЕННО этого заказа,
+  // не партнёра — у разных заказов одного партнёра получатели разные
+  if(o&&o.id&&o.phone&&$('o_chat_box')){
+    loadPhoneChat(o.phone,'o_chat_box');
+    const oChatSendBtn=$('o_chat_send'),oChatInput=$('o_chat_input');
+    if(oChatSendBtn&&oChatInput){
+      const doOrderSend=async()=>{
+        const text=oChatInput.value.trim();if(!text)return;
+        oChatSendBtn.disabled=true;
+        try{
+          const res=await callKelesuSend({phone:o.phone,text});
+          if(res&&res.success){oChatInput.value='';await loadPhoneChat(o.phone,'o_chat_box');}
+          else{toast('Не удалось отправить: '+(res&&res.error||'ошибка'));}
+        }catch(e){toast('Не удалось отправить сообщение');}
+        finally{oChatSendBtn.disabled=false;}
+      };
+      oChatSendBtn.onclick=doOrderSend;
+      oChatInput.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();doOrderSend();}});
+    }
+  }
   if(o&&o.id){
     const bindBig=()=>{
       const pc=$('o_photos');if(!pc)return;
