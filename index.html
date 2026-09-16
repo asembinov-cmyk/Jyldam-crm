@@ -2947,7 +2947,7 @@ function renderSorting(){
   // если у сотрудника в карточке указан город («Упаковщик Алматы» и т.п.) — видит только заказы
   // в этот город; если город не указан (админ, общий доступ) — видит все города, как раньше
   const myCity=S.me&&S.me.city_id;
-  const cityFilter=o=>orderDestCityId(o)===myCity;
+  const cityFilter=o=>sortingCityId(o)===myCity;
   const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
   const total=dayOrders.length;
   const sorted=dayOrders.filter(o=>o.sorted_at).length;
@@ -2987,12 +2987,25 @@ function renderSorting(){
 }
 // город назначения заказа — курьерский берёт из courier_city_id, почтовый из city_id
 function orderDestCityId(o){return isCourierDelivery(o.delivery_id)?o.courier_city_id:o.city_id;}
+// для «Сортировки» город кладовщика сверяется с городом ЗАБОРА заказа (pickup_city_id) — то есть
+// в какой склад физически привезли посылку, а не куда она в итоге едет (это отдельно, для показа
+// кладовщику, см. orderDestCityId выше). Талдыкорган считается «своим» для склада Алматы — заказы,
+// забранные там, физически привозят на склад Алматы (нет отдельного склада в Талдыкоргане)
+function sortingCityId(o){
+  const cid=o.pickup_city_id;
+  const cName=(cityName(cid)||'').toLowerCase();
+  if(cName.includes('талдыкорган')){
+    const almaty=(S.cities||[]).find(c=>(c.name||'').toLowerCase().includes('алматы')&&!(c.name||'').toLowerCase().includes('область'));
+    if(almaty)return almaty.id;
+  }
+  return cid;
+}
 // заказы, которые сотрудник вообще может видеть в «Сортировке» — за выбранную дату, ещё не
 // отсортированные, и (если у сотрудника задан город) только в его город
 function sortingPool(){
   const day=sortingDate||localToday();
   const myCity=S.me&&S.me.city_id;
-  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&(!myCity||orderDestCityId(o)===myCity));
+  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&(!myCity||sortingCityId(o)===myCity));
 }
 async function handleSortPhoto(file){
   const resultEl=$('sortResult');if(!resultEl)return;
