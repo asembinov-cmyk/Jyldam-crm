@@ -2759,6 +2759,7 @@ async function loadAiInsights(){
   renderNotify();
 }
 
+let notifyTrashCollapsed=false; // свёрнута ли корзина в Центре контроля
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const trash=S.deletedItems||[];
@@ -2768,7 +2769,8 @@ function renderNotify(){
     </div>
 
     <div class="panel" style="margin-bottom:18px">
-      <div class="panel-head"><h2>🗑 Корзина</h2><span class="count">${trash.length}</span></div>
+      <div class="panel-head" data-trashtoggle style="cursor:pointer"><h2>🗑 Корзина</h2><span class="count">${trash.length}</span><span style="margin-left:auto;font-size:12px;color:var(--muted)">${notifyTrashCollapsed?'▸ развернуть':'▾ свернуть'}</span></div>
+      ${notifyTrashCollapsed?'':`
       <div class="hint" style="margin:0 20px 12px;color:var(--muted)">Здесь хранится всё удалённое (заказы, заявки, сотрудники и т.д.) — 30 дней, потом чистится само. Если что-то удалили по ошибке — можно восстановить.</div>
       ${trash.length?trash.map(it=>`
         <div class="nf-issue">
@@ -2778,7 +2780,7 @@ function renderNotify(){
             <div class="nf-i-desc">Удалено ${it.deleted_at?esc(fmtDateTime(it.deleted_at)):''}${it.deleted_by?' · '+esc(it.deleted_by):''}</div>
           </div>
           <button class="btn sm primary" data-restore="${it.id}">↩ Восстановить</button>
-        </div>`).join(''):'<div class="empty" style="padding:28px"><div class="big">Пусто</div>За последние 30 дней ничего не удаляли.</div>'}
+        </div>`).join(''):'<div class="empty" style="padding:28px"><div class="big">Пусто</div>За последние 30 дней ничего не удаляли.</div>'}`}
     </div>
 
     ${isStaff()?`
@@ -2813,6 +2815,8 @@ function renderNotify(){
     renderNotify();toast('Обновлено');
   };
   $('main').querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>restoreDeletedItem(b.dataset.restore));
+  const trashToggle=$('main').querySelector('[data-trashtoggle]');
+  if(trashToggle)trashToggle.onclick=()=>{notifyTrashCollapsed=!notifyTrashCollapsed;renderNotify();};
 }
 
 function renderHistory(){
@@ -5140,6 +5144,7 @@ let icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:''};
 // забора+получения+дате, чтобы сразу было видно, где и что копится, а не листать по одному.
 function findUnassignedIntercityOrders(){
   const groups={};
+  const curMonth=localToday().slice(0,7); // YYYY-MM текущего месяца — прошлые месяцы больше не актуальны
   (S.orders||[]).forEach(o=>{
     if(!isCourierDelivery(o.delivery_id))return;
     if(o.intercity_cost!=null&&o.intercity_cost!==0&&o.intercity_cost!=='')return; // уже привязан
@@ -5148,6 +5153,7 @@ function findUnassignedIntercityOrders(){
     const destNm=courierCityName(o.courier_city_id)||'—';
     if(pickupNm.trim().toLowerCase()===destNm.trim().toLowerCase())return; // свой город — не межгород
     const dateStr=(o.pickup_date||'').slice(0,10);
+    if(dateStr.slice(0,7)!==curMonth)return; // показываем только текущий месяц — прошлые не нужны
     const key=pickupNm+'→'+destNm+'@'+dateStr;
     if(!groups[key])groups[key]={pickup:pickupNm,dest:destNm,date:dateStr,orders:[]};
     groups[key].orders.push(o);
@@ -5158,7 +5164,7 @@ function unassignedIntercityOrdersModal(){
   const groups=findUnassignedIntercityOrders();
   const totalOrders=groups.reduce((s,g)=>s+g.orders.length,0);
   const body=groups.length?`
-    <p class="hint" style="margin-bottom:10px">Всего заказов без привязки к отправке: <b>${totalOrders}</b> (по данным, загруженным сейчас в CRM). Если заказ уже реально уехал — создайте под него отправку или привяжите к уже существующей.</p>
+    <p class="hint" style="margin-bottom:10px">Заказов без привязки к отправке за текущий месяц: <b>${totalOrders}</b> (по данным, загруженным сейчас в CRM). Заказы прошлых месяцев не показываются. Если заказ уже реально уехал — создайте под него отправку или привяжите к уже существующей.</p>
     <div class="table-scroll"><table class="resp-table"><thead><tr>
       <th>Город забора</th><th>Город получения</th><th>Дата забора</th><th>Кол-во заказов</th><th>Коды заказов</th>
     </tr></thead><tbody>
@@ -5170,8 +5176,8 @@ function unassignedIntercityOrdersModal(){
         <td data-label="Коды заказов" style="font-family:monospace;font-size:12px">${g.orders.slice(0,8).map(o=>esc(o.code)).join(', ')}${g.orders.length>8?` … ещё ${g.orders.length-8}`:''}</td>
       </tr>`).join('')}
     </tbody></table></div>`
-    :'<div class="empty"><div class="big">Непривязанных заказов нет</div>Все межгородние заказы уже привязаны к отправкам.</div>';
-  showModal('🔍 Непривязанные заказы',body,null,{readonly:true,wide:true,closeLabel:'Закрыть'});
+    :'<div class="empty"><div class="big">Непривязанных заказов нет</div>За текущий месяц все межгородние заказы уже привязаны к отправкам.</div>';
+  showModal('🔍 Непривязанные заказы (текущий месяц)',body,null,{readonly:true,wide:true,closeLabel:'Закрыть'});
 }
 function renderIntercity(){
   if(!canMod('intercity')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
