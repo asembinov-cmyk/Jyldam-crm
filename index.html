@@ -2346,7 +2346,7 @@ function canMod(key){
   if(S.myPerms[permKey]&&typeof S.myPerms[permKey].view!=='undefined')return !!S.myPerms[permKey].view;
   // фолбэк: старая привязка модулей к базовым правам
   const fb={dashboard:'orders',pickups:'pickups',orders:'orders',courier:'orders',mail:'orders',
-    intercity:null,cash:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
+    intercity:null,cash:null,sorting:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
     users:'users',settings:'directories'};
   const base=fb[key];
   if(base===null)return isAdminBase(); // модули, что были только для админа
@@ -2439,6 +2439,7 @@ const ICONS={
   calc:'<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 6h8M8 11h2M12 11h.01M15 11h1M8 15h2M12 15h.01M15 15v3M8 18h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   finance:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v10M9.5 9.3c0-1 1-1.8 2.5-1.8s2.5.8 2.5 1.8c0 2.4-5 1.2-5 3.6 0 1 1 1.8 2.5 1.8s2.5-.8 2.5-1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   intercity:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 8l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 8v8l9 4 9-4V8" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 12v8" stroke="currentColor" stroke-width="1.7"/></svg>',
+  scan:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 012-2h2M18 4h2a2 2 0 012 2v2M20 16v2a2 2 0 01-2 2h-2M6 20H4a2 2 0 01-2-2v-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="7" y="8" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
 };
 
 // цвета групп бокового меню (акцент у заголовка и активного пункта)
@@ -2487,6 +2488,7 @@ function buildNav(opts){
     // раздел «Деньги»
     const money=[];
     if(canMod('cash'))money.push({k:'cash',label:'Склад',icon:'warehouse'});
+    if(canMod('sorting'))money.push({k:'sorting',label:'Сортировка',icon:'scan'});
     if(canMod('finance'))money.push({k:'finance',label:'Финансы',icon:'finance'});
     if(canMod('calc'))money.push({k:'calc',label:'Калькуляция',icon:'calc'});
     if(money.length)groups.push({title:'Деньги/Склад',items:money});
@@ -2926,9 +2928,183 @@ function render(){
   else if(S.tab==='history')renderHistory();
   else if(S.tab==='notify')renderNotify();
   else if(S.tab==='cash')renderCash();
+  else if(S.tab==='sorting')renderSorting();
   else if(S.tab==='finance')renderFinance();
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
+}
+
+/* ================= МОДУЛЬ: СОРТИРОВКА ================= */
+// кладовщик фотографирует накладную посылки (штрих-кодов на них нет — только рукописный/печатный
+// текст) → ИИ распознаёт ФИО/адрес/телефон получателя → ищем среди СЕГОДНЯШНИХ ещё не
+// отсортированных заказов лучшее совпадение → показываем город крупно + тип доставки → кладовщик
+// подтверждает («Принял») — заказ помечается отсортированным. Так склад может начинать сортировку
+// по городам сразу по мере поступления заказов, не дожидаясь, пока все «забивальщики» закончат
+// вносить данные, и без отдельного реестра-выгрузки в Excel.
+function renderSorting(){
+  const today=localToday();
+  const todayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today);
+  const total=todayOrders.length;
+  const sorted=todayOrders.filter(o=>o.sorted_at).length;
+  const left=total-sorted;
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Сортировка</h1><p>Сфотографируйте накладную посылки — подскажем, в какой она город</p></div></div>
+    <div class="stats stats-3" style="margin-bottom:16px">
+      <div class="stat"><div class="k">Заказов сегодня</div><div class="v">${total}</div></div>
+      <div class="stat"><div class="k">Принято</div><div class="v" style="color:var(--rust)">${sorted}</div></div>
+      <div class="stat"><div class="k">Осталось</div><div class="v">${left}</div></div>
+    </div>
+    <div class="panel" style="max-width:560px;margin:0 auto">
+      <div style="text-align:center;padding:24px 16px">
+        <label class="btn primary" style="cursor:pointer;font-size:17px;padding:18px 28px;display:inline-block">
+          📷 Сфотографировать накладную
+          <input type="file" accept="image/*" capture="environment" id="sortPhotoInput" style="display:none">
+        </label>
+      </div>
+      <div id="sortResult"></div>
+    </div>`;
+  const inp=$('sortPhotoInput');
+  if(inp)inp.onchange=async e=>{
+    const file=(inp.files||[])[0];if(!file)return;
+    await handleSortPhoto(file);
+    inp.value='';
+  };
+}
+async function handleSortPhoto(file){
+  const resultEl=$('sortResult');if(!resultEl)return;
+  resultEl.innerHTML='<div class="hint" style="text-align:center;padding:24px">⏳ Распознаём накладную…</div>';
+  try{
+    const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});
+    const media_type=file.type||'image/jpeg';
+    const system='Ты распознаёшь рукописные и печатные бланки посылок логистической компании (Казахстан). На фото есть поле ПОЛУЧАТЕЛЬ с ФИО, адресом и телефоном. Верни СТРОГО JSON без пояснений и markdown, формат: {"client":"ФИО получателя","address":"адрес получателя","phone":"телефон только цифры"}. Телефон верни как есть на бланке, только цифры без пробелов и скобок. Если поле не читается — пустая строка. Не выдумывай.';
+    const prompt='Извлеки данные ПОЛУЧАТЕЛЯ (ФИО, адрес, телефон) с этого бланка. Верни только JSON.';
+    const r=await callAI({system,prompt,image:{media_type,data:b64},model:'claude-sonnet-5',max_tokens:400});
+    if(r.error){resultEl.innerHTML=`<div class="empty">Ошибка распознавания: ${esc(r.error)}<br><button class="btn ghost sm" id="sortRetryErr" style="margin-top:10px">🔄 Попробовать снова</button></div>`;const rb=$('sortRetryErr');if(rb)rb.onclick=()=>renderSorting();return;}
+    let txt=(r.text||'').trim().replace(/^```json/i,'').replace(/```$/,'').trim();
+    let data;try{data=JSON.parse(txt);}catch(e){resultEl.innerHTML='<div class="empty">Не удалось разобрать ответ ИИ. Попробуйте переснять чётче.<br><button class="btn ghost sm" id="sortRetryErr2" style="margin-top:10px">🔄 Попробовать снова</button></div>';const rb=$('sortRetryErr2');if(rb)rb.onclick=()=>renderSorting();return;}
+    const matches=findSortMatches(data);
+    renderSortResult(data,matches);
+  }catch(e){resultEl.innerHTML=`<div class="empty">Ошибка: ${esc(String(e&&e.message||e))}</div>`;}
+}
+// ищем среди сегодняшних НЕотсортированных заказов совпадения по телефону/ФИО/адресу —
+// возвращаем отсортированный по «похожести» список {order,score}, лучшие — первыми
+function findSortMatches(data){
+  const today=localToday();
+  const pool=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&!o.sorted_at);
+  const phoneDigits=String(data.phone||'').replace(/\D/g,'').slice(-10);
+  const nameNorm=String(data.client||'').toLowerCase().trim().replace(/\s+/g,' ');
+  const addrNorm=String(data.address||'').toLowerCase().trim();
+  const scored=pool.map(o=>{
+    let score=0;
+    const oPhone=String(o.phone||'').replace(/\D/g,'').slice(-10);
+    if(phoneDigits&&oPhone&&oPhone===phoneDigits)score+=100; // телефон совпал — почти наверняка тот заказ
+    const oName=(o.client||'').toLowerCase().trim().replace(/\s+/g,' ');
+    if(nameNorm&&oName){
+      if(oName===nameNorm)score+=60;
+      else if(oName.includes(nameNorm)||nameNorm.includes(oName))score+=35;
+      else{
+        // частичное совпадение по отдельным словам (порядок ФИО на бланке может отличаться)
+        const nWords=nameNorm.split(' ').filter(w=>w.length>2);
+        const oWords=oName.split(' ').filter(w=>w.length>2);
+        const common=nWords.filter(w=>oWords.includes(w)).length;
+        if(common)score+=common*15;
+      }
+    }
+    const oAddr=(o.address||'').toLowerCase().trim();
+    if(addrNorm&&oAddr&&addrNorm.length>6&&oAddr.length>6){
+      if(oAddr.includes(addrNorm.slice(0,12))||addrNorm.includes(oAddr.slice(0,12)))score+=15;
+    }
+    return {o,score};
+  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+  return scored;
+}
+function renderSortResult(data,matches){
+  const resultEl=$('sortResult');if(!resultEl)return;
+  const best=matches[0];
+  if(!best){
+    resultEl.innerHTML=`<div class="empty" style="padding:20px">
+      <div class="big">Заказ не найден</div>
+      <div style="margin:10px 0;color:var(--muted);font-size:13px">Распознано: ${esc(data.client||'—')} · ${esc(data.address||'—')} · ${esc(data.phone||'—')}</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">
+        <button class="btn ghost sm" id="sortRetry">🔄 Переснять</button>
+        <button class="btn ghost sm" id="sortManual">🔍 Искать вручную</button>
+      </div>
+    </div>`;
+    bindSortResultButtons(data);
+    return;
+  }
+  const o=best.o;
+  const courier=isCourierDelivery(o.delivery_id);
+  const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);
+  const deliveryType=courier?'🚚 Курьерская доставка':'📮 Почтовая доставка';
+  const confident=best.score>=80;
+  resultEl.innerHTML=`
+    <div style="text-align:center;padding:6px 0 10px">
+      <div style="font-size:13px;color:${confident?'var(--muted)':'var(--rust)'};margin-bottom:6px">${confident?'✅ Заказ найден':'⚠️ Похоже, но сверьте данные'}</div>
+      <div style="font-size:38px;font-weight:800;line-height:1.1;margin:8px 0">${esc(cty||'—')}</div>
+      <div style="font-size:14px;color:var(--muted);margin-bottom:10px">${deliveryType}</div>
+      <div style="font-size:15px;font-weight:600">${esc(o.client||'—')}</div>
+      <div style="font-size:13px;color:var(--muted)">${esc(o.address||'—')}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Заказ № ${esc(o.code||'')}</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:18px;flex-wrap:wrap">
+        <button class="btn primary" id="sortConfirm" style="font-size:16px;padding:12px 26px">✅ Принял</button>
+        <button class="btn ghost sm" id="sortNotMatch">✕ Это не тот заказ</button>
+      </div>
+    </div>`;
+  const cb=$('sortConfirm');
+  if(cb)cb.onclick=async()=>{
+    cb.disabled=true;cb.textContent='Сохраняем…';
+    const meName=(S.me&&(S.me.full_name||S.me.email))||'';
+    const u=await dbUpdate('orders',o.id,{sorted_at:new Date().toISOString(),sorted_by_name:meName});
+    if(u){Object.assign(o,u);toast(`Отмечено: «${cty}» · ${o.client||''}`);renderSorting();}
+    else{cb.disabled=false;cb.textContent='✅ Принял';toast('Не удалось сохранить, попробуйте ещё раз');}
+  };
+  const nm=$('sortNotMatch');
+  if(nm)nm.onclick=()=>renderSortManualPick(data,matches.slice(1,6)); // предлагаем следующих по похожести, если есть
+}
+function bindSortResultButtons(data){
+  const retry=$('sortRetry');if(retry)retry.onclick=()=>renderSorting();
+  const manual=$('sortManual');if(manual)manual.onclick=()=>renderSortManualPick(data,[]);
+}
+// ручной поиск/выбор — на случай, если ИИ не нашёл совпадение или нашёл не тот заказ
+function renderSortManualPick(data,extraCandidates){
+  const resultEl=$('sortResult');if(!resultEl)return;
+  const today=localToday();
+  const pool=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&!o.sorted_at);
+  const renderList=(q)=>{
+    const ql=q.trim().toLowerCase();
+    let list=ql?pool.filter(o=>(o.client||'').toLowerCase().includes(ql)||(o.phone||'').includes(ql.replace(/\D/g,''))||(o.address||'').toLowerCase().includes(ql)):extraCandidates.map(x=>x.o);
+    list=list.slice(0,20);
+    if(!list.length)return `<div class="hint" style="padding:10px 0">${ql?'Ничего не найдено':'Начните вводить ФИО, телефон или адрес'}</div>`;
+    return list.map(o=>{
+      const courier=isCourierDelivery(o.delivery_id);
+      const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);
+      return `<div class="sort-cand" data-sortpick="${o.id}" style="padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer;text-align:left">
+        <div style="font-weight:600">${esc(o.client||'—')} <span style="float:right;color:var(--muted);font-weight:400">${esc(cty||'')}</span></div>
+        <div style="font-size:12px;color:var(--muted)">${esc(o.address||'—')} · ${esc(o.phone||'')}</div>
+      </div>`;
+    }).join('');
+  };
+  resultEl.innerHTML=`<div style="padding:10px 0">
+    <input id="sortSearchInp" placeholder="ФИО, телефон или адрес…" style="width:100%;margin-bottom:10px">
+    <div id="sortSearchList">${renderList('')}</div>
+    <button class="btn ghost sm" id="sortBackToPhoto" style="margin-top:8px">← Назад к фото</button>
+  </div>`;
+  const searchInp=$('sortSearchInp');
+  if(searchInp)searchInp.oninput=()=>{const l=$('sortSearchList');if(l)l.innerHTML=renderList(searchInp.value);bindPickClicks();};
+  const back=$('sortBackToPhoto');if(back)back.onclick=()=>renderSorting();
+  const bindPickClicks=()=>{
+    resultEl.querySelectorAll('[data-sortpick]').forEach(el=>{
+      el.onclick=async()=>{
+        const o=pool.find(x=>x.id===el.dataset.sortpick);if(!o)return;
+        const meName=(S.me&&(S.me.full_name||S.me.email))||'';
+        const u=await dbUpdate('orders',o.id,{sorted_at:new Date().toISOString(),sorted_by_name:meName});
+        if(u){Object.assign(o,u);const courier=isCourierDelivery(o.delivery_id);const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);toast(`Отмечено: «${cty}» · ${o.client||''}`);renderSorting();}
+        else toast('Не удалось сохранить');
+      };
+    });
+  };
+  bindPickClicks();
 }
 
 /* ================= МОДУЛЬ: СКЛАД ================= */
