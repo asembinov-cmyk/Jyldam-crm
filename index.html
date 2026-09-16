@@ -1316,35 +1316,39 @@ function clearNav(){try{sessionStorage.removeItem(NAV_KEY);}catch(e){}}
 
 /* ---------- DATA LAYER ---------- */
 async function dbList(table,opts={}){
-  // Supabase отдаёт максимум 1000 строк за запрос. Раньше при больших таблицах страницы грузились
-  // строго одна за другой (10 страниц = 10 последовательных ожиданий сети — секунды задержки).
-  // Теперь: сперва узнаём точное число строк (дёшево, есть индексы), считаем сколько страниц нужно,
-  // и запрашиваем их ВСЕ одновременно — общее время ≈ времени одной страницы, а не суммы всех.
-  const PAGE=1000;
+  // Supabase отдаёт максимум 1000 строк за запрос. При большой таблице нужно много страниц —
+  // но запускать их ВСЕ параллельно нельзя: браузер держит открытыми только ~6 соединений к
+  // одному хосту одновременно, остальные встают в очередь и не успевают уложиться в таймаут,
+  // даже если сама база отвечает быстро. Поэтому грузим пачками по 6 одновременно.
+  const PAGE=1000,CONCURRENCY=6,PAGE_TIMEOUT=30000;
   const fetchPage=(from,to)=>{
     let q=sb.from(table).select('*');
     if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val); // напр. только записи не раньше даты X — сильно сокращает объём для быстро растущих таблиц
     if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
     q=q.range(from,to);
-    return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))]);
+    return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),PAGE_TIMEOUT))]);
+  };
+  const fetchInBatches=async(pageCount)=>{
+    let all=[];
+    for(let i=0;i<pageCount;i+=CONCURRENCY){
+      const batchIdx=Array.from({length:Math.min(CONCURRENCY,pageCount-i)},(_,j)=>i+j);
+      const batchResults=await Promise.all(batchIdx.map(idx=>fetchPage(idx*PAGE,idx*PAGE+PAGE-1)));
+      for(const res of batchResults){
+        const {data,error}=res;
+        if(error){console.error(table,error);continue;}
+        all=all.concat(data||[]);
+      }
+    }
+    return all;
   };
   try{
     let countQ=sb.from(table).select('id',{count:'exact',head:true});
     if(opts.gte)countQ=countQ.gte(opts.gte.col,opts.gte.val);
-    const {count}=await Promise.race([countQ,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))]);
+    const {count}=await Promise.race([countQ,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),PAGE_TIMEOUT))]);
     const total=count||0;
     if(!total)return [];
-    const pageCount=Math.min(Math.ceil(total/PAGE),51); // предохранитель — как и раньше, максимум ~51000 строк
-    const pages=await Promise.all(
-      Array.from({length:pageCount},(_,i)=>fetchPage(i*PAGE,i*PAGE+PAGE-1))
-    );
-    let all=[];
-    for(const res of pages){
-      const {data,error}=res;
-      if(error){console.error(table,error);continue;}
-      all=all.concat(data||[]);
-    }
-    return all;
+    const pageCount=Math.min(Math.ceil(total/PAGE),51); // предохранитель — максимум ~51000 строк
+    return await fetchInBatches(pageCount);
   }catch(e){
     // если count почему-то не сработал (например, для представлений без прав на count) — старый
     // надёжный способ постранично, но хотя бы не молча теряем данные
@@ -7725,15 +7729,20 @@ async function pickupOrdersModal(pickupId){
   // к концу списка — курьер просто листает как обычно, без лишних кнопок «показать ещё».
   const POM_BATCH=40;
   let pomVisible=POM_BATCH;
+  let pomOnlyNoPhoto=false; // фильтр «показать только заказы без фото» — помогает найти те, что не попали при пакетной загрузке
   const renderBody=()=>{
-    const list=S.orders.filter(o=>o.pickup_id===pickupId);
+    const fullList=S.orders.filter(o=>o.pickup_id===pickupId);
+    const noPhotoCount=fullList.filter(o=>!pickupPhotos(o).length).length;
+    const list=pomOnlyNoPhoto?fullList.filter(o=>!pickupPhotos(o).length):fullList;
     const wantNow=parseInt(p.orders||'0',10)||0;
     const shown=Math.min(pomVisible,list.length);
     const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
-      <div style="color:var(--muted);font-size:14px">Создано <b>${list.length}</b>${wantNow?` из ${wantNow}`:''} заказ(ов) по магазину «${esc(p.name)}»${list.length>shown?` · показано ${shown}`:''}</div>
+      <div style="color:var(--muted);font-size:14px">Создано <b>${fullList.length}</b>${wantNow?` из ${wantNow}`:''} заказ(ов) по магазину «${esc(p.name)}»${pomOnlyNoPhoto?` · без фото: ${shown}`:(list.length>shown?` · показано ${shown}`:'')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${noPhotoCount?`<button type="button" class="btn sm ${pomOnlyNoPhoto?'':'ghost'}" id="pom_toggle_nophoto">${pomOnlyNoPhoto?'✕ Показать все':`🔍 Без фото (${noPhotoCount})`}</button>`:''}
         ${canEditPhoto?`<label class="btn sm ghost" style="cursor:pointer">📷 Загрузить фото пачкой<input type="file" accept="image/*" multiple id="pom_bulk_photo" style="display:none"></label>`:''}
         <button class="btn sm primary" id="pom_create">＋ Создать ещё заказ</button>
+        <button type="button" class="btn sm primary" id="pom_save_top">💾 Сохранить</button>
       </div>
     </div>
     ${list.some(o=>o.track)?`<div class="pom-scan"><input id="pom_scan_input" placeholder="📷 Отсканируйте штрих-код посылки, чтобы найти её заказ…" autocomplete="off"></div>`:''}`;
@@ -7772,7 +7781,14 @@ async function pickupOrdersModal(pickupId){
   // навешиваем обработчики (после вставки в DOM)
   setTimeout(()=>{
     const wrap=document.querySelector('.overlay:last-child');if(!wrap)return;
+    // прячем нижнюю кнопку «Сохранить» — теперь она продублирована наверху, рядом с остальными
+    // кнопками, чтобы не листать длинную ленту заказов до самого низа
+    const bottomFoot=wrap.querySelector('.modal-foot');if(bottomFoot)bottomFoot.style.display='none';
     const bind=()=>{
+      // верхняя кнопка «Сохранить» — просто нажимает исходную (скрытую) кнопку внизу, чтобы
+      // сработала та же самая проверка (фото + размер пакета у каждого заказа), без дублирования логики
+      const saveTop=wrap.querySelector('#pom_save_top');
+      if(saveTop)saveTop.onclick=()=>{const dc=wrap.querySelector('[data-close]');if(dc)dc.click();};
       // сканер: ищем карточку по трек-коду (в первую очередь) или по коду заказа, подсвечиваем и прокручиваем к ней
       const scanInp=wrap.querySelector('#pom_scan_input');
       if(scanInp){
@@ -7907,6 +7923,11 @@ async function pickupOrdersModal(pickupId){
       // больше, чем пустых заказов — лишние просто не распределяются, об этом скажет тост.
       // Грузим НЕБОЛЬШИМИ ПАЧКАМИ ПАРАЛЛЕЛЬНО (не по одному подряд) — иначе на 100+ фото это
       // реально занимает несколько минут и выглядит как зависание без какого-либо прогресса.
+      const toggleNoPhoto=wrap.querySelector('#pom_toggle_nophoto');
+      if(toggleNoPhoto)toggleNoPhoto.onclick=()=>{
+        pomOnlyNoPhoto=!pomOnlyNoPhoto;pomVisible=POM_BATCH;
+        const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
+      };
       const bulkInp=wrap.querySelector('#pom_bulk_photo');
       const bulkLabel=bulkInp?bulkInp.closest('label'):null;
       if(bulkInp)bulkInp.onchange=async e=>{
