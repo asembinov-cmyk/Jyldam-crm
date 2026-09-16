@@ -6060,7 +6060,7 @@ function renderCalcNorms(type){
   const P=calcPeriodStr();
   const cs=calcCurrentSettings();
   const monthsRU=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const fixedFields=CALC_FIELDS.filter(f=>f.kind==='fixed');
+  const fixedFields=CALC_FIELDS.filter(f=>f.kind==='fixed'&&f.key!=='freight'); // «Доставка груза» больше не редактируется тут — сумма тянется из «Отправок межгород»
   const fundFields=CALC_FIELDS.filter(f=>f.kind==='fund');
   const fieldRow=f=>`<div class="calc-norm-row">
     <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
@@ -6140,17 +6140,16 @@ function renderCalcNorms(type){
 // сворачиваемый блок городских нормативов: по умолчанию свёрнут, раскрывается по кнопке
 let _calcShowAllCities=false;
 function compactCityNorms(cities,cityNorm){
-  const row=c=>`<div class="calc-city-row" data-citynorm="${c.id}">
+  const row=c=>`<div class="calc-city-row" data-citynorm="${c.id}" style="grid-template-columns:1fr 110px">
     <span class="ccr-name">${esc(c.name)}</span>
     <input type="number" min="0" step="0.01" data-ccourier="${c.id}" value="${esc(cityNorm(c.id,'courier'))}" placeholder="общий">
-    <input type="number" min="0" step="0.01" data-cfreight="${c.id}" value="${esc(cityNorm(c.id,'freight'))}" placeholder="общий">
   </div>`;
   if(!_calcShowAllCities){
     // свёрнуто — только кнопка (но поля рендерим скрытыми, чтобы сохранение видело значения)
     return `<button type="button" class="btn ghost sm" id="cityShowAll"><i style="font-style:normal">▾</i> Показать нормативы по городам (${cities.length})</button>
       <div style="display:none">${cities.map(row).join('')}</div>`;
   }
-  return `<div class="calc-city-head"><span>Город</span><span>Курьер (₸)</span><span>Доставка груза (₸)</span></div>
+  return `<div class="calc-city-head" style="grid-template-columns:1fr 110px"><span>Город</span><span>Курьер (₸)</span></div>
     ${cities.map(row).join('')}
     <button type="button" class="btn ghost sm" id="cityHide" style="margin-top:10px"><i style="font-style:normal">▴</i> Свернуть список</button>`;
 }
@@ -6174,15 +6173,15 @@ async function saveCalcSettings(){
     let saved;
     if(existS){saved=await dbUpdate('calc_settings',existS.id,row);if(saved)Object.assign(existS,saved);}
     else{saved=await dbInsert('calc_settings',row);if(saved){if(!S.calcSettingsAll)S.calcSettingsAll=[];S.calcSettingsAll.push(saved);}}
-    // городские нормативы (курьер/межгород) за период
+    // городские нормативы (курьер) за период — «межгород» больше не сохраняется отсюда,
+    // сумма берётся из «Отправок межгород» напрямую
     const cityRows=document.querySelectorAll('[data-citynorm]');
     for(const el of cityRows){
       const cid=el.dataset.citynorm;
       const courierV=el.querySelector(`[data-ccourier="${cid}"]`).value.trim();
-      const freightV=el.querySelector(`[data-cfreight="${cid}"]`).value.trim();
       const existing=(S.calcCityNorms||[]).find(r=>r.city_id===cid&&r.period===P);
-      if(courierV===''&&freightV===''&&!existing)continue;
-      const payload={city_id:cid,period:P,courier:courierV===''?null:parseFloat(courierV)||0,freight:freightV===''?null:parseFloat(freightV)||0};
+      if(courierV===''&&!existing)continue;
+      const payload={city_id:cid,period:P,courier:courierV===''?null:parseFloat(courierV)||0};
       if(existing){const u=await dbUpdate('calc_city_norms',existing.id,payload);if(u)Object.assign(existing,u);}
       else{const u=await dbInsert('calc_city_norms',payload);if(u){if(!S.calcCityNorms)S.calcCityNorms=[];S.calcCityNorms.push(u);}}
     }
@@ -6213,15 +6212,24 @@ function renderCalcSummary(){
   const monthOrders=(S.orders||[]).filter(o=>((o.pickup_date||o.created_at||'').slice(0,7))===sel);
   // считаем калькуляцию каждого
   const calcs=monthOrders.map(o=>({o,c:calcOrder(o)}));
+  // межгород (freight) в ИТОГОВОЙ сводке считаем по дате САМОЙ ОТПРАВКИ, а не по дате забора
+  // заказа — так сумма точно сходится с «Отправками межгород» (там считают по дате отправки).
+  // Из-за «дня-донора» у некоторых городов заказ мог быть забран в одном месяце, а сама отправка
+  // уйти уже в следующем — по заказу это две разные даты, и старый способ (по заказу) их путал.
+  const freightByOrderDate=calcs.reduce((s,x)=>s+((x.c.items.find(i=>i.key==='freight')||{}).amount||0),0);
+  const freightByShipDate=(S.shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===sel).reduce((s,sh)=>s+(parseFloat(sh.box_cost)||0),0);
+  const freightAdjust=freightByShipDate-freightByOrderDate; // прибавляем/вычитаем разницу к общим итогам
   const totRevenue=calcs.reduce((s,x)=>s+x.c.revenue,0);
-  const totCost=calcs.reduce((s,x)=>s+x.c.totalCost,0);
+  const totCost=calcs.reduce((s,x)=>s+x.c.totalCost,0)+freightAdjust;
   const totProfit=totRevenue-totCost;
   const avgMargin=totRevenue>0?(totProfit/totRevenue*100):0;
   const avgRoi=totCost>0?(totProfit/totCost*100):0;
-  // разбивка курьерские / почтовые
+  // разбивка курьерские / почтовые — межгород (freight) относится только к курьерским, поэтому
+  // корректировку по дате отправки применяем именно к курьерской сумме, почтовую не трогаем
   const cour=calcs.filter(x=>x.c.isCourierType), post=calcs.filter(x=>!x.c.isCourierType);
   const sumBlock=arr=>({cnt:arr.length,rev:arr.reduce((s,x)=>s+x.c.revenue,0),cost:arr.reduce((s,x)=>s+x.c.totalCost,0),profit:arr.reduce((s,x)=>s+(x.c.revenue-x.c.totalCost),0)});
-  const courSum=sumBlock(cour), postSum=sumBlock(post);
+  const courSum=sumBlock(cour);courSum.cost+=freightAdjust;courSum.profit-=freightAdjust;
+  const postSum=sumBlock(post);
   // заказы «Оплачено отправителем» — их выручка (условная, по сохранённой исходной сумме) уже
   // учтена в totRevenue/totProfit выше; здесь просто выделяем её отдельно для прозрачности
   const paidBySenderCalcs=calcs.filter(x=>x.c.isPaidBySender);
@@ -6252,6 +6260,9 @@ function renderCalcSummary(){
     if(!byExpense[label])byExpense[label]={label,amount:0};
     byExpense[label].amount+=(it.amount||0);
   }));
+  // сумму межгорода в разбивке подменяем на посчитанную по дате отправки (см. freightByShipDate
+  // выше) — та же логика, что и для totCost, чтобы разбивка и итог не расходились между собой
+  if(byExpense['Межгород / доставка груза'])byExpense['Межгород / доставка груза'].amount=freightByShipDate;
   const expenseRows=Object.values(byExpense).sort((a,b)=>b.amount-a.amount);
   const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
   const profitColor=totProfit<0?'#c0392b':(totProfit<calcMinProfit()*monthOrders.length?'#c08a2d':'#2e7d32');
