@@ -2943,12 +2943,16 @@ function render(){
 // вносить данные, и без отдельного реестра-выгрузки в Excel.
 function renderSorting(){
   const today=localToday();
-  const todayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today);
+  // если у сотрудника в карточке указан город («Упаковщик Алматы» и т.п.) — видит только заказы
+  // в этот город; если город не указан (админ, общий доступ) — видит все города, как раньше
+  const myCity=S.me&&S.me.city_id;
+  const cityFilter=o=>orderDestCityId(o)===myCity;
+  const todayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&(!myCity||cityFilter(o)));
   const total=todayOrders.length;
   const sorted=todayOrders.filter(o=>o.sorted_at).length;
   const left=total-sorted;
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Сортировка</h1><p>Сфотографируйте накладную посылки — подскажем, в какой она город</p></div></div>
+    <div class="page-head"><div><h1>Сортировка</h1><p>Сфотографируйте накладную посылки — подскажем, в какой она город${myCity?` · только ${esc(cityName(myCity))}`:''}</p></div></div>
     <div class="stats stats-3" style="margin-bottom:16px">
       <div class="stat"><div class="k">Заказов сегодня</div><div class="v">${total}</div></div>
       <div class="stat"><div class="k">Принято</div><div class="v" style="color:var(--rust)">${sorted}</div></div>
@@ -2970,6 +2974,15 @@ function renderSorting(){
     inp.value='';
   };
 }
+// город назначения заказа — курьерский берёт из courier_city_id, почтовый из city_id
+function orderDestCityId(o){return isCourierDelivery(o.delivery_id)?o.courier_city_id:o.city_id;}
+// заказы, которые сотрудник вообще может видеть в «Сортировке» — сегодняшние, ещё не
+// отсортированные, и (если у сотрудника задан город) только в его город
+function sortingPool(){
+  const today=localToday();
+  const myCity=S.me&&S.me.city_id;
+  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&!o.sorted_at&&(!myCity||orderDestCityId(o)===myCity));
+}
 async function handleSortPhoto(file){
   const resultEl=$('sortResult');if(!resultEl)return;
   resultEl.innerHTML='<div class="hint" style="text-align:center;padding:24px">⏳ Распознаём накладную…</div>';
@@ -2986,11 +2999,10 @@ async function handleSortPhoto(file){
     renderSortResult(data,matches);
   }catch(e){resultEl.innerHTML=`<div class="empty">Ошибка: ${esc(String(e&&e.message||e))}</div>`;}
 }
-// ищем среди сегодняшних НЕотсортированных заказов совпадения по телефону/ФИО/адресу —
-// возвращаем отсортированный по «похожести» список {order,score}, лучшие — первыми
+// ищем среди сегодняшних НЕотсортированных заказов (в своём городе, если он задан) совпадения
+// по телефону/ФИО/адресу — возвращаем отсортированный по «похожести» список {order,score}
 function findSortMatches(data){
-  const today=localToday();
-  const pool=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&!o.sorted_at);
+  const pool=sortingPool();
   const phoneDigits=String(data.phone||'').replace(/\D/g,'').slice(-10);
   const nameNorm=String(data.client||'').toLowerCase().trim().replace(/\s+/g,' ');
   const addrNorm=String(data.address||'').toLowerCase().trim();
@@ -3069,8 +3081,7 @@ function bindSortResultButtons(data){
 // ручной поиск/выбор — на случай, если ИИ не нашёл совпадение или нашёл не тот заказ
 function renderSortManualPick(data,extraCandidates){
   const resultEl=$('sortResult');if(!resultEl)return;
-  const today=localToday();
-  const pool=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&!o.sorted_at);
+  const pool=sortingPool();
   const renderList=(q)=>{
     const ql=q.trim().toLowerCase();
     let list=ql?pool.filter(o=>(o.client||'').toLowerCase().includes(ql)||(o.phone||'').includes(ql.replace(/\D/g,''))||(o.address||'').toLowerCase().includes(ql)):extraCandidates.map(x=>x.o);
@@ -10035,6 +10046,7 @@ const MODULES=[
   ['mail','Почтовая доставка'],
   ['intercity','Отправки межгород'],
   ['cash','Склад'],
+  ['sorting','Сортировка'],
   ['finance','Финансы'],
   ['calc','Калькуляция'],
   ['partners','Партнёры'],
