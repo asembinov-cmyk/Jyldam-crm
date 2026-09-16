@@ -9773,11 +9773,10 @@ function dirPartners(){
       {key:'city',label:'Город',filter:'select',text:p=>cityName(p.city_id),cell:p=>cityPill(p.city_id)},
       {key:'district',label:'Район',filter:'select',text:p=>p.district_id?districtName(p.district_id):'',cell:p=>p.district_id?`<span class="pill moss">${esc(districtName(p.district_id))}</span>`:'—'},
       {key:'address',label:'Адрес',filter:'text',text:p=>p.address||''},
-      {key:'phone',label:'Телефон',filter:'text',text:p=>phoneDisplay(p.phone),cell:p=>phoneLink(p.phone)},
       {key:'sales',label:'Менеджер продаж',filter:'select',text:p=>p.sales_id?salesName(p.sales_id):''},
       {key:'proc',label:'Обработчик',filter:'select',text:p=>p.processor_id?processorName(p.processor_id):''},
-      {key:'tpost',label:'Тариф почта',filter:'none',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
-      {key:'tcour',label:'Тариф курьер',filter:'none',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
+      {key:'tpost',label:'Тариф почта',filter:'select',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
+      {key:'tcour',label:'Тариф курьер',filter:'select',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
     ]});
 }
 function partnerModal(id){
