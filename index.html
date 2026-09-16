@@ -2941,20 +2941,22 @@ function render(){
 // подтверждает («Принял») — заказ помечается отсортированным. Так склад может начинать сортировку
 // по городам сразу по мере поступления заказов, не дожидаясь, пока все «забивальщики» закончат
 // вносить данные, и без отдельного реестра-выгрузки в Excel.
+let sortingDate=null; // выбранная дата для просмотра/сортировки — по умолчанию сегодня
 function renderSorting(){
-  const today=localToday();
+  if(!sortingDate)sortingDate=localToday();
   // если у сотрудника в карточке указан город («Упаковщик Алматы» и т.п.) — видит только заказы
   // в этот город; если город не указан (админ, общий доступ) — видит все города, как раньше
   const myCity=S.me&&S.me.city_id;
   const cityFilter=o=>orderDestCityId(o)===myCity;
-  const todayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&(!myCity||cityFilter(o)));
-  const total=todayOrders.length;
-  const sorted=todayOrders.filter(o=>o.sorted_at).length;
+  const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  const total=dayOrders.length;
+  const sorted=dayOrders.filter(o=>o.sorted_at).length;
   const left=total-sorted;
+  const isToday=sortingDate===localToday();
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Сортировка</h1><p>Сфотографируйте накладную посылки — подскажем, в какой она город${myCity?` · только ${esc(cityName(myCity))}`:''}</p></div></div>
     <div class="stats stats-3" style="margin-bottom:16px">
-      <div class="stat"><div class="k">Заказов сегодня</div><div class="v">${total}</div></div>
+      <div class="stat"><div class="k">Заказов${isToday?' сегодня':''}</div><div class="v">${total}</div></div>
       <div class="stat"><div class="k">Принято</div><div class="v" style="color:var(--rust)">${sorted}</div></div>
       <div class="stat"><div class="k">Осталось</div><div class="v">${left}</div></div>
     </div>
@@ -2966,6 +2968,11 @@ function renderSorting(){
         </label>
       </div>
       <div id="sortResult"></div>
+      <div style="border-top:1px solid var(--line);padding:14px 16px;display:flex;align-items:center;gap:10px;justify-content:center">
+        <label style="font-size:13px;color:var(--muted)">Дата:</label>
+        <input type="date" id="sortDateFilter" value="${sortingDate}" max="${localToday()}">
+        ${!isToday?'<button class="btn ghost sm" id="sortDateToday">Сегодня</button>':''}
+      </div>
     </div>`;
   const inp=$('sortPhotoInput');
   if(inp)inp.onchange=async e=>{
@@ -2973,15 +2980,19 @@ function renderSorting(){
     await handleSortPhoto(file);
     inp.value='';
   };
+  const dateInp=$('sortDateFilter');
+  if(dateInp)dateInp.onchange=()=>{if(dateInp.value){sortingDate=dateInp.value;renderSorting();}};
+  const todayBtn=$('sortDateToday');
+  if(todayBtn)todayBtn.onclick=()=>{sortingDate=localToday();renderSorting();};
 }
 // город назначения заказа — курьерский берёт из courier_city_id, почтовый из city_id
 function orderDestCityId(o){return isCourierDelivery(o.delivery_id)?o.courier_city_id:o.city_id;}
-// заказы, которые сотрудник вообще может видеть в «Сортировке» — сегодняшние, ещё не
+// заказы, которые сотрудник вообще может видеть в «Сортировке» — за выбранную дату, ещё не
 // отсортированные, и (если у сотрудника задан город) только в его город
 function sortingPool(){
-  const today=localToday();
+  const day=sortingDate||localToday();
   const myCity=S.me&&S.me.city_id;
-  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===today&&!o.sorted_at&&(!myCity||orderDestCityId(o)===myCity));
+  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&(!myCity||orderDestCityId(o)===myCity));
 }
 async function handleSortPhoto(file){
   const resultEl=$('sortResult');if(!resultEl)return;
