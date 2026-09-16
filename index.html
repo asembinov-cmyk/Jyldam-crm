@@ -2953,16 +2953,28 @@ function renderSorting(){
   const myCity=S.me&&S.me.city_id;
   const cityFilter=o=>sortingCityId(o)===myCity;
   const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
-  const total=dayOrders.length;
-  const sorted=dayOrders.filter(o=>o.sorted_at).length;
+  // «обработан» — менеджер уже внёс данные получателя И определился с типом доставки (курьер/почта).
+  // Заказы, которые только созданы «пустышкой» по заявке (ждут забивки), кладовщику пока не нужны —
+  // тип доставки во время забивки ещё может поменяться, показывать их рано.
+  const processed=dayOrders.filter(orderIsProcessed);
+  const total=processed.length;
+  const notProcessed=dayOrders.length-total;
+  const sorted=processed.filter(o=>o.sorted_at).length;
   const left=total-sorted;
+  const courierCnt=processed.filter(o=>isCourierDelivery(o.delivery_id)).length;
+  const mailCnt=total-courierCnt;
   const isToday=sortingDate===localToday();
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Сортировка</h1><p>Сфотографируйте накладную посылки — подскажем, в какой она город${myCity?` · только ${esc(cityName(myCity))}`:''}</p></div></div>
-    <div class="stats stats-3" style="margin-bottom:16px">
+    <div class="stats stats-3" style="margin-bottom:8px">
       <div class="stat"><div class="k">Заказов${isToday?' сегодня':''}</div><div class="v">${total}</div></div>
       <div class="stat"><div class="k">Принято</div><div class="v" style="color:var(--rust)">${sorted}</div></div>
       <div class="stat"><div class="k">Осталось</div><div class="v">${left}</div></div>
+    </div>
+    <div class="stats stats-3" style="margin-bottom:16px">
+      <div class="stat"><div class="k">🚚 Курьерских</div><div class="v">${courierCnt}</div></div>
+      <div class="stat"><div class="k">📮 Почтовых</div><div class="v">${mailCnt}</div></div>
+      <div class="stat"><div class="k">Не обработано</div><div class="v" style="color:var(--muted)">${notProcessed}</div></div>
     </div>
     <div class="panel" style="max-width:560px;margin:0 auto">
       <div style="text-align:center;padding:24px 16px">
@@ -2989,6 +3001,10 @@ function renderSorting(){
   const todayBtn=$('sortDateToday');
   if(todayBtn)todayBtn.onclick=()=>{sortingDate=localToday();renderSorting();};
 }
+// «обработан» ли заказ менеджером — есть ФИО получателя и определён тип доставки (курьер/почта).
+// Пока это не так — заказ существует (по заявке), но данные ещё забивают, показывать его
+// кладовщику рано (тип доставки, а с ним и город, может ещё поменяться).
+function orderIsProcessed(o){return !!(o.client&&o.client.trim())&&!!o.delivery_id;}
 // город назначения заказа — курьерский берёт из courier_city_id, почтовый из city_id
 function orderDestCityId(o){return isCourierDelivery(o.delivery_id)?o.courier_city_id:o.city_id;}
 // для «Сортировки» город кладовщика сверяется с городом ЗАБОРА заказа (pickup_city_id) — то есть
@@ -3005,11 +3021,18 @@ function sortingCityId(o){
   return cid;
 }
 // заказы, которые сотрудник вообще может видеть в «Сортировке» — за выбранную дату, ещё не
-// отсортированные, и (если у сотрудника задан город) только в его город
+// отсортированные, УЖЕ ОБРАБОТАННЫЕ менеджером, и (если у сотрудника задан город) только в его город
 function sortingPool(){
   const day=sortingDate||localToday();
   const myCity=S.me&&S.me.city_id;
-  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&(!myCity||sortingCityId(o)===myCity));
+  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity));
+}
+// необработанные (пустые) заказы за тот же день/город — чтобы отличить «правда нет такого заказа»
+// от «заказ есть, просто ещё не забили» и показать кладовщику понятное сообщение вместо путаницы
+function sortingUnprocessedCount(){
+  const day=sortingDate||localToday();
+  const myCity=S.me&&S.me.city_id;
+  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity)).length;
 }
 async function handleSortPhoto(file){
   const resultEl=$('sortResult');if(!resultEl)return;
@@ -3062,9 +3085,11 @@ function renderSortResult(data,matches){
   const resultEl=$('sortResult');if(!resultEl)return;
   const best=matches[0];
   if(!best){
+    const unprocessedCnt=sortingUnprocessedCount();
     resultEl.innerHTML=`<div class="empty" style="padding:20px">
       <div class="big">Заказ не найден</div>
       <div style="margin:10px 0;color:var(--muted);font-size:13px">Распознано: ${esc(data.client||'—')} · ${esc(data.address||'—')} · ${esc(data.phone||'—')}</div>
+      ${unprocessedCnt?`<div style="margin:10px 0;padding:10px;background:var(--card);border-radius:10px;font-size:13px;color:var(--rust)">⏳ Заказ, возможно, есть, но ещё не обработан менеджером (сейчас необработанных: ${unprocessedCnt}). Попробуйте чуть позже.</div>`:''}
       <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">
         <button class="btn ghost sm" id="sortRetry">🔄 Переснять</button>
         <button class="btn ghost sm" id="sortManual">🔍 Искать вручную</button>
