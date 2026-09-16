@@ -5683,7 +5683,7 @@ function calcOrder(o){
       if(snap&&snap.items&&snap.items[f.key]!=null)amount=parseFloat(snap.items[f.key])||0;
       else if(f.kind==='fund')amount=Math.round((calcNorm(f.key,P)/monthOrders)*100)/100;
       else if(f.key==='freight'){
-        amount=(o.intercity_cost!=null&&o.intercity_cost!=='')?parseFloat(o.intercity_cost)||0:calcCityNorm(cityId,'freight',P);
+        amount=(o.intercity_cost!=null&&o.intercity_cost!=='')?parseFloat(o.intercity_cost)||0:0; // только реальная стоимость из «Отправок межгород» — не привязан к отправке, не считаем эту статью вообще
       }
       else if(f.key==='courier')amount=calcCityNorm(cityId,f.key,P);
       else amount=calcNorm(f.key,P);
