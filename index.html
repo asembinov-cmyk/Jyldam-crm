@@ -2989,6 +2989,22 @@ function renderSorting(){
         <input type="date" id="sortDateFilter" value="${sortingDate}" max="${localToday()}">
         ${!isToday?'<button class="btn ghost sm" id="sortDateToday">Сегодня</button>':''}
       </div>
+    </div>
+    <div class="panel" style="margin-top:18px">
+      <div class="panel-head"><h2>Список заказов</h2><span class="count">${total}</span></div>
+      <div class="table-scroll"><table class="resp-table"><thead><tr>
+        <th>ФИО</th><th>Телефон</th><th>№ заказа</th><th>Статус</th>
+      </tr></thead><tbody>
+        ${processed.length?[...processed].sort((a,b)=>(a.client||'').localeCompare(b.client||'')).map(o=>{
+          const isS=!!o.sorted_at;
+          return `<tr style="background:${isS?'rgba(46,125,50,0.12)':'rgba(192,57,43,0.10)'}">
+            <td data-label="ФИО">${esc(o.client||'—')}</td>
+            <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
+            <td data-label="№ заказа" style="font-family:monospace">${esc(o.code||'')}</td>
+            <td data-label="Статус">${isS?'✅ Принят':'🔴 Не принят'}</td>
+          </tr>`;
+        }).join(''):'<tr><td colspan="4"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>'}
+      </tbody></table></div>
     </div>`;
   const inp=$('sortPhotoInput');
   if(inp)inp.onchange=async e=>{
