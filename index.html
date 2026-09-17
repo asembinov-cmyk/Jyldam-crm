@@ -2968,6 +2968,7 @@ function sortingListRowHtml(o){
     <td data-label="ФИО">${esc(o.client||'—')}</td>
     <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
     <td data-label="Тип доставки">${courier?'🚚 Курьер':'📮 Почта'}</td>
+    <td data-label="Адрес">${esc(o.address||'—')}</td>
     <td data-label="№ заказа" style="font-family:monospace">${esc(o.code||'')}</td>
     <td data-label="Статус">${isS?'✅ Принят':'🔴 Не принят'}</td>
   </tr>`;
@@ -2991,7 +2992,7 @@ function renderSortListOnly(){
     const startIdx=(sortListPage-1)*sortListPerPage;
     rows=filtered.slice(startIdx,startIdx+sortListPerPage);
   }
-  tbody.innerHTML=rows.length?rows.map(sortingListRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>';
+  tbody.innerHTML=rows.length?rows.map(sortingListRowHtml).join(''):'<tr><td colspan="6"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>';
   bindSortRowClicks();
   renderSortListFooter(filtered,mobile);
 }
@@ -3142,7 +3143,7 @@ function renderSorting(){
         <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:2 1 260px;min-width:260px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line)">
       </div>
       <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>№ заказа</th><th>Статус</th>
+        <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>Адрес</th><th>№ заказа</th><th>Статус</th>
       </tr></thead><tbody id="sortListTbody"></tbody></table></div>
     </div>`;
   const inp=$('sortPhotoInput');
