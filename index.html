@@ -2950,7 +2950,7 @@ let sortingListFilter='all'; // 'all'|'sorted'|'unsorted' — фильтр ст�
 let sortingListSearch=''; // текст поиска по ФИО/телефону/номеру в списке заказов
 let sortListPage=1; // текущая страница (компьютерная пагинация)
 let sortListPerPage=50; // заказов на странице (компьютер)
-let sortListMobileLimit=MOBILE_STEP; // сколько показано на мобиле («показать ещё»)
+let sortListMobileLimit=20; // сколько показано на мобиле («показать ещё») — то же число, что MOBILE_STEP (она объявлена ниже по файлу, поэтому не ссылаемся на неё здесь напрямую)
 // применяет фильтр статуса и поиск к списку — используется и для подсчёта, и для построения страницы
 function sortingListFiltered(processed){
   let rows=[...processed];
