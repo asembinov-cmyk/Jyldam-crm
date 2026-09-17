@@ -344,7 +344,13 @@ async function refreshForTab(tab){
       if(orders.length||!S.orders.length)S.orders=orders;
       if(pickups.length||!S.pickups.length)S.pickups=pickups;
     }else if(tab==='ket_orders'){
-      if(typeof loadInbound==='function'){try{await loadInbound({skipMatch:true});}catch(e){}}
+      // Фоновое обновление НЕ должно перетягивать всю историю заказов партнёров.
+      // Раньше здесь вызывался loadInbound() без параметров, а он наследует режим от
+      // прошлого вызова: стоило один раз применить фильтр (он грузит всё), и каждый
+      // тик раз в 3 минуты заново качал 36 тысяч заказов со всеми позициями — десятки
+      // мегабайт на ровном месте. Сами строки и так обновляются мгновенно через
+      // Realtime, поэтому в фоне обновляем только счётчики: это три лёгких запроса.
+      if(typeof loadInboundCounts==='function'){try{await loadInboundCounts();}catch(e){}}
     }else if(tab==='partners'){
       const [partners,cities,districts,sales,processors,whp]=await Promise.all([
         dbList('partners',{order:'name'}),dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),
