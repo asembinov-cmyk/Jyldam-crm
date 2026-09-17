@@ -1,0 +1,463 @@
+
+/* ================= SUPABASE ================= */
+const SUPABASE_URL='https://tdexhspesodslwgbxojw.supabase.co';
+const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkZXhoc3Blc29kc2x3Z2J4b2p3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMTcxOTMsImV4cCI6MjA5Nzc5MzE5M30.QojVMQAWzINufmqdI5nEL-gX_UsIZV8Nq48-3Fn6YoE';
+// сессия входа — localStorage (переживает закрытие/сворачивание вкладки, критично для курьеров
+// на телефоне: sessionStorage там часто стирается, когда браузер уходит в фон). Раньше пробовали
+// sessionStorage ради независимости вкладок друг от друга, но это ломало вход у курьеров на мобильных —
+// стабильность входа важнее. Для одновременной работы под разными аккаунтами в разных вкладках на
+// компьютере есть обходной путь — приватное окно браузера.
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON,{
+  auth:{storage:window.localStorage,persistSession:true,autoRefreshToken:true},
+});
+let _partnerQR=''; // текущий QR-код партнёра (кабинет по ?p=)
+
+const $=id=>document.getElementById(id);
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uidLocal=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
+
+const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',courier:'Курьер'};
+
+/* состояние сессии и данных */
+const S={
+  me:null,           // профиль текущего пользователя {id,email,full_name,role,courier_kind}
+  tab:'dashboard',
+  dir:'cities',
+  // справочники-кэш
+  cities:[],districts:[],couriers:[],order_couriers:[],sales:[],processors:[],
+  partners:[],statuses:[],orderStatuses:[],delivery:[],courier_cities:[],post_ips:[],profiles:[],roles:[],warehouses:[],
+  pickups:[],orders:[],activityLog:[],
+  myPerms:null, myBaseType:'staff',
+};
+// ВРЕМЕННАЯ ДИАГНОСТИКА: логируем в консоль браузера каждую смену активной вкладки (S.tab) со стеком
+// вызова — нужно, чтобы поймать точную причину случая, когда вкладка сама переключается и возвращается
+// обратно. Как только причина найдена и починена — этот блок можно убрать.
+(function(){
+  let _tab=S.tab;
+  Object.defineProperty(S,'tab',{
+    get(){return _tab;},
+    set(v){
+      if(v!==_tab){
+        console.warn('[S.tab] '+_tab+' → '+v);
+        console.trace();
+      }
+      _tab=v;
+    },
+  });
+})();
+
+/* ---------- ЗАПОМИНАНИЕ ВКЛАДКИ (чтобы при ОБНОВЛЕНИИ страницы остаться на месте, но при НОВОМ
+   входе — например, новая вкладка или после выхода — всегда начинать с дашборда). Поэтому храним
+   не в localStorage (общий, живёт вечно), а в sessionStorage (свой для вкладки, живёт до её закрытия
+   или явного выхода) — та же логика, что и у самой сессии входа. ---------- */
+const NAV_KEY='jyldam_nav';
+function saveNav(){
+  try{sessionStorage.setItem(NAV_KEY,JSON.stringify({tab:S.tab,dir:S.dir,users:(typeof usersSub!=='undefined'?usersSub:'staff')}));}catch(e){}
+}
+function loadNav(){
+  try{const raw=sessionStorage.getItem(NAV_KEY);if(!raw)return;const n=JSON.parse(raw);
+    if(n.tab)S.tab=n.tab;if(n.dir)S.dir=(n.dir==='partners'?'cities':n.dir);if(n.users&&typeof usersSub!=='undefined')usersSub=n.users;
+  }catch(e){}
+}
+function clearNav(){try{sessionStorage.removeItem(NAV_KEY);}catch(e){}}
+
+/* ---------- DATA LAYER ---------- */
+async function dbList(table,opts={}){
+  // Supabase отдаёт максимум 1000 строк за запрос. При большой таблице нужно много страниц —
+  // но запускать их ВСЕ параллельно нельзя: браузер держит открытыми только ~6 соединений к
+  // одному хосту одновременно, остальные встают в очередь и не успевают уложиться в таймаут,
+  // даже если сама база отвечает быстро. Поэтому грузим пачками по 6 одновременно.
+  const PAGE=1000,CONCURRENCY=6,PAGE_TIMEOUT=30000;
+  const fetchPage=(from,to)=>{
+    let q=sb.from(table).select('*');
+    if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val); // напр. только записи не раньше даты X — сильно сокращает объём для быстро растущих таблиц
+    if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
+    q=q.range(from,to);
+    return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),PAGE_TIMEOUT))]);
+  };
+  const fetchInBatches=async(pageCount)=>{
+    let all=[];
+    for(let i=0;i<pageCount;i+=CONCURRENCY){
+      const batchIdx=Array.from({length:Math.min(CONCURRENCY,pageCount-i)},(_,j)=>i+j);
+      const batchResults=await Promise.all(batchIdx.map(idx=>fetchPage(idx*PAGE,idx*PAGE+PAGE-1)));
+      for(const res of batchResults){
+        const {data,error}=res;
+        if(error){console.error(table,error);continue;}
+        all=all.concat(data||[]);
+      }
+    }
+    return all;
+  };
+  try{
+    let countQ=sb.from(table).select('id',{count:'exact',head:true});
+    if(opts.gte)countQ=countQ.gte(opts.gte.col,opts.gte.val);
+    const {count}=await Promise.race([countQ,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),PAGE_TIMEOUT))]);
+    const total=count||0;
+    if(!total)return [];
+    const pageCount=Math.min(Math.ceil(total/PAGE),51); // предохранитель — максимум ~51000 строк
+    return await fetchInBatches(pageCount);
+  }catch(e){
+    // если count почему-то не сработал (например, для представлений без прав на count) — старый
+    // надёжный способ постранично, но хотя бы не молча теряем данные
+    console.error('dbList (fallback to sequential)',table,e&&e.message);
+    try{
+      let all=[],from=0;
+      while(true){
+        const res=await fetchPage(from,from+PAGE-1);
+        const {data,error}=res;
+        if(error){console.error(table,error);return all;}
+        const chunk=data||[];
+        all=all.concat(chunk);
+        if(chunk.length<PAGE)break;
+        from+=PAGE;
+        if(from>50000)break;
+      }
+      return all;
+    }catch(e2){console.error('dbList',table,e2&&e2.message);return [];}
+  }
+}
+// точечная загрузка строк таблицы по значению одного поля, мимо общего кэша S — используется там,
+// где важна свежесть данных именно сейчас (например, подсчёт заказов по заявке перед массовым созданием)
+async function dbListWhere(table,col,val){
+  try{
+    const {data,error}=await sb.from(table).select('*').eq(col,val);
+    if(error){console.error('listWhere',table,error);return null;}
+    return data||[];
+  }catch(e){console.error('dbListWhere',table,e&&e.message);return null;}
+}
+// таблицы, логируемые автоматически в обёртках (orders/pickups логируются отдельно с подробностями)
+const AUTO_LOG_TABLES=new Set(['partners','cities','districts','couriers','order_couriers','sales_managers','processors','statuses','order_statuses','delivery_types','courier_cities','post_ips','profiles','roles','warehouses']);
+// карта таблица→ключ кэша в S (для поиска "до" и подписи)
+const TABLE_ARRKEY={partners:'partners',cities:'cities',districts:'districts',couriers:'couriers',order_couriers:'order_couriers',sales_managers:'sales',processors:'processors',statuses:'statuses',order_statuses:'orderStatuses',delivery_types:'delivery',courier_cities:'courier_cities',post_ips:'post_ips',profiles:'profiles',roles:'roles',warehouses:'warehouses'};
+function recLabel(rec){
+  if(!rec)return '';
+  // проводка Финансов — своих полей name/fio нет, собираем подпись из даты+суммы+типа
+  if(rec.entry_date!=null&&rec.amount!=null&&(rec.type==='income'||rec.type==='expense')){
+    return `Проводка ${fmtDate(rec.entry_date)} · ${Math.round(rec.amount).toLocaleString('ru-RU')} ₸ (${rec.type==='income'?'приход':'расход'})`;
+  }
+  return rec.name||rec.fio||rec.full_name||rec.code||rec.email||('#'+rec.id);
+}
+function findCached(table,id){const k=TABLE_ARRKEY[table];const arr=k&&S[k];return Array.isArray(arr)?arr.find(x=>x&&x.id===id):null;}
+async function dbInsert(table,row){
+  const {data,error}=await sb.from(table).insert(row).select().single();
+  if(error){console.error('insert',table,error);toast('Ошибка: '+error.message);return null;}
+  if(AUTO_LOG_TABLES.has(table))logAction('create',table,{entity_id:data.id,entity_label:recLabel(data)});
+  return data;
+}
+async function dbUpdate(table,id,row){
+  const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
+  const beforeCopy=before?Object.assign({},before):null;
+  const {data,error}=await sb.from(table).update(row).eq('id',id).select().single();
+  if(error){console.error('update',table,error);toast('Ошибка: '+error.message);return null;}
+  if(AUTO_LOG_TABLES.has(table)){const ch=buildChanges(beforeCopy,data);if(ch.length)logAction('update',table,{entity_id:id,entity_label:recLabel(data),changes:ch});}
+  return data;
+}
+// свежая загрузка одной записи мимо кэша S — используется перед записью складских операций/резервов,
+// чтобы уменьшить (не исключить полностью — это клиент без серверных транзакций) окно гонки при параллельной работе
+async function dbGetOne(table,id){
+  try{
+    const {data,error}=await sb.from(table).select('*').eq('id',id).single();
+    if(error){console.error('get',table,error);return null;}
+    return data;
+  }catch(e){console.error('dbGetOne',table,e&&e.message);return null;}
+}
+async function dbDelete(table,id){
+  const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
+  const lbl=before?recLabel(before):String(id);
+  // сохраняем полный снимок строки в корзину, ПРЕЖДЕ чем реально удалить — на случай, если
+  // понадобится восстановить (Центр контроля → Корзина, хранится 30 дней, потом чистится сама)
+  try{
+    let snapshot=before;
+    if(!snapshot){
+      const {data}=await sb.from(table).select('*').eq('id',id).limit(1);
+      snapshot=data&&data[0];
+    }
+    if(snapshot){
+      await sb.from('deleted_items').insert({
+        table_name:table,record_id:String(id),record_data:snapshot,
+        entity_label:lbl||recLabel(snapshot)||String(id),
+        deleted_by:(S.me&&(S.me.full_name||S.me.email))||null,
+      });
+    }
+  }catch(e){console.error('trash snapshot',e);} // не блокируем само удаление, даже если бэкап не удался
+  const {error}=await sb.from(table).delete().eq('id',id);
+  if(error){console.error('delete',table,error);toast('Ошибка: '+error.message);return false;}
+  if(AUTO_LOG_TABLES.has(table))logAction('delete',table,{entity_id:id,entity_label:lbl});
+  return true;
+}
+// восстановить запись из корзины обратно в исходную таблицу
+async function restoreDeletedItem(trashId){
+  const item=(S.deletedItems||[]).find(x=>x.id===trashId);
+  if(!item)return;
+  const row=Object.assign({},item.record_data);
+  const {data,error}=await sb.from(item.table_name).insert(row).select();
+  if(error){toast('Не удалось восстановить: '+error.message);return;}
+  await sb.from('deleted_items').delete().eq('id',trashId);
+  S.deletedItems=(S.deletedItems||[]).filter(x=>x.id!==trashId);
+  const arrKey=RT_TABLE_ARR[item.table_name]||item.table_name;
+  if(Array.isArray(S[arrKey])&&data&&data[0])S[arrKey].unshift(data[0]);
+  toast('Восстановлено: '+(item.entity_label||''));
+  renderNotify();
+}
+
+/* ---------- ЖУРНАЛ ДЕЙСТВИЙ (История изменений) ---------- */
+// человекочитаемые названия сущностей
+const ENTITY_LABEL={
+  orders:'Заказ',pickups:'Заявка на забор',partners:'Партнёр',cities:'Город',districts:'Район',
+  couriers:'Курьер (заборщик)',order_couriers:'Курьер по заказам',sales_managers:'Менеджер по продажам',
+  processors:'Обработчик',statuses:'Статус забора',order_statuses:'Статус заказа',delivery_types:'Тип доставки',
+  courier_cities:'Курьерский город',post_ips:'ИП для Почты',profiles:'Сотрудник',roles:'Роль',warehouses:'Склад отправки',auth:'Система',
+  finance_entries:'Проводка',finance_kassa:'Касса',finance_categories:'Категория расхода',
+  finance_income_categories:'Категория прихода',finance_partners:'Партнёр (финансы)',
+  warehouse_partners:'Партнёр склада',products:'Товар',inbound_orders:'Заказ КЕТ',shipments:'Отправка межгород',
+};
+// человекочитаемые подписи полей (для детальных правок)
+const FIELD_LABEL={
+  code:'Код',client:'ФИО клиента',phone:'Телефон',address:'Адрес',sender:'Отправитель',
+  delivery_id:'Тип доставки',courier_city_id:'Город (курьер.)',city_id:'Город',pickup_city_id:'Город забора',status_id:'Статус',
+  order_status_id:'Статус',weight:'Вес',qty:'Кол-во',index:'Индекс',track:'Трек-код',order_sum:'Сумма заказа',
+  cost:'Стоимость доставки',pay_date:'Дата оплаты',deliver_date:'Дата доставки',pickup_date:'Дата забора',call_status:'Статус обзвона',
+  post_ip_id:'ИП для Почты',order_courier_id:'Курьер по заказам',courier_id:'Курьер',sales_id:'Менеджер продаж',
+  processor_id:'Обработчик',district_id:'Район',name:'Наименование',fio:'ФИО',orders:'Кол-во заказов',
+  full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
+  tariff_courier:'Тариф курьер',qr_code:'QR-код',id_doc:'Уд. личности',paid_by_sender:'Оплачено отправителем',
+  give_packets:'Пакеты для партнёра',give_invoices:'Накладные для партнёра',
+  region:'Область',city_text:'Нас. пункт',comment:'Комментарий',base_type:'Базовый тип',perms:'Права',
+  order_paid:'Оплачен заказ'
+};
+// поля, которые не показываем в истории (служебные)
+const LOG_SKIP_FIELDS=new Set(['id','created_at','status_at','status_history','photos','ket_id','ket_track','ket_synced_at','perms']);
+// форматирование значения поля для отображения старое→новое
+function logFieldValue(field,v){
+  if(v==null||v==='')return '—';
+  try{
+    if(field==='status_id'||field==='order_status_id'){const s=orderStatusObj(v)||statusObj(v);return s?s.name:String(v);}
+    if(field==='delivery_id')return deliveryName(v);
+    if(field==='city_id')return cityName(v);
+    if(field==='pickup_city_id')return cityName(v);
+    if(field==='courier_city_id')return courierCityName(v);
+    if(field==='district_id')return districtName(v);
+    if(field==='courier_id')return courierName(v);
+    if(field==='order_courier_id')return orderCourierName(v);
+    if(field==='sales_id')return salesName(v);
+    if(field==='processor_id')return processorName(v);
+    if(field==='post_ip_id')return postIpName(v);
+    if(field==='partner_id')return partnerName(v);
+    if(field==='role_id')return roleName(v);
+    if(field==='phone')return phoneDisplay(v)||String(v);
+    if(field==='paid_by_sender')return v?'да':'нет';
+    if(field==='order_paid')return v?'да':'нет';
+  }catch(e){}
+  return String(v);
+}
+// собрать дифф полей между старой и новой записью
+function buildChanges(before,after){
+  const out=[];const keys=new Set([...Object.keys(before||{}),...Object.keys(after||{})]);
+  keys.forEach(k=>{
+    if(LOG_SKIP_FIELDS.has(k))return;
+    const a=before?before[k]:undefined, b=after?after[k]:undefined;
+    const na=(a==null?'':String(a)), nb=(b==null?'':String(b));
+    if(na===nb)return;
+    out.push({field:k,label:FIELD_LABEL[k]||k,old:logFieldValue(k,a),new:logFieldValue(k,b)});
+  });
+  return out;
+}
+// записать действие в журнал (не блокирует основную операцию при ошибке)
+async function logAction(action,entity,opts={}){
+  try{
+    const row={
+      user_id:(S.me&&S.me.id)||null,
+      user_name:(S.me&&(S.me.full_name||S.me.email))||'—',
+      action,entity,
+      entity_id:opts.entity_id!=null?String(opts.entity_id):null,
+      entity_label:opts.entity_label||null,
+      changes:opts.changes&&opts.changes.length?opts.changes:null,
+      meta:opts.meta||null,
+    };
+    await sb.from('activity_log').insert(row);
+  }catch(e){console.error('logAction',e);}
+}
+// удобные подписи объектов
+function orderLabel(o){return o?('#'+(o.code||o.id)):'';}
+function pickupLabel(p){return p?(p.name||('заявка '+p.id)):'';}
+
+/* ---------- ФОТО (Supabase Storage) ---------- */
+const PHOTO_BUCKET='pickup-photos';
+// сжимает изображение в браузере перед загрузкой: уменьшает до maxSide px и пережимает в JPEG.
+// Возвращает Blob (или исходный файл, если сжать не удалось).
+async function compressImage(file,maxSide=1280,quality=0.72){
+  try{
+    if(!file||!/^image\//.test(file.type||''))return file; // не картинка — как есть
+    const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(file);});
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=dataUrl;});
+    let {width:w,height:h}=img;
+    if(w<=maxSide&&h<=maxSide&&file.size<600*1024)return file; // уже маленькое — не трогаем
+    if(w>h){if(w>maxSide){h=Math.round(h*maxSide/w);w=maxSide;}}
+    else{if(h>maxSide){w=Math.round(w*maxSide/h);h=maxSide;}}
+    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+    const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
+    const blob=await new Promise(res=>canvas.toBlob(res,'image/jpeg',quality));
+    if(!blob||blob.size>=file.size)return file; // если не стало меньше — оставляем оригинал
+    return blob;
+  }catch(e){console.error('compress',e);return file;}
+}
+// загружает файл в подпапку prefix (например 'order/ID'), возвращает {path,url} или null
+async function uploadPhoto(prefix,file){
+  try{
+    // сжимаем фото перед загрузкой — ускоряет и загрузку, и показ
+    const blob=await compressImage(file);
+    const path=`${prefix}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+    const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false});
+    if(error){console.error('upload',error);toast('Ошибка загрузки: '+error.message);return null;}
+    const {data}=sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    // сохраняем, кто и когда загрузил фото (для новых фото)
+    return {path,url:data.publicUrl,by:(S.me&&(S.me.full_name||S.me.email))||'',at:new Date().toISOString()};
+  }catch(e){console.error(e);toast('Ошибка загрузки фото');return null;}
+}
+// совместимость со старым кодом заявок
+async function uploadPickupPhoto(pickupId,file){return uploadPhoto(pickupId,file);}
+async function deletePhoto(path){
+  try{const {error}=await sb.storage.from(PHOTO_BUCKET).remove([path]);
+    if(error){console.error('remove',error);toast('Не удалось удалить: '+error.message);return false;}return true;
+  }catch(e){console.error(e);return false;}
+}
+async function deletePickupPhoto(path){return deletePhoto(path);}
+// Вызов Edge Function для создания пользователя (с проверкой админа на сервере)
+async function callCreateUser(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/create-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
+// удаление сотрудника ПОЛНОСТЬЮ — и карточка (profiles), и сама учётная запись входа (auth.users) —
+// через Edge Function, поскольку удалить учётную запись входа из браузера напрямую нельзя (это
+// защищено на уровне Supabase — нужен серверный service-role ключ, которого у браузера нет и не
+// должно быть). Без этого шага номер телефона/логин навсегда «занят», даже если карточку удалили.
+async function callDeleteUser(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/delete-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
+// отправка сообщения в WhatsApp через Kelesu (Edge Function kelesu-send) — только для
+// залогиненного сотрудника, вызывается из блока «Переписка» в карточке партнёра
+async function callKelesuSend(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/kelesu-send`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
+    return out;
+  }catch(e){return {success:false,error:String(e&&e.message||e)};}
+}
+// загружает и отрисовывает переписку WhatsApp с этим телефоном (карточка партнёра) —
+// сопоставление идёт по последним 10 цифрам номера (normPhone), независимо от формата
+async function loadPhoneChat(phone,boxId){
+  const box=$(boxId);if(!box)return;
+  const norm=normPhone(phone);
+  if(!norm){box.innerHTML='<div class="hint">Нет телефона для поиска переписки</div>';return;}
+  try{
+    const {data,error}=await sb.from('kelesu_messages').select('*').eq('phone_norm',norm).order('created_at',{ascending:true}).limit(200);
+    if(error)throw error;
+    const box2=$(boxId);if(!box2)return; // модалка могла уже закрыться, пока грузили
+    if(!data||!data.length){box2.innerHTML='<div class="hint">Переписки пока нет</div>';return;}
+    box2.innerHTML=data.map(m=>{
+      const out=m.direction==='outbound';
+      const time=(fmtLogTime(m.created_at)||{}).time||'';
+      return `<div style="display:flex;justify-content:${out?'flex-end':'flex-start'};margin-bottom:6px">
+        <div style="max-width:75%;padding:8px 12px;border-radius:12px;background:${out?'#dcf8c6':'#fff'};border:1px solid var(--line);font-size:13px;white-space:pre-wrap;word-break:break-word">
+          ${esc(m.body_text||(m.message_type&&m.message_type!=='text'?'['+esc(m.message_type)+']':'—'))}
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;text-align:right">${esc(time)}${out&&m.status?' · '+esc(m.status):''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    box2.scrollTop=box2.scrollHeight;
+  }catch(e){
+    const box3=$(boxId);if(box3)box3.innerHTML='<div class="hint" style="color:var(--rust)">Не удалось загрузить переписку — возможно, таблица kelesu_messages ещё не создана</div>';
+  }
+}
+// подтягивает историю переписки из Kelesu (Edge Function kelesu-sync-history) — нужно для
+// сообщений, которые были ДО подключения вебхука и поэтому отсутствуют в нашей базе
+async function callKelesuSyncHistory(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/kelesu-sync-history`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
+    return out;
+  }catch(e){return {success:false,error:String(e&&e.message||e)};}
+}
+// получение реального трек-номера у Казпочты (Edge Function kazpost-get-barcode) — по одному
+// заказу; функция сама сохраняет полученный трек-код прямо в заказ, тут только вызов
+async function callKazpostGetBarcode(orderId){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/kazpost-get-barcode`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify({order_id:orderId}),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
+    return out;
+  }catch(e){return {success:false,error:String(e&&e.message||e)};}
+}
+// смена пароля сотрудника через Edge Function set-password (только для админа)
+async function callSetPassword(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/set-password`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}
+
+// смена телефона/email (логина) сотрудника через Edge Function update-user (только для админа)
+async function callUpdateUser(payload){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/update-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify(payload),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
+    return out;
+  }catch(e){return {error:String(e&&e.message||e)};}
+}

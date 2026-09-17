@@ -1,0 +1,444 @@
+
+/* ================= МОДУЛЬ: СОРТИРОВКА ================= */
+// кладовщик фотографирует накладную посылки (штрих-кодов на них нет — только рукописный/печатный
+// текст) → ИИ распознаёт ФИО/адрес/телефон получателя → ищем среди СЕГОДНЯШНИХ ещё не
+// отсортированных заказов лучшее совпадение → показываем город крупно + тип доставки → кладовщик
+// подтверждает («Принял») — заказ помечается отсортированным. Так склад может начинать сортировку
+// по городам сразу по мере поступления заказов, не дожидаясь, пока все «забивальщики» закончат
+// вносить данные, и без отдельного реестра-выгрузки в Excel.
+let sortingDate=null; // выбранная дата для просмотра/сортировки — по умолчанию сегодня
+let sortingListFilter='all'; // 'all'|'sorted'|'unsorted' — фильтр статуса в списке заказов
+let sortingListSearch=''; // текст поиска по ФИО/телефону/номеру в списке заказов
+let sortListPage=1; // текущая страница (компьютерная пагинация)
+let sortListPerPage=50; // заказов на странице (компьютер)
+let sortListMobileLimit=20; // сколько показано на мобиле («показать ещё») — то же число, что MOBILE_STEP (она объявлена ниже по файлу, поэтому не ссылаемся на неё здесь напрямую)
+// применяет фильтр статуса и поиск к списку — используется и для подсчёта, и для построения страницы
+function sortingListFiltered(processed){
+  let rows=[...processed];
+  if(sortingListFilter==='sorted')rows=rows.filter(o=>o.sorted_at);
+  else if(sortingListFilter==='unsorted')rows=rows.filter(o=>!o.sorted_at);
+  const q=sortingListSearch.trim().toLowerCase();
+  if(q){
+    const qDigits=q.replace(/\D/g,'');
+    rows=rows.filter(o=>
+      (o.client||'').toLowerCase().includes(q)
+      ||(o.code||'').toLowerCase().includes(q)
+      ||(qDigits&&(o.phone||'').includes(qDigits)) // цифры сравниваем только если в запросе реально есть цифры
+    );
+  }
+  rows.sort((a,b)=>(a.client||'').localeCompare(b.client||''));
+  return rows;
+}
+function sortingListRowHtml(o){
+  const isS=!!o.sorted_at;
+  const courier=isCourierDelivery(o.delivery_id);
+  return `<tr class="open" data-sortrow="${o.id}" style="cursor:pointer;background:${isS?'rgba(46,125,50,0.12)':'rgba(192,57,43,0.10)'}">
+    <td data-label="ФИО">${esc(o.client||'—')}</td>
+    <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
+    <td data-label="Тип доставки">${courier?'🚚 Курьер':'📮 Почта'}</td>
+    <td data-label="Адрес">${esc(o.address||'—')}</td>
+    <td data-label="№ заказа" style="font-family:monospace">${esc(o.code||'')}</td>
+    <td data-label="Статус">${isS?'✅ Принят':'🔴 Не принят'}</td>
+  </tr>`;
+}
+// перерисовывает только тело таблицы + пагинацию под ней (не всю страницу) — используется при
+// вводе в поиск/смене фильтра/странице, чтобы курсор в поле поиска не сбрасывался
+function renderSortListOnly(){
+  const tbody=document.querySelector('#sortListTbody');if(!tbody)return;
+  const myCity=S.me&&S.me.city_id;
+  const cityFilter=o=>sortingCityId(o)===myCity;
+  const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  const processed=dayOrders.filter(orderIsProcessed);
+  const filtered=sortingListFiltered(processed);
+  const mobile=isMobileView();
+  let rows;
+  if(mobile){
+    rows=filtered.slice(0,sortListMobileLimit);
+  }else{
+    const totalPages=Math.max(1,Math.ceil(filtered.length/sortListPerPage));
+    if(sortListPage>totalPages)sortListPage=totalPages;
+    const startIdx=(sortListPage-1)*sortListPerPage;
+    rows=filtered.slice(startIdx,startIdx+sortListPerPage);
+  }
+  tbody.innerHTML=rows.length?rows.map(sortingListRowHtml).join(''):'<tr><td colspan="6"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>';
+  bindSortRowClicks();
+  renderSortListFooter(filtered,mobile);
+}
+// подпись/пагинация под таблицей — компьютер: плавающая панель (как везде), мобиле: «показать ещё»
+function renderSortListFooter(filtered,mobile){
+  const old=$('sortListMoreWrap');if(old)old.remove();
+  if(mobile){
+    removeSortListPager();
+    const shown=Math.min(sortListMobileLimit,filtered.length);
+    const wrap=document.createElement('div');wrap.id='sortListMoreWrap';
+    if(shown<filtered.length){
+      wrap.innerHTML=`<button class="btn ghost show-more" id="sortListMoreBtn">Показать ещё (${filtered.length-shown})</button>
+        <div class="list-count">Показано ${shown} из ${filtered.length}</div>`;
+    }else{
+      wrap.innerHTML=`<div class="list-count">Показано ${shown} из ${filtered.length}</div>`;
+    }
+    const tbl=document.querySelector('#sortListTbody');
+    if(tbl)tbl.closest('.table-scroll').insertAdjacentElement('afterend',wrap);
+    const moreBtn=$('sortListMoreBtn');
+    if(moreBtn)moreBtn.onclick=()=>{sortListMobileLimit+=MOBILE_STEP;renderSortListOnly();};
+  }else{
+    const totalPages=Math.max(1,Math.ceil(filtered.length/sortListPerPage));
+    const startIdx=(sortListPage-1)*sortListPerPage;
+    const shownCount=Math.min(sortListPerPage,filtered.length-startIdx);
+    renderSortListPager(filtered.length,totalPages,startIdx,Math.max(0,shownCount));
+  }
+}
+function removeSortListPager(){const ex=$('sortListPager');if(ex)ex.remove();
+  const m=$('main');if(m&&!$('ordersPager')&&!$('pickupsPager')&&!$('inboundPager')&&!$('whProdPager'))m.classList.remove('has-pager');}
+function renderSortListPager(total,totalPages,startIdx,shownCount){
+  removeSortListPager();
+  if(!total)return;
+  const from=startIdx+1, to=startIdx+shownCount;
+  const bar=document.createElement('div');
+  bar.id='sortListPager';bar.className='orders-pager';
+  {const m=$('main');if(m)m.classList.add('has-pager');}
+  bar.innerHTML=`
+    <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
+    <div class="op-perpage">
+      <span>На странице:</span>
+      <div class="op-pp-wrap">
+        <button class="op-btn op-pp-btn" id="slPerPageBtn">${sortListPerPage} ▾</button>
+        <div class="op-pp-menu" id="slPerPageMenu" style="display:none">
+          ${ORDERS_PAGE_SIZES.map(s=>`<button class="op-pp-item ${s===sortListPerPage?'active':''}" data-slpp="${s}">${s}</button>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="op-nav">
+      <button class="op-btn" data-slpage="first" ${sortListPage<=1?'disabled':''} title="В начало">«</button>
+      <button class="op-btn" data-slpage="prev" ${sortListPage<=1?'disabled':''}>‹ Назад</button>
+      <span class="op-page">Стр. ${sortListPage} / ${totalPages}</span>
+      <button class="op-btn" data-slpage="next" ${sortListPage>=totalPages?'disabled':''}>Вперёд ›</button>
+      <button class="op-btn" data-slpage="last" ${sortListPage>=totalPages?'disabled':''} title="В конец">»</button>
+    </div>`;
+  document.body.appendChild(bar);
+  const ppBtn=bar.querySelector('#slPerPageBtn'), ppMenu=bar.querySelector('#slPerPageMenu');
+  if(ppBtn)ppBtn.onclick=e=>{e.stopPropagation();ppMenu.style.display=ppMenu.style.display==='none'?'flex':'none';};
+  bar.querySelectorAll('[data-slpp]').forEach(b=>b.onclick=()=>{
+    sortListPerPage=parseInt(b.dataset.slpp,10)||50;sortListPage=1;renderSortListOnly();
+  });
+  bar.querySelectorAll('[data-slpage]').forEach(b=>b.onclick=()=>{
+    const totalPagesNow=Math.max(1,Math.ceil(total/sortListPerPage));
+    if(b.dataset.slpage==='first')sortListPage=1;
+    else if(b.dataset.slpage==='prev')sortListPage=Math.max(1,sortListPage-1);
+    else if(b.dataset.slpage==='next')sortListPage=Math.min(totalPagesNow,sortListPage+1);
+    else if(b.dataset.slpage==='last')sortListPage=totalPagesNow;
+    renderSortListOnly();
+  });
+}
+function renderSorting(){
+  if(!sortingDate)sortingDate=localToday();
+  // если у сотрудника в карточке указан город («Упаковщик Алматы» и т.п.) — видит только заказы
+  // в этот город; если город не указан (админ, общий доступ) — видит все города, как раньше
+  const myCity=S.me&&S.me.city_id;
+  const cityFilter=o=>sortingCityId(o)===myCity;
+  const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  // «обработан» — менеджер уже внёс данные получателя И определился с типом доставки (курьер/почта).
+  // Заказы, которые только созданы «пустышкой» по заявке (ждут забивки), кладовщику пока не нужны —
+  // тип доставки во время забивки ещё может поменяться, показывать их рано.
+  const processed=dayOrders.filter(orderIsProcessed);
+  const total=processed.length;
+  const notProcessed=dayOrders.length-total;
+  const sorted=processed.filter(o=>o.sorted_at).length;
+  const left=total-sorted;
+  const courierCnt=processed.filter(o=>isCourierDelivery(o.delivery_id)).length;
+  const mailCnt=total-courierCnt;
+  const isToday=sortingDate===localToday();
+  // для админа (город не задан) — разбивка по городам: сколько заказов в каждом, сколько принято
+  let cityBreakdownHtml='';
+  if(!myCity){
+    const byCity={};
+    processed.forEach(o=>{
+      const cid=sortingCityId(o);const nm=cid?cityName(cid):'Без города';
+      if(!byCity[nm])byCity[nm]={total:0,sorted:0};
+      byCity[nm].total++;if(o.sorted_at)byCity[nm].sorted++;
+    });
+    const entries=Object.entries(byCity).sort((a,b)=>b[1].total-a[1].total);
+    if(entries.length){
+      cityBreakdownHtml=`<div class="panel" style="margin-bottom:16px">
+        <div class="panel-head"><h2>По городам</h2></div>
+        <div class="table-scroll"><table class="resp-table"><thead><tr><th>Город</th><th>Заказов</th><th>Принято</th><th>Осталось</th></tr></thead><tbody>
+          ${entries.map(([nm,c])=>`<tr>
+            <td data-label="Город"><strong>${esc(nm)}</strong></td>
+            <td data-label="Заказов">${c.total}</td>
+            <td data-label="Принято" style="color:var(--rust)">${c.sorted}</td>
+            <td data-label="Осталось">${c.total-c.sorted}</td>
+          </tr>`).join('')}
+        </tbody></table></div>
+      </div>`;
+    }
+  }
+  $('main').innerHTML=`
+    <div class="page-head"><div><h1>Сортировка</h1><p>Сфотографируйте накладную посылки — подскажем, в какой она город${myCity?` · только ${esc(cityName(myCity))}`:''}</p></div></div>
+    <div class="stats stats-3" style="margin-bottom:8px">
+      <div class="stat"><div class="k">Заказов${isToday?' сегодня':''}</div><div class="v">${total}</div></div>
+      <div class="stat"><div class="k">Принято</div><div class="v" style="color:var(--rust)">${sorted}</div></div>
+      <div class="stat"><div class="k">Осталось</div><div class="v">${left}</div></div>
+    </div>
+    <div class="stats stats-3" style="margin-bottom:16px">
+      <div class="stat"><div class="k">🚚 Курьерских</div><div class="v">${courierCnt}</div></div>
+      <div class="stat"><div class="k">📮 Почтовых</div><div class="v">${mailCnt}</div></div>
+      <div class="stat"><div class="k">Не обработано</div><div class="v" style="color:var(--muted)">${notProcessed}</div></div>
+    </div>
+    ${cityBreakdownHtml}
+    <div class="panel" style="max-width:560px;margin:0 auto">
+      <div style="text-align:center;padding:24px 16px">
+        <label class="btn primary" style="cursor:pointer;font-size:17px;padding:18px 28px;display:inline-block">
+          📷 Сфотографировать накладную
+          <input type="file" accept="image/*" capture="environment" id="sortPhotoInput" style="display:none">
+        </label>
+      </div>
+      <div id="sortResult"></div>
+      <div style="border-top:1px solid var(--line);padding:14px 16px;display:flex;align-items:center;gap:10px;justify-content:center">
+        <label style="font-size:13px;color:var(--muted)">Дата:</label>
+        <input type="date" id="sortDateFilter" value="${sortingDate}" max="${localToday()}">
+        ${!isToday?'<button class="btn ghost sm" id="sortDateToday">Сегодня</button>':''}
+      </div>
+    </div>
+    <div class="panel" style="margin-top:18px">
+      <div class="panel-head"><h2>Список заказов</h2><span class="count">${total}</span></div>
+      <p class="hint" style="margin:0 20px 10px;color:var(--muted)">Нажмите на заказ, чтобы вручную отметить его принятым/непринятым.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 20px 14px;align-items:center">
+        <select id="sortListStatusFilter" style="min-width:220px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);flex:1 1 220px">
+          <option value="all" ${sortingListFilter==='all'?'selected':''}>Все статусы</option>
+          <option value="sorted" ${sortingListFilter==='sorted'?'selected':''}>✅ Принятые</option>
+          <option value="unsorted" ${sortingListFilter==='unsorted'?'selected':''}>🔴 Непринятые</option>
+        </select>
+        <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:2 1 260px;min-width:260px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line)">
+      </div>
+      <div class="table-scroll"><table class="resp-table"><thead><tr>
+        <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>Адрес</th><th>№ заказа</th><th>Статус</th>
+      </tr></thead><tbody id="sortListTbody"></tbody></table></div>
+    </div>`;
+  const inp=$('sortPhotoInput');
+  if(inp)inp.onchange=async e=>{
+    const file=(inp.files||[])[0];if(!file)return;
+    await handleSortPhoto(file);
+    inp.value='';
+  };
+  const dateInp=$('sortDateFilter');
+  if(dateInp)dateInp.onchange=()=>{if(dateInp.value){sortingDate=dateInp.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSorting();}};
+  const todayBtn=$('sortDateToday');
+  if(todayBtn)todayBtn.onclick=()=>{sortingDate=localToday();sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSorting();};
+  const statusFilterEl=$('sortListStatusFilter');
+  if(statusFilterEl)statusFilterEl.onchange=()=>{sortingListFilter=statusFilterEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
+  const searchEl=$('sortListSearch');
+  if(searchEl){
+    searchEl.oninput=()=>{sortingListSearch=searchEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
+    // курсор остаётся в поле при вводе — перерисовываем только таблицу, не весь экран
+  }
+  renderSortListOnly();
+}
+// обработчик клика по строке в списке заказов — вынесен отдельно, используется и при полной,
+// и при частичной (только таблица, при поиске) перерисовке
+function bindSortRowClicks(){
+  document.querySelectorAll('[data-sortrow]').forEach(tr=>tr.onclick=async e=>{
+    if(e.target.closest('a,button'))return; // клик по ссылке-телефону не должен переключать статус
+    const oid=tr.dataset.sortrow;
+    const o=(S.orders||[]).find(x=>x.id===oid);if(!o)return;
+    const willSort=!o.sorted_at;
+    if(willSort&&!confirm(`Отметить заказ «${o.client||o.code||''}» принятым?`))return;
+    if(!willSort&&!confirm(`Снять отметку «принят» с заказа «${o.client||o.code||''}»?`))return;
+    const payload=willSort?{sorted_at:new Date().toISOString(),sorted_by_name:(S.me&&(S.me.full_name||S.me.email))||''}:{sorted_at:null,sorted_by_name:null};
+    const u=await dbUpdate('orders',oid,payload);
+    if(u){Object.assign(o,u);toast(willSort?'Отмечено принятым':'Отметка снята');renderSorting();}
+    else toast('Не удалось сохранить');
+  });
+}
+// «обработан» ли заказ менеджером — есть ФИО получателя и определён тип доставки (курьер/почта).
+// Пока это не так — заказ существует (по заявке), но данные ещё забивают, показывать его
+// кладовщику рано (тип доставки, а с ним и город, может ещё поменяться).
+function orderIsProcessed(o){return !!(o.client&&o.client.trim())&&!!o.delivery_id;}
+// город назначения заказа — курьерский берёт из courier_city_id, почтовый из city_id
+function orderDestCityId(o){return isCourierDelivery(o.delivery_id)?o.courier_city_id:o.city_id;}
+// для «Сортировки» город кладовщика сверяется с городом ЗАБОРА заказа (pickup_city_id) — то есть
+// в какой склад физически привезли посылку, а не куда она в итоге едет (это отдельно, для показа
+// кладовщику, см. orderDestCityId выше). Талдыкорган считается «своим» для склада Алматы — заказы,
+// забранные там, физически привозят на склад Алматы (нет отдельного склада в Талдыкоргане)
+function sortingCityId(o){
+  const cid=o.pickup_city_id;
+  const cName=(cityName(cid)||'').toLowerCase();
+  if(cName.includes('талдыкорган')){
+    const almaty=(S.cities||[]).find(c=>(c.name||'').toLowerCase().includes('алматы')&&!(c.name||'').toLowerCase().includes('область'));
+    if(almaty)return almaty.id;
+  }
+  return cid;
+}
+// заказы, которые сотрудник вообще может видеть в «Сортировке» — за выбранную дату, ещё не
+// отсортированные, УЖЕ ОБРАБОТАННЫЕ менеджером, и (если у сотрудника задан город) только в его город
+function sortingPool(){
+  const day=sortingDate||localToday();
+  const myCity=S.me&&S.me.city_id;
+  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity));
+}
+// необработанные (пустые) заказы за тот же день/город — чтобы отличить «правда нет такого заказа»
+// от «заказ есть, просто ещё не забили» и показать кладовщику понятное сообщение вместо путаницы
+function sortingUnprocessedCount(){
+  const day=sortingDate||localToday();
+  const myCity=S.me&&S.me.city_id;
+  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity)).length;
+}
+// сжимает фото перед отправкой на распознавание — полноразмерный снимок с телефона (часто
+// несколько МБ) не нужен для чтения текста на бланке, а сильно замедляет и отправку, и саму
+// работу ИИ. Уменьшаем до разумного размера и пережимаем в JPEG с хорошим, но не максимальным
+// качеством — текст остаётся полностью читаемым, а объём падает в разы.
+function resizeImageForAI(file,maxDim=1400,quality=0.75){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      let w=img.width,h=img.height;
+      if(w>maxDim||h>maxDim){
+        if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}else{w=Math.round(w*maxDim/h);h=maxDim;}
+      }
+      const canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const dataUrl=canvas.toDataURL('image/jpeg',quality);
+      resolve(dataUrl.split(',')[1]);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Не удалось обработать изображение'));};
+    img.src=url;
+  });
+}
+async function handleSortPhoto(file){
+  const resultEl=$('sortResult');if(!resultEl)return;
+  resultEl.innerHTML='<div class="hint" style="text-align:center;padding:24px">⏳ Распознаём накладную…</div>';
+  try{
+    const b64=await resizeImageForAI(file);
+    const media_type='image/jpeg'; // после сжатия всегда jpeg, независимо от исходного формата (heic/png/…)
+    const system='Ты распознаёшь рукописные и печатные бланки посылок логистической компании (Казахстан). На фото есть поле ПОЛУЧАТЕЛЬ с ФИО, адресом и телефоном. Верни СТРОГО JSON без пояснений и markdown, формат: {"client":"ФИО получателя","address":"адрес получателя","phone":"телефон только цифры"}. Телефон верни как есть на бланке, только цифры без пробелов и скобок. Если поле не читается — пустая строка. Не выдумывай.';
+    const prompt='Извлеки данные ПОЛУЧАТЕЛЯ (ФИО, адрес, телефон) с этого бланка. Верни только JSON.';
+    const r=await callAI({system,prompt,image:{media_type,data:b64},model:'claude-sonnet-5',max_tokens:400});
+    if(r.error){resultEl.innerHTML=`<div class="empty">Ошибка распознавания: ${esc(r.error)}<br><button class="btn ghost sm" id="sortRetryErr" style="margin-top:10px">🔄 Попробовать снова</button></div>`;const rb=$('sortRetryErr');if(rb)rb.onclick=()=>renderSorting();return;}
+    let txt=(r.text||'').trim().replace(/^```json/i,'').replace(/```$/,'').trim();
+    let data;try{data=JSON.parse(txt);}catch(e){resultEl.innerHTML='<div class="empty">Не удалось разобрать ответ ИИ. Попробуйте переснять чётче.<br><button class="btn ghost sm" id="sortRetryErr2" style="margin-top:10px">🔄 Попробовать снова</button></div>';const rb=$('sortRetryErr2');if(rb)rb.onclick=()=>renderSorting();return;}
+    const matches=findSortMatches(data);
+    renderSortResult(data,matches);
+  }catch(e){resultEl.innerHTML=`<div class="empty">Ошибка: ${esc(String(e&&e.message||e))}</div>`;}
+}
+// ищем среди сегодняшних НЕотсортированных заказов (в своём городе, если он задан) совпадения
+// по телефону/ФИО/адресу — возвращаем отсортированный по «похожести» список {order,score}
+function findSortMatches(data){
+  const pool=sortingPool();
+  const phoneDigits=String(data.phone||'').replace(/\D/g,'').slice(-10);
+  const nameNorm=String(data.client||'').toLowerCase().trim().replace(/\s+/g,' ');
+  const addrNorm=String(data.address||'').toLowerCase().trim();
+  const scored=pool.map(o=>{
+    let score=0;
+    const oPhone=String(o.phone||'').replace(/\D/g,'').slice(-10);
+    if(phoneDigits&&oPhone&&oPhone===phoneDigits)score+=100; // телефон совпал — почти наверняка тот заказ
+    const oName=(o.client||'').toLowerCase().trim().replace(/\s+/g,' ');
+    if(nameNorm&&oName){
+      if(oName===nameNorm)score+=60;
+      else if(oName.includes(nameNorm)||nameNorm.includes(oName))score+=35;
+      else{
+        // частичное совпадение по отдельным словам (порядок ФИО на бланке может отличаться)
+        const nWords=nameNorm.split(' ').filter(w=>w.length>2);
+        const oWords=oName.split(' ').filter(w=>w.length>2);
+        const common=nWords.filter(w=>oWords.includes(w)).length;
+        if(common)score+=common*15;
+      }
+    }
+    const oAddr=(o.address||'').toLowerCase().trim();
+    if(addrNorm&&oAddr&&addrNorm.length>6&&oAddr.length>6){
+      if(oAddr.includes(addrNorm.slice(0,12))||addrNorm.includes(oAddr.slice(0,12)))score+=15;
+    }
+    return {o,score};
+  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+  return scored;
+}
+function renderSortResult(data,matches){
+  const resultEl=$('sortResult');if(!resultEl)return;
+  const best=matches[0];
+  if(!best){
+    const unprocessedCnt=sortingUnprocessedCount();
+    resultEl.innerHTML=`<div class="empty" style="padding:20px">
+      <div class="big">Заказ не найден</div>
+      <div style="margin:10px 0;color:var(--muted);font-size:13px">Распознано: ${esc(data.client||'—')} · ${esc(data.address||'—')} · ${esc(data.phone||'—')}</div>
+      ${unprocessedCnt?`<div style="margin:10px 0;padding:10px;background:var(--card);border-radius:10px;font-size:13px;color:var(--rust)">⏳ Заказ, возможно, есть, но ещё не обработан менеджером (сейчас необработанных: ${unprocessedCnt}). Попробуйте чуть позже.</div>`:''}
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">
+        <button class="btn ghost sm" id="sortRetry">🔄 Переснять</button>
+        <button class="btn ghost sm" id="sortManual">🔍 Искать вручную</button>
+      </div>
+    </div>`;
+    bindSortResultButtons(data);
+    return;
+  }
+  const o=best.o;
+  const courier=isCourierDelivery(o.delivery_id);
+  const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);
+  const deliveryType=courier?'🚚 Курьерская доставка':'📮 Почтовая доставка';
+  const confident=best.score>=80;
+  resultEl.innerHTML=`
+    <div style="text-align:center;padding:6px 0 10px">
+      <div style="font-size:13px;color:${confident?'var(--muted)':'var(--rust)'};margin-bottom:6px">${confident?'✅ Заказ найден':'⚠️ Похоже, но сверьте данные'}</div>
+      <div style="font-size:38px;font-weight:800;line-height:1.1;margin:8px 0">${esc(cty||'—')}</div>
+      <div style="font-size:14px;color:var(--muted);margin-bottom:10px">${deliveryType}</div>
+      <div style="font-size:15px;font-weight:600">${esc(o.client||'—')}</div>
+      <div style="font-size:13px;color:var(--muted)">${esc(o.address||'—')}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Заказ № ${esc(o.code||'')}</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:18px;flex-wrap:wrap">
+        <button class="btn primary" id="sortConfirm" style="font-size:16px;padding:12px 26px">✅ Принял</button>
+        <button class="btn ghost sm" id="sortNotMatch">✕ Это не тот заказ</button>
+      </div>
+    </div>`;
+  const cb=$('sortConfirm');
+  if(cb)cb.onclick=async()=>{
+    cb.disabled=true;cb.textContent='Сохраняем…';
+    const meName=(S.me&&(S.me.full_name||S.me.email))||'';
+    const u=await dbUpdate('orders',o.id,{sorted_at:new Date().toISOString(),sorted_by_name:meName});
+    if(u){Object.assign(o,u);toast(`Отмечено: «${cty}» · ${o.client||''}`);renderSorting();}
+    else{cb.disabled=false;cb.textContent='✅ Принял';toast('Не удалось сохранить, попробуйте ещё раз');}
+  };
+  const nm=$('sortNotMatch');
+  if(nm)nm.onclick=()=>renderSortManualPick(data,matches.slice(1,6)); // предлагаем следующих по похожести, если есть
+}
+function bindSortResultButtons(data){
+  const retry=$('sortRetry');if(retry)retry.onclick=()=>renderSorting();
+  const manual=$('sortManual');if(manual)manual.onclick=()=>renderSortManualPick(data,[]);
+}
+// ручной поиск/выбор — на случай, если ИИ не нашёл совпадение или нашёл не тот заказ
+function renderSortManualPick(data,extraCandidates){
+  const resultEl=$('sortResult');if(!resultEl)return;
+  const pool=sortingPool();
+  const renderList=(q)=>{
+    const ql=q.trim().toLowerCase();
+    let list=ql?pool.filter(o=>(o.client||'').toLowerCase().includes(ql)||(o.phone||'').includes(ql.replace(/\D/g,''))||(o.address||'').toLowerCase().includes(ql)):extraCandidates.map(x=>x.o);
+    list=list.slice(0,20);
+    if(!list.length)return `<div class="hint" style="padding:10px 0">${ql?'Ничего не найдено':'Начните вводить ФИО, телефон или адрес'}</div>`;
+    return list.map(o=>{
+      const courier=isCourierDelivery(o.delivery_id);
+      const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);
+      return `<div class="sort-cand" data-sortpick="${o.id}" style="padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer;text-align:left">
+        <div style="font-weight:600">${esc(o.client||'—')} <span style="float:right;color:var(--muted);font-weight:400">${esc(cty||'')}</span></div>
+        <div style="font-size:12px;color:var(--muted)">${esc(o.address||'—')} · ${esc(o.phone||'')}</div>
+      </div>`;
+    }).join('');
+  };
+  resultEl.innerHTML=`<div style="padding:10px 0">
+    <input id="sortSearchInp" placeholder="ФИО, телефон или адрес…" style="width:100%;margin-bottom:10px">
+    <div id="sortSearchList">${renderList('')}</div>
+    <button class="btn ghost sm" id="sortBackToPhoto" style="margin-top:8px">← Назад к фото</button>
+  </div>`;
+  const searchInp=$('sortSearchInp');
+  if(searchInp)searchInp.oninput=()=>{const l=$('sortSearchList');if(l)l.innerHTML=renderList(searchInp.value);bindPickClicks();};
+  const back=$('sortBackToPhoto');if(back)back.onclick=()=>renderSorting();
+  const bindPickClicks=()=>{
+    resultEl.querySelectorAll('[data-sortpick]').forEach(el=>{
+      el.onclick=async()=>{
+        const o=pool.find(x=>x.id===el.dataset.sortpick);if(!o)return;
+        const meName=(S.me&&(S.me.full_name||S.me.email))||'';
+        const u=await dbUpdate('orders',o.id,{sorted_at:new Date().toISOString(),sorted_by_name:meName});
+        if(u){Object.assign(o,u);const courier=isCourierDelivery(o.delivery_id);const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);toast(`Отмечено: «${cty}» · ${o.client||''}`);renderSorting();}
+        else toast('Не удалось сохранить');
+      };
+    });
+  };
+  bindPickClicks();
+}
