@@ -5,7 +5,10 @@
     --rust:#2546c9;--rust-dk:#1c37a0;--moss:#4a5d3a;--gold:#c08a2d;--muted:#6b7488;
     --shadow:0 1px 0 rgba(20,30,60,.04),0 8px 24px -16px rgba(20,30,60,.30);
   }
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Spline+Sans:wght@400;500;600;700&display=swap');
+  /* Шрифты Fraunces и Spline Sans подключены тегом <link> в шапке index.html.
+     Здесь раньше стоял @import, но он не работал: по стандарту CSS такое правило
+     обязано идти до любых других правил, а выше него уже были * и :root.
+     Браузер молча его игнорировал, и сайт рисовался системными запасными шрифтами. */
   body{font-family:'Spline Sans',system-ui,sans-serif;color:var(--ink);
     background:radial-gradient(circle at 12% 0%,rgba(37,70,201,.06),transparent 40%),var(--paper);
     min-height:100vh;-webkit-font-smoothing:antialiased}
