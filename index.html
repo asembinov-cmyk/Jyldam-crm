@@ -2957,7 +2957,14 @@ function sortingListFiltered(processed){
   if(sortingListFilter==='sorted')rows=rows.filter(o=>o.sorted_at);
   else if(sortingListFilter==='unsorted')rows=rows.filter(o=>!o.sorted_at);
   const q=sortingListSearch.trim().toLowerCase();
-  if(q)rows=rows.filter(o=>(o.client||'').toLowerCase().includes(q)||(o.phone||'').includes(q.replace(/\D/g,''))||(o.code||'').toLowerCase().includes(q));
+  if(q){
+    const qDigits=q.replace(/\D/g,'');
+    rows=rows.filter(o=>
+      (o.client||'').toLowerCase().includes(q)
+      ||(o.code||'').toLowerCase().includes(q)
+      ||(qDigits&&(o.phone||'').includes(qDigits)) // цифры сравниваем только если в запросе реально есть цифры
+    );
+  }
   rows.sort((a,b)=>(a.client||'').localeCompare(b.client||''));
   return rows;
 }
