@@ -3221,12 +3221,36 @@ function sortingUnprocessedCount(){
   const myCity=S.me&&S.me.city_id;
   return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity)).length;
 }
+// сжимает фото перед отправкой на распознавание — полноразмерный снимок с телефона (часто
+// несколько МБ) не нужен для чтения текста на бланке, а сильно замедляет и отправку, и саму
+// работу ИИ. Уменьшаем до разумного размера и пережимаем в JPEG с хорошим, но не максимальным
+// качеством — текст остаётся полностью читаемым, а объём падает в разы.
+function resizeImageForAI(file,maxDim=1400,quality=0.75){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      let w=img.width,h=img.height;
+      if(w>maxDim||h>maxDim){
+        if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}else{w=Math.round(w*maxDim/h);h=maxDim;}
+      }
+      const canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const dataUrl=canvas.toDataURL('image/jpeg',quality);
+      resolve(dataUrl.split(',')[1]);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Не удалось обработать изображение'));};
+    img.src=url;
+  });
+}
 async function handleSortPhoto(file){
   const resultEl=$('sortResult');if(!resultEl)return;
   resultEl.innerHTML='<div class="hint" style="text-align:center;padding:24px">⏳ Распознаём накладную…</div>';
   try{
-    const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});
-    const media_type=file.type||'image/jpeg';
+    const b64=await resizeImageForAI(file);
+    const media_type='image/jpeg'; // после сжатия всегда jpeg, независимо от исходного формата (heic/png/…)
     const system='Ты распознаёшь рукописные и печатные бланки посылок логистической компании (Казахстан). На фото есть поле ПОЛУЧАТЕЛЬ с ФИО, адресом и телефоном. Верни СТРОГО JSON без пояснений и markdown, формат: {"client":"ФИО получателя","address":"адрес получателя","phone":"телефон только цифры"}. Телефон верни как есть на бланке, только цифры без пробелов и скобок. Если поле не читается — пустая строка. Не выдумывай.';
     const prompt='Извлеки данные ПОЛУЧАТЕЛЯ (ФИО, адрес, телефон) с этого бланка. Верни только JSON.';
     const r=await callAI({system,prompt,image:{media_type,data:b64},model:'claude-sonnet-5',max_tokens:400});
