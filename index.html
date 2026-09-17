@@ -2961,7 +2961,7 @@ function sortingListRowsHtml(processed){
   return rows.map(o=>{
     const isS=!!o.sorted_at;
     const courier=isCourierDelivery(o.delivery_id);
-    return `<tr data-sortrow="${o.id}" style="cursor:pointer;background:${isS?'rgba(46,125,50,0.12)':'rgba(192,57,43,0.10)'}">
+    return `<tr class="open" data-sortrow="${o.id}" style="cursor:pointer;background:${isS?'rgba(46,125,50,0.12)':'rgba(192,57,43,0.10)'}">
       <td data-label="ФИО">${esc(o.client||'—')}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Тип доставки">${courier?'🚚 Курьер':'📮 Почта'}</td>
@@ -3029,12 +3029,12 @@ function renderSorting(){
       <div class="panel-head"><h2>Список заказов</h2><span class="count">${total}</span></div>
       <p class="hint" style="margin:0 20px 10px;color:var(--muted)">Нажмите на заказ, чтобы вручную отметить его принятым/непринятым.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 20px 14px;align-items:center">
-        <select id="sortListStatusFilter">
+        <select id="sortListStatusFilter" style="min-width:220px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);flex:1 1 220px">
           <option value="all" ${sortingListFilter==='all'?'selected':''}>Все статусы</option>
           <option value="sorted" ${sortingListFilter==='sorted'?'selected':''}>✅ Принятые</option>
           <option value="unsorted" ${sortingListFilter==='unsorted'?'selected':''}>🔴 Непринятые</option>
         </select>
-        <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:1;min-width:180px">
+        <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:2 1 260px;min-width:260px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line)">
       </div>
       <div class="table-scroll"><table class="resp-table"><thead><tr>
         <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>№ заказа</th><th>Статус</th>
