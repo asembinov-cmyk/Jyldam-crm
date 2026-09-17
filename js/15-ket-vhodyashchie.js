@@ -207,12 +207,21 @@ async function loadInbound(opts){
     const ids=(orders||[]).map(o=>o.id);
     let items=[];
     if(ids.length){
-      const CHUNK=500; // пачками — чтобы не упереться в лимит размера IN-списка на больших объёмах
-      for(let i=0;i<ids.length;i+=CHUNK){
-        const chunkIds=ids.slice(i,i+CHUNK);
-        const {data,error}=await sb.from('inbound_order_items').select('*').in('inbound_order_id',chunkIds);
-        if(error){console.error('loadInbound items chunk',error);continue;}
-        if(data)items=items.concat(data);
+      const CHUNK=500;      // пачками — чтобы не упереться в лимит размера IN-списка на больших объёмах
+      const PARALLEL=6;     // ...но сами пачки шлём по 6 одновременно: браузер держит ~6 соединений
+      // Раньше здесь был последовательный цикл с await внутри: на 36 тысячах заказов это
+      // 73 запроса строго один за другим, то есть десятки секунд ожидания на ровном месте.
+      const chunks=[];
+      for(let i=0;i<ids.length;i+=CHUNK)chunks.push(ids.slice(i,i+CHUNK));
+      for(let i=0;i<chunks.length;i+=PARALLEL){
+        const batch=chunks.slice(i,i+PARALLEL);
+        const results=await Promise.all(batch.map(chunkIds=>
+          sb.from('inbound_order_items').select('*').in('inbound_order_id',chunkIds)
+        ));
+        for(const {data,error} of results){
+          if(error){console.error('loadInbound items chunk',error);continue;}
+          if(data)items=items.concat(data);
+        }
       }
     }
     S.inbound_items=items;

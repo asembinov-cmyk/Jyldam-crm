@@ -444,6 +444,11 @@ const RT_TABLE_ARR={pickups:'pickups',orders:'orders',inbound_orders:'inbound_or
 function applyRealtime(table,payload){
   try{
     const key=RT_TABLE_ARR[table]||table;
+    // Заказы партнёров (KET) грузятся лениво — только при открытии модуля. Если массива
+    // ещё нет, НЕЛЬЗЯ создавать его здесь: модуль проверяет именно `if(!S.inbound_orders)`,
+    // чтобы понять, нужна ли первая загрузка. Один прилетевший заказ делал массив непустым,
+    // первая загрузка не срабатывала, и модуль показывал вместо списка пару случайных строк.
+    if(key==='inbound_orders'&&!S[key])return;
     if(!S[key])S[key]=[];
     const arr=S[key];
     const row=payload.new||payload.old;
@@ -511,6 +516,11 @@ function scheduleRtRender(table){
   // экрана может не сработать вообще никогда (таймер бы постоянно сбрасывался). Поэтому для этой
   // таблицы — throttle: гарантированно не чаще раза в 4 секунды, но и не реже.
   if(table==='inbound_orders'){
+    // Данные KET видны ТОЛЬКО в своём модуле — ни счётчика в меню, ни на дашборде у них нет.
+    // Раньше поток заказов от KET (он может идти почти непрерывно) перерисовывал текущий
+    // экран каждые 4 секунды, какой бы модуль ни был открыт: список дёргался, прокрутка
+    // сбрасывалась. В памяти данные уже обновлены выше — этого достаточно.
+    if(S.tab!=='ket_orders')return;
     if(_rtInboundTimer)return; // уже запланировано — просто ждём
     const wait=Math.max(0,4000-(Date.now()-_rtInboundLastRun));
     _rtInboundTimer=setTimeout(()=>{
