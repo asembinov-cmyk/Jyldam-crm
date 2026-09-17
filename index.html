@@ -2946,6 +2946,41 @@ function render(){
 // по городам сразу по мере поступления заказов, не дожидаясь, пока все «забивальщики» закончат
 // вносить данные, и без отдельного реестра-выгрузки в Excel.
 let sortingDate=null; // выбранная дата для просмотра/сортировки — по умолчанию сегодня
+let sortingListFilter='all'; // 'all'|'sorted'|'unsorted' — фильтр статуса в списке заказов
+let sortingListSearch=''; // текст поиска по ФИО/телефону/номеру в списке заказов
+// строит строки таблицы списка заказов с учётом текущих фильтра/поиска — вынесено отдельно,
+// чтобы при вводе в поиск перерисовывать только таблицу, не всю страницу (не терять фокус)
+function sortingListRowsHtml(processed){
+  let rows=[...processed];
+  if(sortingListFilter==='sorted')rows=rows.filter(o=>o.sorted_at);
+  else if(sortingListFilter==='unsorted')rows=rows.filter(o=>!o.sorted_at);
+  const q=sortingListSearch.trim().toLowerCase();
+  if(q)rows=rows.filter(o=>(o.client||'').toLowerCase().includes(q)||(o.phone||'').includes(q.replace(/\D/g,''))||(o.code||'').toLowerCase().includes(q));
+  rows.sort((a,b)=>(a.client||'').localeCompare(b.client||''));
+  if(!rows.length)return '<tr><td colspan="5"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>';
+  return rows.map(o=>{
+    const isS=!!o.sorted_at;
+    const courier=isCourierDelivery(o.delivery_id);
+    return `<tr data-sortrow="${o.id}" style="cursor:pointer;background:${isS?'rgba(46,125,50,0.12)':'rgba(192,57,43,0.10)'}">
+      <td data-label="ФИО">${esc(o.client||'—')}</td>
+      <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
+      <td data-label="Тип доставки">${courier?'🚚 Курьер':'📮 Почта'}</td>
+      <td data-label="№ заказа" style="font-family:monospace">${esc(o.code||'')}</td>
+      <td data-label="Статус">${isS?'✅ Принят':'🔴 Не принят'}</td>
+    </tr>`;
+  }).join('');
+}
+// перерисовывает только тело таблицы (не всю страницу) — используется при вводе в поиск,
+// чтобы курсор/фокус в самом поле поиска не сбрасывался на каждую напечатанную букву
+function renderSortListOnly(){
+  const tbody=document.querySelector('#sortListTbody');if(!tbody)return;
+  const myCity=S.me&&S.me.city_id;
+  const cityFilter=o=>sortingCityId(o)===myCity;
+  const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  const processed=dayOrders.filter(orderIsProcessed);
+  tbody.innerHTML=sortingListRowsHtml(processed);
+  bindSortRowClicks();
+}
 function renderSorting(){
   if(!sortingDate)sortingDate=localToday();
   // если у сотрудника в карточке указан город («Упаковщик Алматы» и т.п.) — видит только заказы
@@ -2993,21 +3028,17 @@ function renderSorting(){
     <div class="panel" style="margin-top:18px">
       <div class="panel-head"><h2>Список заказов</h2><span class="count">${total}</span></div>
       <p class="hint" style="margin:0 20px 10px;color:var(--muted)">Нажмите на заказ, чтобы вручную отметить его принятым/непринятым.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 20px 14px;align-items:center">
+        <select id="sortListStatusFilter">
+          <option value="all" ${sortingListFilter==='all'?'selected':''}>Все статусы</option>
+          <option value="sorted" ${sortingListFilter==='sorted'?'selected':''}>✅ Принятые</option>
+          <option value="unsorted" ${sortingListFilter==='unsorted'?'selected':''}>🔴 Непринятые</option>
+        </select>
+        <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:1;min-width:180px">
+      </div>
       <div class="table-scroll"><table class="resp-table"><thead><tr>
         <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>№ заказа</th><th>Статус</th>
-      </tr></thead><tbody>
-        ${processed.length?[...processed].sort((a,b)=>(a.client||'').localeCompare(b.client||'')).map(o=>{
-          const isS=!!o.sorted_at;
-          const courier=isCourierDelivery(o.delivery_id);
-          return `<tr data-sortrow="${o.id}" style="cursor:pointer;background:${isS?'rgba(46,125,50,0.12)':'rgba(192,57,43,0.10)'}">
-            <td data-label="ФИО">${esc(o.client||'—')}</td>
-            <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
-            <td data-label="Тип доставки">${courier?'🚚 Курьер':'📮 Почта'}</td>
-            <td data-label="№ заказа" style="font-family:monospace">${esc(o.code||'')}</td>
-            <td data-label="Статус">${isS?'✅ Принят':'🔴 Не принят'}</td>
-          </tr>`;
-        }).join(''):'<tr><td colspan="5"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>'}
-      </tbody></table></div>
+      </tr></thead><tbody id="sortListTbody">${sortingListRowsHtml(processed)}</tbody></table></div>
     </div>`;
   const inp=$('sortPhotoInput');
   if(inp)inp.onchange=async e=>{
@@ -3019,7 +3050,19 @@ function renderSorting(){
   if(dateInp)dateInp.onchange=()=>{if(dateInp.value){sortingDate=dateInp.value;renderSorting();}};
   const todayBtn=$('sortDateToday');
   if(todayBtn)todayBtn.onclick=()=>{sortingDate=localToday();renderSorting();};
-  $('main').querySelectorAll('[data-sortrow]').forEach(tr=>tr.onclick=async e=>{
+  const statusFilterEl=$('sortListStatusFilter');
+  if(statusFilterEl)statusFilterEl.onchange=()=>{sortingListFilter=statusFilterEl.value;renderSorting();};
+  const searchEl=$('sortListSearch');
+  if(searchEl){
+    searchEl.oninput=()=>{sortingListSearch=searchEl.value;renderSortListOnly();};
+    // курсор остаётся в поле при вводе — перерисовываем только таблицу, не весь экран
+  }
+  bindSortRowClicks();
+}
+// обработчик клика по строке в списке заказов — вынесен отдельно, используется и при полной,
+// и при частичной (только таблица, при поиске) перерисовке
+function bindSortRowClicks(){
+  document.querySelectorAll('[data-sortrow]').forEach(tr=>tr.onclick=async e=>{
     if(e.target.closest('a,button'))return; // клик по ссылке-телефону не должен переключать статус
     const oid=tr.dataset.sortrow;
     const o=(S.orders||[]).find(x=>x.id===oid);if(!o)return;
