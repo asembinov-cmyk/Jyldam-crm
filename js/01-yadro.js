@@ -69,16 +69,18 @@ async function dbList(table,opts={}){
   // одному хосту одновременно, остальные встают в очередь и не успевают уложиться в таймаут,
   // даже если сама база отвечает быстро. Поэтому грузим пачками по 6 одновременно.
   const PAGE=1000,CONCURRENCY=6,PAGE_TIMEOUT=30000;
-  const fetchPage=(from,to)=>{
-    let q=sb.from(table).select('*');
+  const fetchPage=(from,to,withCount)=>{
+    // withCount — просим общее число строк ТЕМ ЖЕ запросом, что и данные: PostgREST
+    // возвращает его заголовком Content-Range, отдельный запрос за счётчиком не нужен
+    let q=sb.from(table).select('*',withCount?{count:'exact'}:undefined);
     if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val); // напр. только записи не раньше даты X — сильно сокращает объём для быстро растущих таблиц
     if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
     q=q.range(from,to);
     return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),PAGE_TIMEOUT))]);
   };
-  const fetchInBatches=async(pageCount)=>{
+  const fetchInBatches=async(firstPage,pageCount)=>{
     let all=[];
-    for(let i=0;i<pageCount;i+=CONCURRENCY){
+    for(let i=firstPage;i<pageCount;i+=CONCURRENCY){
       const batchIdx=Array.from({length:Math.min(CONCURRENCY,pageCount-i)},(_,j)=>i+j);
       const batchResults=await Promise.all(batchIdx.map(idx=>fetchPage(idx*PAGE,idx*PAGE+PAGE-1)));
       for(const res of batchResults){
@@ -90,13 +92,18 @@ async function dbList(table,opts={}){
     return all;
   };
   try{
-    let countQ=sb.from(table).select('id',{count:'exact',head:true});
-    if(opts.gte)countQ=countQ.gte(opts.gte.col,opts.gte.val);
-    const {count}=await Promise.race([countQ,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),PAGE_TIMEOUT))]);
-    const total=count||0;
-    if(!total)return [];
+    // Первую страницу и общее количество берём ОДНИМ запросом. Раньше сначала шёл
+    // отдельный запрос только за счётчиком, и лишний круг к серверу платился за каждую
+    // таблицу — даже за пустую. На десятке справочников это лишние круги на ровном месте.
+    const firstRes=await fetchPage(0,PAGE-1,true);
+    if(firstRes.error)throw firstRes.error;
+    const total=firstRes.count||0;
+    let all=firstRes.data||[];
+    if(!total||all.length>=total)return all;
     const pageCount=Math.min(Math.ceil(total/PAGE),51); // предохранитель — максимум ~51000 строк
-    return await fetchInBatches(pageCount);
+    if(pageCount<=1)return all;
+    const rest=await fetchInBatches(1,pageCount);
+    return all.concat(rest);
   }catch(e){
     // если count почему-то не сработал (например, для представлений без прав на count) — старый
     // надёжный способ постранично, но хотя бы не молча теряем данные
