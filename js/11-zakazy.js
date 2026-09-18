@@ -1026,7 +1026,7 @@ function drawOrders(){
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
       const photoCell=ph.length
-        ? `<img src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" loading="lazy" decoding="async" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
+        ? `<img data-ph="${esc(photoPath(ph[0]))}" data-oviewphoto="${esc(photoPath(ph[0]))}" loading="lazy" decoding="async" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
         : '<span style="color:var(--line)">—</span>';
       return `<tr data-orow="${o.id}" style="cursor:pointer" class="${o.via_integration?'order-row-api':''}" title="${o.via_integration?'Пришёл от партнёра напрямую через API-интеграцию':''}">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
@@ -1447,7 +1447,15 @@ function orderModal(id,readonly){
       pc.querySelectorAll('[data-obigthumb]').forEach(t=>t.onclick=e=>{
         e.stopPropagation();
         const main=pc.querySelector('#obigMain');
-        if(main){main.src=t.dataset.obigthumb;main.dataset.oviewphoto=t.dataset.obigthumb;}
+        if(main){
+          // в data-атрибутах теперь путь в хранилище, а не постоянная ссылка:
+          // снимаем отметку «уже подставлено» и просим подставить свежую временную
+          main.setAttribute('data-ph',t.dataset.obigthumb);
+          main.removeAttribute('data-ph-done');
+          main.removeAttribute('src');
+          main.dataset.oviewphoto=t.dataset.obigthumb;
+          hydratePhotos(pc);
+        }
         const byEl=pc.querySelector('#obigBy');
         if(byEl)byEl.innerHTML=t.dataset.obigby||'';
         pc.querySelectorAll('[data-obigthumb]').forEach(x=>x.classList.remove('active'));

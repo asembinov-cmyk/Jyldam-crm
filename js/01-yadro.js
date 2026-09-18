@@ -338,6 +338,80 @@ function pickupLabel(p){return p?(p.name||('заявка '+p.id)):'';}
 
 /* ---------- ФОТО (Supabase Storage) ---------- */
 const PHOTO_BUCKET='pickup-photos';
+
+/* ---------- ФОТО: приватное хранилище и временные ссылки ---------- */
+// На фото накладных — ФИО, адреса и телефоны получателей. Раньше хранилище было
+// открыто всему интернету: ссылка работала у любого, без входа и навсегда. А сами
+// ссылки лежали в поле photos таблицы заказов, которая до 18.09.2026 читалась кем
+// угодно — то есть готовый список рабочих ссылок мог утечь целиком.
+// Теперь бакет закрыт, а под каждый показ выдаётся временная ссылка: живёт час и
+// создаётся только потому, что сотрудник вошёл в систему. Делает это браузер сам,
+// никакой выдачи доступов вручную.
+const PHOTO_URL_TTL=3600;                 // секунд
+const _photoUrlCache=new Map();           // путь → {url, exp}
+function _photoPathFromUrl(u){
+  if(!u)return '';
+  if(!/^https?:\/\//.test(u))return u;    // это уже путь, а не ссылка
+  const m=String(u).match(new RegExp('/'+PHOTO_BUCKET+'/(.+)$'));
+  return m?decodeURIComponent(m[1].split('?')[0]):'';
+}
+// путь в хранилище: у записей он лежит рядом со ссылкой, но у самых старых мог
+// не сохраниться — тогда достаём его из самой ссылки
+function photoPath(f){
+  if(!f)return '';
+  if(typeof f==='string')return _photoPathFromUrl(f);
+  return f.path||_photoPathFromUrl(f.url||'');
+}
+function cachedPhotoUrl(f){
+  const c=_photoUrlCache.get(photoPath(f));
+  return c&&c.exp>Date.now()+60000?c.url:'';
+}
+// подписываем пачкой — один запрос на весь экран, а не по одному на каждое фото
+async function signPhotoPaths(paths){
+  const now=Date.now(),need=[],out=new Map();
+  for(const pt of paths){
+    if(!pt)continue;
+    const c=_photoUrlCache.get(pt);
+    if(c&&c.exp>now+60000)out.set(pt,c.url); else need.push(pt);
+  }
+  if(need.length){
+    try{
+      const {data,error}=await sb.storage.from(PHOTO_BUCKET).createSignedUrls(need,PHOTO_URL_TTL);
+      if(error)console.error('signPhotoPaths',error);
+      (data||[]).forEach(r=>{
+        if(r&&r.signedUrl&&!r.error){
+          _photoUrlCache.set(r.path,{url:r.signedUrl,exp:now+PHOTO_URL_TTL*1000});
+          out.set(r.path,r.signedUrl);
+        }
+      });
+    }catch(e){console.error('signPhotoPaths',e);}
+  }
+  return out;
+}
+async function signedPhotoUrl(f){
+  const pt=photoPath(f);
+  if(!pt)return '';
+  return (await signPhotoPaths([pt])).get(pt)||'';
+}
+// подставляет ссылки во все <img data-ph="путь">, которым их ещё не подставили
+async function hydratePhotos(root){
+  const scope=(root&&root.querySelectorAll)?root:document;
+  const imgs=[...scope.querySelectorAll('img[data-ph]:not([data-ph-done])')];
+  if(!imgs.length)return;
+  imgs.forEach(i=>i.setAttribute('data-ph-done','1'));
+  const map=await signPhotoPaths([...new Set(imgs.map(i=>i.getAttribute('data-ph')).filter(Boolean))]);
+  imgs.forEach(i=>{const u=map.get(i.getAttribute('data-ph'));if(u)i.src=u;});
+}
+// фото рисуются в десятке мест — вместо правки каждого следим за появлением в DOM
+let _photoObserver=null;
+function startPhotoHydration(){
+  if(_photoObserver||!document.body)return;
+  _photoObserver=new MutationObserver(()=>{
+    if(document.querySelector('img[data-ph]:not([data-ph-done])'))hydratePhotos(document);
+  });
+  _photoObserver.observe(document.body,{childList:true,subtree:true});
+  hydratePhotos(document);
+}
 // сжимает изображение в браузере перед загрузкой: уменьшает до maxSide px и пережимает в JPEG.
 // Возвращает Blob (или исходный файл, если сжать не удалось).
 async function compressImage(file,maxSide=1280,quality=0.72){
@@ -364,9 +438,10 @@ async function uploadPhoto(prefix,file){
     const path=`${prefix}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
     const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false});
     if(error){console.error('upload',error);toast('Ошибка загрузки: '+error.message);return null;}
-    const {data}=sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    // публичную ссылку больше не сохраняем: бакет закрыт, она всё равно не работала бы.
+    // Для показа достаточно пути — под него выдаётся временная ссылка (signedPhotoUrl).
     // сохраняем, кто и когда загрузил фото (для новых фото)
-    return {path,url:data.publicUrl,by:(S.me&&(S.me.full_name||S.me.email))||'',at:new Date().toISOString()};
+    return {path,by:(S.me&&(S.me.full_name||S.me.email))||'',at:new Date().toISOString()};
   }catch(e){console.error(e);toast('Ошибка загрузки фото');return null;}
 }
 // совместимость со старым кодом заявок

@@ -381,12 +381,24 @@ function updateCollectedStat(){
 /* ---------- ФОТО ЗАЯВКИ: рендер блока и обработчики ---------- */
 const pickupPhotos=p=>Array.isArray(p.photos)?p.photos:[];
 // просмотр фото на весь экран
-function viewPhoto(url){
-  // открываем фото в отдельной вкладке браузера
-  window.open(url,'_blank','noopener,noreferrer');
+function viewPhoto(f){
+  // f — путь в хранилище. Сначала пробуем ссылку из кеша: она уже есть, потому что
+  // миниатюру только что показали, и тогда вкладка открывается прямо по клику —
+  // если открыть её после ожидания, браузер посчитает это всплывающим окном и заблокирует.
+  const ready=cachedPhotoUrl(f);
+  if(ready){window.open(ready,'_blank','noopener,noreferrer');return;}
+  signedPhotoUrl(f).then(u=>{
+    if(u)window.open(u,'_blank','noopener,noreferrer');
+    else toast('Не удалось открыть фото');
+  });
 }
 // увеличение фото поверх текущего окна (без новой вкладки), закрытие по клику/Esc
-function zoomPhoto(url){
+function zoomPhoto(f){
+  const ready=cachedPhotoUrl(f);
+  if(!ready){signedPhotoUrl(f).then(u=>{if(u)_zoomPhotoWith(u);else toast('Не удалось открыть фото');});return;}
+  _zoomPhotoWith(ready);
+}
+function _zoomPhotoWith(url){
   const ov=document.createElement('div');ov.className='photo-zoom-ov';
   ov.innerHTML=`<button class="pz-x" aria-label="Закрыть">×</button><img src="${esc(url)}" alt="">`;
   const close=()=>{ov.remove();document.removeEventListener('keydown',onKey);};
@@ -399,7 +411,7 @@ function zoomPhoto(url){
 function photoBlockHtml(p,canEdit){
   const ph=pickupPhotos(p);
   const thumbs=ph.map((f,i)=>`<div class="photo-thumb">
-    <img src="${esc(f.url)}" data-pview-photo="${esc(f.url)}" loading="lazy" decoding="async">
+    <img data-ph="${esc(photoPath(f))}" data-pview-photo="${esc(photoPath(f))}" loading="lazy" decoding="async">
     ${canEdit?`<button class="del" data-pdelphoto="${p.id}" data-idx="${i}" title="Удалить">×</button>`:''}
   </div>`).join('');
   const adder=canEdit?`<label class="photo-add">📷 Снять фото
@@ -419,12 +431,12 @@ function orderPhotoFieldHtml(o,canEdit){
 function orderBigPhotoInner(o,canEdit){
   const ph=pickupPhotos(o);
   const big=ph.length
-    ? `<div class="obig-wrap"><img class="obig-photo" id="obigMain" src="${esc(ph[0].url)}" data-oviewphoto="${esc(ph[0].url)}" alt=""></div>`
+    ? `<div class="obig-wrap"><img class="obig-photo" id="obigMain" data-ph="${esc(photoPath(ph[0]))}" data-oviewphoto="${esc(photoPath(ph[0]))}" alt=""></div>`
     : `<div class="obig-empty">Фото заказа нет</div>`;
   // подпись: кто загрузил текущее (первое) фото
   const byLine=ph.length?`<div class="obig-by" id="obigBy">${photoByLabel(ph[0])}</div>`:'';
   const rotBtns=ph.length?`<div class="obig-rotate"><button type="button" class="btn sm" id="orotL">↺ Влево</button><button type="button" class="btn sm" id="orotR">↻ Вправо</button></div>`:'';
-  const thumbs=ph.length>1?`<div class="obig-thumbs">${ph.map((f,i)=>`<img src="${esc(f.url)}" data-obigthumb="${esc(f.url)}" data-obigby="${esc(photoByLabel(f))}" class="${i===0?'active':''}">`).join('')}</div>`:'';
+  const thumbs=ph.length>1?`<div class="obig-thumbs">${ph.map((f,i)=>`<img data-ph="${esc(photoPath(f))}" data-obigthumb="${esc(photoPath(f))}" data-obigby="${esc(photoByLabel(f))}" class="${i===0?'active':''}">`).join('')}</div>`:'';
   const adder=canEdit?`<div class="photo-grid" style="margin-top:10px">
     <label class="photo-add">📷 Снять фото<input type="file" accept="image/*" capture="environment" multiple data-paddphoto="${o.id}" style="display:none"></label>
     <label class="photo-add">🖼️ Из галереи<input type="file" accept="image/*" multiple data-paddphoto="${o.id}" style="display:none"></label>
