@@ -183,7 +183,10 @@ function renderPTabProfile(partner){
       <button class="pcab-clear" id="pcabCopyLink">Скопировать ссылку</button>
     </div>`;
   const img=$('pcabQrImg');
-  if(img)img.src='https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data='+encodeURIComponent(link);
+  // QR рисуем локально. Раньше картинку заказывали у api.qrserver.com, передавая ссылку
+  // с кодом доступа прямо в адресе запроса — то есть пароль партнёра уходил третьей
+  // стороне и оставался у неё в логах.
+  if(img)renderQrInto(img,link,220);
   const cp=$('pcabCopyLink');
   if(cp)cp.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(link).then(()=>toast('Ссылка скопирована')).catch(()=>toast('Не удалось скопировать'));};
 }

@@ -227,7 +227,17 @@ function partnerModal(id){
     </div>
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
-    <div class="field"><label>QR-код / номер доступа в кабинет</label><input id="p_qr" value="${esc(p.qr_code||'')}" placeholder="например 1001"><small style="color:var(--muted);font-size:12px">Ссылка для партнёра: jyldam-crm.kz/?p=ЭТОТ_НОМЕР</small></div>
+    <div class="field"><label>Доступ в кабинет партнёра</label>
+      <input id="p_qr" value="${esc(p.qr_code||'')}" readonly placeholder="код ещё не выдан"
+        style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;letter-spacing:.02em">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button type="button" class="btn ghost sm" id="p_gen_qr">🔐 ${p.qr_code?'Сменить код':'Выдать код'}</button>
+        <button type="button" class="btn ghost sm" id="p_copy_qr">📋 Скопировать ссылку</button>
+        <button type="button" class="btn ghost sm" id="p_show_qr">🔳 Показать QR</button>
+      </div>
+      <small style="color:var(--muted);font-size:12px">Ссылка с этим кодом пускает в кабинет <b>без пароля</b> — отправляйте её только самому партнёру. Смена кода сразу ломает старую ссылку.</small>
+      <div id="p_qr_box" style="margin-top:10px"></div>
+    </div>
     ${id?`<div class="field"><label>Приём заказов по API</label>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span class="wh-cat">${p.api_token_hash?'✅ токен настроен':'токен не выдан'}</span>
@@ -283,6 +293,41 @@ function partnerModal(id){
       toast('Сохранено'+syncMsg);renderPartnersPage();return true;});
   attachPhone('p_phone',p.phone);
   const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
+  // ---- доступ в кабинет партнёра ----
+  const qrInp=$('p_qr');
+  // новому партнёру код выдаём сразу, чтобы менеджер не забыл этот шаг
+  if(qrInp&&!id&&!qrInp.value.trim())qrInp.value=genPartnerCode();
+  const qrBox=$('p_qr_box');
+  const paintQr=()=>{
+    const code=qrInp?qrInp.value.trim():'';
+    if(!qrBox)return;
+    if(!code){qrBox.innerHTML='';return;}
+    qrBox.dataset.shown='1';
+    qrBox.innerHTML='<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;display:inline-block">'+
+      '<img id="p_qr_img" width="200" height="200" alt="QR партнёра"></div>';
+    renderQrInto($('p_qr_img'),partnerCabinetLink(code),200);
+  };
+  const genQr=$('p_gen_qr');
+  if(genQr)genQr.onclick=()=>{
+    if(qrInp.value.trim()&&!confirm('Старая ссылка партнёра перестанет работать сразу после сохранения. Сменить код?'))return;
+    qrInp.value=genPartnerCode();
+    genQr.textContent='🔐 Сменить код';
+    toast('Код создан. Сохраните карточку и отправьте партнёру новую ссылку');
+    if(qrBox&&qrBox.dataset.shown)paintQr();
+  };
+  const copyQr=$('p_copy_qr');
+  if(copyQr)copyQr.onclick=async()=>{
+    const code=qrInp.value.trim();
+    if(!code){toast('Сначала выдайте код');return;}
+    const link=partnerCabinetLink(code);
+    try{await navigator.clipboard.writeText(link);toast('Ссылка скопирована');}
+    catch(e){prompt('Скопируйте ссылку для партнёра:',link);}   // запасной путь, если буфер недоступен
+  };
+  const showQr=$('p_show_qr');
+  if(showQr)showQr.onclick=()=>{
+    if(!qrInp.value.trim()){toast('Сначала выдайте код');return;}
+    paintQr();
+  };
   const genBtn=$('p_gen_token');
   if(genBtn)genBtn.onclick=async()=>{
     if(p.api_token_hash&&!confirm('Старый токен перестанет работать, если у партнёра уже настроена интеграция. Продолжить?'))return;

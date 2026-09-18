@@ -14,6 +14,53 @@ let _partnerQR=''; // текущий QR-код партнёра (кабинет 
 
 const $=id=>document.getElementById(id);
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- ДОСТУП В КАБИНЕТ ПАРТНЁРА ---------- */
+// Код доступа — единственный пароль партнёра: ссылка ?p=КОД пускает в кабинет без логина,
+// позволяет читать его заказы (ФИО, телефоны, адреса), вызывать курьера и менять заказы.
+// Раньше код вписывал менеджер руками, а подсказка в поле предлагала «например 1001» —
+// четыре цифры перебираются за минуты. Теперь код выдаётся криптостойким генератором.
+// Алфавит без похожих друг на друга знаков (нет 0/o, 1/l/i) — чтобы код можно было
+// продиктовать или переписать с экрана без ошибок.
+const PARTNER_CODE_ALPHABET='23456789abcdefghjkmnpqrstuvwxyz';
+function genPartnerCode(len){
+  len=len||26;                       // 26 знаков по 31 варианту ≈ 128 бит, перебор невозможен
+  const a=new Uint32Array(len);
+  crypto.getRandomValues(a);         // именно crypto, а не Math.random: тот предсказуем
+  let out='';
+  for(let i=0;i<len;i++)out+=PARTNER_CODE_ALPHABET[a[i]%PARTNER_CODE_ALPHABET.length];
+  return out;
+}
+function partnerCabinetLink(code){
+  return location.origin+location.pathname+'?p='+encodeURIComponent(code||'');
+}
+// QR рисуем В БРАУЗЕРЕ. Раньше картинку заказывали у api.qrserver.com, передавая ссылку
+// с кодом доступа прямо в адресе запроса — секрет партнёра уходил третьей стороне и
+// оставался у неё в логах. Библиотека грузится только когда QR реально понадобился.
+let _qrLibPromise=null;
+function ensureQrLib(){
+  if(window.qrcode)return Promise.resolve();
+  if(!_qrLibPromise)_qrLibPromise=new Promise((resolve,reject)=>{
+    const el=document.createElement('script');
+    el.src='https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+    el.onload=()=>resolve();
+    el.onerror=()=>{_qrLibPromise=null;reject(new Error('Не удалось загрузить библиотеку QR'));};
+    document.head.appendChild(el);
+  });
+  return _qrLibPromise;
+}
+async function renderQrInto(img,text,size){
+  if(!img)return false;
+  try{
+    await ensureQrLib();
+    const qr=window.qrcode(0,'M');   // 0 — версия подбирается по длине данных
+    qr.addData(String(text||''));
+    qr.make();
+    const cell=Math.max(3,Math.round((size||220)/qr.getModuleCount()));
+    img.src=qr.createDataURL(cell,8);
+    return true;
+  }catch(e){console.error('QR',e);toast('Не удалось нарисовать QR-код');return false;}
+}
 const uidLocal=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
 
