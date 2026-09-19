@@ -120,6 +120,91 @@ function inboundOnlyDateFilterActive(){
 }
 // границы для серверного запроса created_at — явный диапазон дат из фильтра, иначе «сегодня»,
 // иначе последние N дней / вся история
+/* ---- ФИЛЬТРАЦИЯ НА СТОРОНЕ БАЗЫ ----
+   Раньше любой фильтр включал полную загрузку: 36 тысяч заказов и 87 тысяч позиций,
+   десятки мегабайт в память, только чтобы отобрать полсотни строк в браузере.
+   Теперь то, что выражается запросом, считает база, и качается одна страница.
+   Всё, что запросом не выражается (партнёр — он вычисляется через состав заказа,
+   склад, звонки, переведённые на русский статусы), по-прежнему требует полной
+   загрузки. Лучше честно подождать, чем показать неполный список. */
+// фильтр по колонке → поле в базе. Поля, которых тут нет, запросом не выражаются.
+const INB_SERVER_COL={
+  client:['client'], phone:['phone'], city:['city'], index:['index'],
+  logistics_operator:['logistics_operator'], sender_ip:['sender_ip'], kz_code:['kz_code'],
+  external_id:['external_id','source'],   // в интерфейсе это одна колонка из двух полей
+};
+function inboundNeedsFullLoad(){
+  if(inbFilter.partner)return true;                    // партнёр — только через состав заказа
+  for(const key in inbColFilters){
+    if((inbColFilters[key]||'').trim()&&!INB_SERVER_COL[key])return true;
+  }
+  return false;
+}
+// экранируем то, что PostgREST разбирает как разделители внутри or(...)
+function inbEsc(v){return String(v).replace(/[(),*]/g,' ').trim();}
+// накладываем на запрос всё, что можно посчитать в базе
+function inboundApplyServerFilters(q){
+  const b=inboundQueryDateBounds();
+  if(b.gte)q=q.gte('created_at',b.gte);
+  if(b.lt)q=q.lt('created_at',b.lt);
+  if(inbFilter.status)q=q.eq('send_status',inbFilter.status);
+  if(inbFilter.callStatus)q=q.eq('call_status',inbFilter.callStatus);
+  if(inbFilter.statusKz)q=q.eq('status_kz',inbFilter.statusKz);
+  // тип доставки: курьерская — индекса нет, почтовая — индекс заполнен
+  if(inbFilter.delivery==='courier')q=q.is('index',null);
+  else if(inbFilter.delivery==='mail')q=q.not('index','is',null);
+  // фильтры по колонкам — вхождение подстроки без учёта регистра
+  for(const key in inbColFilters){
+    const val=inbEsc(inbColFilters[key]||'');
+    const cols=INB_SERVER_COL[key];
+    if(!val||!cols)continue;
+    if(cols.length===1)q=q.ilike(cols[0],'%'+val+'%');
+    else q=q.or(cols.map(c=>`${c}.ilike.%${val}%`).join(','));
+  }
+  // общий поиск: несколько значений через пробел/запятую — подходит совпавший с любым.
+  // Телефон в базе хранится цифрами, поэтому для запроса с цифрами ищем ещё и по ним:
+  // иначе вставленный '+7 701 234 56 78' не нашёл бы ничего.
+  const qs=(inbFilter.q||'').trim();
+  if(qs){
+    const terms=qs.split(/[\s,;]+/).filter(Boolean).map(inbEsc).filter(Boolean);
+    const parts=[];
+    for(const t of terms){
+      parts.push(`external_id.ilike.%${t}%`,`client.ilike.%${t}%`,`phone.ilike.%${t}%`);
+      const digits=t.replace(/\D/g,'');
+      if(digits.length>=4)parts.push(`phone.ilike.%${digits}%`);
+    }
+    // Отдельно — цифры ВСЕЙ строки целиком. Иначе вставленный '+7 701 234 56 78'
+    // распадается на куски по пробелам и по телефону не находится. Раньше это
+    // спасалось тем, что поиск шёл ещё и по отформатированному телефону.
+    const allDigits=qs.replace(/\D/g,'');
+    if(allDigits.length>=6){
+      const tail=allDigits.slice(-10);      // в базе телефон хранится без кода страны
+      parts.push(`phone.ilike.%${tail}%`);
+    }
+    if(parts.length)q=q.or(parts.join(','));
+  }
+  return q;
+}
+
+// Фильтр изменился. Если его умеет посчитать база — перезапрашиваем первую страницу
+// и счётчики (несколько килобайт). Если нет (партнёр, склад, звонки) — грузим всё
+// целиком, как раньше: лучше подождать, чем показать неполный список.
+async function inboundApplyFilterChange(){
+  inbPage=1;
+  inbSelectAll=false;
+  if(S.inbound_full_loaded)return;          // всё уже в памяти — отберём локально
+  if(inboundNeedsFullLoad()){
+    toast('Загружаем весь список для фильтра…');
+    try{await loadInbound({full:true});}catch(e){}
+    return;
+  }
+  _inboundPageCache.clear();                // страницы считались по прежним условиям
+  try{
+    await loadInboundCounts();
+    const pg=await loadInboundPage(1);
+    S.inbound_orders=pg.orders;S.inbound_items=pg.items;
+  }catch(e){console.error('inboundApplyFilterChange',e);}
+}
 function inboundQueryDateBounds(){
   if(inbFilter.dateFrom||inbFilter.dateTo){
     const gte=inbFilter.dateFrom?new Date(inbFilter.dateFrom+'T00:00:00').toISOString():null;
@@ -133,11 +218,8 @@ function inboundQueryDateBounds(){
 let _inboundCounts={total:0,courier:0,mail:0,unmatched:0}; // точные счётчики с сервера (для карточек статистики и пагинации в быстром режиме)
 let _inboundPageCache=new Map(); // page → {orders,items}, чтобы не перезапрашивать уже открытую страницу
 async function loadInboundCounts(){
-  const bounds=inboundQueryDateBounds();
-  const build=()=>{let q=sb.from('inbound_orders').select('id',{count:'exact',head:true});
-    if(bounds.gte)q=q.gte('created_at',bounds.gte);
-    if(bounds.lt)q=q.lt('created_at',bounds.lt);
-    return q;};
+  // счётчики считаем по тем же условиям, что и сам список — иначе «Всего» не сойдётся
+  const build=()=>inboundApplyServerFilters(sb.from('inbound_orders').select('id',{count:'exact',head:true}));
   try{
     const [tot,cou,mai]=await Promise.all([build(),build().is('index',null),build().not('index','is',null)]);
     _inboundCounts={total:tot.count||0,courier:cou.count||0,mail:mai.count||0};
@@ -160,9 +242,7 @@ async function loadInboundPage(page){
   const from=(page-1)*inbPerPage,to=from+inbPerPage-1;
   try{
     let q=sb.from('inbound_orders').select('*').order('created_at',{ascending:false}).range(from,to);
-    const bounds=inboundQueryDateBounds();
-    if(bounds.gte)q=q.gte('created_at',bounds.gte);
-    if(bounds.lt)q=q.lt('created_at',bounds.lt);
+    q=inboundApplyServerFilters(q);   // даты, статусы, поиск — считает база, а не браузер
     const {data:orders,error}=await q;
     if(error)throw error;
     const ids=(orders||[]).map(o=>o.id);
@@ -552,11 +632,8 @@ function openInboundColFilter(th,key){
     sel.focus();
     const applyDelivery=async(val)=>{
       inbFilter.delivery=val;
-      if(inboundHasActiveFilters()&&!S.inbound_full_loaded){
-        toast('Загружаем весь список для фильтра…');
-        try{await loadInbound({full:true});}catch(e){}
-      }
-      inbPage=1;drawInboundOrders();
+      await inboundApplyFilterChange();
+      drawInboundOrders();
     };
     // единая функция закрытия — вызывается ЛЮБЫМ способом (выбор варианта, клик мимо), всегда
     // снимает и попап, и обработчик на document. Раньше отдельные пути закрытия не всегда снимали
@@ -585,11 +662,7 @@ function openInboundColFilter(th,key){
   const apply=async(val)=>{
     inbColFilters[key]=val;
     if(!val)delete inbColFilters[key];
-    if(inboundColFiltersActive()&&!S.inbound_full_loaded){
-      toast('Загружаем весь список для фильтра…');
-      try{await loadInbound({full:true});}catch(e){}
-    }
-    inbPage=1;
+    await inboundApplyFilterChange();
     drawInboundOrders();
   };
   // единая функция закрытия — Escape/Enter/крестик/клик мимо все идут через неё, обработчик на
@@ -619,7 +692,10 @@ function drawInboundOrders(){
   // если единственный активный фильтр — диапазон дат (без остальных полей, без фильтров по
   // столбцу) — можно оставаться в быстром постраничном режиме, сервер сам применит эти границы
   const dateOnlyFilter=inboundOnlyDateFilterActive()&&!inboundColFiltersActive();
-  const lazy=!S.inbound_full_loaded&&(!anyFilter||dateOnlyFilter); // быстрый режим: постранично с сервера, без полного набора в памяти
+  // Быстрый постраничный режим держится теперь не на «фильтров нет» и не только на диапазоне
+  // дат: почти всё, что вводит пользователь, умеет посчитать база. Полная загрузка нужна лишь
+  // для того, что запросом не выразить (см. inboundNeedsFullLoad).
+  const lazy=!S.inbound_full_loaded&&!inboundNeedsFullLoad();
   const list=S.inbound_orders||[]; // в быстром режиме — только текущая страница; иначе — весь (отфильтрованный по дате) набор
   const allRows=lazy?list:filteredInbound();
   const totalCount=lazy?_inboundCounts.total:allRows.length;
@@ -751,21 +827,7 @@ function drawInboundOrders(){
   renderInboundPager(totalCount,totalPages,startIdx,rows.length);
   const redraw=async()=>{
     const active=document.activeElement;const fid=active&&active.id;const pos=active&&active.selectionStart;
-    inbPage=1; // при смене фильтра — на первую страницу
-    inbSelectAll=false;
-    const dateOnly=inboundOnlyDateFilterActive()&&!inboundColFiltersActive();
-    if(dateOnly&&!S.inbound_full_loaded){
-      // только дата — быстрый серверный запрос по этому диапазону, не тянем всю историю
-      _inboundPageCache.clear();
-      try{
-        await loadInboundCounts();
-        const pg=await loadInboundPage(1);
-        S.inbound_orders=pg.orders;S.inbound_items=pg.items;
-      }catch(e){}
-    }else if(inboundHasActiveFilters()&&!S.inbound_full_loaded){
-      toast('Загружаем весь список для фильтра…');
-      try{await loadInbound({full:true});}catch(e){}
-    }
+    await inboundApplyFilterChange();
     drawInboundOrders();
     if(fid){const el=$(fid);if(el){el.focus();try{el.setSelectionRange(pos,pos);}catch(e){}}}
   };
