@@ -148,6 +148,7 @@ function renderSorting(){
   const courierCnt=processed.filter(o=>isCourierDelivery(o.delivery_id)).length;
   const mailCnt=total-courierCnt;
   const isToday=sortingDate===localToday();
+  const labelQueue=processed.filter(labelNeedsPrint);
   // для админа (город не задан) — разбивка по городам: сколько заказов в каждом, сколько принято
   let cityBreakdownHtml='';
   if(!myCity){
@@ -199,6 +200,7 @@ function renderSorting(){
         ${!isToday?'<button class="btn ghost sm" id="sortDateToday">Сегодня</button>':''}
       </div>
     </div>
+    ${labelPrintPanelHtml(labelQueue,isToday)}
     <div class="panel" style="margin-top:18px">
       <div class="panel-head"><h2>Список заказов</h2><span class="count">${total}</span></div>
       <p class="hint" style="margin:0 20px 10px;color:var(--muted)">Нажмите на заказ, чтобы вручную отметить его принятым/непринятым.</p>
@@ -231,6 +233,7 @@ function renderSorting(){
     searchEl.oninput=()=>{sortingListSearch=searchEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
     // курсор остаётся в поле при вводе — перерисовываем только таблицу, не весь экран
   }
+  bindLabelPrintPanel(labelQueue,isToday);
   renderSortListOnly();
 }
 // обработчик клика по строке в списке заказов — вынесен отдельно, используется и при полной,
@@ -441,4 +444,172 @@ function renderSortManualPick(data,extraCandidates){
     });
   };
   bindPickClicks();
+}
+
+// ==================== ПЕЧАТЬ ПОЧТОВЫХ БЛАНКОВ ИЗ «СОРТИРОВКИ» ====================
+// Задача: кладовщик отсканировал накладную телефоном — и на складском принтере
+// сам по себе выехал бланк, который остаётся наклеить.
+//
+// Телефон напрямую на складской принтер печатать не умеет, поэтому сканирование и
+// печать разведены: телефон только отмечает заказ принятым, а бланк печатает тот
+// компьютер, где включена «Автопечать» (галочка ниже) и открыт этот раздел.
+// Галочка хранится в localStorage — она СВОЯ У КАЖДОГО УСТРОЙСТВА, чтобы телефон
+// кладовщика не начал печатать заодно с компьютером.
+//
+// Молча, без диалога «куда печатать», печатает только Chrome, запущенный с ключом
+// --kiosk-printing. В обычном браузере выйдет обычный диалог печати.
+const LABEL_AUTOPRINT_KEY='jyldam_label_autoprint';
+const LABEL_SINGLE_WAIT_MS=60000;  // сколько ждать пару к одинокому бланку, прежде чем печатать его одного
+let _labelSingleTimer=null;        // таймер этого ожидания
+let _labelSingleSince=null;        // {id,at} — когда одинокий бланк появился впервые
+let _labelPrintBusy=false;         // защита от повторного запуска, пока готовится лист
+let _labelPrintPauseUntil=0;       // до какого момента не пробовать печатать после неудачи
+let _lastLabelSheet=null;          // последний собранный лист — для «Перепечатать»
+
+function labelAutoPrintOn(){
+  try{return localStorage.getItem(LABEL_AUTOPRINT_KEY)==='1';}catch(e){return false;}
+}
+function setLabelAutoPrint(on){
+  try{localStorage.setItem(LABEL_AUTOPRINT_KEY,on?'1':'0');}catch(e){}
+}
+// бланк нужен почтовому заказу, который уже приняли на складе и на который бланк ещё не печатали
+function labelNeedsPrint(o){
+  return !isCourierDelivery(o.delivery_id)&&!!o.sorted_at&&!o.label_printed_at;
+}
+function labelPrintPanelHtml(queue,isToday){
+  const auto=labelAutoPrintOn();
+  return `
+    <div class="panel" style="max-width:560px;margin:16px auto 0">
+      <div class="panel-head"><h2>🖨 Печать бланков</h2><span class="count">${queue.length}</span></div>
+      <div style="padding:12px 16px 16px">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:15px">
+          <input type="checkbox" id="labelAutoPrint" ${auto?'checked':''} style="width:18px;height:18px">
+          <span>Автопечать на этом устройстве</span>
+        </label>
+        <p class="hint" style="margin:8px 0 0;color:var(--muted);font-size:12px">
+          Включайте только на компьютере, к которому подключён принтер. На лист A4 идут два
+          бланка, по линии реза лист разрезается пополам. Одинокий бланк ждёт пару до минуты,
+          потом печатается один.
+        </p>
+        ${!isToday?'<p class="hint" style="margin:8px 0 0;color:var(--rust);font-size:12px">Выбран прошлый день — автопечать не работает, чтобы не напечатать старое. Кнопкой ниже можно напечатать вручную.</p>':''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button class="btn primary sm" id="labelPrintNow" ${queue.length?'':'disabled'}>🖨 Печатать все (${queue.length})</button>
+          <button class="btn ghost sm" id="labelOpenPdf" ${queue.length?'':'disabled'}>Открыть PDF</button>
+          ${_lastLabelSheet?'<button class="btn ghost sm" id="labelReprint">↻ Перепечатать последний лист</button>':''}
+        </div>
+      </div>
+    </div>`;
+}
+function bindLabelPrintPanel(queue,isToday){
+  const chk=$('labelAutoPrint');
+  if(chk)chk.onchange=()=>{
+    setLabelAutoPrint(chk.checked);
+    toast(chk.checked?'Автопечать включена на этом устройстве':'Автопечать выключена');
+    renderSorting();
+  };
+  const nowBtn=$('labelPrintNow');
+  if(nowBtn)nowBtn.onclick=()=>printLabelsFor(queue,{open:false});
+  const openBtn=$('labelOpenPdf');
+  if(openBtn)openBtn.onclick=()=>printLabelsFor(queue,{open:true});
+  const rep=$('labelReprint');
+  if(rep)rep.onclick=async()=>{
+    if(!_lastLabelSheet)return;
+    await printPdfBytes(_lastLabelSheet);
+  };
+  labelAutoPrintTick(queue,isToday);
+}
+// Решает, печатать ли прямо сейчас. Вызывается при каждой перерисовке раздела —
+// в том числе когда заказ прилетел через Realtime от телефона кладовщика.
+function labelAutoPrintTick(queue,isToday){
+  if(_labelSingleTimer){clearTimeout(_labelSingleTimer);_labelSingleTimer=null;}
+  if(!queue.length)_labelSingleSince=null;
+  if(!isToday||!labelAutoPrintOn()||_labelPrintBusy||!queue.length)return;
+  // Пауза после неудачной попытки. Без неё автопечать зацикливается: печать не
+  // удалась → заказ остался в очереди → перерисовка → снова попытка, и так без
+  // конца, десятки запросов в секунду. Ловилось на проверке.
+  if(Date.now()<_labelPrintPauseUntil){
+    _labelSingleTimer=setTimeout(()=>{_labelSingleTimer=null;renderSorting();},_labelPrintPauseUntil-Date.now()+200);
+    return;
+  }
+  if(queue.length>=2){_labelSingleSince=null;printLabelsFor(queue,{open:false});return;}
+  // Один бланк — ждём пару, чтобы не тратить лист на половину. Если за минуту никто
+  // ничего не отсканировал, печатаем его одного: посылка не должна ждать.
+  //
+  // Отсчёт идёт от ПЕРВОГО появления этого бланка, а не от последней перерисовки.
+  // Иначе ожидание не кончится никогда: раздел перерисовывается на каждое изменение
+  // в базе (Realtime), и таймер сбрасывался бы снова и снова.
+  const id=queue[0].id;
+  if(!_labelSingleSince||_labelSingleSince.id!==id)_labelSingleSince={id,at:Date.now()};
+  const left=Math.max(0,LABEL_SINGLE_WAIT_MS-(Date.now()-_labelSingleSince.at));
+  _labelSingleTimer=setTimeout(()=>{
+    _labelSingleTimer=null;
+    const fresh=(S.orders||[]).filter(o=>o.id===id&&labelNeedsPrint(o));
+    if(fresh.length)printLabelsFor(fresh,{open:false});
+  },left);
+}
+// Занимаем заказы ДО печати: условие `is('label_printed_at',null)` не даст двум
+// устройствам напечатать один бланк дважды — второму просто ничего не достанется.
+async function claimLabels(orders){
+  const meName=(S.me&&(S.me.full_name||S.me.email))||'';
+  const stamp={label_printed_at:new Date().toISOString(),label_printed_by:meName};
+  const claimed=[];
+  for(const o of orders){
+    const {data,error}=await sb.from('orders').update(stamp).eq('id',o.id).is('label_printed_at',null).select();
+    if(error){
+      console.error('отметка о печати бланка',error);
+      // Ошибку возвращаем наружу: «не смогли» и «уже напечатано другим» — разные
+      // вещи, и сообщать о них надо по-разному.
+      return {claimed,error};
+    }
+    if(data&&data.length){Object.assign(o,data[0]);claimed.push(o);continue;}
+    // Ничего не обновилось — бланк уже занят другим устройством. Обязательно
+    // подтягиваем его отметку в память: иначе заказ останется в очереди и
+    // следующая же перерисовка попытается напечатать его снова, и так без конца.
+    const {data:cur}=await sb.from('orders').select('id,label_printed_at,label_printed_by').eq('id',o.id).single();
+    if(cur)Object.assign(o,cur);
+  }
+  return {claimed,error:null};
+}
+const LABEL_PAUSE_AFTER_FAIL_MS=60000; // пауза перед следующей попыткой, если печать не удалась
+async function printLabelsFor(orders,opts){
+  if(_labelPrintBusy||!orders.length)return;
+  _labelPrintBusy=true;
+  let printed=false;
+  const btn=$('labelPrintNow');const orig=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='Готовим…';}
+  try{
+    const {claimed,error}=await claimLabels(orders);
+    if(error){toast('Не удалось отметить бланки: '+error.message);return;}
+    if(!claimed.length){toast('Бланки уже напечатаны на другом устройстве');return;}
+    const bytes=await buildMailLabelSheet(claimed);
+    if(!bytes){
+      // лист не собрался — снимаем отметку, иначе бланки потеряются молча
+      await unclaimLabels(claimed);
+      return;
+    }
+    _lastLabelSheet=bytes;
+    if(opts&&opts.open)await openOrDownloadPdf(bytes,'Бланки_сортировка.pdf');
+    else await printPdfBytes(bytes);
+    printed=true;
+    toast(`Бланков: ${claimed.length}`);
+  }catch(e){
+    console.error('печать бланков',e);
+    toast('Ошибка печати: '+(e&&e.message||e));
+  }finally{
+    _labelPrintBusy=false;
+    // Ничего не напечаталось — ждём минуту, прежде чем пробовать снова. Причина
+    // обычно не проходит мгновенно (нет колонок в базе, нет сети), а без паузы
+    // автопечать зациклится на перерисовках.
+    _labelPrintPauseUntil=printed?0:Date.now()+LABEL_PAUSE_AFTER_FAIL_MS;
+    if(btn){btn.disabled=false;btn.textContent=orig;}
+    renderSorting();
+  }
+}
+// возврат в очередь, если лист так и не собрался
+async function unclaimLabels(orders){
+  for(const o of orders){
+    const u=await dbUpdate('orders',o.id,{label_printed_at:null,label_printed_by:null});
+    if(u)Object.assign(o,u);
+  }
+  toast('Не удалось собрать бланки — заказы остались в очереди');
 }

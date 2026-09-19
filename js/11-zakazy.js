@@ -908,18 +908,82 @@ async function openOrDownloadPdf(bytes,filename){
   }
   setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
-// бланки для «своих» заказов (Заказы → Почтовая доставка)
-async function printMailLabelsPdf(orders){
-  const items=orders.map(o=>({
+// данные заказа для бланка — одно место, из него берут и массовая печать, и «Сортировка»
+function mailLabelItems(orders){
+  return orders.map(o=>({
     order:o,   // нужен, чтобы взять данные выбранного ИП
     client:o.client,address:o.address,index:o.index||'',
     phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
     amount:(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0),
   }));
-  const bytes=await generateMailLabelsPdf(items);
+}
+// бланки для «своих» заказов (Заказы → Почтовая доставка)
+async function printMailLabelsPdf(orders){
+  const bytes=await generateMailLabelsPdf(mailLabelItems(orders));
   if(!bytes)return;
   await openOrDownloadPdf(bytes,'Бланки_почта.pdf');
   toast(`Готово: бланков ${orders.length}`);
+}
+
+// ==================== ЛИСТ A4 ИЗ ДВУХ БЛАНКОВ ====================
+// Раньше два бланка на листе получали вручную: в диалоге печати выставляли A5 и
+// «2 страницы на листе». Для автоматической печати из «Сортировки» диалога нет,
+// поэтому лист собираем сами.
+//
+// Бланк — A4 альбомный (841.89×595.28). Уменьшенный в 0.7071 раза он становится
+// A5 альбомным, и два таких ровно укладываются в A4 книжный. Масштаб считаем из
+// размеров самой страницы, а не числом: если шаблон когда-нибудь заменят на
+// другой формат, лист всё равно соберётся правильно.
+async function composeTwoUpPdf(singleBytes){
+  const {PDFDocument,rgb}=PDFLib;
+  const src=await PDFDocument.load(singleBytes);
+  const out=await PDFDocument.create();
+  const embedded=await out.embedPdf(src,src.getPageIndices());
+  const A4W=595.276,A4H=841.89,HALF=A4H/2;
+  for(let i=0;i<embedded.length;i+=2){
+    const page=out.addPage([A4W,A4H]);
+    for(let k=0;k<2;k++){
+      const em=embedded[i+k];if(!em)break;
+      const sc=Math.min(A4W/em.width,HALF/em.height);
+      page.drawPage(em,{
+        x:(A4W-em.width*sc)/2,
+        y:(k===0?HALF:0)+(HALF-em.height*sc)/2,   // первый бланк сверху, второй снизу
+        xScale:sc,yScale:sc,
+      });
+    }
+    // линия реза — лист режут пополам, на глаз середину не поймать
+    page.drawLine({start:{x:0,y:HALF},end:{x:A4W,y:HALF},thickness:0.5,color:rgb(0.7,0.7,0.7),dashArray:[5,5]});
+  }
+  return await out.save();
+}
+// готовый лист (или несколько) по списку заказов — по два бланка на лист
+async function buildMailLabelSheet(orders){
+  const single=await generateMailLabelsPdf(mailLabelItems(orders));
+  if(!single)return null;
+  return await composeTwoUpPdf(single);
+}
+// Печать без новой вкладки: PDF кладём в невидимый iframe и печатаем оттуда.
+// Именно здесь Chrome, запущенный с ключом --kiosk-printing, печатает молча,
+// без диалога — ради этого всё и затевалось.
+// В Safari печать PDF из iframe работает не всегда, поэтому рядом в «Сортировке»
+// оставлена кнопка «Открыть PDF» — запасной путь через обычную вкладку.
+function printPdfBytes(bytes){
+  return new Promise(resolve=>{
+    const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+    const fr=document.createElement('iframe');
+    fr.style.cssText='position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0';
+    fr.onload=()=>{
+      let ok=true;
+      try{fr.contentWindow.focus();fr.contentWindow.print();}
+      catch(e){ok=false;console.error('печать бланка',e);}
+      // окно печати держит iframe, убирать сразу нельзя — чистим с запасом
+      setTimeout(()=>{URL.revokeObjectURL(url);fr.remove();},120000);
+      resolve(ok);
+    };
+    fr.onerror=()=>{URL.revokeObjectURL(url);fr.remove();resolve(false);};
+    fr.src=url;
+    document.body.appendChild(fr);
+  });
 }
 // бланки для входящих заказов КЕТ (Заказы → Заказы КЕТ)
 async function printInboundMailLabelsPdf(orders){
