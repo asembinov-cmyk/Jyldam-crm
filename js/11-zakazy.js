@@ -714,12 +714,47 @@ async function ensurePdfLib(){
     loadScriptOnce('https://unpkg.com/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js'),
   ]);
 }
+/* ---- НАСТРОЙКИ БЛАНКА КАЗПОЧТЫ ----
+   Раньше данные отправителя были ВПЕЧАТАНЫ в PDF-шаблон: сменить ИП, адрес или номер
+   договора можно было только заменой файла. Теперь шаблон чистый (assets/mail-label-blank.pdf,
+   получен из исходного удалением этих надписей), а значения рисуются отсюда.
+   Значения по умолчанию — ровно те, что стояли в старом бланке: если таблицы ещё нет или
+   она недоступна, бланк напечатается как раньше, а не пустым. */
+const MAIL_LABEL_DEFAULTS={
+  sender:'ТОО QP Service (ИП Ахитова Гульшарат)',
+  from_addr:'г.Астана, Филиал “ИЛЦ ЮГ”, улица А185, здание 13',
+  support:'Номер тех. поддержки:+7 (705) 927-57-07',
+  index_code:'010009',
+  contract:'Договор № 10004943-2024-191272 25.01.2024 г',
+  payment_code:'5652',
+};
+let _mailLabelSettings=null;
+async function loadMailLabelSettings(force){
+  if(_mailLabelSettings&&!force)return _mailLabelSettings;
+  try{
+    const {data}=await sb.from('mail_label_settings').select('*').eq('id','default').maybeSingle();
+    _mailLabelSettings=Object.assign({},MAIL_LABEL_DEFAULTS,data||{});
+  }catch(e){
+    console.error('loadMailLabelSettings',e);
+    _mailLabelSettings=Object.assign({},MAIL_LABEL_DEFAULTS);
+  }
+  return _mailLabelSettings;
+}
+async function saveMailLabelSettings(row){
+  const {error}=await sb.from('mail_label_settings').upsert(Object.assign({id:'default'},row));
+  if(error){console.error('saveMailLabelSettings',error);toast('Ошибка: '+error.message);return false;}
+  _mailLabelSettings=null;   // перечитаем при следующей печати
+  return true;
+}
+
 async function loadMailLabelAssets(){
   if(_mailLabelAssets)return _mailLabelAssets;
   await ensurePdfLib();
   // бланк лежит отдельным файлом и качается только при печати — раньше он был вшит сюда
   // строкой base64 на 158 КБ и грузился у всех при каждом открытии сайта
-  const templateBytes=new Uint8Array(await fetch('assets/mail-label-template.pdf').then(r=>r.arrayBuffer()));
+  // Чистый бланк: без впечатанных данных отправителя — их рисуем из настроек.
+  // Исходный assets/mail-label-template.pdf оставлен рядом как образец «как было».
+  const templateBytes=new Uint8Array(await fetch('assets/mail-label-blank.pdf').then(r=>r.arrayBuffer()));
   const [regularBytes,boldBytes]=await Promise.all([
     fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf/ttf/DejaVuSans.ttf').then(r=>r.arrayBuffer()),
     fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf').then(r=>r.arrayBuffer()),
@@ -767,6 +802,7 @@ async function generateMailLabelsPdf(items){
   const templateDoc=await PDFDocument.load(assets.templateBytes);
   const outDoc=await PDFDocument.create();
   outDoc.registerFontkit(window.fontkit);
+  const cfg=await loadMailLabelSettings();   // данные отправителя из настроек
   const font=await outDoc.embedFont(assets.regularBytes,{subset:true});
   const fontBold=await outDoc.embedFont(assets.boldBytes,{subset:true});
   for(const it of items){
@@ -774,8 +810,16 @@ async function generateMailLabelsPdf(items){
     outDoc.addPage(page);
     const {height:h}=page.getSize();
     const yOf=top=>h-top;
-    // 1) закрашиваем строку отправителя (ИП) белым — у разных заказов будут разные ИП, пока оставляем пустой
-    page.drawRectangle({x:90,y:h-158,width:260,height:16,color:rgb(1,1,1)});
+    // 1) данные отправителя — из настроек (Настройки → «Бланк Казпочты»).
+    // Закрашивать больше нечего: в чистом шаблоне этих строк нет.
+    drawFitText(page,cfg.sender||'',96,yOf(156),350,font,12);
+    drawFitText(page,cfg.from_addr||'',96,yOf(190),340,font,12);
+    drawFitText(page,cfg.support||'',96,yOf(204),340,font,12);
+    drawFitText(page,cfg.index_code||'',196,yOf(220),120,font,11);
+    drawFitText(page,cfg.contract||'',65,yOf(351),330,font,11);
+    // «КОД ПЛАТЕЖА» и сам код — в исходном бланке это была одна строка
+    page.drawText('КОД ПЛАТЕЖА',{x:264,y:yOf(126),size:16,font:fontBold});
+    drawFitText(page,cfg.payment_code||'',480,yOf(126),90,fontBold,16);
     // 2) первая строка "0 (ноль тенге...)" — сумма заказа. Реальная линия поля: x 474–665 (не 825!)
     page.drawRectangle({x:465,y:h-146,width:155,height:15,color:rgb(1,1,1)});
     if(it.amount)page.drawText(Math.round(+it.amount).toLocaleString('ru-RU')+' т.',{x:478,y:yOf(144.5),size:10,font:fontBold});

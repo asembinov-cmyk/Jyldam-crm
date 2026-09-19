@@ -8,7 +8,7 @@ function renderSettings(){
     ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
     ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки'],
     ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории расходов'],['fin_income_categories','Финансы · Категории приходов'],['fin_partners','Финансы · Партнёры'],
-    ['apidocs','Документация API']];
+    ['maillabel','Бланк Казпочты'],['apidocs','Документация API']];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
     <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
@@ -18,11 +18,71 @@ function renderSettings(){
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
     fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners,
-    apidocs:renderApiDocsSettings};
+    maillabel:dirMailLabel,apidocs:renderApiDocsSettings};
   (map[S.dir]||dirCities)();
 }
 // вкладка «Документация API» в Настройках — две ссылки на документацию по интеграциям,
 // раньше «Документация API КЕТ» была отдельным пунктом бокового меню (ссылка на api-docs.html)
+// Настройки бланка Казпочты. Раньше эти строки были впечатаны в PDF-шаблон, и чтобы
+// сменить ИП, адрес или договор, приходилось пересобирать файл. Теперь они здесь.
+const MAIL_LABEL_FIELDS=[
+  ['sender','От кого','ТОО, ИП — кто отправитель'],
+  ['from_addr','Откуда','адрес отправителя одной строкой'],
+  ['support','Номер тех. поддержки','строка целиком, как должна печататься'],
+  ['index_code','Индекс','почтовый индекс отправителя'],
+  ['contract','Договор','номер и дата договора с Казпочтой'],
+  ['payment_code','Код платежа','число справа вверху бланка'],
+];
+async function dirMailLabel(){
+  const can=canEditDir();
+  $('dirContent').innerHTML='<div class="panel"><div class="loading">Загружаем настройки…</div></div>';
+  const cfg=await loadMailLabelSettings(true);
+  $('dirContent').innerHTML=`<div class="panel">
+    <div class="panel-head"><h2>Бланк Казпочты</h2></div>
+    <div style="padding:4px 16px 18px">
+      <p class="hint" style="margin-bottom:14px">Эти строки печатаются на бланке «5 нысан — форма 5»
+        в блоке отправителя. Менять можно в любой момент — новые бланки сразу печатаются с новыми данными,
+        уже напечатанные не меняются.</p>
+      ${MAIL_LABEL_FIELDS.map(([k,label,hint])=>`
+        <div class="field" style="margin-bottom:12px">
+          <label>${esc(label)}</label>
+          <input id="ml_${k}" value="${esc(cfg[k]||'')}" ${can?'':'disabled'}>
+          <span class="hint" style="font-size:12px">${esc(hint)}</span>
+        </div>`).join('')}
+      ${can?'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">'+
+        '<button class="btn primary" id="mlSave">Сохранить</button>'+
+        '<button class="btn ghost" id="mlPreview">👁 Посмотреть образец</button>'+
+        '<button class="btn ghost" id="mlReset">Вернуть прежние</button></div>'
+        :'<p class="hint">Изменять может тот, кому разрешено редактировать справочники.</p>'}
+    </div></div>`;
+  if(!can)return;
+  const read=()=>{const r={};MAIL_LABEL_FIELDS.forEach(([k])=>r[k]=val('ml_'+k).trim());return r;};
+  $('mlSave').onclick=async()=>{
+    const b=$('mlSave');b.disabled=true;b.textContent='Сохраняем…';
+    const ok=await saveMailLabelSettings(read());
+    b.disabled=false;b.textContent='Сохранить';
+    if(ok){toast('Сохранено');logAction('update','directories',{entity_label:'Бланк Казпочты'});}
+  };
+  $('mlReset').onclick=()=>{
+    if(!confirm('Вернуть значения, которые были на старом бланке?'))return;
+    MAIL_LABEL_FIELDS.forEach(([k])=>{const el=$('ml_'+k);if(el)el.value=MAIL_LABEL_DEFAULTS[k]||'';});
+    toast('Значения возвращены — не забудьте сохранить');
+  };
+  // образец печатается с ТЕМ, ЧТО СЕЙЧАС В ПОЛЯХ, даже если ещё не сохранено —
+  // чтобы можно было посмотреть, как ляжет текст, прежде чем сохранять
+  $('mlPreview').onclick=async()=>{
+    const b=$('mlPreview');b.disabled=true;b.textContent='Готовим…';
+    try{
+      const saved=_mailLabelSettings;
+      _mailLabelSettings=Object.assign({},MAIL_LABEL_DEFAULTS,read());
+      const bytes=await generateMailLabelsPdf([{client:'Образец Клиент Клиентович',address:'обл., район, посёлок, улица, дом',phone:'7010000000',amount:2000}]);
+      _mailLabelSettings=saved;
+      await openOrDownloadPdf(bytes,'Образец_бланка.pdf');
+    }catch(e){console.error('preview',e);toast('Не удалось сделать образец');}
+    b.disabled=false;b.textContent='👁 Посмотреть образец';
+  };
+}
+
 function renderApiDocsSettings(){
   $('dirContent').innerHTML=`
     <div class="panel">
