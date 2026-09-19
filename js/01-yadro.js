@@ -235,8 +235,16 @@ async function dbDelete(table,id){
       });
     }
   }catch(e){console.error('trash snapshot',e);} // не блокируем само удаление, даже если бэкап не удался
-  const {error}=await sb.from(table).delete().eq('id',id);
+  // .select() обязателен: без него PostgREST на запрещённое правилами удаление отвечает
+  // «успех, удалено 0 строк» — ошибки нет, и код рапортует «Удалено», хотя запись на месте.
+  // Именно так однажды несколько часов молча не работало удаление заказов.
+  const {data,error}=await sb.from(table).delete().eq('id',id).select('id');
   if(error){console.error('delete',table,error);toast('Ошибка: '+error.message);return false;}
+  if(!data||!data.length){
+    console.error('delete',table,'0 строк — запрещено правилами доступа или записи уже нет');
+    toast('Не удалось удалить: нет прав или запись уже удалена');
+    return false;
+  }
   if(AUTO_LOG_TABLES.has(table))logAction('delete',table,{entity_id:id,entity_label:lbl});
   return true;
 }
