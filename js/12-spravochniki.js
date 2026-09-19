@@ -656,7 +656,6 @@ function postIpModal(id){
       dirPostIp();return true;
     });
 }
-      toast('Сохранено');renderSettings();return true;});}
 
 /* Склады отправки (для модуля Отправки межгород) */
 function dirWarehouses(){
