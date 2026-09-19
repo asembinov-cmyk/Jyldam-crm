@@ -601,7 +601,10 @@ async function unclaimLabels(orders){
 // уезжает в KET (см. раздел 6b в CLAUDE.md).
 function openSortOrderModal(o,confident,data,matches){
   const courier=isCourierDelivery(o.delivery_id);
-  const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);
+  const ctyId=courier?o.courier_city_id:o.city_id;
+  // cityName для неизвестного города возвращает прочерк — здесь он не нужен:
+  // строка с городом либо есть целиком, либо её нет совсем.
+  const cty=ctyId?cityName(ctyId):'';
   const deliveryType=courier?'🚚 Курьерская доставка':'📮 Почтовая доставка';
   // Вес и штрих-код спрашиваем только у почтовых: курьерские никуда не сдаются по
   // весу и трека у них нет — для них окно остаётся прежним, «город и Принял».
@@ -624,13 +627,15 @@ function openSortOrderModal(o,confident,data,matches){
       </div>
       <div id="sortScanBox"></div>
     </div>`;
+  // Город показываем, только если он в заказе указан: пустое место занимал прочерк
+  // на весь экран, а данные клиента из-за него уезжали вниз. У почтовых заказов город
+  // бывает не заполнен — тогда кладовщик ориентируется по адресу.
   const body=`
     <div style="text-align:center">
-      <div style="font-size:13px;color:${confident?'var(--muted)':'var(--rust)'}">${confident?'✅ Заказ найден':'⚠️ Похоже, но сверьте данные'}</div>
-      <div style="font-size:38px;font-weight:800;line-height:1.1;margin:6px 0">${esc(cty||'—')}</div>
+      ${cty?`<div style="font-size:38px;font-weight:800;line-height:1.1;margin:0 0 6px">${esc(cty)}</div>`:''}
       <div style="font-size:14px;color:var(--muted);margin-bottom:8px">${deliveryType}</div>
-      <div style="font-size:15px;font-weight:600">${esc(o.client||'—')}</div>
-      <div style="font-size:13px;color:var(--muted)">${esc(o.address||'—')}</div>
+      <div style="font-size:16px;font-weight:600">${esc(o.client||'—')}</div>
+      <div style="font-size:14px;color:var(--muted)">${esc(o.address||'—')}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:4px">Заказ № ${esc(o.code||'')}</div>
     </div>${fields}`;
   const ov=showModal('Посылка',body,async()=>{
@@ -655,6 +660,11 @@ function openSortOrderModal(o,confident,data,matches){
     toast(`Отмечено: «${cty}» · ${o.client||''}`);
     renderSorting();
   },{mid:true});
+  // «Заказ найден» — в шапку окна, рядом с заголовком: это про само окно, а не про
+  // заказ, и сверху оно не отодвигает вниз данные клиента.
+  const h3=ov.querySelector('.modal-head h3');
+  if(h3)h3.insertAdjacentHTML('afterend',
+    `<span style="margin-left:10px;font-size:12px;white-space:nowrap;color:${confident?'var(--muted)':'var(--rust)'}">${confident?'✅ Заказ найден':'⚠️ Сверьте данные'}</span>`);
   // кнопка «Сохранить» здесь по смыслу — «Принял», а рядом нужен выход к ручному выбору
   const saveBtn=ov.querySelector('[data-save]');
   if(saveBtn)saveBtn.textContent='✅ Принял';
