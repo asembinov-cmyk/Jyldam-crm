@@ -630,10 +630,24 @@ const POST_IP_EXTRA_FIELDS=[
   ['bank_name','Название банка',''],
   ['bik','БИКС',''],
   ['support_phone','Телефон тех. поддержки','только номер, без текста'],
-  ['balance','Баланс','справочно: у нас сам не обновляется, живой баланс в KET'],
   ['manager','Менеджер',''],
   ['manager_contacts','Менеджер (контакты на бланке)',''],
 ];
+// Баланс НЕ вводится руками: ИП связывается с безналичной кассой из «Финансов»,
+// и остаток берётся оттуда — той же функцией, что показывает его в самом модуле.
+// Если у сотрудника нет доступа к финансам, проводки ему не приходят и остаток
+// показывать нечестно — пишем «—», а не ноль.
+function postIpBalanceHtml(ip){
+  if(!ip||!ip.kassa_id)return '<span class="wh-cat">касса не выбрана</span>';
+  if(typeof can==='function'&&!can('finance','view'))return '<span class="wh-cat">нет доступа</span>';
+  if(typeof currentKassaBalance!=='function')return '—';
+  const v=currentKassaBalance(ip.kassa_id);
+  return `<span style="font-weight:600">${Math.round(v).toLocaleString('ru-RU')} ₸</span>`;
+}
+function postIpKassaName(id){
+  const k=(S.finance_kassa||[]).find(x=>x.id===id);
+  return k?k.name:'';
+}
 function dirPostIp(){
   const col=(k,label)=>({key:k,label,filter:'text',text:c=>c[k]==null?'':String(c[k])});
   dirGrid({title:'ИП для Почты',arrKey:'post_ips',table:'post_ips',modalFn:postIpModal,emptyText:'Нет записей',
@@ -651,7 +665,8 @@ function dirPostIp(){
       col('bank_name','Название банка'),
       col('bik','БИКС'),
       col('support_phone','Телефон тех. поддержки'),
-      col('balance','Баланс'),
+      {key:'kassa',label:'Безналичная касса',filter:'select',text:c=>postIpKassaName(c.kassa_id)},
+      {key:'balance',label:'Баланс',text:c=>'',cell:c=>`<td data-label="Баланс">${postIpBalanceHtml(c)}</td>`},
       col('manager','Менеджер'),
       col('manager_contacts','Менеджер (контакты на бланке)'),
     ]});
@@ -662,6 +677,9 @@ function postIpModal(id){
     <div class="field" style="margin-bottom:10px"><label>${esc(label)}</label>
       <input id="ip_${k}" value="${esc(c[k]==null?'':String(c[k]))}">
       ${hint?`<span class="hint" style="font-size:12px">${esc(hint)}</span>`:''}</div>`;
+  // в выбор попадают только безналичные кассы — кассы городов к ИП отношения не имеют
+  const kassas=(S.finance_kassa||[]).filter(k=>k.kassa_type==='cashless')
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   showModal(id?'ИП для Почты':'Новый ИП',
     `<div class="field"><label>Название <span style="color:var(--rust)">*</span></label>
        <input id="ip_name" value="${esc(c.name||'')}"></div>
@@ -670,11 +688,18 @@ function postIpModal(id){
      ${POST_IP_LABEL_FIELDS.map(fld).join('')}
      <p class="hint" style="margin:14px 0 8px">Реквизиты и контакты — на бланк не печатаются,
        хранятся здесь для справки, чтобы не искать их в кабинете KET.</p>
-     ${POST_IP_EXTRA_FIELDS.map(fld).join('')}`,
+     ${POST_IP_EXTRA_FIELDS.map(fld).join('')}
+     <div class="field"><label>Безналичная касса (Финансы)</label>
+       <select id="ip_kassa">
+         <option value="">— не связана —</option>
+         ${kassas.map(k=>`<option value="${k.id}" ${c.kassa_id===k.id?'selected':''}>${esc(k.name)}</option>`).join('')}
+       </select>
+       <span class="hint" style="font-size:12px">Баланс не вводится руками — он берётся из этой кассы.
+         Сейчас: ${postIpBalanceHtml(c)}</span></div>`,
     async()=>{
       const name=val('ip_name').trim();
       if(!name){toast('Укажите название');return false;}
-      const row={name};
+      const row={name,kassa_id:val('ip_kassa')||null};
       [...POST_IP_LABEL_FIELDS,...POST_IP_EXTRA_FIELDS].forEach(([k])=>{row[k]=val('ip_'+k).trim()||null;});
       if(id){const u=await dbUpdate('post_ips',id,row);if(!u)return false;Object.assign(S.post_ips.find(x=>x.id===id),u);}
       else{const u=await dbInsert('post_ips',row);if(!u)return false;S.post_ips.push(u);}
