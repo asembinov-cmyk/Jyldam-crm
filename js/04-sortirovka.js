@@ -173,7 +173,7 @@ function renderSorting(){
     }
   }
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Сортировка</h1><p>Сфотографируйте накладную посылки — подскажем, в какой она город${myCity?` · только ${esc(cityName(myCity))}`:''}</p></div></div>
+    <div class="page-head"><div><h1>Сортировка</h1><p>Отсканируйте накладную посылки — подскажем, в какой она город${myCity?` · только ${esc(cityName(myCity))}`:''}</p></div></div>
     <div class="stats stats-3" style="margin-bottom:8px">
       <div class="stat"><div class="k">Заказов${isToday?' сегодня':''}</div><div class="v">${total}</div></div>
       <div class="stat"><div class="k">Принято</div><div class="v" style="color:var(--rust)">${sorted}</div></div>
@@ -188,7 +188,7 @@ function renderSorting(){
     <div class="panel" style="max-width:560px;margin:0 auto">
       <div style="text-align:center;padding:24px 16px">
         <label class="btn primary" style="cursor:pointer;font-size:17px;padding:18px 28px;display:inline-block">
-          📷 Сфотографировать накладную
+          📷 Сканировать накладную
           <input type="file" accept="image/*" capture="environment" id="sortPhotoInput" style="display:none">
         </label>
       </div>
