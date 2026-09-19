@@ -191,7 +191,7 @@ function drawPickups(){
     startIdx=(pickupsPage-1)*pickupsPerPage;
     rows=allRows.slice(startIdx,startIdx+pickupsPerPage);
   }
-  el.innerHTML=`<div class="table-scroll"><table class="resp-table"><thead><tr>
+  el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
     ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer" class="${p.partner_id?'pickup-row-qr':''}" title="${p.partner_id?'Пришла от партнёра через кабинет (QR)':''}">

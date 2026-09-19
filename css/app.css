@@ -1038,22 +1038,30 @@
     .filters-toggle{display:block;width:100%;justify-content:center}
     .filters-body{display:none}
     .filters-body.open{display:flex;flex-direction:column;gap:10px;width:100%}
-    /* ── СВОРАЧИВАЕМЫЕ КАРТОЧКИ: свёрнуто видно только заголовок + кнопки ── */
-    .resp-table tr{position:relative}
-    .resp-table tr td[data-label="Наименование"],.resp-table tr td[data-label="ID"]{padding-top:13px}
-    .resp-table tr td[data-label="Наименование"]::after,.resp-table tr td[data-label="ID"]::after{
+    /* ── СВОРАЧИВАЕМЫЕ КАРТОЧКИ: свёрнуто видно только заголовок + кнопки ──
+       ВНИМАНИЕ: правила ниже относятся ТОЛЬКО к таблицам с классом .resp-collapse —
+       это «Заказы» и «Заявки на забор», где строка раскрывается по клику. Раньше они
+       действовали на все .resp-table подряд, и любая другая таблица на мобильном
+       превращалась в пустые полоски: ячейки скрывались, а показывались только те,
+       чьи подписи перечислены ниже («ID», «Статус», «Город»…) — у чужих таблиц таких
+       подписей нет. Так ломались «История изменений» и «Непривязанные заказы».
+       Новую таблицу со сворачиванием помечайте классом .resp-collapse; без него
+       она просто покажет все ячейки, и это правильное поведение по умолчанию. */
+    .resp-collapse tr{position:relative}
+    .resp-collapse tr td[data-label="Наименование"],.resp-collapse tr td[data-label="ID"]{padding-top:13px}
+    .resp-collapse tr td[data-label="Наименование"]::after,.resp-collapse tr td[data-label="ID"]::after{
       content:"▾";position:absolute;right:14px;color:var(--rust);font-size:14px;transition:transform .2s}
-    .resp-table tr.open td[data-label="Наименование"]::after,.resp-table tr.open td[data-label="ID"]::after{transform:rotate(180deg)}
+    .resp-collapse tr.open td[data-label="Наименование"]::after,.resp-collapse tr.open td[data-label="ID"]::after{transform:rotate(180deg)}
     /* свёрнутая строка: прячем все ячейки кроме заголовка и блока действий */
-    .resp-table tr:not(.open) td{display:none}
-    .resp-table tr:not(.open) td[data-label="Наименование"],
-    .resp-table tr:not(.open) td[data-label="ID"],
-    .resp-table tr:not(.open) td[data-label="Отправитель"],
-    .resp-table tr:not(.open) td[data-label="ФИО клиента"],
-    .resp-table tr:not(.open) td[data-label="Город"],
-    .resp-table tr:not(.open) td[data-label="Статус"]{display:flex;border-bottom:1px solid #e4e9f2}
-    .resp-table tr:not(.open) td[data-label="ID"]{border-bottom:1px solid #e4e9f2}
-    .resp-table tr:not(.open) td.cell-actions{display:flex;border-top:1px solid #e4e9f2}
+    .resp-collapse tr:not(.open) td{display:none}
+    .resp-collapse tr:not(.open) td[data-label="Наименование"],
+    .resp-collapse tr:not(.open) td[data-label="ID"],
+    .resp-collapse tr:not(.open) td[data-label="Отправитель"],
+    .resp-collapse tr:not(.open) td[data-label="ФИО клиента"],
+    .resp-collapse tr:not(.open) td[data-label="Город"],
+    .resp-collapse tr:not(.open) td[data-label="Статус"]{display:flex;border-bottom:1px solid #e4e9f2}
+    .resp-collapse tr:not(.open) td[data-label="ID"]{border-bottom:1px solid #e4e9f2}
+    .resp-collapse tr:not(.open) td.cell-actions{display:flex;border-top:1px solid #e4e9f2}
     .show-more{display:block;width:100%;margin:4px 0 6px;justify-content:center}
     .list-count{display:block;text-align:center;font-size:12px;color:var(--muted);padding:4px 0 2px}
   }
@@ -1103,6 +1111,10 @@
   .log-chg .new{color:#2f6d36;font-weight:600}
   .log-user{font-weight:600;white-space:nowrap}
   /* ── Плавающая панель пагинации заказов ── */
+  /* пока открыта карточка — плавающая панель пагинации не должна её перекрывать.
+     Правило, а не разовое скрытие из JS: экран может перерисоваться при открытой
+     карточке (обновления KET, заявок, фоновое обновление), и панель создастся заново. */
+  body.modal-open .orders-pager{display:none!important}
   .orders-pager{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:8000;
     display:flex;align-items:center;gap:18px;background:var(--card);border:1px solid var(--line);
     border-radius:30px;box-shadow:0 8px 28px -8px rgba(20,30,60,.4);padding:9px 18px}

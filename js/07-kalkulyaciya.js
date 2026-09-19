@@ -801,8 +801,16 @@ function showModal(title,bodyHtml,onSave,opts={}){
   document.body.appendChild(ov);
   // плавающая панель пагинации (z-index:8000) перекрывает модальные окна (z-index:100) —
   // прячем её, пока открыта карточка, возвращаем обратно при закрытии
+  // Одного скрытия здесь мало: пока карточка открыта, экран может перерисоваться —
+  // от обновлений KET, заявок или фонового обновления — и панель создастся заново,
+  // уже видимой, поверх карточки. Поэтому вешаем признак на <body>, а прячет панель
+  // правило в CSS: оно действует и на те панели, что появятся позже.
+  syncModalOpenClass();
   document.querySelectorAll('.orders-pager').forEach(p=>{if(p.style.display!=='none'){p.dataset.hiddenByModal='1';p.style.display='none';}});
-  const restorePagers=()=>{document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});};
+  const restorePagers=()=>{
+    syncModalOpenClass();
+    document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});
+  };
   // жёсткое закрытие — всегда работает (крестик, Escape, клик мимо): выход без сохранения
   const forceClose=()=>{ov.remove();restorePagers();};
   // закрытие с проверкой (кнопка Сохранить/Закрыть): beforeClose может запретить
@@ -824,7 +832,11 @@ function showModal(title,bodyHtml,onSave,opts={}){
 }
 function showInfo(title,bodyHtml,opts){return showModal(title,bodyHtml,null,Object.assign({readonly:true},opts||{}));}
 // закрыть самую верхнюю открытую модалку (используется для перехода «карточка товара» → «операция/резерв»)
-function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.length){ovs[ovs.length-1].remove();document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});}}
+// признак «открыта карточка» на <body>: снимаем только когда закрыта последняя
+function syncModalOpenClass(){
+  document.body.classList.toggle('modal-open',!!document.querySelector('.overlay'));
+}
+function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.length){ovs[ovs.length-1].remove();syncModalOpenClass();document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});}}
 
 /* автологин / спец-кабинеты по ссылке */
 (async()=>{
