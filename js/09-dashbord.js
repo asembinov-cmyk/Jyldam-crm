@@ -9,7 +9,9 @@ async function aiRecognizeFromPhoto(o){
   const setNote=(t,cls)=>{if(note){note.textContent=t;note.className='ai-recog-note '+(cls||'');}};
   const ph=pickupPhotos(o);
   if(!ph.length){setNote('Нет фото для распознавания','err');return;}
-  const url=(ph[0]&&ph[0].url)||'';
+  // фото лежит в закрытом хранилище: берём временную ссылку под текущего сотрудника.
+  // Раньше здесь читалось поле url — постоянная публичная ссылка, которой больше нет.
+  const url=await signedPhotoUrl(ph[0]);
   if(!url){setNote('Не удалось получить фото','err');return;}
   if(btn)btn.disabled=true;setNote('Распознаю данные с фото…','load');
   try{
