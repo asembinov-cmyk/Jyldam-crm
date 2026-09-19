@@ -613,15 +613,49 @@ function courierCityModal(id){const c=id?S.courier_cities.find(x=>x.id===id):{na
       toast('Сохранено');renderSettings();return true;});}
 /* ИП для Почты */
 function dirPostIp(){
+  // Колонки повторяют «Настройки отправителей» у KET: при выборе ИП в заказе
+  // эти данные попадают на бланк Казпочты.
   dirGrid({title:'ИП для Почты',arrKey:'post_ips',table:'post_ips',modalFn:postIpModal,emptyText:'Нет записей',
     sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
-    cols:[{key:'name',label:'ИП',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`}]});
+    cols:[
+      {key:'name',label:'ИП',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`},
+      {key:'label_prefix',label:'Приставка',filter:'text',text:c=>c.label_prefix||''},
+      {key:'from_addr',label:'Адрес',filter:'text',text:c=>c.from_addr||''},
+      {key:'contract',label:'Номер договора',filter:'text',text:c=>c.contract||''},
+      {key:'index_code',label:'Индекс',filter:'text',text:c=>c.index_code||''},
+      {key:'payment_code',label:'Код платежа',filter:'text',text:c=>c.payment_code||''},
+    ]});
 }
-function postIpModal(id){const c=id?S.post_ips.find(x=>x.id===id):{name:''};
-  showModal(id?'ИП для Почты':'Новое ИП',`<div class="field"><label>Наименование</label><input id="ip_name" value="${esc(c.name)}"></div>`,
-    async()=>{const name=val('ip_name').trim();if(!name){toast('Укажите наименование');return false;}
-      if(id){const u=await dbUpdate('post_ips',id,{name});if(!u)return false;Object.assign(S.post_ips.find(x=>x.id===id),u);}
-      else{const u=await dbInsert('post_ips',{name});if(!u)return false;S.post_ips.push(u);}
+const POST_IP_LABEL_FIELDS=[
+  ['label_prefix','Приставка','например «ТОО QP Service» — печатается перед названием ИП'],
+  ['from_addr','Откуда (адрес)','оставьте пустым — возьмётся общий из «Бланка Казпочты»'],
+  ['support','Номер тех. поддержки','строка целиком, как печатать'],
+  ['index_code','Индекс',''],
+  ['contract','Номер договора',''],
+  ['payment_code','Код платежа',''],
+];
+function postIpModal(id){
+  const c=id?S.post_ips.find(x=>x.id===id):{name:''};
+  showModal(id?'ИП для Почты':'Новый ИП',
+    `<div class="field"><label>Название ИП <span style="color:var(--rust)">*</span></label>
+       <input id="ip_name" value="${esc(c.name||'')}"></div>
+     <p class="hint" style="margin:10px 0">Ниже — данные для бланка Казпочты. Пустые поля берутся
+       из общих настроек (Настройки → «Бланк Казпочты»), так что заполнять нужно только то,
+       что у этого ИП своё.</p>
+     ${POST_IP_LABEL_FIELDS.map(([k,label,hint])=>`
+       <div class="field" style="margin-bottom:10px"><label>${esc(label)}</label>
+         <input id="ip_${k}" value="${esc(c[k]||'')}">
+         ${hint?`<span class="hint" style="font-size:12px">${esc(hint)}</span>`:''}</div>`).join('')}`,
+    async()=>{
+      const name=val('ip_name').trim();
+      if(!name){toast('Укажите название ИП');return false;}
+      const row={name};
+      POST_IP_LABEL_FIELDS.forEach(([k])=>{row[k]=val('ip_'+k).trim()||null;});
+      if(id){const u=await dbUpdate('post_ips',id,row);if(!u)return false;Object.assign(S.post_ips.find(x=>x.id===id),u);}
+      else{const u=await dbInsert('post_ips',row);if(!u)return false;S.post_ips.push(u);}
+      dirPostIp();return true;
+    });
+}
       toast('Сохранено');renderSettings();return true;});}
 
 /* Склады отправки (для модуля Отправки межгород) */

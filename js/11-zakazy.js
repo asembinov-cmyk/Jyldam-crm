@@ -729,6 +729,22 @@ const MAIL_LABEL_DEFAULTS={
   payment_code:'5652',
 };
 let _mailLabelSettings=null;
+// Поля, которые можно задать у конкретного ИП (справочник «ИП для Почты»).
+// Так же устроено у KET: там таблица «Настройки отправителей», и при выборе ИП
+// данные бланка меняются. У нас выбор ИП уже есть — в карточке почтового заказа.
+const MAIL_LABEL_KEYS=['sender','from_addr','support','index_code','contract','payment_code'];
+// данные бланка для одного заказа: сначала поля выбранного ИП, чего нет — общие настройки
+function mailLabelCfgFor(order,common){
+  const ip=(order&&order.post_ip_id)?(S.post_ips||[]).find(x=>x.id===order.post_ip_id):null;
+  const out=Object.assign({},common);
+  if(ip){
+    // «приставка» + название ИП складываются в строку «От кого», как в KET
+    const sender=[ip.label_prefix,ip.name].map(v=>(v||'').trim()).filter(Boolean).join(' ');
+    if(sender)out.sender=sender;
+    MAIL_LABEL_KEYS.forEach(k=>{if(k!=='sender'&&ip[k]!=null&&String(ip[k]).trim())out[k]=String(ip[k]).trim();});
+  }
+  return out;
+}
 async function loadMailLabelSettings(force){
   if(_mailLabelSettings&&!force)return _mailLabelSettings;
   try{
@@ -802,7 +818,7 @@ async function generateMailLabelsPdf(items){
   const templateDoc=await PDFDocument.load(assets.templateBytes);
   const outDoc=await PDFDocument.create();
   outDoc.registerFontkit(window.fontkit);
-  const cfg=await loadMailLabelSettings();   // данные отправителя из настроек
+  const common=await loadMailLabelSettings();   // общие данные отправителя
   const font=await outDoc.embedFont(assets.regularBytes,{subset:true});
   const fontBold=await outDoc.embedFont(assets.boldBytes,{subset:true});
   for(const it of items){
@@ -810,7 +826,8 @@ async function generateMailLabelsPdf(items){
     outDoc.addPage(page);
     const {height:h}=page.getSize();
     const yOf=top=>h-top;
-    // 1) данные отправителя — из настроек (Настройки → «Бланк Казпочты»).
+    // 1) данные отправителя: у выбранного в заказе ИП, иначе общие настройки.
+    const cfg=mailLabelCfgFor(it.order,common);
     // Закрашивать больше нечего: в чистом шаблоне этих строк нет.
     drawFitText(page,cfg.sender||'',96,yOf(156),350,font,12);
     drawFitText(page,cfg.from_addr||'',96,yOf(190),340,font,12);
@@ -844,6 +861,7 @@ async function openOrDownloadPdf(bytes,filename){
 // бланки для «своих» заказов (Заказы → Почтовая доставка)
 async function printMailLabelsPdf(orders){
   const items=orders.map(o=>({
+    order:o,   // нужен, чтобы взять данные выбранного ИП
     client:o.client,address:o.address,
     phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
     amount:(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0),
