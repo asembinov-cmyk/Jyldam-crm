@@ -211,7 +211,7 @@ function calcProfitColor(profit,period){
   return 'green';
 }
 
-let calcSub='courier'; // подвкладка раздела Калькуляция: courier | mail | summary | partner
+let calcSub='norms'; // подвкладка раздела Калькуляция: norms | summary | partner
 // состояние вкладки «Расчёт партнёра» — отдельная логика, свой отдельный список партнёров
 // (S.calc_partners), НЕ связанный с обычными партнёрами CRM (S.partners)
 let calcPartnerId=''; // выбранный партнёр (из S.calc_partners)
@@ -231,15 +231,16 @@ function renderCalc(){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Калькуляция</h1><p>Себестоимость, прибыль и заработок по заказам</p></div></div>
     <div class="subtabs">
-      <button data-calcsub="courier" class="${calcSub==='courier'?'active':''}">Курьерская доставка</button>
-      <button data-calcsub="mail" class="${calcSub==='mail'?'active':''}">Почтовая доставка</button>
+      <button data-calcsub="norms" class="${calcSub==='norms'?'active':''}">Расходы компании</button>
       <button data-calcsub="summary" class="${calcSub==='summary'?'active':''}">Общая сводка</button>
       <button data-calcsub="partner" class="${calcSub==='partner'?'active':''}">Расчёт партнёра</button>
     </div>
     <div id="calcContent"></div>`;
   $('main').querySelectorAll('[data-calcsub]').forEach(b=>b.onclick=()=>{calcSub=b.dataset.calcsub;renderCalc();});
-  if(calcSub==='courier'||calcSub==='norms')renderCalcNorms('courier');
-  else if(calcSub==='mail')renderCalcNorms('mail');
+  // вкладок нормативов было две — курьерская и почтовая, но состав у них одинаковый,
+  // поэтому осталась одна. Старые значения принимаем на случай, если calcSub где-то
+  // выставят прежним именем.
+  if(calcSub==='norms'||calcSub==='courier'||calcSub==='mail')renderCalcNorms();
   else if(calcSub==='partner')renderCalcPartner();
   else renderCalcSummary();
 }
@@ -537,8 +538,7 @@ function calcPartnerModal(id){
     toast('Сохранено');renderCalcPartner();return true;
   });
 }
-function renderCalcNorms(type){
-  type=type||'courier';
+function renderCalcNorms(){
   const P=calcPeriodStr();
   const cs=calcCurrentSettings();
   const monthsRU=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
@@ -584,9 +584,9 @@ function renderCalcNorms(type){
           и у курьерских заказов, и у почтовых.</p>
         ${expenseFields.map(fieldRow).join('')}
       </div>`;
-  // Нормативы одинаковы для обеих вкладок: фонды, зарплаты и расходы общие, а два блока
-  // «за заказ» (курьерский и почтовый) раньше показывались по одному на вкладку — левая
-  // колонка пустовала наполовину. Теперь оба слева, общее справа, вкладка ни на что не влияет.
+  // Фонды, зарплаты и расходы общие для обоих типов доставки, а два блока «за заказ»
+  // (курьерский и почтовый) раньше показывались по одному на вкладку — левая колонка
+  // пустовала наполовину. Теперь оба слева, общее справа, и вкладка всего одна.
   const html=`
     <div class="calc-grid">
       <div>
