@@ -12,6 +12,11 @@ const CALC_FIELDS=[
   {key:'admin_courier', label:'ЗП Администратор курьера (за заказ)', kind:'fixed', hint:'Фиксированная ставка за заказ'},
   {key:'fund_logist',  label:'Фонд ЗП Менеджера заказов',   kind:'fund', hint:'Делится на кол-во заказов за месяц'},
   {key:'fund_pickers', label:'Фонд ЗП заборщиков (в месяц)', kind:'fund', hint:'Делится на кол-во заказов за месяц (курьер+почта)'},
+  // Расходы компании: считаются ТАК ЖЕ, как фонды — делятся на заказы месяца и вычитаются
+  // и у курьерских, и у почтовых заказов. Отдельная группа нужна только для отрисовки:
+  // показываем их в своём блоке «Расходы», а не вперемешку с фондами ЗП.
+  {key:'fund_smm',   label:'ЗП СММ команде (в месяц)', kind:'fund', group:'expense', hint:'Делится на кол-во заказов за месяц'},
+  {key:'fund_other', label:'Иные расходы (в месяц)',   kind:'fund', group:'expense', hint:'Всё, что не вошло в другие статьи'},
 ];
 // сотрудники с окладом (делится на заказы месяца) + ставкой за заказ
 const CALC_SALARY_FIELDS=[
@@ -538,7 +543,8 @@ function renderCalcNorms(type){
   const cs=calcCurrentSettings();
   const monthsRU=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const fixedFields=CALC_FIELDS.filter(f=>f.kind==='fixed'&&f.key!=='freight'); // «Доставка груза» больше не редактируется тут — сумма тянется из «Отправок межгород»
-  const fundFields=CALC_FIELDS.filter(f=>f.kind==='fund');
+  const fundFields=CALC_FIELDS.filter(f=>f.kind==='fund'&&f.group!=='expense');
+  const expenseFields=CALC_FIELDS.filter(f=>f.group==='expense');
   const fieldRow=f=>`<div class="calc-norm-row">
     <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
     <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
@@ -573,38 +579,35 @@ function renderCalcNorms(type){
             <input type="number" min="0" step="0.01" data-sper="${sm.id}" value="${perV?esc(perV):''}" placeholder="0">
           </div>`;
         }).join('')}
+        <h3 class="calc-h" style="margin-top:18px">Расходы</h3>
+        <p class="calc-note">Делятся на количество заказов за месяц и вычитаются так же, как фонды —
+          и у курьерских заказов, и у почтовых.</p>
+        ${expenseFields.map(fieldRow).join('')}
       </div>`;
-  let html;
-  if(type==='mail'){
-    // ПОЧТОВАЯ вкладка: почтовые расходы + фонды + заборщики
-    html=`
+  // Нормативы одинаковы для обеих вкладок: фонды, зарплаты и расходы общие, а два блока
+  // «за заказ» (курьерский и почтовый) раньше показывались по одному на вкладку — левая
+  // колонка пустовала наполовину. Теперь оба слева, общее справа, вкладка ни на что не влияет.
+  const html=`
     <div class="calc-grid">
-      <div class="panel calc-panel">
-        <h3 class="calc-h">Почтовая доставка — фиксированные расходы (за заказ)</h3>
-        <p class="calc-note">Применяются к заказам с типом доставки «почта».</p>
-        ${CALC_POST_FIELDS.map(f=>`<div class="calc-norm-row">
-          <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
-          <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
-        </div>`).join('')}
-      </div>
-      ${fundsBlock}
-    </div>`;
-  }else{
-    // КУРЬЕРСКАЯ вкладка: общие расходы + фонды + компактные города + заборщики
-    html=`
-    <div class="calc-grid">
-      <div class="panel calc-panel">
-        <h3 class="calc-h">Курьерская доставка — общие расходы (за заказ)</h3>
-        ${fixedFields.map(fieldRow).join('')}
+      <div>
+        <div class="panel calc-panel">
+          <h3 class="calc-h">Курьерская доставка — общие расходы (за заказ)</h3>
+          <p class="calc-note">Применяются к заказам с типом доставки «курьер».</p>
+          ${fixedFields.map(fieldRow).join('')}
+        </div>
+        <div class="panel calc-panel" style="margin-top:18px">
+          <h3 class="calc-h">Почтовая доставка — фиксированные расходы (за заказ)</h3>
+          <p class="calc-note">Применяются к заказам с типом доставки «почта».</p>
+          ${CALC_POST_FIELDS.map(fieldRow).join('')}
+        </div>
       </div>
       ${fundsBlock}
     </div>
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Нормативы по городам</h3>
-      <p class="calc-note">Курьер и доставка груза по городам. Пусто = берётся общий норматив. Показаны города, где задана ставка; остальные — по кнопке.</p>
+      <p class="calc-note">Курьер и доставка груза по городам. Пусто = берётся общий норматив. Показаны города, где заданы значения.</p>
       ${compactCityNorms(cities,cityNorm)}
     </div>`;
-  }
   $('calcContent').innerHTML=periodBar+html+
     `<div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>`;
   $('calcSaveBtn').onclick=saveCalcSettings;

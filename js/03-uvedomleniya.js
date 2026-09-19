@@ -143,7 +143,9 @@ async function loadAiInsights(){
   renderNotify();
 }
 
-let notifyTrashCollapsed=false; // свёрнута ли корзина в Центре контроля
+let notifyTrashCollapsed=true; // корзина свёрнута при открытии раздела — в ней сотни записей
+// и они оттесняют вниз выводы и важные изменения. Разворачивается кликом по заголовку,
+// выбор держится до перезагрузки страницы.
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const trash=S.deletedItems||[];
