@@ -141,13 +141,11 @@ function ketSendWarnNoTrack(list){
   const names=bad.slice(0,5).map(o=>o.code||o.id).join(', ');
   return `\n\nВНИМАНИЕ: почтовых заказов без трек-номера — ${bad.length} (${names}${bad.length>5?'…':''}).`
     +`\nВ KET трек передаётся только при отправке, дослать его потом нечем.`
-    +`\nЛучше сначала получить трек у Казпочты, потом отправлять.`;
+    +`\nЗаказы уйдут в любом случае — но трек лучше получать до отправки.`;
 }
 // отправить один заказ в KET
 async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
-  const warn=ketSendWarnNoTrack([o]);
-  if(warn&&!confirm('Отправить заказ в KET?'+warn))return false;
   toast('Отправка в KET…');
   const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
@@ -158,6 +156,9 @@ async function sendOrderToKet(o){
     if(u)Object.assign(o,u);
     logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:ketId}});
     toast('Заказ отправлен в KET (ID '+(ketId||'?')+')');
+    // Отправку не блокируем никогда. Но если это почтовый заказ без трека — говорим об этом
+    // вслух: у KET нет метода обновления, дослать трек в этот заказ будет нечем.
+    if(ketSendWarnNoTrack([o]))toast('Трек-номера не было — в KET он не ушёл, дослать нечем');
     renderOrders();return true;
   }else{
     toast('KET отклонил: '+(result.message||'неизвестно'));return false;
