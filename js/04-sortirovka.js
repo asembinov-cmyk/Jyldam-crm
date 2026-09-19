@@ -373,34 +373,10 @@ function renderSortResult(data,matches){
     bindSortResultButtons(data);
     return;
   }
-  const o=best.o;
-  const courier=isCourierDelivery(o.delivery_id);
-  const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);
-  const deliveryType=courier?'🚚 Курьерская доставка':'📮 Почтовая доставка';
-  const confident=best.score>=80;
-  resultEl.innerHTML=`
-    <div style="text-align:center;padding:6px 0 10px">
-      <div style="font-size:13px;color:${confident?'var(--muted)':'var(--rust)'};margin-bottom:6px">${confident?'✅ Заказ найден':'⚠️ Похоже, но сверьте данные'}</div>
-      <div style="font-size:38px;font-weight:800;line-height:1.1;margin:8px 0">${esc(cty||'—')}</div>
-      <div style="font-size:14px;color:var(--muted);margin-bottom:10px">${deliveryType}</div>
-      <div style="font-size:15px;font-weight:600">${esc(o.client||'—')}</div>
-      <div style="font-size:13px;color:var(--muted)">${esc(o.address||'—')}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">Заказ № ${esc(o.code||'')}</div>
-      <div style="display:flex;gap:8px;justify-content:center;margin-top:18px;flex-wrap:wrap">
-        <button class="btn primary" id="sortConfirm" style="font-size:16px;padding:12px 26px">✅ Принял</button>
-        <button class="btn ghost sm" id="sortNotMatch">✕ Это не тот заказ</button>
-      </div>
-    </div>`;
-  const cb=$('sortConfirm');
-  if(cb)cb.onclick=async()=>{
-    cb.disabled=true;cb.textContent='Сохраняем…';
-    const meName=(S.me&&(S.me.full_name||S.me.email))||'';
-    const u=await dbUpdate('orders',o.id,{sorted_at:new Date().toISOString(),sorted_by_name:meName});
-    if(u){Object.assign(o,u);toast(`Отмечено: «${cty}» · ${o.client||''}`);renderSorting();}
-    else{cb.disabled=false;cb.textContent='✅ Принял';toast('Не удалось сохранить, попробуйте ещё раз');}
-  };
-  const nm=$('sortNotMatch');
-  if(nm)nm.onclick=()=>renderSortManualPick(data,matches.slice(1,6)); // предлагаем следующих по похожести, если есть
+  // Найденный заказ показываем окном: кроме города кладовщику надо вписать вес
+  // и отсканировать штрих-код, а это уже форма, а не строчка под кнопкой.
+  resultEl.innerHTML='';
+  openSortOrderModal(best.o,best.score>=80,data,matches);
 }
 function bindSortResultButtons(data){
   const retry=$('sortRetry');if(retry)retry.onclick=()=>renderSorting();
@@ -612,4 +588,174 @@ async function unclaimLabels(orders){
     if(u)Object.assign(o,u);
   }
   toast('Не удалось собрать бланки — заказы остались в очереди');
+}
+
+
+// ==================== ОКНО НАЙДЕННОГО ЗАКАЗА ====================
+// Раньше найденный заказ показывался строчкой под кнопкой сканирования. Теперь это
+// окно: кроме города кладовщику надо взвесить посылку и отсканировать штрих-код,
+// а вес и код — это уже форма, и её лучше держать отдельно от списка заказов.
+//
+// Вес уходит в orders.weight — то же поле, что в карточке заказа и в выгрузке;
+// штрих-код в orders.track — то же поле, что и трек Казпочты, и именно оно
+// уезжает в KET (см. раздел 6b в CLAUDE.md).
+function openSortOrderModal(o,confident,data,matches){
+  const courier=isCourierDelivery(o.delivery_id);
+  const cty=courier?cityName(o.courier_city_id):cityName(o.city_id);
+  const deliveryType=courier?'🚚 Курьерская доставка':'📮 Почтовая доставка';
+  // Вес и штрих-код спрашиваем только у почтовых: курьерские никуда не сдаются по
+  // весу и трека у них нет — для них окно остаётся прежним, «город и Принял».
+  const fields=courier?'':`
+    <div style="border-top:1px solid var(--line);margin:14px 0 0;padding-top:14px">
+      <div class="field">
+        <label>Вес (кг)</label>
+        <input id="sortWeight" type="text" inputmode="decimal"
+               value="${o.weight!=null&&o.weight!==''?esc(o.weight):''}" placeholder="0"
+               style="font-size:22px;padding:14px;text-align:center;font-weight:700">
+        <span class="hint">Взвесьте посылку и впишите вес — он попадёт в карточку заказа. Можно через запятую.</span>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>Штрих-код</label>
+        <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">
+          <input id="sortBarcode" value="${esc(o.track||'')}" placeholder="отсканируйте или введите" style="flex:1 1 180px;min-width:0;font-size:16px;padding:12px">
+          <button type="button" class="btn ghost" id="sortScanBarcode" style="flex:1 1 150px;white-space:nowrap">📷 Сканировать</button>
+        </div>
+        <span class="hint">Тот же номер, что уходит в KET и служит треком.</span>
+      </div>
+      <div id="sortScanBox"></div>
+    </div>`;
+  const body=`
+    <div style="text-align:center">
+      <div style="font-size:13px;color:${confident?'var(--muted)':'var(--rust)'}">${confident?'✅ Заказ найден':'⚠️ Похоже, но сверьте данные'}</div>
+      <div style="font-size:38px;font-weight:800;line-height:1.1;margin:6px 0">${esc(cty||'—')}</div>
+      <div style="font-size:14px;color:var(--muted);margin-bottom:8px">${deliveryType}</div>
+      <div style="font-size:15px;font-weight:600">${esc(o.client||'—')}</div>
+      <div style="font-size:13px;color:var(--muted)">${esc(o.address||'—')}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Заказ № ${esc(o.code||'')}</div>
+    </div>${fields}`;
+  const ov=showModal('Посылка',body,async()=>{
+    const meName=(S.me&&(S.me.full_name||S.me.email))||'';
+    const payload={sorted_at:new Date().toISOString(),sorted_by_name:meName};
+    // Поле текстовое, а не числовое: у type="number" запятая считается ошибкой ввода,
+    // значение молча становится пустым, и вес терялся бы при каждом «2,4».
+    const wEl=ov.querySelector('#sortWeight');
+    const wRaw=wEl?(wEl.value||'').trim().replace(',','.'):'';
+    if(wRaw!==''){
+      const w=parseFloat(wRaw);
+      if(isNaN(w)||w<0||!/^\d*[.]?\d*$/.test(wRaw)){toast('Вес указан неверно — например 2,4');return false;}
+      payload.weight=w;
+    }
+    const bcEl=ov.querySelector('#sortBarcode');
+    const bc=bcEl?(bcEl.value||'').trim():'';
+    if(bc)payload.track=bc;
+    const u=await dbUpdate('orders',o.id,payload);
+    if(!u){toast('Не удалось сохранить, попробуйте ещё раз');return false;}
+    Object.assign(o,u);
+    stopBarcodeScan();
+    toast(`Отмечено: «${cty}» · ${o.client||''}`);
+    renderSorting();
+  },{mid:true});
+  // кнопка «Сохранить» здесь по смыслу — «Принял», а рядом нужен выход к ручному выбору
+  const saveBtn=ov.querySelector('[data-save]');
+  if(saveBtn)saveBtn.textContent='✅ Принял';
+  const cancelBtn=ov.querySelector('[data-cancel]');
+  if(cancelBtn){
+    cancelBtn.textContent='✕ Это не тот заказ';
+    cancelBtn.onclick=()=>{stopBarcodeScan();ov.remove();syncModalOpenClass();
+      document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});
+      renderSortManualPick(data,matches.slice(1,6));};
+  }
+  const xBtn=ov.querySelector('.x');
+  if(xBtn)xBtn.addEventListener('click',stopBarcodeScan);
+  const scanBtn=ov.querySelector('#sortScanBarcode');
+  if(scanBtn)scanBtn.onclick=()=>startBarcodeScan(ov);
+  return ov;
+}
+
+// ==================== СКАНЕР ШТРИХ-КОДА ====================
+// Камера включается прямо в окне заказа и читает код живьём, без снимка: ИИ тут не
+// нужен и был бы медленнее и дороже.
+//
+// Где есть BarcodeDetector (Chrome, Android) — берём его: он встроен в браузер,
+// ничего качать не надо. Где нет (Safari, iPhone) — подгружаем ZXing с CDN, но
+// только в момент нажатия кнопки, чтобы не тянуть библиотеку всем и всегда.
+let _barcodeStream=null;   // поток камеры — его обязательно надо гасить, иначе камера останется включённой
+let _barcodeTimer=null;
+let _zxingReader=null;
+function stopBarcodeScan(){
+  if(_barcodeTimer){clearInterval(_barcodeTimer);_barcodeTimer=null;}
+  if(_zxingReader){try{_zxingReader.reset();}catch(e){}_zxingReader=null;}
+  if(_barcodeStream){_barcodeStream.getTracks().forEach(t=>t.stop());_barcodeStream=null;}
+  const box=document.getElementById('sortScanBox');if(box)box.innerHTML='';
+}
+async function startBarcodeScan(ov){
+  const box=ov.querySelector('#sortScanBox');if(!box)return;
+  stopBarcodeScan();
+  box.innerHTML=`
+    <div style="margin-top:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#000;position:relative">
+      <video id="sortScanVideo" playsinline muted style="width:100%;display:block;max-height:280px;object-fit:cover"></video>
+      <div style="position:absolute;inset:18% 8%;border:2px solid rgba(255,255,255,.9);border-radius:8px;pointer-events:none"></div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px">
+      <span class="hint" id="sortScanHint">Наведите камеру на штрих-код</span>
+      <button type="button" class="btn ghost sm" id="sortScanStop">Отмена</button>
+    </div>`;
+  const stopBtn=box.querySelector('#sortScanStop');
+  if(stopBtn)stopBtn.onclick=stopBarcodeScan;
+  const video=box.querySelector('#sortScanVideo');
+  const hint=box.querySelector('#sortScanHint');
+  const done=code=>{
+    const inp=ov.querySelector('#sortBarcode');
+    if(inp)inp.value=code;
+    stopBarcodeScan();
+    toast('Штрих-код: '+code);
+  };
+  try{
+    _barcodeStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+  }catch(e){
+    console.error('камера',e);
+    box.innerHTML=`<p class="hint" style="color:var(--rust);margin-top:10px">Камера недоступна: ${esc(String(e&&e.message||e))}. Введите код вручную.</p>`;
+    return;
+  }
+  video.srcObject=_barcodeStream;
+  try{await video.play();}catch(e){}
+  if(box)box.scrollIntoView({block:'nearest',behavior:'smooth'});
+  if('BarcodeDetector' in window){
+    // Список форматов у браузеров разный: чего он не умеет, того просить нельзя —
+    // конструктор ругнётся, и сканер не откроется вовсе. Поэтому пересекаем свой
+    // список с тем, что браузер объявляет сам.
+    let det=null;
+    try{
+      const want=['code_128','code_39','ean_13','ean_8','itf','qr_code'];
+      const have=await window.BarcodeDetector.getSupportedFormats();
+      const formats=want.filter(f=>have.includes(f));
+      if(formats.length)det=new window.BarcodeDetector({formats});
+    }catch(e){console.error('BarcodeDetector',e);}
+    if(det){
+      _barcodeTimer=setInterval(async()=>{
+        try{
+          const found=await det.detect(video);
+          if(found&&found.length&&found[0].rawValue)done(found[0].rawValue.trim());
+        }catch(e){/* кадр не разобрался — просто ждём следующий */}
+      },300);
+      return;
+    }
+  }
+  // запасной путь для Safari/iPhone
+  if(hint)hint.textContent='Готовим сканер…';
+  try{
+    await loadScriptOnce('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js');
+  }catch(e){
+    box.innerHTML='<p class="hint" style="color:var(--rust);margin-top:10px">Сканер не загрузился — проверьте интернет или введите код вручную.</p>';
+    stopBarcodeScan();return;
+  }
+  if(!window.ZXing){
+    box.innerHTML='<p class="hint" style="color:var(--rust);margin-top:10px">Сканер не загрузился — введите код вручную.</p>';
+    stopBarcodeScan();return;
+  }
+  if(hint)hint.textContent='Наведите камеру на штрих-код';
+  _zxingReader=new window.ZXing.BrowserMultiFormatReader();
+  _zxingReader.decodeFromStream(_barcodeStream,video,(res,err)=>{
+    if(res&&res.getText)done(String(res.getText()).trim());
+  });
 }
