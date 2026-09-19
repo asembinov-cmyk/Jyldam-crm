@@ -53,6 +53,15 @@ function orderToKet(o){
     saller_butique:o.sender||'',             // продавец/бутик
   };
   if(o.index)data.index=o.index;             // индекс (для почты)
+  // ТРЕК-НОМЕР. В KET он называется kz_code. В их документации это поле описано только
+  // среди возвращаемых (get_orders: «kz_code - трекинг код - когда заказ идёт почтой»),
+  // среди полей отправки его нет — но именно его назвал их программист, и другого
+  // кандидата в API просто не существует. Раньше мы не отправляли трек вообще, поэтому
+  // в KET он и не появлялся.
+  // ВАЖНО: у KET всего два метода — создать заказ и прочитать заказы. Метода обновления
+  // НЕТ. Значит трек уходит только в момент отправки: если его ещё не получили у Казпочты,
+  // дослать потом будет нечем (см. предупреждение в ketSendWarnNoTrack).
+  if(!courier&&o.track)data.kz_code=String(o.track).trim();
   if(o.deliver_date)data.date_delivery=o.deliver_date; // дата доставки (YYYY-MM-DD), имя поля по требованию KET
   // дата принятия/подтверждения заказа = дата создания заказа в нашей системе (YYYY-MM-DD)
   // для курьерки это «принятие», для обзвона — «подтверждение»; в KET это одно поле fill_date
@@ -124,9 +133,21 @@ function ketAccountForOrder(o){
   if(/алмат/.test(nm))return 'almaty';
   return 'astana'; // основной (старый) аккаунт по умолчанию
 }
+// Почтовые заказы без трек-номера: у KET нет метода обновления, поэтому трек можно
+// передать только сейчас. Возвращает текст предупреждения или пустую строку.
+function ketSendWarnNoTrack(list){
+  const bad=list.filter(o=>!isCourierDelivery(o.delivery_id)&&!(o.track&&String(o.track).trim()));
+  if(!bad.length)return '';
+  const names=bad.slice(0,5).map(o=>o.code||o.id).join(', ');
+  return `\n\nВНИМАНИЕ: почтовых заказов без трек-номера — ${bad.length} (${names}${bad.length>5?'…':''}).`
+    +`\nВ KET трек передаётся только при отправке, дослать его потом нечем.`
+    +`\nЛучше сначала получить трек у Казпочты, потом отправлять.`;
+}
 // отправить один заказ в KET
 async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
+  const warn=ketSendWarnNoTrack([o]);
+  if(warn&&!confirm('Отправить заказ в KET?'+warn))return false;
   toast('Отправка в KET…');
   const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
   if(r.error){toast('Ошибка KET: '+r.error);return false;}

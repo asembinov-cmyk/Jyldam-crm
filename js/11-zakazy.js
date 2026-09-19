@@ -547,6 +547,8 @@ function renderOrders(mode){
     const already=list.filter(o=>o.ket_id).length;
     let msg=`Отправить в KET заказов: ${list.length} (${source})?`;
     if(already)msg+=`\n(из них ${already} уже были отправлены — будут отправлены повторно)`;
+    // трек уходит в KET только при отправке: метода обновления у них нет
+    msg+=ketSendWarnNoTrack(list);
     if(!confirm(msg))return;
     const b=$('ketSendSel');b.disabled=true;const origLabel=b.textContent;
     // отправка одного заказа → {ok, reason, retry}
