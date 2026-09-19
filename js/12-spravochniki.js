@@ -612,45 +612,70 @@ function courierCityModal(id){const c=id?S.courier_cities.find(x=>x.id===id):{na
       else{const u=await dbInsert('courier_cities',{name});if(!u)return false;S.courier_cities.push(u);}
       toast('Сохранено');renderSettings();return true;});}
 /* ИП для Почты */
+/* ИП для Почты. Набор полей повторяет «Настройки отправителей» в кабинете KET —
+   чтобы данные отправителя лежали в одном месте и не приходилось лазить к ним.
+   На бланк Казпочты попадают только поля из POST_IP_LABEL_FIELDS (см. MAIL_LABEL_KEYS
+   в 11-zakazy.js); остальные — справочные: реквизиты и контакты. */
+const POST_IP_LABEL_FIELDS=[
+  ['label_prefix','Приставка','печатается перед названием ИП: «ТОО QP Service»'],
+  ['from_addr','Адрес','пусто — возьмётся общий адрес из «Бланка Казпочты»'],
+  ['support','Текст с номером тех. поддержки','строка целиком, как печатать на бланке'],
+  ['contract','Номер договора',''],
+  ['payment_code','Код платежа',''],
+  ['index_code','Индекс',''],
+];
+const POST_IP_EXTRA_FIELDS=[
+  ['inn','ИНН',''],
+  ['iik','ИИК',''],
+  ['bank_name','Название банка',''],
+  ['bik','БИКС',''],
+  ['support_phone','Телефон тех. поддержки','только номер, без текста'],
+  ['balance','Баланс','справочно: у нас сам не обновляется, живой баланс в KET'],
+  ['manager','Менеджер',''],
+  ['manager_contacts','Менеджер (контакты на бланке)',''],
+];
 function dirPostIp(){
-  // Колонки повторяют «Настройки отправителей» у KET: при выборе ИП в заказе
-  // эти данные попадают на бланк Казпочты.
+  const col=(k,label)=>({key:k,label,filter:'text',text:c=>c[k]==null?'':String(c[k])});
   dirGrid({title:'ИП для Почты',arrKey:'post_ips',table:'post_ips',modalFn:postIpModal,emptyText:'Нет записей',
     sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
     cols:[
-      {key:'name',label:'ИП',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`},
-      {key:'label_prefix',label:'Приставка',filter:'text',text:c=>c.label_prefix||''},
-      {key:'from_addr',label:'Адрес',filter:'text',text:c=>c.from_addr||''},
-      {key:'contract',label:'Номер договора',filter:'text',text:c=>c.contract||''},
-      {key:'index_code',label:'Индекс',filter:'text',text:c=>c.index_code||''},
-      {key:'payment_code',label:'Код платежа',filter:'text',text:c=>c.payment_code||''},
+      col('label_prefix','Приставка'),
+      {key:'name',label:'Название',filter:'text',text:c=>c.name||'',cell:c=>`<strong>${esc(c.name)}</strong>`},
+      col('from_addr','Адрес'),
+      col('support','Текст с номером тех. поддержки'),
+      col('contract','Номер договора'),
+      col('payment_code','Код'),
+      col('index_code','Индекс'),
+      col('inn','ИНН'),
+      col('iik','ИИК'),
+      col('bank_name','Название банка'),
+      col('bik','БИКС'),
+      col('support_phone','Телефон тех. поддержки'),
+      col('balance','Баланс'),
+      col('manager','Менеджер'),
+      col('manager_contacts','Менеджер (контакты на бланке)'),
     ]});
 }
-const POST_IP_LABEL_FIELDS=[
-  ['label_prefix','Приставка','например «ТОО QP Service» — печатается перед названием ИП'],
-  ['from_addr','Откуда (адрес)','оставьте пустым — возьмётся общий из «Бланка Казпочты»'],
-  ['support','Номер тех. поддержки','строка целиком, как печатать'],
-  ['index_code','Индекс',''],
-  ['contract','Номер договора',''],
-  ['payment_code','Код платежа',''],
-];
 function postIpModal(id){
   const c=id?S.post_ips.find(x=>x.id===id):{name:''};
+  const fld=([k,label,hint])=>`
+    <div class="field" style="margin-bottom:10px"><label>${esc(label)}</label>
+      <input id="ip_${k}" value="${esc(c[k]==null?'':String(c[k]))}">
+      ${hint?`<span class="hint" style="font-size:12px">${esc(hint)}</span>`:''}</div>`;
   showModal(id?'ИП для Почты':'Новый ИП',
-    `<div class="field"><label>Название ИП <span style="color:var(--rust)">*</span></label>
+    `<div class="field"><label>Название <span style="color:var(--rust)">*</span></label>
        <input id="ip_name" value="${esc(c.name||'')}"></div>
-     <p class="hint" style="margin:10px 0">Ниже — данные для бланка Казпочты. Пустые поля берутся
-       из общих настроек (Настройки → «Бланк Казпочты»), так что заполнять нужно только то,
-       что у этого ИП своё.</p>
-     ${POST_IP_LABEL_FIELDS.map(([k,label,hint])=>`
-       <div class="field" style="margin-bottom:10px"><label>${esc(label)}</label>
-         <input id="ip_${k}" value="${esc(c[k]||'')}">
-         ${hint?`<span class="hint" style="font-size:12px">${esc(hint)}</span>`:''}</div>`).join('')}`,
+     <p class="hint" style="margin:10px 0 8px">Печатается на бланке Казпочты. Пустое поле берётся
+       из общих настроек (Настройки → «Бланк Казпочты»), так что заполняйте только то, что у этого ИП своё.</p>
+     ${POST_IP_LABEL_FIELDS.map(fld).join('')}
+     <p class="hint" style="margin:14px 0 8px">Реквизиты и контакты — на бланк не печатаются,
+       хранятся здесь для справки, чтобы не искать их в кабинете KET.</p>
+     ${POST_IP_EXTRA_FIELDS.map(fld).join('')}`,
     async()=>{
       const name=val('ip_name').trim();
-      if(!name){toast('Укажите название ИП');return false;}
+      if(!name){toast('Укажите название');return false;}
       const row={name};
-      POST_IP_LABEL_FIELDS.forEach(([k])=>{row[k]=val('ip_'+k).trim()||null;});
+      [...POST_IP_LABEL_FIELDS,...POST_IP_EXTRA_FIELDS].forEach(([k])=>{row[k]=val('ip_'+k).trim()||null;});
       if(id){const u=await dbUpdate('post_ips',id,row);if(!u)return false;Object.assign(S.post_ips.find(x=>x.id===id),u);}
       else{const u=await dbInsert('post_ips',row);if(!u)return false;S.post_ips.push(u);}
       dirPostIp();return true;
