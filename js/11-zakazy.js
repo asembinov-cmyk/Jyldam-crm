@@ -732,6 +732,47 @@ let _mailLabelSettings=null;
 // Поля, которые можно задать у конкретного ИП (справочник «ИП для Почты»).
 // Так же устроено у KET: там таблица «Настройки отправителей», и при выборе ИП
 // данные бланка меняются. У нас выбор ИП уже есть — в карточке почтового заказа.
+/* Сумма прописью для бланка: «2000 (две тысячи тенге 00 тиын)».
+   Тысячи и единицы — женского рода («одна тысяча», «две тысячи»), как принято
+   в денежных суммах. Тиын всегда две цифры. */
+const _NUM_0_19_F=['ноль','одна','две','три','четыре','пять','шесть','семь','восемь','девять','десять',
+  'одиннадцать','двенадцать','тринадцать','четырнадцать','пятнадцать','шестнадцать','семнадцать','восемнадцать','девятнадцать'];
+const _NUM_0_19_M=_NUM_0_19_F.slice();_NUM_0_19_M[1]='один';_NUM_0_19_M[2]='два';
+const _NUM_TENS=['','','двадцать','тридцать','сорок','пятьдесят','шестьдесят','семьдесят','восемьдесят','девяносто'];
+const _NUM_HUNDREDS=['','сто','двести','триста','четыреста','пятьсот','шестьсот','семьсот','восемьсот','девятьсот'];
+function _numTriad(n,fem){
+  const words=[];
+  const h=Math.floor(n/100), t=Math.floor((n%100)/10), u=n%10;
+  if(h)words.push(_NUM_HUNDREDS[h]);
+  if(t>1){words.push(_NUM_TENS[t]);if(u)words.push((fem?_NUM_0_19_F:_NUM_0_19_M)[u]);}
+  else if(t===1)words.push(_NUM_0_19_M[10+u]);
+  else if(u)words.push((fem?_NUM_0_19_F:_NUM_0_19_M)[u]);
+  return words.join(' ');
+}
+// правильное окончание: 1 тысяча, 2-4 тысячи, 5-20 тысяч
+function _plural(n,one,few,many){
+  const n10=n%10,n100=n%100;
+  if(n10===1&&n100!==11)return one;
+  if(n10>=2&&n10<=4&&(n100<12||n100>14))return few;
+  return many;
+}
+function amountInWords(sum){
+  const total=Math.max(0,Math.round((+sum||0)*100));
+  const tenge=Math.floor(total/100), tiyn=total%100;
+  const parts=[];
+  const mil=Math.floor(tenge/1000000), th=Math.floor((tenge%1000000)/1000), rest=tenge%1000;
+  if(mil){parts.push(_numTriad(mil,false),_plural(mil,'миллион','миллиона','миллионов'));}
+  if(th){parts.push(_numTriad(th,true),_plural(th,'тысяча','тысячи','тысяч'));}
+  if(rest)parts.push(_numTriad(rest,false));
+  if(!parts.length)parts.push('ноль');
+  return `${parts.join(' ')} тенге ${String(tiyn).padStart(2,'0')} тиын`;
+}
+// как на бланке: число, затем прописью в скобках
+function amountForLabel(sum){
+  const t=Math.round(+sum||0);
+  return `${t.toLocaleString('ru-RU')} (${amountInWords(sum)})`;
+}
+
 const MAIL_LABEL_KEYS=['sender','from_addr','support','index_code','contract','payment_code'];
 // данные бланка для одного заказа: сначала поля выбранного ИП, чего нет — общие настройки
 function mailLabelCfgFor(order,common){
@@ -770,7 +811,7 @@ async function loadMailLabelAssets(){
   // строкой base64 на 158 КБ и грузился у всех при каждом открытии сайта
   // Чистый бланк: без впечатанных данных отправителя — их рисуем из настроек.
   // Исходный assets/mail-label-template.pdf оставлен рядом как образец «как было».
-  const templateBytes=new Uint8Array(await fetch('assets/mail-label-blank.pdf').then(r=>r.arrayBuffer()));
+  const templateBytes=new Uint8Array(await fetch('assets/mail-label-blank.pdf?v=53c2b074').then(r=>r.arrayBuffer()));
   const [regularBytes,boldBytes]=await Promise.all([
     fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf/ttf/DejaVuSans.ttf').then(r=>r.arrayBuffer()),
     fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf').then(r=>r.arrayBuffer()),
@@ -829,7 +870,7 @@ async function generateMailLabelsPdf(items){
     // 1) данные отправителя: у выбранного в заказе ИП, иначе общие настройки.
     const cfg=mailLabelCfgFor(it.order,common);
     // Закрашивать больше нечего: в чистом шаблоне этих строк нет.
-    drawFitText(page,cfg.sender||'',96,yOf(156),350,font,12);
+    drawFitText(page,cfg.sender||'',96,yOf(156),248,font,12);   // до x≈344: правее начинается подпись правой колонки
     drawFitText(page,cfg.from_addr||'',96,yOf(190),340,font,12);
     drawFitText(page,cfg.support||'',96,yOf(204),340,font,12);
     drawFitText(page,cfg.index_code||'',196,yOf(220),120,font,11);
@@ -837,15 +878,24 @@ async function generateMailLabelsPdf(items){
     // «КОД ПЛАТЕЖА» и сам код — в исходном бланке это была одна строка
     page.drawText('КОД ПЛАТЕЖА',{x:264,y:yOf(126),size:16,font:fontBold});
     drawFitText(page,cfg.payment_code||'',480,yOf(126),90,fontBold,16);
-    // 2) первая строка "0 (ноль тенге...)" — сумма заказа. Реальная линия поля: x 474–665 (не 825!)
-    page.drawRectangle({x:465,y:h-146,width:155,height:15,color:rgb(1,1,1)});
-    if(it.amount)page.drawText(Math.round(+it.amount).toLocaleString('ru-RU')+' т.',{x:478,y:yOf(144.5),size:10,font:fontBold});
+    // 2) ОБЕ суммы — объявленной ценности и наложенного платежа — это одна и та же сумма
+    // заказа, прописью: «2000 (две тысячи тенге 00 тиын)». В шаблоне обе строки были
+    // напечатаны как «0 (ноль тенге 00 тиын)» — закрашиваем их и пишем свою.
+    // Закрашивать не нужно: обе строки «0 (ноль тенге 00 тиын)» убраны из чистого шаблона
+    // вместе с данными отправителя — иначе старый текст остаётся в файле под белым
+    // прямоугольником и вылезает при копировании текста из PDF.
+    // Правее x=666 стоит «теңге» из самого бланка — под него не залезаем.
+    const sumText=amountForLabel(it.amount);
+    drawFitText(page,sumText,470,yOf(142),193,fontBold,10);
+    drawFitText(page,sumText,470,yOf(167.5),193,fontBold,10);
     // 3) Кому — линия поля: x 454–665, ширина ~200пт (не 360!)
     drawFitText(page,it.client||'',458,yOf(388),195,font,10);
     // 4) Куда — та же узкая ширина, обязательно переносим на несколько строк
     drawWrappedText(page,it.address||'',458,yOf(439),195,font,9.5,11,3);
     // 5) телефон (после "+") — та же колонка
     drawFitText(page,(it.phone||'').replace(/^\+/,''),468,yOf(477),175,font,10);
+    // 6) индекс ПОЛУЧАТЕЛЯ (внизу справа) — из карточки заказа, а не из настроек отправителя
+    drawFitText(page,it.index||'',560,yOf(507),100,font,11);
   }
   return await outDoc.save();
 }
@@ -862,7 +912,7 @@ async function openOrDownloadPdf(bytes,filename){
 async function printMailLabelsPdf(orders){
   const items=orders.map(o=>({
     order:o,   // нужен, чтобы взять данные выбранного ИП
-    client:o.client,address:o.address,
+    client:o.client,address:o.address,index:o.index||'',
     phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
     amount:(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0),
   }));
@@ -874,7 +924,7 @@ async function printMailLabelsPdf(orders){
 // бланки для входящих заказов КЕТ (Заказы → Заказы КЕТ)
 async function printInboundMailLabelsPdf(orders){
   const items=orders.map(o=>({
-    client:o.client,address:o.address,
+    client:o.client,address:o.address,index:o.index||'',
     phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
     amount:o.price!=null?o.price:(o.total_price!=null?o.total_price:0),
   }));

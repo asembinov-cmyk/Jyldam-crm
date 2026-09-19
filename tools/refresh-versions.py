@@ -49,6 +49,15 @@ def main() -> int:
 
     out = re.sub(r'(?:src|href)="((?:js|css)/[^"?]+)\?v=([0-9a-f]+)"', replace, src)
 
+    # Файлы из assets/ (например PDF-шаблон бланка) подключаются не тегом, а fetch()
+    # прямо из кода. Им метка версии нужна ровно так же: без неё браузер продолжит
+    # отдавать старую копию, и правка шаблона до сотрудников не доедет.
+    for js_file in sorted((ROOT / "js").glob("*.js")):
+        js_src = io.open(js_file, encoding="utf-8", newline="").read()
+        js_out = re.sub(r"'(assets/[^'?]+)\?v=([0-9a-f]+)'", replace, js_src)
+        if js_out != js_src:
+            io.open(js_file, "w", encoding="utf-8", newline="").write(js_out)
+
     # подключён ли каждый файл из js/ и css/
     linked = set(re.findall(r'(?:src|href)="((?:js|css)/[^"?]+)\?v=[0-9a-f]+"', src))
     on_disk = {
