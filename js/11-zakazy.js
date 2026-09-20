@@ -1506,6 +1506,11 @@ function orderModal(id,readonly){
   const _initPartner=d.sender?S.partners.find(pp=>(pp.name||'').trim().toLowerCase()===d.sender.trim().toLowerCase()):null;
   const _initSizes=packageSizesFor(_initPartner);
   const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
+  // Сохранение карточки держим в переменной: им пользуется не только кнопка «Сохранить»,
+  // но и «Получить трек» с «Отправить в KET». И трек, и отправка читают заказ на сервере
+  // ИЗ БАЗЫ, поэтому перед ними карточку надо сохранить — иначе всё, что человек только
+  // что набрал, для них не существует.
+  let saveOrderCard=null;
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
     <div class="order-split">
       <div class="ophoto-col">
@@ -1559,7 +1564,7 @@ function orderModal(id,readonly){
     </div>
       </div>
     </div>`,
-    ro?null:async()=>{
+    ro?null:(saveOrderCard=async()=>{
       // телефон клиента обязателен
       const phoneDigits=phoneVal('o_phone');
       if(!phoneDigits||phoneDigits.length<10){toast('Укажите номер телефона клиента');const pf=$('o_phone');if(pf){pf.focus();pf.style.borderColor='var(--rust)';}return false;}
@@ -1619,11 +1624,21 @@ function orderModal(id,readonly){
         const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);
         await logAction('create','orders',{entity_id:u.id,entity_label:orderLabel(u)});}
       toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
-    },{readonly:ro,wide:true});
+    }),{readonly:ro,wide:true});
   attachPhone('o_phone',d.phone);
   // кнопка «Отправить в KET»
   if(o&&o.id){const kb=document.querySelector(`[data-ketsend="${o.id}"]`);if(kb)kb.onclick=async()=>{
     kb.disabled=true;
+    // Тоже сначала сохраняем: в KET уходит то, что лежит в заказе, а не то, что набрано
+    // в открытой карточке. Метода обновления у KET нет — уйдёт неполный заказ, и
+    // исправить его там будет нечем.
+    const origText=kb.textContent;
+    if(saveOrderCard){
+      kb.textContent='Сохраняем…';
+      const saved=await saveOrderCard();
+      if(saved===false){kb.disabled=false;kb.textContent=origText;return;}
+      kb.textContent=origText;
+    }
     const ok=await sendOrderToKet(o);
     kb.disabled=false;
     // обновляем пометку прямо в открытой карточке
@@ -1674,6 +1689,16 @@ function orderModal(id,readonly){
   if($('o_kazpost_btn'))$('o_kazpost_btn').onclick=async()=>{
     const btn=$('o_kazpost_btn');btn.disabled=true;btn.textContent='⏳ Получаем…';
     try{
+      // Сначала сохраняем карточку. Трек запрашивает сервер, а он читает заказ из базы —
+      // индекс, адрес и вес, набранные минуту назад, для него не существуют, пока не
+      // сохранены. Раньше из-за этого приходилось сохранять, закрывать заказ и открывать
+      // заново, и только потом жать эту кнопку.
+      if(saveOrderCard){
+        btn.textContent='⏳ Сохраняем…';
+        const saved=await saveOrderCard();
+        if(saved===false){btn.disabled=false;btn.textContent='📮 Получить трек';return;}
+        btn.textContent='⏳ Получаем…';
+      }
       const res=await callKazpostGetBarcode(o.id);
       if(res&&res.success){
         o.track=res.barcode;
