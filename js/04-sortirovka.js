@@ -242,11 +242,25 @@ function renderSorting(){
 // Одиночный клик статус больше НЕ переключает. Раньше переключал, и это мешало
 // двум вещам: по случайному касанию в списке заказ менял статус, а окно подтверждения
 // от первого клика не давало дойти до второго — двойное нажатие было бы невозможно.
+const SORT_DBLTAP_MS=450;  // сколько ждать второе касание
 function bindSortRowClicks(){
   document.querySelectorAll('[data-sortrow]').forEach(tr=>{
     tr.style.touchAction='manipulation';   // иначе на телефоне двойное касание масштабирует страницу
-    tr.ondblclick=e=>{
+    // Двойное касание считаем сами, по двум обычным нажатиям подряд.
+    //
+    // Штатное событие dblclick Safari на айфоне для строки таблицы отдаёт
+    // ненадёжно — заказчик и сообщил, что карточка не открывается. Два обычных
+    // click приходят всегда и на телефоне, и мышью, поэтому считаем их сами.
+    // Ложных срабатываний нет: одиночное нажатие в списке больше ничего не делает,
+    // а при прокрутке click вообще не приходит.
+    tr.onclick=e=>{
       if(e.target.closest('a,button'))return; // ссылка-телефон открывает звонок, а не карточку
+      if(document.querySelector('.overlay'))return; // карточка уже открыта
+      const now=Date.now();
+      const prev=Number(tr.dataset.lastTap||0);
+      tr.dataset.lastTap=now;
+      if(now-prev>SORT_DBLTAP_MS)return;      // это было первое касание — ждём второе
+      tr.dataset.lastTap=0;
       const o=(S.orders||[]).find(x=>x.id===tr.dataset.sortrow);if(!o)return;
       openSortOrderModal(o,{});
     };
