@@ -203,7 +203,7 @@ function renderSorting(){
     ${labelPrintPanelHtml(labelQueue,isToday)}
     <div class="panel" style="margin-top:18px">
       <div class="panel-head"><h2>Список заказов</h2><span class="count">${total}</span></div>
-      <p class="hint" style="margin:0 20px 10px;color:var(--muted)">Нажмите на заказ, чтобы вручную отметить его принятым/непринятым.</p>
+      <p class="hint" style="margin:0 20px 10px;color:var(--muted)">Двойное нажатие по заказу открывает карточку: вес, штрих-код, отметка о приёмке.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 20px 14px;align-items:center">
         <select id="sortListStatusFilter" style="min-width:220px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);flex:1 1 220px">
           <option value="all" ${sortingListFilter==='all'?'selected':''}>Все статусы</option>
@@ -236,20 +236,20 @@ function renderSorting(){
   bindLabelPrintPanel(labelQueue,isToday);
   renderSortListOnly();
 }
-// обработчик клика по строке в списке заказов — вынесен отдельно, используется и при полной,
-// и при частичной (только таблица, при поиске) перерисовке
+// Двойное нажатие по строке открывает ту же карточку, что и после сканирования:
+// вес, штрих-код, «Принял» либо «Снять отметку» — и «Отмена», если передумали.
+//
+// Одиночный клик статус больше НЕ переключает. Раньше переключал, и это мешало
+// двум вещам: по случайному касанию в списке заказ менял статус, а окно подтверждения
+// от первого клика не давало дойти до второго — двойное нажатие было бы невозможно.
 function bindSortRowClicks(){
-  document.querySelectorAll('[data-sortrow]').forEach(tr=>tr.onclick=async e=>{
-    if(e.target.closest('a,button'))return; // клик по ссылке-телефону не должен переключать статус
-    const oid=tr.dataset.sortrow;
-    const o=(S.orders||[]).find(x=>x.id===oid);if(!o)return;
-    const willSort=!o.sorted_at;
-    if(willSort&&!confirm(`Отметить заказ «${o.client||o.code||''}» принятым?`))return;
-    if(!willSort&&!confirm(`Снять отметку «принят» с заказа «${o.client||o.code||''}»?`))return;
-    const payload=willSort?{sorted_at:new Date().toISOString(),sorted_by_name:(S.me&&(S.me.full_name||S.me.email))||''}:{sorted_at:null,sorted_by_name:null};
-    const u=await dbUpdate('orders',oid,payload);
-    if(u){Object.assign(o,u);toast(willSort?'Отмечено принятым':'Отметка снята');renderSorting();}
-    else toast('Не удалось сохранить');
+  document.querySelectorAll('[data-sortrow]').forEach(tr=>{
+    tr.style.touchAction='manipulation';   // иначе на телефоне двойное касание масштабирует страницу
+    tr.ondblclick=e=>{
+      if(e.target.closest('a,button'))return; // ссылка-телефон открывает звонок, а не карточку
+      const o=(S.orders||[]).find(x=>x.id===tr.dataset.sortrow);if(!o)return;
+      openSortOrderModal(o,{});
+    };
   });
 }
 // «обработан» ли заказ менеджером — есть ФИО получателя и определён тип доставки (курьер/почта).
@@ -376,7 +376,7 @@ function renderSortResult(data,matches){
   // Найденный заказ показываем окном: кроме города кладовщику надо вписать вес
   // и отсканировать штрих-код, а это уже форма, а не строчка под кнопкой.
   resultEl.innerHTML='';
-  openSortOrderModal(best.o,best.score>=80,data,matches);
+  openSortOrderModal(best.o,{fromScan:true,confident:best.score>=80,data,matches});
 }
 function bindSortResultButtons(data){
   const retry=$('sortRetry');if(retry)retry.onclick=()=>renderSorting();
@@ -400,9 +400,13 @@ function renderSortManualPick(data,extraCandidates){
       </div>`;
     }).join('');
   };
+  // Когда похожих не нашлось совсем, поле поиска открывается не пустым: подставляем
+  // фамилию с фото. Пустой список и пустое поле выглядели как «ничего больше нет»,
+  // хотя искать ещё есть где.
+  const startQ=extraCandidates.length?'':String((data&&data.client)||'').trim().split(/\s+/)[0]||'';
   resultEl.innerHTML=`<div style="padding:10px 0">
-    <input id="sortSearchInp" placeholder="ФИО, телефон или адрес…" style="width:100%;margin-bottom:10px">
-    <div id="sortSearchList">${renderList('')}</div>
+    <input id="sortSearchInp" placeholder="ФИО, телефон или адрес…" value="${esc(startQ)}" style="width:100%;margin-bottom:10px">
+    <div id="sortSearchList">${renderList(startQ)}</div>
     <button class="btn ghost sm" id="sortBackToPhoto" style="margin-top:8px">← Назад к фото</button>
   </div>`;
   const searchInp=$('sortSearchInp');
@@ -599,13 +603,19 @@ async function unclaimLabels(orders){
 // Вес уходит в orders.weight — то же поле, что в карточке заказа и в выгрузке;
 // штрих-код в orders.track — то же поле, что и трек Казпочты, и именно оно
 // уезжает в KET (см. раздел 6b в CLAUDE.md).
-function openSortOrderModal(o,confident,data,matches){
+function openSortOrderModal(o,opts){
+  opts=opts||{};
+  const fromScan=!!opts.fromScan;                  // окно после сканирования или из списка
+  const confident=opts.confident!==false;
+  const matches=opts.matches||[];
+  const others=fromScan?matches.slice(1,6):[];     // на кого ещё похоже распознанное фото
   const courier=isCourierDelivery(o.delivery_id);
   const ctyId=courier?o.courier_city_id:o.city_id;
   // cityName для неизвестного города возвращает прочерк — здесь он не нужен:
   // строка с городом либо есть целиком, либо её нет совсем.
   const cty=ctyId?cityName(ctyId):'';
   const deliveryType=courier?'🚚 Курьерская доставка':'📮 Почтовая доставка';
+  const phone=typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||'');
   // Вес и штрих-код спрашиваем только у почтовых: курьерские никуда не сдаются по
   // весу и трека у них нет — для них окно остаётся прежним, «город и Принял».
   const fields=courier?'':`
@@ -627,20 +637,36 @@ function openSortOrderModal(o,confident,data,matches){
       </div>
       <div id="sortScanBox"></div>
     </div>`;
-  // Город показываем, только если он в заказе указан: пустое место занимал прочерк
-  // на весь экран, а данные клиента из-за него уезжали вниз. У почтовых заказов город
-  // бывает не заполнен — тогда кладовщик ориентируется по адресу.
+  // Похожие заказы показываем прямо в окне, а не прячем за кнопкой: когда ИИ
+  // ошибся, человеку нужен не сам факт ошибки, а список, из которого он выберет
+  // нужный заказ. Раньше до него надо было догадаться нажать «Это не тот заказ».
+  const othersHtml=others.length?`
+    <div style="border-top:1px solid var(--line);margin:14px 0 0;padding-top:12px;text-align:left">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:8px">Похоже ещё на ${others.length} ${others.length===1?'заказ':'заказа'} — нажмите, если нужен другой:</div>
+      ${others.map(x=>{
+        const c2=isCourierDelivery(x.o.delivery_id);
+        const cty2=c2?cityName(x.o.courier_city_id):cityName(x.o.city_id);
+        return `<div data-sortother="${x.o.id}" style="padding:9px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;cursor:pointer">
+          <div style="font-weight:600;font-size:14px">${esc(x.o.client||'—')} <span style="float:right;font-weight:400;color:var(--muted)">${esc(cty2||'')}</span></div>
+          <div style="font-size:12px;color:var(--muted)">${esc(x.o.address||'—')}${x.o.phone?' · '+esc(phoneDisplay(x.o.phone)):''}</div>
+        </div>`;
+      }).join('')}
+    </div>`:'';
   const body=`
     <div style="text-align:center">
       ${cty?`<div style="font-size:38px;font-weight:800;line-height:1.1;margin:0 0 6px">${esc(cty)}</div>`:''}
       <div style="font-size:14px;color:var(--muted);margin-bottom:8px">${deliveryType}</div>
       <div style="font-size:16px;font-weight:600">${esc(o.client||'—')}</div>
       <div style="font-size:14px;color:var(--muted)">${esc(o.address||'—')}</div>
+      ${phone?`<div style="font-size:16px;font-weight:600;margin-top:6px;letter-spacing:.5px">${esc(phone)}</div>`:''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">Заказ № ${esc(o.code||'')}</div>
-    </div>${fields}`;
+    </div>${fields}${othersHtml}`;
+  const unmark=!fromScan&&!!o.sorted_at;           // из списка открыли уже принятый заказ
   const ov=showModal('Посылка',body,async()=>{
     const meName=(S.me&&(S.me.full_name||S.me.email))||'';
-    const payload={sorted_at:new Date().toISOString(),sorted_by_name:meName};
+    const payload=unmark
+      ? {sorted_at:null,sorted_by_name:null}
+      : {sorted_at:new Date().toISOString(),sorted_by_name:meName};
     // Поле текстовое, а не числовое: у type="number" запятая считается ошибкой ввода,
     // значение молча становится пустым, и вес терялся бы при каждом «2,4».
     const wEl=ov.querySelector('#sortWeight');
@@ -657,29 +683,47 @@ function openSortOrderModal(o,confident,data,matches){
     if(!u){toast('Не удалось сохранить, попробуйте ещё раз');return false;}
     Object.assign(o,u);
     stopBarcodeScan();
-    toast(`Отмечено: «${cty}» · ${o.client||''}`);
+    toast(unmark?'Отметка снята' : `Отмечено: «${cty||'без города'}» · ${o.client||''}`);
     renderSorting();
   },{mid:true});
   // «Заказ найден» — в шапку окна, рядом с заголовком: это про само окно, а не про
   // заказ, и сверху оно не отодвигает вниз данные клиента.
-  const h3=ov.querySelector('.modal-head h3');
-  if(h3)h3.insertAdjacentHTML('afterend',
-    `<span style="margin-left:10px;font-size:12px;white-space:nowrap;color:${confident?'var(--muted)':'var(--rust)'}">${confident?'✅ Заказ найден':'⚠️ Сверьте данные'}</span>`);
-  // кнопка «Сохранить» здесь по смыслу — «Принял», а рядом нужен выход к ручному выбору
+  if(fromScan){
+    const h3=ov.querySelector('.modal-head h3');
+    if(h3)h3.insertAdjacentHTML('afterend',
+      `<span style="margin-left:10px;font-size:12px;white-space:nowrap;color:${confident?'var(--muted)':'var(--rust)'}">${confident?'✅ Заказ найден':'⚠️ Сверьте данные'}</span>`);
+  }
   const saveBtn=ov.querySelector('[data-save]');
-  if(saveBtn)saveBtn.textContent='✅ Принял';
+  if(saveBtn)saveBtn.textContent=unmark?'↩ Снять отметку':'✅ Принял';
   const cancelBtn=ov.querySelector('[data-cancel]');
   if(cancelBtn){
-    cancelBtn.textContent='✕ Это не тот заказ';
-    cancelBtn.onclick=()=>{stopBarcodeScan();ov.remove();syncModalOpenClass();
-      document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});
-      renderSortManualPick(data,matches.slice(1,6));};
+    if(fromScan){
+      // выход к ручному поиску — на случай, если нужного заказа нет и среди похожих
+      cancelBtn.textContent='✕ Это не тот заказ';
+      cancelBtn.onclick=()=>{closeSortModal(ov);renderSortManualPick(opts.data||{},others);};
+    }else{
+      cancelBtn.textContent='Отмена';
+      cancelBtn.onclick=()=>closeSortModal(ov);
+    }
   }
   const xBtn=ov.querySelector('.x');
   if(xBtn)xBtn.addEventListener('click',stopBarcodeScan);
   const scanBtn=ov.querySelector('#sortScanBarcode');
   if(scanBtn)scanBtn.onclick=()=>startBarcodeScan(ov);
+  // выбор другого заказа из списка похожих — открываем окно уже для него
+  ov.querySelectorAll('[data-sortother]').forEach(el=>el.onclick=()=>{
+    const other=(S.orders||[]).find(x=>x.id===el.dataset.sortother);if(!other)return;
+    closeSortModal(ov);
+    openSortOrderModal(other,{fromScan:true,confident:true,data:opts.data,matches:[{o:other}].concat(matches.filter(m=>m.o.id!==other.id))});
+  });
   return ov;
+}
+// закрытие окна вручную: showModal прячет плавающую панель пагинации, её надо вернуть
+function closeSortModal(ov){
+  stopBarcodeScan();
+  ov.remove();
+  if(typeof syncModalOpenClass==='function')syncModalOpenClass();
+  document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});
 }
 
 // ==================== СКАНЕР ШТРИХ-КОДА ====================
