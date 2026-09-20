@@ -622,6 +622,24 @@ async function callKazpostGetBarcode(orderId){
     return out;
   }catch(e){return {success:false,error:String(e&&e.message||e)};}
 }
+// то же самое ПАЧКОЙ: один вызов функции на список заказов. Внутри функции вход
+// проверяется один раз на всю пачку, а не на каждый заказ отдельно, и сама функция
+// запускается один раз вместо N — Казпочта быстрее не стала, но накладные расходы ушли.
+// Ответ: {success:true, results:[{order_id,success,barcode?,warning?,error?}]}
+async function callKazpostGetBarcodeBatch(orderIds){
+  const {data:sess}=await sb.auth.getSession();
+  const token=sess&&sess.session?sess.session.access_token:'';
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/kazpost-get-barcode`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      body:JSON.stringify({order_ids:orderIds}),
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
+    return out;
+  }catch(e){return {success:false,error:String(e&&e.message||e)};}
+}
 // смена пароля сотрудника через Edge Function set-password (только для админа)
 async function callSetPassword(payload){
   const {data:sess}=await sb.auth.getSession();

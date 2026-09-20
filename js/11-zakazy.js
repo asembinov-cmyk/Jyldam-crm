@@ -509,33 +509,62 @@ function renderOrders(mode){
     if(already)msg+=`\n(у ${already} уже есть трек-код — будет заменён на новый)`;
     if(!confirm(msg))return;
     const b=$('kazpostAssignSel');b.disabled=true;const origLabel=b.textContent;
-    const assignOne=async(o)=>{
-      try{
-        const r=await callKazpostGetBarcode(o.id);
-        if(r&&r.success){o.track=r.barcode;return {ok:true,warn:r.warning?o.code:''};}
-        return {ok:false,reason:`${o.code}: ${r&&r.error||'неизвестная ошибка'}`};
-      }catch(e){return {ok:false,reason:`${o.code}: ${String(e&&e.message||e)}`};}
-    };
-    // Одновременных запросов к Казпочте. Раньше заказы шли группами по 5, и каждая
-    // группа ждала самый медленный ответ: четыре пришли за секунду, пятый думает
-    // десять — всё это время четыре места простаивают. Теперь очередь: как только
-    // один ответил, сразу уходит следующий, и в работе всегда ровно KAZPOST_PARALLEL
-    // запросов. Само число поднято умеренно — Казпочта внешняя и небыстрая, заваливать
-    // её десятками параллельных запросов смысла нет.
-    const KAZPOST_PARALLEL=8;
+    // Заказы уходят пачками: один вызов функции на KAZPOST_CHUNK заказов. Внутри
+    // функции они обрабатываются по два сразу, а самих вызовов держим KAZPOST_CHUNKS
+    // штук одновременно — итого к Казпочте те же ~8 запросов, что и раньше, но проверка
+    // входа и запуск функции теперь один раз на восемь заказов, а не на каждый.
+    //
+    // Пачки идут очередью, а не группами: освободилось место — сразу уходит следующая.
+    // Раньше заказы шли группами по 5 и каждая группа ждала самый медленный ответ:
+    // четыре пришли за секунду, пятый думает десять, и всё это время четыре места
+    // простаивают. У Казпочты ответы очень неровные, так что простой был постоянным.
+    const KAZPOST_CHUNK=8;    // заказов в одном вызове функции
+    const KAZPOST_CHUNKS=4;   // одновременных вызовов
     let ok=0,fail=0,done=0;const errs=[];const noIndex=[];   // трек выдан, но индекс получателя пуст
+    const byId=new Map(list.map(o=>[o.id,o]));
+    const applyResult=(r)=>{
+      const o=byId.get(r&&r.order_id);
+      const code=o?(o.code||o.id):(r&&r.order_id)||'?';
+      if(r&&r.success){
+        if(o)o.track=r.barcode;
+        ok++;
+        if(r.warning)noIndex.push(code);
+      }else{
+        fail++;errs.push(`${code}: ${(r&&r.error)||'неизвестная ошибка'}`);
+      }
+      done++;
+    };
+    // запасной путь: пока новая версия функции не выложена, она не знает про order_ids —
+    // тогда шлём заказы по одному, как раньше, чтобы присвоение не встало совсем
+    let batchWorks=true;
+    const chunks=[];
+    for(let i=0;i<list.length;i+=KAZPOST_CHUNK)chunks.push(list.slice(i,i+KAZPOST_CHUNK));
     let cursor=0;
     const worker=async()=>{
       while(true){
         const i=cursor++;
-        if(i>=list.length)return;
-        const res=await assignOne(list[i]);
-        if(res.ok){ok++;if(res.warn)noIndex.push(res.warn);}else{fail++;errs.push(res.reason);}
-        done++;
+        if(i>=chunks.length)return;
+        const chunk=chunks[i];
+        let results=null;
+        if(batchWorks){
+          const r=await callKazpostGetBarcodeBatch(chunk.map(o=>o.id));
+          if(r&&Array.isArray(r.results))results=r.results;
+          else batchWorks=false;   // старая версия функции — дальше по одному
+        }
+        if(!results){
+          results=[];
+          for(const o of chunk){
+            try{
+              const one=await callKazpostGetBarcode(o.id);
+              results.push(Object.assign({order_id:o.id},one||{success:false,error:'нет ответа'}));
+            }catch(e){results.push({order_id:o.id,success:false,error:String(e&&e.message||e)});}
+          }
+        }
+        results.forEach(applyResult);
         b.textContent=`Получаем… ${done}/${list.length}`;
       }
     };
-    await Promise.all(Array.from({length:Math.min(KAZPOST_PARALLEL,list.length)},worker));
+    await Promise.all(Array.from({length:Math.min(KAZPOST_CHUNKS,chunks.length)},worker));
     b.disabled=false;b.textContent=origLabel;
     toast(`Трек-номер присвоен: ${ok}${fail?(', с ошибкой: '+fail):''}${noIndex.length?(', без индекса: '+noIndex.length):''}`);
     if(errs.length)alert('Не удалось получить трек-номер:\n\n'+errs.join('\n'));
