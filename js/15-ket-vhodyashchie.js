@@ -27,13 +27,71 @@ async function runInBatches(list,batchSize,worker){
     await Promise.all(list.slice(i,i+batchSize).map(worker));
   }
 }
-// лёгкая ТОЧЕЧНАЯ привязка — только позиции с указанными тех-названиями, без пересканирования
-// всех товаров и без принудительной подгрузки полной истории. Вызывается при сохранении товара
-// на складе — единственное место, где НОВАЯ привязка вообще может появиться (кроме самого
-// поступления заказа от KET). Полная функция autoMatchInboundItems() остаётся для явных действий
-// пользователя (кнопка «Обновить», экран «Непривязанные коды») — на каждый заход в «Заказы
-// партнёров» она больше не гоняется, это и было основной нагрузкой.
+// ТОЧЕЧНАЯ привязка ЧЕРЕЗ БАЗУ — единственно надёжная.
+//
+// ЗАЧЕМ ИМЕННО ТАК. Прежняя версия искала позиции в S.inbound_items, то есть только среди
+// заказов, загруженных в память ЭТОЙ вкладки. А «Заказы партнёров» грузятся лениво: по
+// умолчанию только сегодняшние. Отсюда и жалоба «прописал тех.названия, а заказам не
+// присвоилось»: если модуль KET в этой вкладке не открывали — в памяти пусто и привязывать
+// не к чему; если открывали — привязывались только свежие заказы, старые не трогались
+// никогда. Молча: сообщение показывалось лишь когда привязалось хоть что-то.
+//
+// Теперь ищем в базе по самим тех-названиям, независимо от того, что загружено на экране.
+// Заодно отпала необходимость тянуть ради привязки всю историю (36 тысяч заказов).
+//
+// Регистр не важен: сравниваем через ilike, значения берём в кавычки — в кодах встречаются
+// дефисы и подчёркивания, а запятая и скобки ломали бы синтаксис запроса.
 async function matchInboundItemsForCodes(productId,ketSkuCodes){
+  if(!productId||!ketSkuCodes||!ketSkuCodes.length)return 0;
+  const codes=[...new Set(ketSkuCodes.map(c=>String(c||'').trim()).filter(Boolean))]
+    .filter(c=>!/[,()"]/.test(c));   // такие коды в or-запрос не положить — их пропускаем
+  if(!codes.length)return 0;
+  const orderIds=new Set();
+  let matched=0;
+  try{
+    const CH=40;
+    for(let i=0;i<codes.length;i+=CH){
+      const or=codes.slice(i,i+CH).map(c=>`ket_sku.ilike."${c}"`).join(',');
+      const {data,error}=await sb.from('inbound_order_items').select('id,inbound_order_id')
+        .is('product_id',null).or(or);
+      if(error){console.error('match: поиск позиций',error);return matched;}
+      const ids=(data||[]).map(r=>r.id);
+      (data||[]).forEach(r=>orderIds.add(r.inbound_order_id));
+      for(let j=0;j<ids.length;j+=200){
+        const part=ids.slice(j,j+200);
+        const {error:uErr}=await sb.from('inbound_order_items')
+          .update({product_id:productId,matched:true}).in('id',part);
+        if(uErr){console.error('match: привязка позиций',uErr);return matched;}
+        matched+=part.length;
+        // подтягиваем и локальные копии, если эти позиции сейчас на экране
+        part.forEach(id=>{const it=(S.inbound_items||[]).find(x=>x.id===id);
+          if(it){it.product_id=productId;it.matched=true;}});
+      }
+    }
+    if(orderIds.size)await refreshInboundMatchStatus([...orderIds]);
+  }catch(e){console.error('matchInboundItemsForCodes',e);}
+  return matched;
+}
+// Проставляем заказам «привязан», если у них не осталось ни одной непривязанной позиции.
+// Тоже по базе: заказ мог быть загружен не в этой вкладке.
+async function refreshInboundMatchStatus(orderIds){
+  for(let i=0;i<orderIds.length;i+=200){
+    const part=orderIds.slice(i,i+200);
+    const {data,error}=await sb.from('inbound_order_items')
+      .select('inbound_order_id,product_id,matched').in('inbound_order_id',part);
+    if(error){console.error('match: сверка заказов',error);return;}
+    const bad=new Set();   // заказы, где ещё осталось непривязанное
+    (data||[]).forEach(r=>{if(!r.matched||!r.product_id)bad.add(r.inbound_order_id);});
+    const done=part.filter(id=>!bad.has(id));
+    if(!done.length)continue;
+    const {error:uErr}=await sb.from('inbound_orders').update({match_status:'matched'}).in('id',done);
+    if(uErr){console.error('match: отметка заказов',uErr);return;}
+    done.forEach(id=>{const o=(S.inbound_orders||[]).find(x=>x.id===id);if(o)o.match_status='matched';});
+  }
+}
+// СТАРАЯ версия той же привязки — по памяти вкладки. Оставлена только для полного прохода
+// autoMatchInboundItems, который вызывается после явной полной загрузки истории.
+async function matchInboundItemsInMemory(productId,ketSkuCodes){
   if(!productId||!ketSkuCodes||!ketSkuCodes.length||!S.inbound_items||!S.inbound_items.length)return 0;
   const normSet=new Set(ketSkuCodes.map(normKetSku));
   const toMatch=S.inbound_items.filter(it=>!(it.matched&&it.product_id)&&it.ket_sku&&normSet.has(normKetSku(it.ket_sku)));

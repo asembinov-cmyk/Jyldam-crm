@@ -349,7 +349,7 @@ async function loadAll(){
     dbList('calc_sales_norms',{}).catch(()=>[]),
     dbList('shipments',{}).catch(()=>[]),
     dbList('warehouses',{order:'name'}).catch(()=>[]),
-    dbList('products',{order:'name'}).catch(()=>[]),
+    dbList('products',{order:'name',select:PRODUCT_LIST_COLS}).catch(()=>[]),
     dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
     dbList('wh_moves',{order:'created_at',asc:false}).catch(()=>[]),
     dbList('wh_order_items',{}).catch(()=>[]),
@@ -439,7 +439,7 @@ async function refreshForTab(tab){
       if(can('users','view'))S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       S.roles=await dbList('roles',{order:'created_at',asc:true});
     }else if(tab==='cash'){
-      try{const [pr,wp,wm,oi,rv]=await Promise.all([dbList('products',{order:'name'}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false}),dbList('wh_order_items',{}),dbList('wh_reservations',{order:'created_at',asc:false})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;S.wh_order_items=oi;S.wh_reservations=rv;}catch(e){}
+      try{const [pr,wp,wm,oi,rv]=await Promise.all([dbList('products',{order:'name',select:PRODUCT_LIST_COLS}),dbList('warehouse_partners',{order:'name'}),dbList('wh_moves',{order:'created_at',asc:false}),dbList('wh_order_items',{}),dbList('wh_reservations',{order:'created_at',asc:false})]);S.products=pr;S.warehouse_partners=wp;S.wh_moves=wm;S.wh_order_items=oi;S.wh_reservations=rv;}catch(e){}
     }else if(tab==='history'||tab==='notify'){
       await loadActivityLog();
       if(tab==='notify'){

@@ -63,6 +63,49 @@ async function renderQrInto(img,text,size){
 }
 const uidLocal=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 // ms — для длинных сообщений, которые не успеть прочитать за две секунды
+// Двойное нажатие, посчитанное вручную по двум обычным click подряд.
+//
+// Штатное событие dblclick Safari на айфоне для строк таблицы отдаёт ненадёжно — на этом
+// уже обожглись в «Сортировке». Два обычных click приходят всегда, и на телефоне, и мышью.
+// Ложных срабатываний нет: при прокрутке click не приходит вовсе.
+// Колонки товара, которые нужны списку. Специально БЕЗ photo: фото хранится прямо в строке
+// товара картинкой в виде текста (300×300, десятки килобайт), и «звёздочка» тянула их все
+// при каждом входе в систему — у всех сотрудников, включая курьеров, которые склад не
+// открывают вовсе. Сами фото подгружаются только для видимой страницы списка и для
+// открытой карточки (см. ensureProductPhotos).
+const PRODUCT_LIST_COLS='id,name,partner_id,barcode,sku,category,stock,storage_cell,ket_sku';
+// Подтягивает фото для указанных товаров — по требованию, одной пачкой. Уже загруженные
+// не перезапрашиваются: photo остаётся в объекте товара до перезагрузки страницы.
+async function ensureProductPhotos(ids){
+  const need=[...new Set(ids)].filter(id=>{
+    const p=(S.products||[]).find(x=>x.id===id);
+    return p&&p.photo===undefined;
+  });
+  if(!need.length)return;
+  try{
+    for(let i=0;i<need.length;i+=200){
+      const {data,error}=await sb.from('products').select('id,photo').in('id',need.slice(i,i+200));
+      if(error){console.error('фото товаров',error);return;}
+      (data||[]).forEach(r=>{const p=(S.products||[]).find(x=>x.id===r.id);if(p)p.photo=r.photo||null;});
+      // Товары, которых база не вернула (например, строку удалили), оставляем с undefined —
+      // это значит «не знаем», и сохранение карточки такое фото не тронет.
+    }
+  }catch(e){console.error('ensureProductPhotos',e);}
+}
+const DBLTAP_MS=450;
+function bindDoubleTap(el,fn){
+  if(!el)return;
+  el.style.touchAction='manipulation';   // иначе на телефоне двойное касание масштабирует страницу
+  el.onclick=e=>{
+    if(e.target.closest('a,button,input,select,textarea'))return;
+    const now=Date.now();
+    const prev=Number(el.dataset.lastTap||0);
+    el.dataset.lastTap=now;
+    if(now-prev>DBLTAP_MS)return;        // это было первое касание — ждём второе
+    el.dataset.lastTap=0;
+    fn(e);
+  };
+}
 function toast(m,ms){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms||2200);}
 
 const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',courier:'Курьер'};
@@ -120,7 +163,10 @@ async function dbList(table,opts={}){
   const fetchPage=(from,to,withCount)=>{
     // withCount — просим общее число строк ТЕМ ЖЕ запросом, что и данные: PostgREST
     // возвращает его заголовком Content-Range, отдельный запрос за счётчиком не нужен
-    let q=sb.from(table).select('*',withCount?{count:'exact'}:undefined);
+    // opts.select — список нужных колонок. Нужен там, где в таблице есть тяжёлое поле,
+    // которое в списке не требуется: у товаров фото хранится прямо в строке (картинка
+    // текстом, десятки килобайт), и «звёздочка» тянула их все при каждом входе в систему.
+    let q=sb.from(table).select(opts.select||'*',withCount?{count:'exact'}:undefined);
     if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val); // напр. только записи не раньше даты X — сильно сокращает объём для быстро растущих таблиц
     if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
     q=q.range(from,to);

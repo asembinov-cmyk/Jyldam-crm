@@ -20,8 +20,12 @@ let whProdPage=1;              // текущая страница списка �
 let whProdPerPage=50;          // товаров на страницу
 
 // генерация штрих-кода (если у товара нет своего) — EAN-13-подобный из времени + счётчика
+// Счётчик на случай, когда штрих-коды генерируются в одну и ту же миллисекунду (пакетный
+// импорт) — без него два товара могли получить одинаковый код.
+let _barcodeSeq=0;
 function genBarcode(){
-  const base='2'+String(Date.now()).slice(-11); // 12 цифр, префикс 2 (внутренний диапазон)
+  const uniq=(Date.now()+(_barcodeSeq++))%100000000000;
+  const base='2'+String(uniq).padStart(11,'0').slice(-11); // 12 цифр, префикс 2 (внутренний диапазон)
   // контрольная цифра EAN-13
   let sum=0;for(let i=0;i<12;i++){sum+=parseInt(base[i],10)*(i%2?3:1);}
   const check=(10-(sum%10))%10;
@@ -53,13 +57,14 @@ function resizeImageToDataURL(file,maxSize){
   });
 }
 
+// Вкладки-заглушки («Приёмка», «Инвентаризация») убраны: они показывали только надпись
+// «в разработке» и создавали впечатление недоделанного раздела. Вернуть их — одна строка,
+// когда эти разделы действительно появятся. Функция renderWhSoon оставлена для этого.
 const WH_TABS=[ // ключ, иконка, подпись, реализовано ли (false = «скоро», честная заглушка)
   ['overview','🏠','Обзор',true],
   ['products','📦','Товары',true],
-  ['receiving','📥','Приёмка',false],
   ['assembly','🚚','Сборка',true],
   ['returns','↩️','Возвраты',true],   // = существующая «Приёмка невыкупа»
-  ['stocktake','🧮','Инвентаризация',false],
   ['moves','📊','Движения',true],
 ];
 function whTabKeyFor(sub){ // внутренний whSub → ключ верхней вкладки (для подсветки активной)
@@ -1007,7 +1012,7 @@ function renderWhProducts(){
       ${pageRows.length?pageRows.map(p=>{
         const reserved=productReserved(p.id);const avail=productAvailable(p);const badge=productStatusBadge(p);
         return `<tr data-whrow="${p.id}">
-        <td data-label="" style="width:44px"><div class="wh2-thumb">${p.photo?`<img src="${p.photo}" alt="">`:'📦'}</div></td>
+        <td data-label="" style="width:44px"><div class="wh2-thumb" data-whthumb="${p.id}">${p.photo?`<img src="${p.photo}" alt="">`:'📦'}</div></td>
         <td data-label="Название"><strong>${esc(p.name||'—')}</strong>${p.category?`<div class="wh-cat">${esc(p.category)}</div>`:''}</td>
         <td data-label="Партнёр">${p.partner_id?esc(whPartnerName(p.partner_id)):'<span class="wh-cat">—</span>'}</td>
         <td data-label="Штрих-код"><span class="wh-barcode">${esc(p.barcode||'—')}</span></td>
@@ -1041,11 +1046,18 @@ function renderWhProducts(){
   if(_whUnmatchedCount==null)loadWhUnmatchedCount().then(()=>{if(S.tab==='cash'&&whSub==='products')renderWhProducts();}).catch(()=>{});
   $('whContent').querySelectorAll('[data-whedit]').forEach(b=>b.onclick=()=>productPanel(b.dataset.whedit));
   $('whContent').querySelectorAll('[data-whlabel]').forEach(b=>b.onclick=()=>productLabelModal(b.dataset.whlabel));
-  $('whContent').querySelectorAll('[data-whrow]').forEach(tr=>tr.ondblclick=e=>{
-    if(e.target.closest('button,a,input,select'))return;
-    productPanel(tr.dataset.whrow);
-  });
+  $('whContent').querySelectorAll('[data-whrow]').forEach(tr=>bindDoubleTap(tr,()=>productPanel(tr.dataset.whrow)));
   renderWhProductsPager(all.length,totalPages,startIdx,pageRows.length);
+  // Фото подгружаем только для видимой страницы и дорисовываем на месте — без повторной
+  // отрисовки всего списка, иначе сбрасывался бы курсор в поле поиска.
+  ensureProductPhotos(pageRows.map(x=>x.id)).then(()=>{
+    if(S.tab!=='cash'||whSub!=='products')return;
+    pageRows.forEach(x=>{
+      if(!x.photo)return;
+      const el=document.querySelector(`[data-whthumb="${x.id}"]`);
+      if(el&&!el.querySelector('img'))el.innerHTML=`<img src="${x.photo}" alt="">`;
+    });
+  });
 }
 // плавающая панель пагинации для списка товаров (тот же вид, что у заказов/заявок/КЕТ)
 function removeWhProductsPager(){const ex=$('whProdPager');if(ex)ex.remove();
@@ -1121,6 +1133,7 @@ function productModal(){
         <select id="p_partner"><option value="">— выберите партнёра склада —</option>${(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}">${esc(pt.name)}</option>`).join('')}</select>
         ${(!S.warehouse_partners||!S.warehouse_partners.length)?'<span class="hint" style="color:var(--rust)">Сначала добавьте партнёров склада в разделе Партнёры → Партнёры склада</span>':''}</div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" placeholder="Оставьте пустым — сгенерируем"></div>
+      <div class="field"><label>Артикул</label><input id="p_sku" placeholder="напр. NK-42"><span class="hint">Внутренний код товара. Раньше его можно было задать только импортом, поэтому колонка «Артикул» в списке почти всегда пустовала.</span></div>
       <div class="field full"><label>Коды KET (ket_sku)</label><input id="p_ketsku" placeholder="напр. brutalin, brutalin2, brutalin-m"><span class="hint">Если у товара несколько тех-названий в KET (разные листинги) — перечислите через запятую.</span></div>
       <div class="field full"><label>Начальные остатки по городам</label>
         <div class="wh-stock-grid">
@@ -1138,14 +1151,18 @@ function productModal(){
     if(!barcode)barcode=genBarcode();
     const st={};
     document.querySelectorAll('[data-pstock]').forEach(el=>{const c=el.dataset.pstock;const v=el.value.trim();st[c]=v===''?0:parseInt(v,10)||0;});
-    const payload={name,partner_id,barcode,sku:null,ket_sku:val('p_ketsku').trim()||null,category:null,stock:st,storage_cell:{},photo:photoDataUrl};
+    const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,ket_sku:val('p_ketsku').trim()||null,category:null,stock:st,storage_cell:{},photo:photoDataUrl};
     const saved=await dbInsert('products',payload);
     if(!saved){toast('Не удалось сохранить');return false;}
     if(!S.products)S.products=[];S.products.unshift(saved);
     logAction('create','products',{entity_id:saved.id,entity_label:name});
     if(payload.ket_sku){
       const matchedCount=await matchInboundItemsForCodes(saved.id,productKetSkuList(payload));
-      if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
+      // говорим и про ноль: раньше при нуле не показывалось ничего, и человек не понимал,
+      // сработала привязка или просто нечего было привязывать
+      toast(matchedCount?`Привязано позиций в заказах KET: ${matchedCount}`
+                        :'Позиций с такими тех.названиями в заказах KET не нашлось',5000);
+      _whUnmatchedCount=null;
       if(S.tab==='ket_orders'&&typeof drawInboundOrders==='function')drawInboundOrders();
     }
     toast('Товар добавлен');renderCash();return true;
@@ -1178,7 +1195,11 @@ function productPanel(id){
   ov.querySelector('#wp_x').onclick=()=>ov.remove();
   document.addEventListener('keydown',function esc3(e){if(e.key==='Escape'){ov.remove();document.removeEventListener('keydown',esc3);}});
 
+  // Фото грузится отдельно и может прийти уже после открытия карточки. Пока не пришло —
+  // photoTouched остаётся false, и поле photo в сохранение НЕ попадает: иначе быстрое
+  // «Сохранить» затёрло бы существующее фото пустотой.
   let panelPhotoDataUrl=p.photo||null;
+  let photoTouched=(p.photo!==undefined);
   function infoHtml(){
     const stock=(p.stock&&typeof p.stock==='object')?p.stock:{};
     return `
@@ -1196,6 +1217,7 @@ function productPanel(id){
       <div class="field full"><label>Партнёр склада <span style="color:var(--rust)">*</span></label>
         <select id="p_partner" ${canEdit?'':'disabled'}>${(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(pt=>`<option value="${pt.id}" ${p.partner_id===pt.id?'selected':''}>${esc(pt.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Штрих-код</label><input id="p_barcode" value="${esc(p.barcode||'')}" ${canEdit?'':'disabled'}></div>
+      <div class="field"><label>Артикул</label><input id="p_sku" value="${esc(p.sku||'')}" ${canEdit?'':'disabled'}></div>
       <div class="field full"><label>Коды KET (ket_sku)</label><input id="p_ketsku" value="${esc(p.ket_sku||'')}" ${canEdit?'':'disabled'}><span class="hint">Через запятую, если несколько тех-названий.</span></div>
       <div class="field full"><label>Остатки и резерв по городам</label>
         <div class="table-scroll"><table class="resp-table wh-prod-city-tbl"><thead><tr>
@@ -1243,11 +1265,11 @@ function productPanel(id){
     const pf=$('p_photoFile');
     if(pf)pf.onchange=async()=>{
       const f=pf.files&&pf.files[0];if(!f)return;
-      try{panelPhotoDataUrl=await resizeImageToDataURL(f,300);paint();}
+      try{panelPhotoDataUrl=await resizeImageToDataURL(f,300);photoTouched=true;paint();}
       catch(e){toast('Не удалось загрузить изображение');}
     };
     const pr=$('p_photoRemove');
-    if(pr)pr.onclick=()=>{panelPhotoDataUrl=null;paint();};
+    if(pr)pr.onclick=()=>{panelPhotoDataUrl=null;photoTouched=true;paint();};
   }
   function paint(){
     ov.querySelectorAll('[data-wptab]').forEach(b=>b.classList.toggle('active',b.dataset.wptab===tab));
@@ -1265,7 +1287,8 @@ function productPanel(id){
           const partner_id=val('p_partner')||null;
           if(!partner_id){toast('Выберите партнёра');return;}
           let barcode=val('p_barcode').trim();if(!barcode)barcode=genBarcode();
-          const payload={name,partner_id,barcode,ket_sku:val('p_ketsku').trim()||null,photo:panelPhotoDataUrl};
+          const payload={name,partner_id,barcode,sku:val('p_sku').trim()||null,ket_sku:val('p_ketsku').trim()||null};
+          if(photoTouched)payload.photo=panelPhotoDataUrl;   // иначе фото не трогаем вовсе
           const saved=await dbUpdate('products',id,payload);
           if(!saved){toast('Не удалось сохранить');return;}
           Object.assign(p,saved);
@@ -1273,7 +1296,9 @@ function productPanel(id){
           logAction('update','products',{entity_id:id,entity_label:name});
           if(payload.ket_sku){
             const matchedCount=await matchInboundItemsForCodes(id,productKetSkuList(payload));
-            if(matchedCount)toast(`Товар привязан к заказам КЕТ: ${matchedCount}`);
+            toast(matchedCount?`Привязано позиций в заказах KET: ${matchedCount}`
+                              :'Позиций с такими тех.названиями в заказах KET не нашлось',5000);
+            _whUnmatchedCount=null;
           }
           toast('Товар изменён');ov.remove();renderCash();
         }finally{saveBtn.disabled=false;}
@@ -1282,6 +1307,17 @@ function productPanel(id){
   }
   ov.querySelectorAll('[data-wptab]').forEach(b=>b.onclick=()=>{tab=b.dataset.wptab;paint();});
   paint();
+  // фото в списке не грузится (оно тяжёлое) — подтягиваем для открытой карточки и
+  // перерисовываем, когда пришло
+  if(p.photo===undefined){
+    ensureProductPhotos([id]).then(()=>{
+      // Отмечаем «фото под нашим контролем» ТОЛЬКО если оно реально пришло. Иначе (запрос не
+      // удался, строку не вернули) сохранение отправило бы photo:null и затёрло существующее.
+      if(p.photo===undefined)return;
+      panelPhotoDataUrl=p.photo||null;photoTouched=true;
+      if(document.body.contains(ov)&&tab==='info')paint();
+    });
+  }
 }
 
 // этикетка со штрих-кодом (для печати)
@@ -1323,9 +1359,13 @@ function productImportModal(){
       batch.push({name,partner_id,barcode:barcode||genBarcode(),sku:sku||null,category:category||null,stock:{}});
     }
     if(!batch.length){toast('Нет строк для импорта');return false;}
-    for(const item of batch){
-      const saved=await dbInsert('products',item);
-      if(saved){if(!S.products)S.products=[];S.products.unshift(saved);added++;}
+    // Вставляем пачками, а не по одной строке: сто товаров — это был сто запросов подряд.
+    // Рядом, в создании заказов по заявке, так уже сделано.
+    const CH=200;
+    for(let i=0;i<batch.length;i+=CH){
+      const {data,error}=await sb.from('products').insert(batch.slice(i,i+CH)).select();
+      if(error){console.error('импорт товаров',error);toast('Ошибка импорта: '+error.message);break;}
+      if(data){if(!S.products)S.products=[];data.forEach(r=>S.products.unshift(r));added+=data.length;}
     }
     logAction('create','products',{entity_label:`импорт ${added} товаров`});
     toast(`Добавлено товаров: ${added}`);renderCash();return true;
@@ -1367,6 +1407,7 @@ function productImportKetModal(){
     const partnerByName=new Map();
     (S.warehouse_partners||[]).forEach(pt=>partnerByName.set((pt.name||'').toLowerCase().trim(),pt.id));
     let created=0,updated=0,noPartner=0;const noPartnerNames=new Set();
+    const touched=[];   // товары, которых импорт коснулся — по ним и запускаем привязку
     for(const g of groups.values()){
       // существующий товар: сперва по совпадению тех.кода, иначе по точному названию
       let existing=null;
@@ -1379,19 +1420,28 @@ function productImportKetModal(){
           const upd=await dbUpdate('products',existing.id,{ket_sku:merged});
           if(upd){Object.assign(existing,upd);updated++;}
         }
+        touched.push(existing);
         continue;
       }
       const partner_id=partnerByName.get((g.mgr||'').toLowerCase().trim())||null;
       if(!partner_id){noPartner++;noPartnerNames.add(g.mgr||'(пусто)');continue;}
       const payload={name:g.desc,partner_id,barcode:genBarcode(),sku:null,category:null,stock:{},ket_sku:g.codes.join(', ')};
       const saved=await dbInsert('products',payload);
-      if(saved){if(!S.products)S.products=[];S.products.unshift(saved);nameIndex.set(g.desc.toLowerCase().trim(),saved);g.codes.forEach(c=>codeIndex.set(normKetSku(c),saved));created++;}
+      if(saved){if(!S.products)S.products=[];S.products.unshift(saved);nameIndex.set(g.desc.toLowerCase().trim(),saved);g.codes.forEach(c=>codeIndex.set(normKetSku(c),saved));created++;touched.push(saved);}
     }
     logAction('create','products',{entity_label:`импорт KET: создано ${created}, обновлено ${updated}`});
-    if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}else{try{await autoMatchInboundItems();}catch(e){}}
+    // Привязка идёт по базе, а не по загруженным на экран заказам. Раньше здесь ради неё
+    // выкачивалась вся история KET (десятки тысяч заказов со всем составом), и всё равно
+    // привязывалось только то, что попало в память — см. matchInboundItemsForCodes.
+    let linked=0;
+    for(const pr of touched){
+      try{linked+=await matchInboundItemsForCodes(pr.id,productKetSkuList(pr));}catch(e){console.error('привязка после импорта',e);}
+    }
+    _whUnmatchedCount=null;   // счётчик «требуют привязки» пересчитаем заново
     let msg=`Создано товаров: ${created}, обновлено (добавлены коды): ${updated}`;
+    msg+=`. Привязано позиций в заказах KET: ${linked}`;
     if(noPartner)msg+=`. Пропущено без партнёра: ${noPartner} (${[...noPartnerNames].join(', ')})`;
-    toast(msg);renderCash();return true;
+    toast(msg,7000);renderCash();return true;
   },{wide:true});
 }
 
@@ -1542,29 +1592,77 @@ function flashFeedback(el,msg,kind){
   // звук: короткий бип (ok — высокий, err — низкий)
   try{const ctx=new (window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=kind==='ok'?880:220;g.gain.value=0.1;o.start();setTimeout(()=>{o.stop();ctx.close();},kind==='ok'?90:200);}catch(e){}
 }
+// Проверка «склад по этому заказу уже списывали». У заказов KET для этого есть отметка
+// stock_written, у собственных её не было вовсе — тот же код можно было отсканировать
+// второй раз и списать товар повторно, молча. Журнал движений и есть запись о списании,
+// по нему и проверяем — отдельное поле в базе заводить не нужно.
+async function assemblyAlreadyWritten(code){
+  try{
+    const {data,error}=await sb.from('wh_moves').select('created_at')
+      .eq('target','Заказ '+code).order('created_at',{ascending:false}).limit(1);
+    if(error){console.error('проверка повторного списания',error);return '';}
+    if(data&&data.length)return fmtDate(data[0].created_at)||'ранее';
+  }catch(e){console.error('проверка повторного списания',e);}
+  return '';
+}
+// К какому городу относится собираемый заказ (для сверки со складом, выбранным в шапке)
+function assemblyOrderCity(asm){
+  if(asm&&asm.kind==='own'&&asm.order&&asm.order.pickup_city_id){
+    const nm=cityName(asm.order.pickup_city_id);
+    return normalizeWhCity(nm)||'';
+  }
+  return '';
+}
 async function finishAssembly(){
   if(!_asmOrder)return;
+  const code=_asmOrder.code;
+  // 1) Не списываем дважды.
+  const already=await assemblyAlreadyWritten(code);
+  if(already&&!confirm(`Склад по заказу «${code}» уже списывали (${already}).\nСписать ещё раз?`))return;
+  // 2) Город. Списание идёт в тот город, что выбран в шапке склада. Если заказ относится
+  //    к другому — спрашиваем прямо, а не уводим остаток с чужого склада молча.
+  const orderCity=assemblyOrderCity(_asmOrder);
+  if(orderCity&&orderCity!==whCity&&
+     !confirm(`Заказ «${code}» — город «${orderCity}», а выбран склад «${whCity}».\nВсё равно списать со склада «${whCity}»?`))return;
+  // 3) Нехватка. Раньше остаток упирался в ноль: было 2, списали 5 — стало 0, и расхождение
+  //    исчезало. Теперь оно видно: предупреждаем и списываем как есть, в минус.
+  const pn=id=>{const p=(S.products||[]).find(x=>x.id===id);return p?p.name:'—';};
+  const short=[];
+  for(const it of _asmOrder.items){
+    const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
+    const before=parseInt(((p.stock&&typeof p.stock==='object')?p.stock:{})[whCity]||0,10)||0;
+    if(before<it.qty)short.push(`${pn(it.product_id)}: на складе ${before}, нужно ${it.qty}`);
+  }
+  if(short.length&&!confirm(`На складе «${whCity}» не хватает товара:\n\n${short.join('\n')}\n\nСписать всё равно? Остаток уйдёт в минус — это и покажет недостачу.`))return;
   // списываем товары со склада (расход — отгрузка) и пишем движения
   for(const it of _asmOrder.items){
     const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
     const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
     const before=parseInt(stock[whCity]||0,10)||0;
-    const after=Math.max(0,before-it.qty);
+    const after=before-it.qty;   // без обрезки по нулю: недостача должна быть видна
     stock[whCity]=after;
     const move={product_id:it.product_id,city:whCity,op:'out_courier',qty:it.qty,balance_after:after,
       target:`Заказ ${_asmOrder.code}`,comment:'Сборка заказа',user_id:(S.me&&S.me.id)||null,user_name:(S.me&&(S.me.full_name||S.me.email))||'—'};
     const sm=await dbInsert('wh_moves',move);if(sm){if(!S.wh_moves)S.wh_moves=[];S.wh_moves.unshift(sm);}
     const sp=await dbUpdate('products',it.product_id,{stock});if(sp){const i=S.products.findIndex(x=>x.id===it.product_id);if(i>=0)S.products[i].stock=stock;}
   }
+  // 4) Снимаем резервы этого заказа: товар уже уехал, держать его «занятым» незачем.
+  //    Раньше резерв не снимался ничем, кроме ручной отмены, и «Доступно» оставалось
+  //    заниженным навсегда.
+  let released=0;
+  for(const r of (S.wh_reservations||[]).filter(r=>r.status==='active'&&r.order_code===code)){
+    const u=await dbUpdate('wh_reservations',r.id,{status:'cancelled',updated_at:new Date().toISOString()});
+    if(u){Object.assign(r,u);released++;}
+  }
   logAction('create','wh_moves',{entity_label:`Собран заказ ${_asmOrder.code}`});
-  // если это заказ из интеграции KET — помечаем его как списанный, чтобы не списать склад повторно в «Заказы КЕТ»
+  // если это заказ из интеграции KET — помечаем его как списанный, чтобы не списать склад повторно
   if(_asmOrder.kind==='ket'&&_asmOrder.inboundId){
     const upd={stock_written:true,stock_written_at:new Date().toISOString()};
     await dbUpdate('inbound_orders',_asmOrder.inboundId,upd);
     const inb=(S.inbound_orders||[]).find(x=>x.id===_asmOrder.inboundId);
     if(inb)Object.assign(inb,upd);
   }
-  toast(`Заказ ${_asmOrder.code} собран ✅`);
+  toast(`Заказ ${_asmOrder.code} собран ✅${released?` · снято резервов: ${released}`:''}`);
   _asmOrder=null;renderWhAssembly();
 }
 
@@ -1630,24 +1728,46 @@ function renderWhIntake(){
   if($('intakeOpen'))$('intakeOpen').onclick=open;
   if($('intakeInput')){$('intakeInput').focus();$('intakeInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();open();}};}
 }
-function startIntake(code){
-  const items=(S.wh_order_items||[]).filter(it=>it.order_code===code);
+// Приёмка возврата. Раньше состав искался ТОЛЬКО среди вручную заведённых составов
+// (wh_order_items) — значит невыкуп по заказу из KET принять было нечем, хотя собрать его
+// склад умел. Теперь оба источника, как и в сборке.
+async function startIntake(code){
+  const body=$('intakeBody');if(!body)return;
+  let items=(S.wh_order_items||[]).filter(it=>it.order_code===code)
+    .map(it=>({product_id:it.product_id,qty:it.qty||1}));
+  let inboundId=null;
   if(!items.length){
-    $('intakeBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Состав заказа не найден</div>Для «${esc(code)}» не задан состав — нечего возвращать. Укажите состав в сборке.</div></div>`;
+    body.innerHTML='<div class="panel"><div class="empty">Ищем заказ…</div></div>';
+    if(!S.inbound_orders){try{await loadInbound({full:true});}catch(e){}}
+    const inb=(S.inbound_orders||[]).find(o=>String(o.external_id||'')===code||String(o.id).slice(0,8)===code);
+    if(inb){
+      const inbItems=inboundItemsFor(inb.id);
+      if(!inbItems.length||inbItems.some(it=>!it.matched||!it.product_id)){
+        body.innerHTML=`<div class="panel"><div class="empty"><div class="big">Товары ещё не привязаны</div>
+          Это заказ из KET, но его позиции не сопоставлены с товарами склада. Пропишите тех.названия в карточках товаров.</div></div>`;
+        return;
+      }
+      items=inbItems.map(it=>({product_id:it.product_id,qty:it.qty||1}));
+      inboundId=inb.id;
+    }
+  }
+  if(!items.length){
+    body.innerHTML=`<div class="panel"><div class="empty"><div class="big">Состав заказа не найден</div>Для «${esc(code)}» не указано, какие товары внутри — ни у нас, ни в заказах KET.</div></div>`;
     return;
   }
   const pn=id=>{const p=(S.products||[]).find(x=>x.id===id);return p?p.name:'—';};
-  $('intakeBody').innerHTML=`
+  body.innerHTML=`
     <div class="panel">
-      <div class="panel-head"><h2>Возврат заказа ${esc(code)}</h2></div>
+      <div class="panel-head"><h2>Возврат заказа ${esc(code)}</h2><span class="count">${esc(whCity)}</span></div>
       <div class="asm-items">
         ${items.map(it=>`<div class="asm-item"><div class="asm-item-ico">↩️</div>
           <div class="asm-item-body"><div class="asm-item-name">${esc(pn(it.product_id))}</div></div>
           <div class="asm-item-qty">+${it.qty||1}</div></div>`).join('')}
       </div>
-      <div class="asm-foot"><button class="btn primary" id="intakeConfirm">✅ Принять возврат на склад</button></div>
+      <div class="asm-foot"><button class="btn primary" id="intakeConfirm">✅ Принять возврат на склад «${esc(whCity)}»</button></div>
     </div>`;
   if($('intakeConfirm'))$('intakeConfirm').onclick=async()=>{
+    const btn=$('intakeConfirm');btn.disabled=true;btn.textContent='Принимаем…';
     for(const it of items){
       const p=(S.products||[]).find(x=>x.id===it.product_id);if(!p)continue;
       const stock=(p.stock&&typeof p.stock==='object')?Object.assign({},p.stock):{};
@@ -1656,6 +1776,12 @@ function startIntake(code){
         target:`Возврат заказа ${code}`,comment:'Приёмка невыкупа',user_id:(S.me&&S.me.id)||null,user_name:(S.me&&(S.me.full_name||S.me.email))||'—'};
       const sm=await dbInsert('wh_moves',move);if(sm){if(!S.wh_moves)S.wh_moves=[];S.wh_moves.unshift(sm);}
       const sp=await dbUpdate('products',it.product_id,{stock});if(sp){const i=S.products.findIndex(x=>x.id===it.product_id);if(i>=0)S.products[i].stock=stock;}
+    }
+    // заказ KET вернулся — снимаем отметку о списании, иначе его нельзя будет собрать заново
+    if(inboundId){
+      const upd={stock_written:false,stock_written_at:null};
+      await dbUpdate('inbound_orders',inboundId,upd);
+      const inb=(S.inbound_orders||[]).find(x=>x.id===inboundId);if(inb)Object.assign(inb,upd);
     }
     logAction('create','wh_moves',{entity_label:`Приёмка возврата ${code}`});
     toast(`Возврат ${code} принят ✅`);renderWhIntake();
