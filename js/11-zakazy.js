@@ -599,7 +599,9 @@ function renderOrders(mode){
     const sendOne=async(o)=>{
       if(!o.phone||o.phone.length<10)return {ok:false,reason:`${o.code}: нет телефона`};
       try{
-        const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
+        const payload=orderToKet(o);
+        const r=await callKet({action:'send',account:ketAccountForOrder(o),order:payload});
+        rememberKetExchange(o,payload,r);
         const result=(r&&r.ket&&r.ket.result)||{};
         if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
           const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
@@ -1512,6 +1514,7 @@ function orderModal(id,readonly){
           <div style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)">
             ${o.ket_id?`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}
             <button type="button" class="btn sm ${o.ket_id?'ghost':''}" data-ketsend="${o.id}">${o.ket_id?'Отправить повторно':'Отправить в KET'}</button>
+            <button type="button" class="btn ghost sm" data-ketinfo="${o.id}" style="margin-left:6px" title="Что именно ушло в KET и что он ответил">🔍 Что ушло</button>
           </div></div>`:''}
         ${(o&&o.id&&o.phone)?`<div class="field full" style="margin-top:14px"><label>💬 Переписка с получателем (WhatsApp) <button type="button" class="btn ghost sm" id="o_chat_sync" style="margin-left:8px">🔄 Загрузить историю</button></label>
           <small style="color:var(--muted);font-size:12px">Новые сообщения приходят сами; старую переписку (до подключения) нужно подтянуть кнопкой выше — один раз</small>
@@ -1626,6 +1629,7 @@ function orderModal(id,readonly){
     // обновляем пометку прямо в открытой карточке
     if(ok){const box=kb.parentElement;if(box){box.querySelector('div').outerHTML=`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id||'')}</strong>${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`;kb.textContent='Отправить повторно';kb.classList.add('ghost');}}
   };}
+  if(o&&o.id){const ki=document.querySelector(`[data-ketinfo="${o.id}"]`);if(ki)ki.onclick=()=>ketExchangeInfo(o.id);}
   // переписка с получателем заказа (WhatsApp через Kelesu) — по телефону ИМЕННО этого заказа,
   // не партнёра — у разных заказов одного партнёра получатели разные
   if(o&&o.id&&o.phone&&$('o_chat_box')){

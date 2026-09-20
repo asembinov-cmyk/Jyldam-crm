@@ -160,12 +160,14 @@ async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
   toast('Отправка в KET…');
   const payload=orderToKet(o);
-  // Что именно ушло в KET и что он ответил — в консоль браузера. Отправка ручная и редкая,
-  // шума от этого нет, а разбирать «трек не дошёл» без этих двух вещей невозможно:
-  // у KET нет метода обновления, второй попытки на том же заказе не будет.
+  // Что именно ушло в KET и что он ответил — сохраняем и показываем по кнопке в карточке
+  // заказа. Разбирать «трек не дошёл» без этих двух вещей невозможно, а лазить в консоль
+  // браузера на телефоне нереально. Метода обновления у KET нет — второй попытки на том
+  // же заказе не будет, поэтому запись о каждой отправке дороже обычного.
   console.log('KET → отправляем',payload);
   const r=await callKet({action:'send',account:ketAccountForOrder(o),order:payload});
   console.log('KET ← ответ',r);
+  rememberKetExchange(o,payload,r);
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
   const result=(r.ket&&r.ket.result)||{};
   if((result.success||'').toUpperCase()==='TRUE'){
@@ -183,6 +185,31 @@ async function sendOrderToKet(o){
   }else{
     toast('KET отклонил: '+(result.message||'неизвестно'));return false;
   }
+}
+// Последние отправки в KET: что ушло и что ответили. Держим в памяти вкладки (последние 20),
+// показываем по кнопке в карточке заказа — см. ketExchangeInfo.
+let _ketExchanges=[];
+function rememberKetExchange(o,payload,resp){
+  _ketExchanges.unshift({order_id:o.id,code:o.code||o.id,at:new Date().toISOString(),payload,resp});
+  if(_ketExchanges.length>20)_ketExchanges.length=20;
+}
+function lastKetExchange(orderId){return _ketExchanges.find(x=>x.order_id===orderId)||null;}
+// показать, что именно ушло в KET по этому заказу и что он ответил
+function ketExchangeInfo(orderId){
+  const ex=lastKetExchange(orderId);
+  if(!ex){toast('В этой вкладке заказ ещё не отправляли — отправьте и нажмите снова');return;}
+  const track=ex.payload&&ex.payload.barcode?esc(ex.payload.barcode):'';
+  showInfo('Отправка в KET · '+esc(ex.code),`
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${esc(fmtDate(ex.at))}</div>
+    <div style="margin-bottom:10px;font-size:15px">
+      ${track?`Трек <strong>${track}</strong> передан в полях <code>kz_code</code> и <code>barcode</code>.`
+             :'<span style="color:var(--rust)">Трек не передавался — в заказе он был пустой.</span>'}
+    </div>
+    <label style="font-size:12px;color:var(--muted)">Отправлено в KET</label>
+    <pre style="white-space:pre-wrap;word-break:break-word;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;max-height:240px;overflow:auto">${esc(JSON.stringify(ex.payload,null,2))}</pre>
+    <label style="font-size:12px;color:var(--muted);margin-top:10px;display:block">Ответ KET</label>
+    <pre style="white-space:pre-wrap;word-break:break-word;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;max-height:240px;overflow:auto">${esc(JSON.stringify(ex.resp,null,2))}</pre>`,
+    {wide:true});
 }
 // дефолтные права на случай отсутствия роли — выводим из base_type
 function defaultPerms(base){
