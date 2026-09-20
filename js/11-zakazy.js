@@ -1489,7 +1489,7 @@ function orderModal(id,readonly){
       <div class="field full" id="fizlicoPickupAddrField" style="${(_initPartner&&isFizlicoPartner(_initPartner))?'':'display:none'}"><label>Адрес откуда забрали (физ. лицо)</label><input id="o_fizlico_pickup_addr" value="${esc(d.fizlico_pickup_address||'')}" placeholder="реальный адрес, где забрали посылку у этого клиента" ${dis}></div>
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
-      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" value="${esc(d.index)}" ${dis}></div>
+      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
       <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?(_initPartner.is_protected?' — 🔒 неприкосновенный, фиксированная цена по тарифу '+esc(_initPartner.name):' — по тарифу '+esc(_initPartner.name)):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
       <div class="field"><label>Тип доставки <span style="color:var(--rust)">*</span></label><select id="o_delivery" ${dis}><option value="">—</option>${S.delivery.filter(x=>/курьер|почт/i.test(x.name||'')).map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
@@ -1519,6 +1519,16 @@ function orderModal(id,readonly){
       // тип доставки обязателен — без него заказ не считается обработанным (например, для
       // «Сортировки» на складе) и непонятно, какой набор полей (курьер/почта) заполнять
       if(!val('o_delivery')){toast('Выберите тип доставки');const df=$('o_delivery');if(df){df.focus();df.style.borderColor='var(--rust)';}return false;}
+      // Индекс: либо пусто, либо ровно 6 цифр. Ошибаются тут часто — со справочных сайтов
+      // копируют вместе с внутренним кодом страницы вроде «Z00E7C2», и заказ уходит с
+      // мусором в индексе. Всплывает это поздно и дважды: Казпочта отказывается выдавать
+      // трек, а на бланке печатается неверный индекс получателя.
+      const idxVal=val('o_index').trim();
+      if(idxVal&&!/^\d{6}$/.test(idxVal)){
+        toast('Индекс должен быть ровно из 6 цифр — например 010010');
+        const inf=$('o_index');if(inf){inf.focus();inf.style.borderColor='var(--rust)';}
+        return false;
+      }
       const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
         weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),phone:phoneDigits,
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
@@ -1605,6 +1615,14 @@ function orderModal(id,readonly){
       finally{oChatSyncBtn.disabled=false;oChatSyncBtn.textContent='🔄 Загрузить историю';}
     };
   }
+  // Индекс — только цифры. Со справочных сайтов его копируют вместе с внутренним
+  // кодом страницы («Z00E7C2»), и буквы попадали в заказ незаметно.
+  const oIndexEl=$('o_index');
+  if(oIndexEl)oIndexEl.oninput=()=>{
+    const cleaned=oIndexEl.value.replace(/\D/g,'').slice(0,6);
+    if(cleaned!==oIndexEl.value)oIndexEl.value=cleaned;
+    oIndexEl.style.borderColor='';
+  };
   if($('o_kazpost_btn'))$('o_kazpost_btn').onclick=async()=>{
     const btn=$('o_kazpost_btn');btn.disabled=true;btn.textContent='⏳ Получаем…';
     try{
