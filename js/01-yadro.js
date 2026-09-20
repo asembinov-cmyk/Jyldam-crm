@@ -422,11 +422,33 @@ function startPhotoHydration(){
 }
 // сжимает изображение в браузере перед загрузкой: уменьшает до maxSide px и пережимает в JPEG.
 // Возвращает Blob (или исходный файл, если сжать не удалось).
+// Сжатие фото перед загрузкой.
+//
+// ВАЖНО, ПОЧЕМУ ЧЕРЕЗ createObjectURL, А НЕ FileReader. Раньше файл читался в
+// base64-строку (readAsDataURL). Для фото с телефона это очень дорого: снимок на
+// 8 МБ превращается в строку почти на 11 МБ, и она живёт в памяти вместе с самим
+// файлом и раскодированным изображением. При загрузке пачкой (заборщик снимает
+// десятки накладных подряд) телефон послабее просто убивает вкладку — со стороны
+// это выглядит как «фото не грузятся», без всякой ошибки.
+// createObjectURL не копирует файл вообще — браузер читает его с диска сам.
+//
+// Таймаут на раскодирование: если браузер не осилил формат (бывает с HEIC на
+// Android), события onload/onerror могут не прийти вовсе, и загрузка зависала бы
+// навсегда. Через 20 секунд грузим оригинал как есть — лучше большой файл, чем
+// вечное ожидание.
+const IMG_DECODE_TIMEOUT_MS=20000;
 async function compressImage(file,maxSide=1280,quality=0.72){
+  let objUrl=null;
   try{
     if(!file||!/^image\//.test(file.type||''))return file; // не картинка — как есть
-    const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(file);});
-    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=dataUrl;});
+    objUrl=URL.createObjectURL(file);
+    const img=await new Promise((res,rej)=>{
+      const i=new Image();
+      const t=setTimeout(()=>rej(new Error('изображение не раскодировалось за 20 секунд')),IMG_DECODE_TIMEOUT_MS);
+      i.onload=()=>{clearTimeout(t);res(i);};
+      i.onerror=()=>{clearTimeout(t);rej(new Error('браузер не смог прочитать изображение'));};
+      i.src=objUrl;
+    });
     let {width:w,height:h}=img;
     if(w<=maxSide&&h<=maxSide&&file.size<600*1024)return file; // уже маленькое — не трогаем
     if(w>h){if(w>maxSide){h=Math.round(h*maxSide/w);w=maxSide;}}
@@ -434,9 +456,11 @@ async function compressImage(file,maxSide=1280,quality=0.72){
     const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
     const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
     const blob=await new Promise(res=>canvas.toBlob(res,'image/jpeg',quality));
+    canvas.width=canvas.height=0;   // освобождаем память сразу, не ждём сборщик мусора
     if(!blob||blob.size>=file.size)return file; // если не стало меньше — оставляем оригинал
     return blob;
   }catch(e){console.error('compress',e);return file;}
+  finally{if(objUrl)URL.revokeObjectURL(objUrl);}
 }
 // загружает файл в подпапку prefix (например 'order/ID'), возвращает {path,url} или null
 async function uploadPhoto(prefix,file){
@@ -445,7 +469,16 @@ async function uploadPhoto(prefix,file){
     const blob=await compressImage(file);
     const path=`${prefix}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
     const {error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false});
-    if(error){console.error('upload',error);toast('Ошибка загрузки: '+error.message);return null;}
+    if(error){
+      console.error('upload',error);
+      // Самая частая причина отказа — протухший вход: читать экран человек ещё может
+      // (данные уже в памяти), а записывать уже нет. Английское «JWT expired» на
+      // телефоне ничего не объясняет, поэтому переводим на понятное действие.
+      const m=String(error.message||error.error||'');
+      if(/jwt|token|unauthorized|not authenticated|401|403/i.test(m))toast('Вход устарел — выйдите и войдите снова');
+      else toast('Ошибка загрузки: '+m);
+      return null;
+    }
     // публичную ссылку больше не сохраняем: бакет закрыт, она всё равно не работала бы.
     // Для показа достаточно пути — под него выдаётся временная ссылка (signedPhotoUrl).
     // сохраняем, кто и когда загрузил фото (для новых фото)
