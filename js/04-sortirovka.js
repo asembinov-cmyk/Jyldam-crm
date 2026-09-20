@@ -93,6 +93,11 @@ function removeSortListPager(){const ex=$('sortListPager');if(ex)ex.remove();
 function renderSortListPager(total,totalPages,startIdx,shownCount){
   removeSortListPager();
   if(!total)return;
+  // Если всё уместилось на одной странице, панель не нужна: листать нечего, а выбор
+  // «сколько на странице» на коротком списке ничего не меняет. Зато панель висит
+  // поверх содержимого: она прикреплена к низу экрана, и на списке из пяти строк
+  // закрывала их целиком — это и было видно на складе.
+  if(totalPages<=1)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='sortListPager';bar.className='orders-pager';

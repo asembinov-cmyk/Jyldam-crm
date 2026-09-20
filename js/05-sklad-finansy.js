@@ -281,7 +281,7 @@ function exportFinanceToExcel(rows){
   ws['!cols']=cols.map(c=>({wch:c==='Комментарий'?28:(c==='Касса'||c==='Партнёр'||c==='Категория'||c==='Менеджер'?20:14)}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Проводки');
-  const today=new Date().toISOString().slice(0,10);
+  const today=localToday();
   XLSX.writeFile(wb,`Финансы_проводки_${today}.xlsx`);
   toast(`Выгружено проводок: ${rows.length}`);
 }
@@ -1065,6 +1065,11 @@ function removeWhProductsPager(){const ex=$('whProdPager');if(ex)ex.remove();
 function renderWhProductsPager(total,totalPages,startIdx,shownCount){
   removeWhProductsPager();
   if(!total)return;
+  // Если всё уместилось на одной странице, панель не нужна: листать нечего, а выбор
+  // «сколько на странице» на коротком списке ничего не меняет. Зато панель висит
+  // поверх содержимого: она прикреплена к низу экрана, и на списке из пяти строк
+  // закрывала их целиком — это и было видно на складе.
+  if(totalPages<=1)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='whProdPager';bar.className='orders-pager';

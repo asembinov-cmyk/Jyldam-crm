@@ -470,10 +470,35 @@ async function pickupOrdersModal(pickupId){
   },30);
 }
 let ordersMode=''; // ''=все, 'courier', 'mail', 'today'
+// Сколько фильтров сейчас реально что-то ограничивают — показываем числом на кнопке,
+// иначе свёрнутые фильтры легко забыть и потом не понять, почему список короткий.
+function activeOrdersFilterCount(){
+  let n=0;
+  // createFrom/createTo не считаем: это фильтр дня, он стоит по умолчанию на сегодня и
+  // переключается отдельными кнопками «Сегодня» / «Все даты» — на виду и без того.
+  ['status','delivery','partner','sales','processor','missing','pickupCity','destCity',
+   'paidBySender','callStatus'].forEach(k=>{if(of[k])n++;});
+  if(of.q)n++;
+  if(of.pickFrom||of.pickTo||of.delFrom||of.delTo)n++;
+  return n;
+}
+function applyOrdersFiltersToggle(){
+  const btn=$('ofFiltersToggle'),body=$('ofFiltersBody');
+  if(!btn||!body)return;
+  let open=false;
+  try{open=localStorage.getItem('ordersFiltersOpen')==='1';}catch(e){}
+  body.classList.toggle('open',open);
+  btn.classList.toggle('active',open);
+  const n=activeOrdersFilterCount();
+  btn.textContent=n?`Фильтры · ${n} ${open?'▴':'▾'}`:`Фильтры ${open?'▴':'▾'}`;
+  btn.classList.toggle('has-active',!!n);
+}
 function renderOrders(mode){
   ordersMode=mode||'';
   // по умолчанию показываем заказы, созданные СЕГОДНЯ (до первой ручной правки дат)
-  if(!ordersDateInit){const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;ordersDateInit=true;}
+  // localToday(), а не UTC: раньше здесь стояла дата по Гринвичу, и с полуночи до 5–6 утра
+  // по Казахстану раздел открывался на ВЧЕРАШНЕМ дне — список выглядел пустым.
+  if(!ordersDateInit){const t=localToday();of.createFrom=t;of.createTo=t;ordersDateInit=true;}
   const list=ordersDateScopedList();
   const totalCost=list.reduce((s,o)=>s+(+o.cost||0),0);
   const paid=list.filter(o=>o.pay_date).length;
@@ -481,7 +506,7 @@ function renderOrders(mode){
   const subs={'':'Отправления: курьерская и почтовая доставка',courier:'Заказы с курьерской доставкой',
     mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня'};
   let dayNote='';
-  if(of.createFrom&&of.createFrom===of.createTo){const t=new Date().toISOString().slice(0,10);dayNote=of.createFrom===t?'за сегодня':('за '+fmtDate(of.createFrom));}
+  if(of.createFrom&&of.createFrom===of.createTo){const t=localToday();dayNote=of.createFrom===t?'за сегодня':('за '+fmtDate(of.createFrom));}
   else if(of.createFrom||of.createTo){dayNote='за период';}
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
@@ -730,7 +755,15 @@ function renderOrders(mode){
     renderOrders();
   };
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrdersReset();};
-  if($('ofFiltersToggle'))$('ofFiltersToggle').onclick=()=>{const b=$('ofFiltersBody');if(b)b.classList.toggle('open');$('ofFiltersToggle').classList.toggle('active');};
+  if($('ofFiltersToggle'))$('ofFiltersToggle').onclick=()=>{
+    const b=$('ofFiltersBody');if(!b)return;
+    const open=!b.classList.contains('open');
+    b.classList.toggle('open',open);
+    $('ofFiltersToggle').classList.toggle('active',open);
+    try{localStorage.setItem('ordersFiltersOpen',open?'1':'0');}catch(e){}
+    applyOrdersFiltersToggle();   // стрелка на кнопке должна смотреть в нужную сторону
+  };
+  applyOrdersFiltersToggle();
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrdersReset();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrdersReset();};
   if($('ofpartner'))$('ofpartner').oninput=e=>{
@@ -752,7 +785,7 @@ function renderOrders(mode){
   if($('ofpickto'))$('ofpickto').onchange=e=>{of.pickTo=e.target.value;drawOrdersReset();};
   if($('ofdelfrom'))$('ofdelfrom').onchange=e=>{of.delFrom=e.target.value;drawOrdersReset();};
   if($('ofdelto'))$('ofdelto').onchange=e=>{of.delTo=e.target.value;drawOrdersReset();};
-  if($('oftoday'))$('oftoday').onclick=()=>{const t=new Date().toISOString().slice(0,10);of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
+  if($('oftoday'))$('oftoday').onclick=()=>{const t=localToday();of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   drawOrders();
 }
@@ -763,7 +796,7 @@ function ordersScopedList(){
   let list=visibleOrders();
   if(ordersMode==='courier')list=list.filter(o=>isCourierDelivery(o.delivery_id));
   else if(ordersMode==='mail')list=list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id));
-  else if(ordersMode==='today'){const t=new Date().toISOString().slice(0,10);list=list.filter(o=>(o.created_at||'').slice(0,10)===t||(o.pickup_date||'').slice(0,10)===t);}
+  else if(ordersMode==='today'){const t=localToday();list=list.filter(o=>(o.created_at||'').slice(0,10)===t||(o.pickup_date||'').slice(0,10)===t);}
   return list;
 }
 // список с учётом режима вкладки И фильтра по дате создания (для статистики вверху)
@@ -1273,7 +1306,7 @@ function exportOrdersToExcel(){
   XLSX.utils.book_append_sheet(wb,ws,'Заказы');
   // имя файла с датой и режимом
   const modeName=ordersMode==='courier'?'курьерская':ordersMode==='mail'?'почтовая':ordersMode==='today'?'сегодня':'все';
-  const today=new Date().toISOString().slice(0,10);
+  const today=localToday();
   XLSX.writeFile(wb,`Заказы_${modeName}_${today}.xlsx`);
   toast(`Выгружено заказов: ${rows.length}`);
 }
@@ -1304,7 +1337,7 @@ function exportInboundToExcel(rows){
   ws['!cols']=cols.map(c=>({wch:c==='Адрес'?28:(c==='Клиент'||c==='Магазин'?20:14)}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Заказы КЕТ');
-  const today=new Date().toISOString().slice(0,10);
+  const today=localToday();
   XLSX.writeFile(wb,`Заказы_KET_${today}.xlsx`);
   toast(`Выгружено заказов: ${rows.length}`);
 }
@@ -1332,7 +1365,7 @@ function drawOrders(){
   }
   // если включён режим «выбраны все» — добавляем id текущей страницы в выбор
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
-  el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse"><thead><tr>
+  el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>${ordersMode==='mail'?'Статус обзвона':'Дата доставки'}</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}${staff&&ordersMode!=='mail'?'<th>Менеджер</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
@@ -1345,7 +1378,7 @@ function drawOrders(){
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
-      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?`<small class="cell-time">создан ${esc(fmtDateTime(o.created_at))}</small>`:''}</td>
+      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${(o.created_at&&String(o.created_at).slice(0,10)!==String(o.pickup_date||'').slice(0,10))?`<small class="cell-time">создан ${esc(fmtDateTime(o.created_at))}</small>`:''}</td>
       <td data-label="${isCourierDelivery(o.delivery_id)?'Дата доставки':'Статус обзвона'}" ${isCourierDelivery(o.delivery_id)?'':'onclick="event.stopPropagation()"'}>${isCourierDelivery(o.delivery_id)
         ?(o.deliver_date?esc(fmtDate(o.deliver_date)):'—')
         :`<select class="status-pick" data-ocall="${o.id}" style="border-color:${callStatusColor(o.call_status)}">
@@ -1448,6 +1481,11 @@ function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();const m
 function renderOrdersPager(total,totalPages,startIdx,shownCount){
   removeOrdersPager();
   if(!total)return;
+  // Если всё уместилось на одной странице, панель не нужна: листать нечего, а выбор
+  // «сколько на странице» на коротком списке ничего не меняет. Зато панель висит
+  // поверх содержимого: она прикреплена к низу экрана, и на списке из пяти строк
+  // закрывала их целиком — это и было видно на складе.
+  if(totalPages<=1)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='ordersPager';bar.className='orders-pager';
@@ -1587,7 +1625,7 @@ function isExplicitNum(v){return v!=null&&v!==''&&!isNaN(+v);}
 const PACKAGE_SIZES=packageSizesFor(null);
 function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localToday();
   const code=o?o.code:genOrderCode();
   const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',pickup_city_id:'',address:'',qty:'',status_id:defaultOrderStatusId(),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
   // размеры пакетов — сразу по партнёру из поля «Отправитель», если он уже известен (для первичной

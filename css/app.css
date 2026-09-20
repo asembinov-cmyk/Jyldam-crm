@@ -110,8 +110,16 @@
   .calc-courier-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
   .calc-courier-tbl td{padding:10px;border-bottom:1px solid var(--line)}
   .calc-courier-tbl th:not(:first-child),.calc-courier-tbl td:not(:first-child){text-align:right}
-  .filters-toggle{display:none}
-  .filters-body{display:contents}
+  /* Фильтры свёрнуты и на компьютере: раньше восемь списков и шесть полей дат стояли
+     развёрнутыми всегда и съедали ~150 px до первой строки данных. Состояние кнопки
+     запоминается, так что тем, кто держит фильтры открытыми, ничего делать не надо. */
+  /* Номер заказа не переносится: «KZ-571000» рвалось пополам, и строка таблицы
+     вырастала вдвое по высоте. На телефоне карточка не страдает — там своя вёрстка. */
+  .orders-tbl td[data-label="ID"]{white-space:nowrap}
+  .filters-toggle{display:inline-flex;white-space:nowrap}
+  .filters-toggle.has-active{border-color:var(--rust);color:var(--rust);font-weight:700}
+  .filters-body{display:none}
+  .filters-body.open{display:contents}
   .bottom-nav{display:none}
   .sidebar-backdrop{display:none}
   .show-more{display:none}
@@ -473,7 +481,15 @@
   .ai-recog-note.err{display:block;background:rgba(192,57,43,.10);color:#c0392b}
   .dash-period-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .dash-period-filter select{font:inherit;font-size:14px;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
-  .head-actions{margin-left:auto;display:flex;gap:10px}
+  .head-actions{margin-left:auto;display:flex;gap:10px;flex-wrap:wrap}
+  /* На телефоне четыре кнопки в ряд не помещаются: раньше они вставали по одной-две
+     в строку, а подписи рвались на три строки («Присвоить / трек- / номер»). Кладём их
+     в две колонки на всю ширину — подпись переносится максимум на две строки и читается. */
+  @media (max-width:760px){
+    .head-actions{margin-left:0;width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .head-actions .btn{width:100%;justify-content:center;text-align:center;font-size:13px;
+      padding-left:10px;padding-right:10px;line-height:1.25;hyphens:none}
+  }
   .ic-orders-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:10px 0 8px;flex-wrap:wrap}
   .ic-totals{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
   .ic-total-item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:3px;min-width:120px}
@@ -684,7 +700,12 @@
     .modal-wide{max-width:560px;width:min(560px,96vw)}
     .modal-mid{max-width:560px}
     .order-split{grid-template-columns:1fr;gap:16px}
-    .order-split .ophoto-col{position:static;top:auto}
+    /* На телефоне данные получателя идут ПЕРВЫМИ, а фото, блок KET и переписка — ниже.
+       Раньше колонка с фото стояла первой: курьер открывал заказ и видел пустую рамку
+       «Фото заказа нет» на треть экрана, под ней KET, под ним чат, а ФИО, телефон, адрес
+       и сумму — только после двух экранов прокрутки. */
+    .order-split .oform-col{order:1}
+    .order-split .ophoto-col{order:2;position:static;top:auto}
     .obig-empty{aspect-ratio:4/3}
     .obig-photo{max-height:60vh}
   }
@@ -1047,7 +1068,7 @@
        подписей нет. Так ломались «История изменений» и «Непривязанные заказы».
        Новую таблицу со сворачиванием помечайте классом .resp-collapse; без него
        она просто покажет все ячейки, и это правильное поведение по умолчанию. */
-    .resp-collapse tr{position:relative}
+  .resp-collapse tr{position:relative}
     .resp-collapse tr td[data-label="Наименование"],.resp-collapse tr td[data-label="ID"]{padding-top:13px}
     .resp-collapse tr td[data-label="Наименование"]::after,.resp-collapse tr td[data-label="ID"]::after{
       content:"▾";position:absolute;right:14px;color:var(--rust);font-size:14px;transition:transform .2s}
@@ -1062,6 +1083,15 @@
     .resp-collapse tr:not(.open) td[data-label="Статус"]{display:flex;border-bottom:1px solid #e4e9f2}
     .resp-collapse tr:not(.open) td[data-label="ID"]{border-bottom:1px solid #e4e9f2}
     .resp-collapse tr:not(.open) td.cell-actions{display:flex;border-top:1px solid #e4e9f2}
+    /* В «Заказах» в блоке действий лежит ровно одна кнопка — «Удалить». В свёрнутой
+       карточке на телефоне она оказывалась самым заметным элементом: ни телефона, ни
+       адреса, ни суммы, зато красная кнопка под большим пальцем. Прячем её в свёрнутом
+       виде — строка раскрывается одним касанием, и кнопка там же. Вместо неё показываем
+       телефон получателя: курьеру он нужен чаще всего.
+       В «Заявках на забор» действия оставляем: там это «Заказы» и «Изменить», то есть
+       единственный вход внутрь заявки. */
+    .orders-tbl tr:not(.open) td.cell-actions{display:none}
+    .orders-tbl tr:not(.open) td[data-label="Телефон"]{display:flex;border-bottom:1px solid #e4e9f2}
     .show-more{display:block;width:100%;margin:4px 0 6px;justify-content:center}
     .list-count{display:block;text-align:center;font-size:12px;color:var(--muted);padding:4px 0 2px}
   }

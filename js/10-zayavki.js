@@ -34,7 +34,7 @@ function renderPickups(){
   pickupsPage=1; // при полной перерисовке начинаем с первой страницы
   const list=filteredPickups();
   const totalOrders=list.reduce((s,p)=>s+(+p.orders||0),0);
-  const today=new Date().toISOString().slice(0,10);
+  const today=localToday();
   // «Собрано»: статус заявки содержит забран/собран/готов
   const collectedCount=list.filter(p=>isCollectedStatus(p.status_id)).length;
   const head=isCourier()?'Мои заборы':'Заявки на забор';
@@ -258,6 +258,11 @@ function removePickupsPager(){const ex=$('pickupsPager');if(ex)ex.remove();const
 function renderPickupsPager(total,totalPages,startIdx,shownCount){
   removePickupsPager();
   if(!total)return;
+  // Если всё уместилось на одной странице, панель не нужна: листать нечего, а выбор
+  // «сколько на странице» на коротком списке ничего не меняет. Зато панель висит
+  // поверх содержимого: она прикреплена к низу экрана, и на списке из пяти строк
+  // закрывала их целиком — это и было видно на складе.
+  if(totalPages<=1)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='pickupsPager';bar.className='orders-pager';

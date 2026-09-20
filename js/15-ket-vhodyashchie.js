@@ -960,6 +960,11 @@ function removeInboundPager(){const ex=$('inboundPager');if(ex)ex.remove();
 function renderInboundPager(total,totalPages,startIdx,shownCount){
   removeInboundPager();
   if(!total)return;
+  // Если всё уместилось на одной странице, панель не нужна: листать нечего, а выбор
+  // «сколько на странице» на коротком списке ничего не меняет. Зато панель висит
+  // поверх содержимого: она прикреплена к низу экрана, и на списке из пяти строк
+  // закрывала их целиком — это и было видно на складе.
+  if(totalPages<=1)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='inboundPager';bar.className='orders-pager';

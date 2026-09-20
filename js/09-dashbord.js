@@ -181,7 +181,7 @@ function renderDashboard(){
   const inWay=o=>{const s=orderStatusObj(o.status_id);return s&&/прибыл|выехал|пути|курьер|отправл|передан/i.test(s.name||'');};
   const delivered=o=>{const s=orderStatusObj(o.status_id);return s&&/доставлен|выдан|заверш/i.test(s.name||'');};
   const problem=o=>{const s=orderStatusObj(o.status_id);return s&&/проблем|возврат|отмен|ошибк/i.test(s.name||'');};
-  const today=new Date().toISOString().slice(0,10);
+  const today=localToday();
   const cNew=orders.filter(isNew).length, cWay=orders.filter(inWay).length,
         cDel=orders.filter(delivered).length, cProb=orders.filter(problem).length;
   const todayCount=orders.filter(o=>(o.created_at||'').slice(0,10)===today).length;
