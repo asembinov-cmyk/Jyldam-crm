@@ -38,6 +38,81 @@ function isFizlicoName(name){
 function isFizlicoPartner(partner){
   return isFizlicoName(partner&&partner.name);
 }
+// Строки будущих заказов по заявке. Вынесено отдельно: их собирают и автосоздание по
+// плановому количеству, и ручное добавление «ещё N штук», и создание из фото.
+function buildPickupOrderRows(p,count){
+  const pickupId=p.id;
+  // ищем партнёра по имени из заявки, чтобы подтянуть его данные
+  const partner=S.partners.find(x=>x.name===p.name)||null;
+  // тип доставки по умолчанию — курьерский, если есть такой тип
+  const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
+  const baseStatus=defaultOrderStatusId();
+  // по умолчанию всем автосозданным заказам сразу проставляем размер S (самый частый случай) и
+  // сумму по тарифу партнёра — курьеру останется вручную поменять только исключения (M/L), а не
+  // выбирать размер для каждого заказа с нуля
+  const defaultSizes=packageSizesFor(partner);
+  const defaultCost=courierDelivery?defaultSizes.S.courier:defaultSizes.S.mail;
+  const rows=[];
+  for(let i=0;i<count;i++){
+    rows.push({
+      code:genOrderCode(),
+      pickup_id:pickupId,
+      partner_id:partner?partner.id:null,
+      sender:partner?partner.name:(p.name||''),
+      pickup_date:p.pickup_date||null,
+      phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
+      // для «Физ лицо Астана» / «Физ лицо Алматы» — это не магазины, а конкретные клиенты.
+      // В самой заявке для них два разных адреса: «Адрес» (откуда забрали — идёт в
+      // fizlico_pickup_address) и «Адрес доставки» (куда везём — идёт в обычный address).
+      // Для обычных партнёров всё как раньше — адрес доставки клиента заполняется вручную.
+      address:isFizlicoName(p.name)?(p.delivery_address||''):'',
+      fizlico_pickup_address:isFizlicoName(p.name)?(p.address||(partner&&partner.address)||''):null,
+      client:'',weight:null,qty:1,
+      delivery_id:courierDelivery?courierDelivery.id:null,
+      courier_city_id:null,
+      pickup_city_id:partner?partner.city_id||null:(p.city_id||null), // город забора из партнёра/заявки
+      status_id:baseStatus,
+      sales_id:partner?partner.sales_id:(p.sales_id||null),
+      processor_id:partner?partner.processor_id:(p.processor_id||null),
+      size:'S', // по умолчанию — сотрудник/курьер меняет вручную, только если посылка реально M или L
+      cost:defaultCost, order_sum:defaultCost,
+      // эти заказы всегда курьерские (курьер забирает у партнёра) — если у партнёра именно
+      // курьерский тариф стоит ровно 0, он оплачивает эту доставку сам отдельно, не через сумму
+      // заказа — сразу помечаем «Оплачено отправителем». Почтовый тариф тут ни при чём — заказ
+      // не почтовый. order_sum_orig подтягиваем из карточки партнёра (условная сумма при прямой
+      // оплате) — иначе Калькуляции неоткуда взять «условную выручку» по этим заказам.
+      paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)),
+      order_sum_orig:(partner&&isExplicitZero(partner.tariff_courier)&&partner.direct_pay_amount!=null)?partner.direct_pay_amount:null,
+      index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
+    });
+  }
+  return rows;
+}
+// Вставка готовых строк. Supabase/PostgREST спокойно принимает несколько тысяч строк за раз,
+// но на всякий случай (лимиты размера запроса, таймауты на слабом интернете) режем на пачки
+// по 200 штук — для 500 заказов это всего 3 запроса вместо пятисот.
+async function insertOrderRows(rows){
+  const made=[];
+  const CHUNK=200;
+  for(let i=0;i<rows.length;i+=CHUNK){
+    const chunk=rows.slice(i,i+CHUNK);
+    const {data:inserted,error}=await sb.from('orders').insert(chunk).select();
+    if(error){console.error('bulk insert orders',error);toast('Ошибка при создании заказов: '+error.message);break;}
+    if(inserted){inserted.forEach(u=>S.orders.unshift(u));made.push(...inserted);}
+  }
+  return made;
+}
+// Сколько заказов по этой заявке РЕАЛЬНО есть — считаем прямо из базы, а не из памяти
+// вкладки: по той же заявке заказы могли создавать в другой вкладке или другим сотрудником.
+// Заодно синхронизируем локальный кэш этими строками, чтобы список в интерфейсе не отставал.
+async function freshOrdersCount(pickupId){
+  const freshRows=await dbListWhere('orders','pickup_id',pickupId);
+  if(!freshRows)return ordersCountForPickup(pickupId); // запрос не удался — считаем по памяти
+  freshRows.forEach(r=>{const i=S.orders.findIndex(x=>x.id===r.id);if(i>=0)S.orders[i]=r;else S.orders.unshift(r);});
+  return freshRows.length;
+}
+// АВТОСОЗДАНИЕ по плановому количеству из заявки: доводим число заказов до p.orders.
+// Вызывается при открытии заявки и после правки количества.
 async function createOrdersFromPickup(pickupId,opts){
   opts=opts||{};
   const p=S.pickups.find(x=>x.id===pickupId);if(!p)return;
@@ -47,80 +122,67 @@ async function createOrdersFromPickup(pickupId,opts){
   if(!want){if(!opts.silent)toast('Укажите количество заказов');return;}
   _creatingOrders[pickupId]=true;
   try{
-    // СВЕЖИЙ подсчёт прямо из базы (не из локального кэша) — если по этой же заявке заказы
-    // прямо сейчас создаются в другой вкладке/другим сотрудником, здесь мы это увидим и не задвоим.
-    // Заодно синхронизируем локальный кэш этими строками, чтобы список в интерфейсе не отставал.
-    const freshRows=await dbListWhere('orders','pickup_id',pickupId);
-    if(freshRows){
-      freshRows.forEach(r=>{const i=S.orders.findIndex(x=>x.id===r.id);if(i>=0)S.orders[i]=r;else S.orders.unshift(r);});
-    }
-    const have=freshRows?freshRows.length:ordersCountForPickup(pickupId); // если запрос не удался — fallback на локальный кэш
+    const have=await freshOrdersCount(pickupId);
     const need=want-have;
     if(need<=0){if(!opts.silent)toast(have?`Уже создано ${have} заказ(ов) по заявке`:'Нечего создавать');return;}
-    // ищем партнёра по имени из заявки, чтобы подтянуть его данные
-    const partner=S.partners.find(x=>x.name===p.name)||null;
-    // тип доставки по умолчанию — курьерский, если есть такой тип
-    const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
-    const baseStatus=defaultOrderStatusId();
-    // собираем ВСЕ строки заранее и вставляем ОДНИМ запросом — раньше вставляли по одной штуке в
-    // цикле (каждая ждала ответ сервера), и на партиях в сотни заказов это могло занимать больше
-    // минуты и выглядело как зависание. Пакетная вставка — доли секунды даже на 500+ строк.
-    const rows=[];
-    // по умолчанию всем автосозданным заказам сразу проставляем размер S (самый частый случай) и
-    // сумму по тарифу партнёра — курьеру останется вручную поменять только исключения (M/L), а не
-    // выбирать размер для каждого заказа с нуля
-    const defaultSizes=packageSizesFor(partner);
-    const defaultCost=courierDelivery?defaultSizes.S.courier:defaultSizes.S.mail;
-    for(let i=0;i<need;i++){
-      rows.push({
-        code:genOrderCode(),
-        pickup_id:pickupId,
-        partner_id:partner?partner.id:null,
-        sender:partner?partner.name:(p.name||''),
-        pickup_date:p.pickup_date||null,
-        phone:'', // телефон клиента-получателя заполняется вручную, не телефон магазина
-        // для «Физ лицо Астана» / «Физ лицо Алматы» — это не магазины, а конкретные клиенты.
-        // В самой заявке для них два разных адреса: «Адрес» (откуда забрали — идёт в
-        // fizlico_pickup_address) и «Адрес доставки» (куда везём — идёт в обычный address).
-        // Для обычных партнёров всё как раньше — адрес доставки клиента заполняется вручную.
-        address:isFizlicoName(p.name)?(p.delivery_address||''):'',
-        fizlico_pickup_address:isFizlicoName(p.name)?(p.address||(partner&&partner.address)||''):null,
-        client:'',weight:null,qty:1,
-        delivery_id:courierDelivery?courierDelivery.id:null,
-        courier_city_id:null,
-        pickup_city_id:partner?partner.city_id||null:(p.city_id||null), // город забора из партнёра/заявки
-        status_id:baseStatus,
-        sales_id:partner?partner.sales_id:(p.sales_id||null),
-        processor_id:partner?partner.processor_id:(p.processor_id||null),
-        size:'S', // по умолчанию — сотрудник/курьер меняет вручную, только если посылка реально M или L
-        cost:defaultCost, order_sum:defaultCost,
-        // эти заказы всегда курьерские (курьер забирает у партнёра) — если у партнёра именно
-        // курьерский тариф стоит ровно 0, он оплачивает эту доставку сам отдельно, не через сумму
-        // заказа — сразу помечаем «Оплачено отправителем». Почтовый тариф тут ни при чём — заказ
-        // не почтовый. order_sum_orig подтягиваем из карточки партнёра (условная сумма при прямой
-        // оплате) — иначе Калькуляции неоткуда взять «условную выручку» по этим заказам.
-        paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)),
-        order_sum_orig:(partner&&isExplicitZero(partner.tariff_courier)&&partner.direct_pay_amount!=null)?partner.direct_pay_amount:null,
-        index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
-      });
-    }
-    let created=0;
-    // Supabase/PostgREST спокойно принимает несколько тысяч строк за раз, но на всякий случай
-    // (лимиты размера запроса, таймауты на слабом интернете) режем на пачки по 200 штук —
-    // для 500 заказов это всего 3 запроса вместо пятисот
-    const CHUNK=200;
-    for(let i=0;i<rows.length;i+=CHUNK){
-      const chunk=rows.slice(i,i+CHUNK);
-      const {data:inserted,error}=await sb.from('orders').insert(chunk).select();
-      if(error){console.error('bulk insert orders',error);toast('Ошибка при создании заказов: '+error.message);break;}
-      if(inserted){inserted.forEach(u=>S.orders.unshift(u));created+=inserted.length;}
-    }
+    const created=(await insertOrderRows(buildPickupOrderRows(p,need))).length;
     if(created&&!opts.silent)toast(`Создано заказов: ${created}`);
     return created;
   }finally{
     delete _creatingOrders[pickupId]; // снимаем блокировку в любом случае
   }
 }
+// ДОБАВИТЬ ещё N заказов к заявке.
+//
+// Считаем от ФАКТА, а не от планового числа в заявке. Раньше кнопка «Создать ещё заказ»
+// просто увеличивала план на единицу, а создание сравнивало план с фактом и делало разницу.
+// Стоило факту обогнать план — а это обычное дело, когда партнёр досыпает заказы и число в
+// заявке правят задним числом, — и кнопка молча не делала НИЧЕГО, столько раз подряд, на
+// сколько план отстал. Проверено: при плане 2 и пяти заказах первые три нажатия уходили
+// впустую, без единого сообщения.
+//
+// Плановое число после добавления подтягиваем до факта, чтобы «Создано N из M» сходилось.
+async function addOrdersToPickup(pickupId,count){
+  const p=S.pickups.find(x=>x.id===pickupId);if(!p)return [];
+  count=Math.max(0,parseInt(count,10)||0);
+  if(!count)return [];
+  if(_creatingOrders[pickupId]){toast('Заказы уже создаются…');return [];}
+  _creatingOrders[pickupId]=true;
+  try{
+    const have=await freshOrdersCount(pickupId);
+    const made=await insertOrderRows(buildPickupOrderRows(p,count));
+    if(made.length){
+      const u=await dbUpdate('pickups',pickupId,{orders:have+made.length});
+      if(u)Object.assign(p,u);
+    }
+    return made;
+  }finally{
+    delete _creatingOrders[pickupId];
+  }
+}
+// Окошко «сколько заказов добавить». Вводится ДОБАВКА, а не общее число: складывать в уме
+// с тем, что уже создано, больше не нужно — на этом и спотыкались.
+function askAddOrdersCount(onOk){
+  const ov=showModal('Сколько заказов добавить?',`
+    <div class="field">
+      <label>Количество</label>
+      <input id="pom_add_count" type="text" inputmode="numeric" value="1"
+             style="font-size:26px;padding:14px;text-align:center;font-weight:700">
+      <span class="hint">Добавится к тем, что уже созданы. Общее число считать не нужно.</span>
+    </div>`,async()=>{
+      const el=ov.querySelector('#pom_add_count');
+      const n=parseInt(String(el.value||'').replace(/\D/g,''),10)||0;
+      if(n<1){toast('Укажите количество — хотя бы 1');return false;}
+      if(n>100&&!confirm(`Создать сразу ${n} заказов?`))return false;
+      await onOk(n);
+    },{mid:true});
+  const sv=ov.querySelector('[data-save]');if(sv)sv.textContent='Создать';
+  const el=ov.querySelector('#pom_add_count');
+  if(el){el.oninput=()=>{const c=el.value.replace(/\D/g,'').slice(0,4);if(c!==el.value)el.value=c;};
+         setTimeout(()=>{el.focus();el.select();},60);}
+  return ov;
+}
+
 // Окно: список заказов, созданных по заявке, с возможностью прикрепить фото к каждому
 async function pickupOrdersModal(pickupId){
   const p=S.pickups.find(x=>x.id===pickupId);if(!p)return;
@@ -146,12 +208,13 @@ async function pickupOrdersModal(pickupId){
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${noPhotoCount?`<button type="button" class="btn sm ${pomOnlyNoPhoto?'':'ghost'}" id="pom_toggle_nophoto">${pomOnlyNoPhoto?'✕ Показать все':`🔍 Без фото (${noPhotoCount})`}</button>`:''}
         ${canEditPhoto?`<label class="btn sm ghost" style="cursor:pointer">📷 Загрузить фото пачкой<input type="file" accept="image/*" multiple id="pom_bulk_photo" style="display:none"></label>`:''}
-        <button class="btn sm primary" id="pom_create">＋ Создать ещё заказ</button>
+        ${canEditPhoto?`<label class="btn sm ghost" style="cursor:pointer" title="Сколько снимков — столько заказов">🖼️ Заказы из фото<input type="file" accept="image/*" multiple id="pom_photo_orders" style="display:none"></label>`:''}
+        <button class="btn sm primary" id="pom_create">＋ Добавить заказы</button>
         <button type="button" class="btn sm primary" id="pom_save_top">💾 Сохранить</button>
       </div>
     </div>
     ${list.some(o=>o.track)?`<div class="pom-scan"><input id="pom_scan_input" placeholder="📷 Отсканируйте штрих-код посылки, чтобы найти её заказ…" autocomplete="off"></div>`:''}`;
-    if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Создать ещё заказ».</div>`;
+    if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Добавить заказы» или «Заказы из фото».</div>`;
     const cards=list.slice(0,shown).map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
       <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
       ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:''}
@@ -364,17 +427,43 @@ async function pickupOrdersModal(pickupId){
         toast(`Загружено фото: ${ok}${leftover?` · ещё ${leftover} не распределено (пустых заказов не хватило) — добавьте вручную`:''}`);
         const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
       };
-      // «Создать ещё заказ» — добавляет ОДИН новый заказ, увеличивает счётчик заявки
+      // «Добавить заказы» — спрашиваем сколько и создаём ровно столько же новых
       const cb=wrap.querySelector('#pom_create');
-      if(cb)cb.onclick=async()=>{
+      if(cb)cb.onclick=()=>askAddOrdersCount(async(n)=>{
         cb.disabled=true;cb.textContent='Создаём…';
-        // увеличиваем плановое количество в заявке на 1, затем досоздаём недостающее
-        const newWant=(parseInt(p.orders||'0',10)||0)+1;
-        const u=await dbUpdate('pickups',pickupId,{orders:newWant});
-        if(u)Object.assign(p,u);
-        await createOrdersFromPickup(pickupId,{silent:true});
+        const made=await addOrdersToPickup(pickupId,n);
+        cb.disabled=false;cb.textContent='＋ Добавить заказы';
+        if(made.length)toast(`Добавлено заказов: ${made.length}`);
         const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
         drawPickups(); // счётчик в карточке заявки обновляется автоматом
+      });
+      // «Заказы из фото» — сколько снимков выбрали, столько заказов и создаём, каждому свой
+      // снимок. Раньше это были два отдельных шага: сначала создать нужное число заказов,
+      // потом раздать им фото пачкой — и если фото оказывалось больше, чем пустых заказов,
+      // лишние оставались нераспределёнными. Здесь такого разъезда быть не может.
+      const po=wrap.querySelector('#pom_photo_orders');
+      if(po)po.onchange=async()=>{
+        const files=pickedPhotoFiles(po);
+        po.value='';
+        if(!files.length)return;
+        if(!confirm(`Создать ${files.length} заказ(ов) и прикрепить к ним ${files.length} фото?`))return;
+        const label=po.closest('label');const origLabel=label?label.textContent:'';
+        if(label)label.textContent='Создаём…';
+        const made=await addOrdersToPickup(pickupId,files.length);
+        if(!made.length){if(label)label.textContent=origLabel;toast('Не удалось создать заказы');return;}
+        // фото цепляем по порядку: первый снимок — первому созданному заказу
+        let okPh=0;
+        for(let i=0;i<made.length;i++){
+          if(label)label.textContent=`Фото ${i+1}/${made.length}…`;
+          const r=await uploadPhoto('order/'+made[i].id,files[i]);
+          if(!r)continue;
+          const u=await dbUpdate('orders',made[i].id,{photos:[r]});
+          if(u){Object.assign(made[i],u);const j=S.orders.findIndex(x=>x.id===made[i].id);if(j>=0)Object.assign(S.orders[j],u);okPh++;}
+        }
+        if(label)label.textContent=origLabel;
+        toast(okPh===made.length?`Создано заказов с фото: ${okPh}`:`Заказов ${made.length}, фото прикреплено ${okPh}`);
+        const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
+        drawPickups();
       };
     };
     bind();
