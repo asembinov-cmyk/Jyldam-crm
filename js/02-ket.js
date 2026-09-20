@@ -53,15 +53,27 @@ function orderToKet(o){
     saller_butique:o.sender||'',             // продавец/бутик
   };
   if(o.index)data.index=o.index;             // индекс (для почты)
-  // ТРЕК-НОМЕР (штрихкод). В KET поле называется barcode — как одноимённая колонка в их
-  // интерфейсе. Установлено опытом 20.09.2026, а не по документации: в документации KET
-  // среди полей ОТПРАВКИ нет ни barcode, ни kz_code. Упомянут только kz_code и только
-  // среди полей ОТВЕТА («kz_code - трекинг код - когда заказ идёт почтой») — именно его
-  // назвали их сотрудником на вопрос «где трек», и отправка с ним не срабатывала:
-  // заказ создавался, колонка Barcode оставалась пустой. Заработало после barcode.
+  // ТРЕК-НОМЕР (штрихкод). Отправляем ДВА поля сразу — kz_code и barcode. Не убирайте
+  // ни одно из них без проверки на живом заказе: у KET нет метода обновления, и цена
+  // ошибки — заказ, уехавший к ним без трека навсегда.
+  //
+  // Что показал опыт (20–21.09.2026), в порядке проверок:
+  //   только kz_code        → колонка Barcode у KET пустая
+  //   kz_code + barcode     → колонка Barcode заполнена
+  //   только barcode        → колонка Barcode снова пустая (проверено дважды)
+  // То есть работает именно пара. Почему — неизвестно; в документации KET среди полей
+  // ОТПРАВКИ нет ни того, ни другого (kz_code описан только как поле ОТВЕТА get_orders).
+  //
+  // Здесь я уже ошибся один раз: после удачного теста с двумя полями убрал kz_code,
+  // решив, что сработал barcode. Тест этого не показывал — уходили оба поля, и какое
+  // сработало, из него не следовало. Трек перестал доходить, и заметили это не сразу.
+  //
   // Отправляем при любом типе доставки, если трек заполнен.
   const trackVal=(o.track==null?'':String(o.track)).trim();
-  if(trackVal)data.barcode=trackVal;
+  if(trackVal){
+    data.kz_code=trackVal;
+    data.barcode=trackVal;
+  }
   if(o.deliver_date)data.date_delivery=o.deliver_date; // дата доставки (YYYY-MM-DD), имя поля по требованию KET
   // дата принятия/подтверждения заказа = дата создания заказа в нашей системе (YYYY-MM-DD)
   // для курьерки это «принятие», для обзвона — «подтверждение»; в KET это одно поле fill_date
@@ -147,7 +159,13 @@ function ketSendWarnNoTrack(list){
 async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
   toast('Отправка в KET…');
-  const r=await callKet({action:'send',account:ketAccountForOrder(o),order:orderToKet(o)});
+  const payload=orderToKet(o);
+  // Что именно ушло в KET и что он ответил — в консоль браузера. Отправка ручная и редкая,
+  // шума от этого нет, а разбирать «трек не дошёл» без этих двух вещей невозможно:
+  // у KET нет метода обновления, второй попытки на том же заказе не будет.
+  console.log('KET → отправляем',payload);
+  const r=await callKet({action:'send',account:ketAccountForOrder(o),order:payload});
+  console.log('KET ← ответ',r);
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
   const result=(r.ket&&r.ket.result)||{};
   if((result.success||'').toUpperCase()==='TRUE'){
@@ -155,7 +173,9 @@ async function sendOrderToKet(o){
     const u=await dbUpdate('orders',o.id,{ket_id:ketId,ket_synced_at:new Date().toISOString()});
     if(u)Object.assign(o,u);
     logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:ketId}});
-    toast('Заказ отправлен в KET (ID '+(ketId||'?')+')');
+    // Прямо говорим, ушёл ли трек. Иначе «в KET колонка Barcode пустая» невозможно
+    // отличить от «мы его и не передавали».
+    toast('Заказ отправлен в KET (ID '+(ketId||'?')+')'+(payload.barcode?' · трек '+payload.barcode+' передан':''),5000);
     // Отправку не блокируем никогда. Но если это почтовый заказ без трека — говорим об этом
     // вслух: у KET нет метода обновления, дослать трек в этот заказ будет нечем.
     if(ketSendWarnNoTrack([o]))toast('Трек-номера не было — в KET он не ушёл, дослать нечем');
