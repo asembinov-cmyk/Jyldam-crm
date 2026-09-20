@@ -516,14 +516,26 @@ function renderOrders(mode){
         return {ok:false,reason:`${o.code}: ${r&&r.error||'неизвестная ошибка'}`};
       }catch(e){return {ok:false,reason:`${o.code}: ${String(e&&e.message||e)}`};}
     };
-    const BATCH=5; // Казпочта — внешний медленный сервис, шлём по 5 параллельно, не больше
-    let ok=0,fail=0;const errs=[];const noIndex=[];   // трек выдан, но индекс получателя пуст
-    for(let i=0;i<list.length;i+=BATCH){
-      const chunk=list.slice(i,i+BATCH);
-      b.textContent=`Получаем… ${Math.min(i+BATCH,list.length)}/${list.length}`;
-      const results=await Promise.all(chunk.map(o=>assignOne(o).then(res=>({o,res}))));
-      results.forEach(({res})=>{if(res.ok){ok++;if(res.warn)noIndex.push(res.warn);}else{fail++;errs.push(res.reason);}});
-    }
+    // Одновременных запросов к Казпочте. Раньше заказы шли группами по 5, и каждая
+    // группа ждала самый медленный ответ: четыре пришли за секунду, пятый думает
+    // десять — всё это время четыре места простаивают. Теперь очередь: как только
+    // один ответил, сразу уходит следующий, и в работе всегда ровно KAZPOST_PARALLEL
+    // запросов. Само число поднято умеренно — Казпочта внешняя и небыстрая, заваливать
+    // её десятками параллельных запросов смысла нет.
+    const KAZPOST_PARALLEL=8;
+    let ok=0,fail=0,done=0;const errs=[];const noIndex=[];   // трек выдан, но индекс получателя пуст
+    let cursor=0;
+    const worker=async()=>{
+      while(true){
+        const i=cursor++;
+        if(i>=list.length)return;
+        const res=await assignOne(list[i]);
+        if(res.ok){ok++;if(res.warn)noIndex.push(res.warn);}else{fail++;errs.push(res.reason);}
+        done++;
+        b.textContent=`Получаем… ${done}/${list.length}`;
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(KAZPOST_PARALLEL,list.length)},worker));
     b.disabled=false;b.textContent=origLabel;
     toast(`Трек-номер присвоен: ${ok}${fail?(', с ошибкой: '+fail):''}${noIndex.length?(', без индекса: '+noIndex.length):''}`);
     if(errs.length)alert('Не удалось получить трек-номер:\n\n'+errs.join('\n'));
