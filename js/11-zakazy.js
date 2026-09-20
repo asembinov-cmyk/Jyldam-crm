@@ -336,7 +336,7 @@ async function pickupOrdersModal(pickupId){
       const bulkInp=wrap.querySelector('#pom_bulk_photo');
       const bulkLabel=bulkInp?bulkInp.closest('label'):null;
       if(bulkInp)bulkInp.onchange=async e=>{
-        const files=[...(bulkInp.files||[])];if(!files.length)return;
+        const files=pickedPhotoFiles(bulkInp);if(!files.length){bulkInp.value='';return;}
         const currentList=S.orders.filter(o=>o.pickup_id===pickupId);
         const emptyOrders=currentList.filter(o=>!pickupPhotos(o).length);
         if(!emptyOrders.length){toast('У всех заказов уже есть хотя бы одно фото');bulkInp.value='';return;}

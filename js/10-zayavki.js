@@ -461,7 +461,7 @@ function bindPhotoBlock(root,rec,redraw,table){
   const prefix=(table==='orders'?'order/':'')+rec.id;
   root.querySelectorAll('[data-pview-photo]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.pviewPhoto);});
   root.querySelectorAll('[data-paddphoto]').forEach(inp=>inp.onchange=async e=>{
-    e.stopPropagation();const files=[...(inp.files||[])];if(!files.length)return;
+    e.stopPropagation();const files=pickedPhotoFiles(inp);if(!files.length){inp.value='';return;}
     toast(`Загрузка фото (${files.length})…`);
     const arr=pickupPhotos(rec).slice();let ok=0,fail=0;
     for(const f of files){const r=await uploadPhoto(prefix,f);if(r){arr.push(r);ok++;}else{fail++;}}

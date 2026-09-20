@@ -62,7 +62,8 @@ async function renderQrInto(img,text,size){
   }catch(e){console.error('QR',e);toast('Не удалось нарисовать QR-код');return false;}
 }
 const uidLocal=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
+// ms — для длинных сообщений, которые не успеть прочитать за две секунды
+function toast(m,ms){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms||2200);}
 
 const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',courier:'Курьер'};
 
@@ -463,6 +464,27 @@ async function compressImage(file,maxSide=1280,quality=0.72){
   finally{if(objUrl)URL.revokeObjectURL(objUrl);}
 }
 // загружает файл в подпапку prefix (например 'order/ID'), возвращает {path,url} или null
+// Фото, выбранные в системном окне телефона: отдаём только пригодные, про остальные
+// честно говорим вслух.
+//
+// ЗАЧЕМ. На айфоне снимки часто лежат в iCloud, а не на самом телефоне (настройка
+// «Оптимизация хранилища»). Когда оригинал не скачался — мало места, слабая сеть,
+// iCloud на паузе — Safari отдаёт странице пустой файл либо не отдаёт ничего.
+// Раньше код в обоих случаях молча выходил, и человек видел ровно то, на что
+// пожаловался заборщик: «вообще ничего». Теперь видно, что именно не сложилось.
+function pickedPhotoFiles(inp){
+  const all=[...((inp&&inp.files)||[])];
+  if(!all.length){
+    toast('Фото не выбраны. Если выбирали — проверьте место на телефоне и доступ Safari к «Фото»',5000);
+    return [];
+  }
+  const good=all.filter(f=>f&&f.size>0);
+  const bad=all.length-good.length;
+  if(bad)toast(bad===1
+    ? '1 фото не открылось — похоже, лежит в iCloud и не скачалось. Откройте его в приложении «Фото» и повторите'
+    : `${bad} фото не открылись — похоже, лежат в iCloud и не скачались. Откройте их в приложении «Фото» и повторите`,6000);
+  return good;
+}
 async function uploadPhoto(prefix,file){
   try{
     // сжимаем фото перед загрузкой — ускоряет и загрузку, и показ
