@@ -512,21 +512,24 @@ function renderOrders(mode){
     const assignOne=async(o)=>{
       try{
         const r=await callKazpostGetBarcode(o.id);
-        if(r&&r.success){o.track=r.barcode;return {ok:true};}
+        if(r&&r.success){o.track=r.barcode;return {ok:true,warn:r.warning?o.code:''};}
         return {ok:false,reason:`${o.code}: ${r&&r.error||'неизвестная ошибка'}`};
       }catch(e){return {ok:false,reason:`${o.code}: ${String(e&&e.message||e)}`};}
     };
     const BATCH=5; // Казпочта — внешний медленный сервис, шлём по 5 параллельно, не больше
-    let ok=0,fail=0;const errs=[];
+    let ok=0,fail=0;const errs=[];const noIndex=[];   // трек выдан, но индекс получателя пуст
     for(let i=0;i<list.length;i+=BATCH){
       const chunk=list.slice(i,i+BATCH);
       b.textContent=`Получаем… ${Math.min(i+BATCH,list.length)}/${list.length}`;
       const results=await Promise.all(chunk.map(o=>assignOne(o).then(res=>({o,res}))));
-      results.forEach(({res})=>{if(res.ok)ok++;else{fail++;errs.push(res.reason);}});
+      results.forEach(({res})=>{if(res.ok){ok++;if(res.warn)noIndex.push(res.warn);}else{fail++;errs.push(res.reason);}});
     }
     b.disabled=false;b.textContent=origLabel;
-    toast(`Трек-номер присвоен: ${ok}${fail?(', с ошибкой: '+fail):''}`);
+    toast(`Трек-номер присвоен: ${ok}${fail?(', с ошибкой: '+fail):''}${noIndex.length?(', без индекса: '+noIndex.length):''}`);
     if(errs.length)alert('Не удалось получить трек-номер:\n\n'+errs.join('\n'));
+    // Про такие заказы надо сказать отдельно: трек есть, но по индексу Казпочта
+    // маршрутизирует посылку, и без него она может уехать не туда.
+    if(noIndex.length)alert('Трек-номер выдан, но у этих заказов не заполнен индекс получателя.\nПо индексу Казпочта определяет маршрут — впишите его, иначе посылка может уехать не туда:\n\n'+noIndex.join('\n'));
     ketSelected.clear();ketSelectAll=false;
     renderOrders();
   };
@@ -1631,7 +1634,10 @@ function orderModal(id,readonly){
         o.track=res.barcode;
         const trackEl=$('o_track');if(trackEl)trackEl.value=res.barcode;
         toast(`Трек-номер получен: ${res.barcode}`);
-      }else{toast('Не удалось получить трек-номер: '+(res&&res.error||'ошибка'));}
+        // трек могли выдать и без индекса получателя — но по индексу Казпочта
+        // маршрутизирует посылку, поэтому такое молча пропускать нельзя
+        if(res.warning)toast(res.warning,7000);
+      }else{toast('Не удалось получить трек-номер: '+(res&&res.error||'ошибка'),7000);}
     }catch(e){toast('Не удалось получить трек-номер');}
     finally{btn.disabled=false;btn.textContent='📮 Получить трек';}
   };

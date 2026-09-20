@@ -3,3 +3,5 @@
 db/
 preview/
 .claude/
+# исходники Edge Functions — держим локально, как и db/
+functions/
