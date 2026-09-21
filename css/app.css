@@ -1040,6 +1040,12 @@
       padding:9px 14px;border-bottom:1px solid #e4e9f2;text-align:right;
     }
     .resp-table tr td:last-child{border-bottom:0}
+    /* «Сортировка», телефон: в ячейке «Кто принял» три части — отметка, имя и время.
+       На мобильном ячейка выкладывается в строку (label слева, содержимое справа), и
+       имя со временем уезжали за край экрана. Переносим их на свои строки, как на
+       компьютере, с выравниванием по правому краю. */
+    .sorting-tbl td[data-label="Кто принял"]{flex-wrap:wrap;align-items:flex-start}
+    .sorting-tbl td[data-label="Кто принял"] .cell-time{flex:0 0 100%;text-align:right;margin-top:3px}
     .resp-table td::before{
       content:attr(data-label);font-size:11px;font-weight:700;text-transform:uppercase;
       letter-spacing:.04em;color:var(--muted);text-align:left;flex:0 0 42%;
