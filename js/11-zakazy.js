@@ -567,6 +567,7 @@ function renderOrders(mode){
           <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">
           <button class="btn sm" id="oftoday">Сегодня</button>
           <button class="btn sm" id="ofdateclear">Все даты</button>
+          <button class="btn sm ghost" id="ofreset" title="Снять все фильтры и показать сегодняшние заказы">✕ Сброс</button>
         </div>
         </div>
       </div>
@@ -788,6 +789,16 @@ function renderOrders(mode){
   if($('ofdelto'))$('ofdelto').onchange=e=>{of.delTo=e.target.value;drawOrdersReset();};
   if($('oftoday'))$('oftoday').onclick=()=>{const t=localToday();of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
+  // «Сброс» — снять ВСЕ фильтры и вернуться к обычному виду: сегодняшние заказы, ничего
+  // больше не отобрано. Полезно, когда после десятка правок фильтров непонятно, почему
+  // список короткий: одно нажатие вместо обхода всех полей по очереди.
+  if($('ofreset'))$('ofreset').onclick=()=>{
+    const t=localToday();
+    Object.keys(of).forEach(k=>{of[k]='';});
+    of.createFrom=t;of.createTo=t;
+    ketSelected.clear();ketSelectAll=false;
+    renderOrders(ordersMode);
+  };
   drawOrders();
 }
 // число заказов с заполненным телефоном клиента
@@ -1709,6 +1720,21 @@ function orderModal(id,readonly){
       // тип доставки обязателен — без него заказ не считается обработанным (например, для
       // «Сортировки» на складе) и непонятно, какой набор полей (курьер/почта) заполнять
       if(!val('o_delivery')){toast('Выберите тип доставки');const df=$('o_delivery');if(df){df.focus();df.style.borderColor='var(--rust)';}return false;}
+      // ФИО получателя обязательно: без него заказ не считается обработанным (та же проверка
+      // стоит в «Сортировке» — orderIsProcessed), и на бланк Казпочты печатать нечего.
+      if(!val('o_client').trim()){
+        toast('Укажите ФИО клиента');
+        const cf=$('o_client');if(cf){cf.focus();cf.style.borderColor='var(--rust)';}
+        return false;
+      }
+      // Индекс обязателен для ПОЧТОВЫХ заказов: по нему Казпочта выдаёт трек и маршрутизирует
+      // посылку, он же печатается на бланке. У курьерских индекса нет вовсе — там поле скрыто,
+      // и требовать его было бы бессмыслицей.
+      if(!isCourierDelivery(val('o_delivery'))&&!val('o_index').trim()){
+        toast('Укажите индекс получателя — 6 цифр');
+        const inf=$('o_index');if(inf){inf.focus();inf.style.borderColor='var(--rust)';}
+        return false;
+      }
       // Индекс: либо пусто, либо ровно 6 цифр. Ошибаются тут часто — со справочных сайтов
       // копируют вместе с внутренним кодом страницы вроде «Z00E7C2», и заказ уходит с
       // мусором в индексе. Всплывает это поздно и дважды: Казпочта отказывается выдавать
