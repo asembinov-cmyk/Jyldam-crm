@@ -1039,6 +1039,25 @@ function drawWrappedText(page,text,x,yTop,maxWidth,font,size,lineHeight,maxLines
   });
 }
 // общая генерация PDF со бланками — принимает уже нормализованный список {client,address,phone,amount}
+// Штрих-код номера ШПИ картинкой для вставки в PDF. Рисуем настоящий Code128 — тот же,
+// что печатает сама Казпочта, — библиотекой JsBarcode, она уже подключена в index.html и
+// используется для кодов заказов. Самодельные «полоски по цифрам» сканером не читаются.
+// Кэшируем: в одной печати часто десятки бланков, и каждый раз рисовать заново незачем.
+const _barcodePngCache=new Map();
+function barcodePngBytes(code){
+  if(_barcodePngCache.has(code))return _barcodePngCache.get(code);
+  if(!window.JsBarcode)return null;
+  try{
+    const cv=document.createElement('canvas');
+    JsBarcode(cv,code,{format:'CODE128',width:2,height:60,displayValue:false,margin:0});
+    const dataUrl=cv.toDataURL('image/png');
+    const bin=atob(dataUrl.split(',')[1]);
+    const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    _barcodePngCache.set(code,bytes);
+    return bytes;
+  }catch(e){console.error('штрих-код',e);return null;}
+}
 async function generateMailLabelsPdf(items){
   await ensurePdfLib();
   if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
@@ -1084,6 +1103,22 @@ async function generateMailLabelsPdf(items){
     drawFitText(page,(it.phone||'').replace(/^\+/,''),468,yOf(477),175,font,10);
     // 6) индекс ПОЛУЧАТЕЛЯ (внизу справа) — из карточки заказа, а не из настроек отправителя
     drawFitText(page,it.index||'',560,yOf(507),100,font,11);
+    // 7) НОМЕР ШПИ и штрих-код — правая колонка, вокруг поля «№ ШПИ».
+    // Координаты сняты из самого шаблона, а не на глаз: подпись «№ ШПИ» стоит на 511/219,
+    // подписи штамп-квадрата — на 273 и 283. Номер ставим над подписью, код — под штампом,
+    // ровно как на бланке, который печатает KET.
+    const trackText=String(it.track||'').trim();
+    if(trackText){
+      drawFitText(page,trackText,470,yOf(211),195,fontBold,11);
+      const png=barcodePngBytes(trackText);
+      if(png){
+        try{
+          const img=await outDoc.embedPng(png);
+          const bw=205,bh=40;
+          page.drawImage(img,{x:455,y:yOf(296)-bh,width:bw,height:bh});
+        }catch(e){console.error('вставка штрих-кода',e);}
+      }
+    }
   }
   return await outDoc.save();
 }
@@ -1100,6 +1135,7 @@ async function openOrDownloadPdf(bytes,filename){
 function mailLabelItems(orders){
   return orders.map(o=>({
     order:o,   // нужен, чтобы взять данные выбранного ИП
+    track:o.track||o.kz_code||'',
     client:o.client,address:o.address,index:o.index||'',
     phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
     amount:orderSum(o),
@@ -1176,6 +1212,7 @@ function printPdfBytes(bytes){
 // бланки для входящих заказов КЕТ (Заказы → Заказы КЕТ)
 async function printInboundMailLabelsPdf(orders){
   const items=orders.map(o=>({
+    track:o.track||o.kz_code||'',
     client:o.client,address:o.address,index:o.index||'',
     phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
     amount:o.price!=null?o.price:(o.total_price!=null?o.total_price:0),
