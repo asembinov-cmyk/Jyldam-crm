@@ -38,7 +38,9 @@ function sortingListRowHtml(o){
     <td data-label="Тип доставки">${courier?'🚚 Курьер':'📮 Почта'}</td>
     <td data-label="Адрес">${esc(o.address||'—')}</td>
     <td data-label="№ заказа" style="font-family:monospace">${esc(o.code||'')}</td>
-    <td data-label="Статус">${isS?'✅ Принят':'🔴 Не принят'}</td>
+    <td data-label="Кто принял">${isS
+      ? `✅ Принят<small class="cell-time">${esc(o.sorted_by_name||'кто — не записано')}</small><small class="cell-time">${esc(fmtDateTime(o.sorted_at))}</small>`
+      : '🔴 Не принят'}</td>
   </tr>`;
 }
 // перерисовывает только тело таблицы + пагинацию под ней (не всю страницу) — используется при
@@ -217,8 +219,8 @@ function renderSorting(){
         </select>
         <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:2 1 260px;min-width:260px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line)">
       </div>
-      <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>Адрес</th><th>№ заказа</th><th>Статус</th>
+      <div class="table-scroll"><table class="resp-table sorting-tbl"><thead><tr>
+        <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>Адрес</th><th>№ заказа</th><th>Кто принял</th>
       </tr></thead><tbody id="sortListTbody"></tbody></table></div>
     </div>`;
   const inp=$('sortPhotoInput');
@@ -664,6 +666,7 @@ function openSortOrderModal(o,opts){
       <div style="font-size:14px;color:var(--muted)">${esc(o.address||'—')}</div>
       ${phone?`<div style="font-size:16px;font-weight:600;margin-top:6px;letter-spacing:.5px">${esc(phone)}</div>`:''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">Заказ № ${esc(o.code||'')}</div>
+      ${o.sorted_at?`<div style="font-size:12px;color:var(--muted);margin-top:6px">Принял: <b>${esc(o.sorted_by_name||'не записано')}</b> · ${esc(fmtDateTime(o.sorted_at))}</div>`:''}
     </div>${fields}${othersHtml}`;
   const unmark=!fromScan&&!!o.sorted_at;           // из списка открыли уже принятый заказ
   const ov=showModal('Посылка',body,async()=>{

@@ -116,6 +116,9 @@
   /* Номер заказа не переносится: «KZ-571000» рвалось пополам, и строка таблицы
      вырастала вдвое по высоте. На телефоне карточка не страдает — там своя вёрстка. */
   .orders-tbl td[data-label="ID"]{white-space:nowrap}
+  /* «Сортировка»: в столбце статуса теперь три строки — отметка, кто принял и когда.
+     Без запаса по ширине столбец сжимался и резал имя кладовщика. */
+  .sorting-tbl td[data-label="Кто принял"]{min-width:170px;white-space:nowrap}
   .filters-toggle{display:inline-flex;white-space:nowrap}
   .filters-toggle.has-active{border-color:var(--rust);color:var(--rust);font-weight:700}
   .filters-body{display:none}
