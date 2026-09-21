@@ -39,7 +39,7 @@ function orderToKet(o){
   const pickupCityNm=o.pickup_city_id?cityName(o.pickup_city_id):'';
   const originCode=ketOriginCode(pickupCityNm);
   // сумма: сначала order_sum, иначе cost (дубль). Идёт и в price, и в total_price
-  const sumVal=(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0);
+  const sumVal=orderSum(o);
   const sumStr=String(sumVal||0);
   const data={
     phone:'7'+(o.phone||''),                 // телефон в формате 7XXXXXXXXXX (* обязательное)

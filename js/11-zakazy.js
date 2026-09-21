@@ -500,7 +500,7 @@ function renderOrders(mode){
   // по Казахстану раздел открывался на ВЧЕРАШНЕМ дне — список выглядел пустым.
   if(!ordersDateInit){const t=localToday();of.createFrom=t;of.createTo=t;ordersDateInit=true;}
   const list=ordersDateScopedList();
-  const totalCost=list.reduce((s,o)=>s+(+o.cost||0),0);
+  const totalCost=list.reduce((s,o)=>s+orderSum(o),0);
   const paid=list.filter(o=>o.pay_date).length;
   const titles={'':'Заказы заборов',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня'};
   const subs={'':'Отправления: курьерская и почтовая доставка',courier:'Заказы с курьерской доставкой',
@@ -1091,7 +1091,7 @@ function mailLabelItems(orders){
     order:o,   // нужен, чтобы взять данные выбранного ИП
     client:o.client,address:o.address,index:o.index||'',
     phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
-    amount:(o.order_sum!=null&&o.order_sum!=='')?o.order_sum:(o.cost!=null?o.cost:0),
+    amount:orderSum(o),
   }));
 }
 // бланки для «своих» заказов (Заказы → Почтовая доставка)
@@ -1304,7 +1304,7 @@ function exportOrdersToExcel(){
       'Партнёр':o.partner_id?partnerName(o.partner_id):'',
       'Оплачено отправителем':o.paid_by_sender?'да':'нет',
     };
-    if(staff)row['Стоимость (₸)']=o.cost!=null&&o.cost!==''?(+o.cost):'';
+    if(staff)row['Стоимость (₸)']=orderSum(o)||'';
     return row;
   });
   const ws=XLSX.utils.json_to_sheet(data);
@@ -1408,7 +1408,7 @@ function drawOrders(){
         <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div></td>
       <td data-label="Трек-код">${esc(o.track)||'—'}</td>
-      ${staff?`<td data-label="Стоимость">${o.cost?esc((+o.cost).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
+      ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
       <td data-label="" class="cell-actions"><div class="row-actions">
         ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
       </div></td></tr>`;
@@ -1553,7 +1553,7 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
 function drawCourierOrderCards(el,rows){
   el.innerHTML=`<div class="cour-cards">${rows.map(o=>{
     const ph=phoneStored(o.phone);
-    const sum=o.cost?(+o.cost).toLocaleString('ru-RU')+' ₸':'—';
+    const sum=orderSum(o)?orderSum(o).toLocaleString('ru-RU')+' ₸':'—';
     const city=isCourierDelivery(o.delivery_id)?courierCityName(o.courier_city_id):'';
     return `<div class="cour-card" data-card="${o.id}">
       <div class="cc-head" data-toggle="${o.id}">

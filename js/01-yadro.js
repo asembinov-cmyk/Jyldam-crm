@@ -92,6 +92,24 @@ async function ensureProductPhotos(ids){
     }
   }catch(e){console.error('ensureProductPhotos',e);}
 }
+// «Сумма заказа» — одно правило на всю систему.
+//
+// В базе исторически ДВА поля: order_sum (то, что человек вводит в карточке) и cost (его
+// копия). Сохранение давно пишет оба одинаково, но у старых заказов order_sum бывает
+// пустым, а cost заполнен — тогда верное число лежит именно в cost.
+//
+// Раньше это разъезжалось прямо на экране: карточка и Калькуляция читали order_sum, а
+// грид «Стоимость», плашка «Сумма доставки» и выгрузка Excel — cost. Один и тот же заказ
+// показывал 1500 в карточке и 2000 в списке, а в Калькуляцию заказы с пустым order_sum
+// попадали с нулевой выручкой, хотя деньги по ним были.
+//
+// Так же устроены печать бланков Казпочты и отправка в KET — теперь одинаково везде.
+function orderSum(o){
+  if(!o)return 0;
+  if(o.order_sum!=null&&o.order_sum!=='')return parseFloat(o.order_sum)||0;
+  if(o.cost!=null&&o.cost!=='')return parseFloat(o.cost)||0;
+  return 0;
+}
 const DBLTAP_MS=450;
 function bindDoubleTap(el,fn){
   if(!el)return;

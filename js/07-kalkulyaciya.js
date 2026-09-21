@@ -96,7 +96,7 @@ function orderPickerCourier(o){
 // финансовая раскладка курьерского заказа: все статьи расходов + остаток
 function orderCourierFinance(o){
   const P=orderPeriodStr(o); // период (YYYY-MM) месяца забора заказа
-  const revenue=(o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0;
+  const revenue=orderSum(o);
   const cityId=o.courier_city_id||orderCalcCity(o);
   const monthOrders=ordersInOrderMonth(o); // кол-во заказов за месяц (для деления окладов/фондов)
   // межгород — из отправки (intercity_cost), иначе 0
@@ -151,9 +151,7 @@ function calcOrder(o){
   // партнёр платит ровно столько же, просто не через сумму заказа в CRM.
   const isPaidBySender=!!o.paid_by_sender;
   const notionalRevenue=isPaidBySender&&o.order_sum_orig!=null&&o.order_sum_orig!==''?(parseFloat(o.order_sum_orig)||0):0;
-  const revenue=isPaidBySender
-    ? notionalRevenue
-    : ((o.order_sum!=null&&o.order_sum!=='')?parseFloat(o.order_sum)||0:0);
+  const revenue=isPaidBySender?notionalRevenue:orderSum(o);
   const monthOrders=ordersInOrderMonth(o);
   // тип доставки: курьерская или почтовая
   const isCourierType=isCourierDelivery(o.delivery_id);
