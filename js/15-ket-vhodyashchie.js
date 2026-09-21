@@ -630,7 +630,7 @@ const INB_COLUMNS=[
   {key:'phone',label:'Телефон',text:o=>o.phone||'',cell:o=>`<td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>`},
   {key:'city',label:'Город',text:o=>o.city||'',cell:o=>`<td data-label="Город">${esc(o.city||'—')}</td>`},
   {key:'index',label:'Индекс',text:o=>o.index||'',cell:o=>`<td data-label="Индекс">${esc(o.index||'—')}</td>`},
-  {key:'weight',label:'Вес',text:o=>o.weight!=null?String(o.weight):'',cell:o=>`<td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>`},
+  {key:'weight',label:'Вес',text:o=>o.weight!=null?String(o.weight):'',cell:o=>`<td data-label="Вес">${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</td>`},
   {key:'amount',label:'Сумма',text:o=>{const a=o.price!=null?o.price:o.total_price;return a!=null?String(a):'';},
     cell:o=>{const a=o.price!=null?o.price:o.total_price;return `<td data-label="Сумма">${a!=null?Math.round(+a).toLocaleString('ru-RU'):'—'}</td>`;}},
   {key:'delivery',label:'Доставка',text:o=>inboundDeliveryLabel(o),
@@ -1076,7 +1076,7 @@ function inboundOrderModal(id){
     <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
     <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
     <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
-    <div><b>Вес:</b> ${o.weight?esc(o.weight)+' кг':'—'}</div>
+    <div><b>Вес:</b> ${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</div>
     <div><b>Сумма:</b> ${o.price!=null?esc(o.price):'—'} ${o.total_price!=null&&o.total_price!==o.price?('(итого '+esc(o.total_price)+')'):''}</div>
     <div><b>Статус доставки:</b> ${esc(ketSendLabel(o.send_status))} · <b>Посылка:</b> ${esc(ketKzLabel(o.status_kz))}${o.call_status!=null?` · <b>Звонок:</b> ${esc(ketCallLabel(o.call_status))}`:''}</div>
     <div><b>Статус почтового возврата:</b> ${o.return_status!=null?esc(ketReturnLabel(o.return_status)):'—'}</div>

@@ -1303,7 +1303,7 @@ function exportOrdersToExcel(){
       'Отправитель':o.sender||'',
       'ФИО клиента':o.client||'',
       'Телефон':o.phone?phoneDisplay(o.phone):'',
-      'Вес (кг)':o.weight||'',
+      'Вес (кг)':fmtWeight(o.weight),
       'Размер пакета':o.size?((PACKAGE_SIZES[o.size]||{}).label||o.size):'',
       'Тип доставки':o.delivery_id?deliveryName(o.delivery_id):'',
       'Город':city||'',
@@ -1409,7 +1409,7 @@ function drawOrders(){
       </select>`}</td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
-      <td data-label="Вес">${o.weight?esc(o.weight)+' кг':'—'}</td>
+      <td data-label="Вес">${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       ${ordersMode!=='mail'?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
       ${staff&&ordersMode!=='mail'?`<td data-label="Менеджер">${o.sales_id?esc(salesName(o.sales_id)):'<span style="color:var(--muted)">—</span>'}</td>`:''}
@@ -1587,7 +1587,7 @@ function drawCourierOrderCards(el,rows){
         <div class="cc-row"><span class="lbl">Дата забора</span><span class="vl">${esc(fmtDate(o.pickup_date))}</span></div>
         <div class="cc-row"><span class="lbl">Отправитель</span><span class="vl">${esc(o.sender)||'—'}</span></div>
         <div class="cc-row"><span class="lbl">Тип доставки</span><span class="vl">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</span></div>
-        <div class="cc-row"><span class="lbl">Вес</span><span class="vl">${o.weight?esc(o.weight)+' кг':'—'}</span></div>
+        <div class="cc-row"><span class="lbl">Вес</span><span class="vl">${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</span></div>
         <div class="cc-row"><span class="lbl">Кол-во товаров</span><span class="vl">${esc(o.qty||0)}</span></div>
         <div class="cc-row"><span class="lbl">Индекс</span><span class="vl">${esc(o.index)||'—'}</span></div>
         <div class="cc-row"><span class="lbl">Трек-код</span><span class="vl">${esc(o.track)||'—'}</span></div>
@@ -1699,7 +1699,7 @@ function orderModal(id,readonly){
       <div class="field full"><label>Адрес получателя</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
       <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Вес (кг)</label><input type="number" min="0" step="0.01" id="o_weight" value="${esc(d.weight)}" ${dis}></div>
+      <div class="field"><label>Вес (кг)</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label>
         <div style="display:flex;gap:8px">
           <input id="o_track" value="${esc(d.track)}" ${dis} style="flex:1">
@@ -1720,6 +1720,13 @@ function orderModal(id,readonly){
       // тип доставки обязателен — без него заказ не считается обработанным (например, для
       // «Сортировки» на складе) и непонятно, какой набор полей (курьер/почта) заполнять
       if(!val('o_delivery')){toast('Выберите тип доставки');const df=$('o_delivery');if(df){df.focus();df.style.borderColor='var(--rust)';}return false;}
+      // вес: принимаем и «1,3», и «1.3»; в базу кладём число, округлённое до грамма
+      const weightVal=parseWeight(val('o_weight'));
+      if(isNaN(weightVal)){
+        toast('Вес указан неверно — например 1,300');
+        const wf=$('o_weight');if(wf){wf.focus();wf.style.borderColor='var(--rust)';}
+        return false;
+      }
       // ФИО получателя обязательно: без него заказ не считается обработанным (та же проверка
       // стоит в «Сортировке» — orderIsProcessed), и на бланк Казпочты печатать нечего.
       if(!val('o_client').trim()){
@@ -1746,7 +1753,7 @@ function orderModal(id,readonly){
         return false;
       }
       const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
-        weight:val('o_weight')?parseFloat(val('o_weight')):null,client:val('o_client').trim(),phone:phoneDigits,
+        weight:weightVal,client:val('o_client').trim(),phone:phoneDigits,
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),
         fizlico_pickup_address:$('o_fizlico_pickup_addr')?val('o_fizlico_pickup_addr').trim()||null:null,
         pickup_city_id:val('o_pickupcity')||null,

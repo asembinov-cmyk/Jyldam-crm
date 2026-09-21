@@ -629,9 +629,9 @@ function openSortOrderModal(o,opts){
       <div class="field">
         <label>Вес (кг)</label>
         <input id="sortWeight" type="text" inputmode="decimal"
-               value="${o.weight!=null&&o.weight!==''?esc(o.weight):''}" placeholder="0"
+               value="${esc(fmtWeight(o.weight))}" placeholder="0,000"
                style="font-size:22px;padding:14px;text-align:center;font-weight:700">
-        <span class="hint">Взвесьте посылку и впишите вес — он попадёт в карточку заказа. Можно через запятую.</span>
+        <span class="hint">Взвесьте посылку и впишите вес — он попадёт в карточку заказа. Три знака после запятой, как на весах: 1,3 система сама запишет как 1,300.</span>
       </div>
       <div class="field" style="margin-top:12px">
         <label>Штрих-код</label>
@@ -677,11 +677,10 @@ function openSortOrderModal(o,opts){
     // Поле текстовое, а не числовое: у type="number" запятая считается ошибкой ввода,
     // значение молча становится пустым, и вес терялся бы при каждом «2,4».
     const wEl=ov.querySelector('#sortWeight');
-    const wRaw=wEl?(wEl.value||'').trim().replace(',','.'):'';
-    if(wRaw!==''){
-      const w=parseFloat(wRaw);
-      if(isNaN(w)||w<0||!/^\d*[.]?\d*$/.test(wRaw)){toast('Вес указан неверно — например 2,4');return false;}
-      payload.weight=w;
+    if(wEl){
+      const w=parseWeight(wEl.value);
+      if(isNaN(w)){toast('Вес указан неверно — например 2,400');return false;}
+      if(w!=null)payload.weight=w;
     }
     const bcEl=ov.querySelector('#sortBarcode');
     const bc=bcEl?(bcEl.value||'').trim():'';

@@ -110,6 +110,29 @@ function orderSum(o){
   if(o.cost!=null&&o.cost!=='')return parseFloat(o.cost)||0;
   return 0;
 }
+// ВЕС ЗАКАЗА — всегда три знака после запятой.
+//
+// Кладовщик списывает с весов и часто отбрасывает хвостовые нули: набирает «1,3» вместо
+// «1,300», «0,97» вместо «0,970». Число от этого не меняется (1,3 кг и 1,300 кг — одно и
+// то же), но в списке рядом стоят «1,3», «0,97» и «2» — глазами их не сравнить, и не
+// понять, всё ли записано до грамма. Поэтому показываем одинаково: ровно три знака.
+//
+// fmtWeight — для показа (запятая, как принято в русской записи).
+// parseWeight — для чтения из поля: принимает и запятую, и точку, округляет до грамма.
+function fmtWeight(w){
+  if(w==null||w==='')return '';
+  const n=parseFloat(String(w).replace(',','.'));
+  if(isNaN(n))return '';
+  return n.toFixed(3).replace('.',',');
+}
+function parseWeight(v){
+  const raw=String(v==null?'':v).trim().replace(',','.');
+  if(raw==='')return null;
+  if(!/^\d*\.?\d*$/.test(raw))return NaN;   // буквы и прочий мусор — ошибка ввода
+  const n=parseFloat(raw);
+  if(isNaN(n)||n<0)return NaN;
+  return Math.round(n*1000)/1000;            // до грамма, лишние знаки не храним
+}
 const DBLTAP_MS=450;
 function bindDoubleTap(el,fn){
   if(!el)return;

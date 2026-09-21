@@ -83,7 +83,9 @@ function orderToKet(o){
   // не уйдёт само собой. Если понадобится слать вес и по Астане — достаточно начать его
   // проставлять в заказах, в коде менять нечего.
   const weightVal=(o.weight==null||o.weight==='')?null:parseFloat(o.weight);
-  if(weightVal!=null&&!isNaN(weightVal)&&weightVal>0)data.actual_weight=String(weightVal);
+  // три знака — тем же видом, что в карточке: число то же самое, но в «Что ушло» и в KET
+  // не будет расхождения с тем, что человек видит у себя на экране
+  if(weightVal!=null&&!isNaN(weightVal)&&weightVal>0)data.actual_weight=weightVal.toFixed(3);
   if(o.deliver_date)data.date_delivery=o.deliver_date; // дата доставки (YYYY-MM-DD), имя поля по требованию KET
   // дата принятия/подтверждения заказа = дата создания заказа в нашей системе (YYYY-MM-DD)
   // для курьерки это «принятие», для обзвона — «подтверждение»; в KET это одно поле fill_date
