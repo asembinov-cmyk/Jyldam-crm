@@ -541,6 +541,7 @@ function renderOrders(mode){
           <option value="phone" ${of.missing==='phone'?'selected':''}>Нет телефона</option>
           <option value="track" ${of.missing==='track'?'selected':''}>Нет трек-кода</option>
           <option value="index" ${of.missing==='index'?'selected':''}>Нет индекса</option>
+          <option value="weight" ${of.missing==='weight'?'selected':''}>Нет веса</option>
         </select>
         <select id="ofpaid" title="Фильтр по оплате отправителем">
           <option value="">Оплата: все</option>
@@ -829,6 +830,14 @@ function filteredOrders(){
       if(of.missing==='index'){
         if(isCourierDelivery(o.delivery_id))return false; // курьерские не показываем
         if((o.index||'').toString().trim()!=='')return false;
+      }else if(of.missing==='weight'){
+        // «Нет веса» — тоже только почтовые: вес нужен Казпочте и уходит в KET полем
+        // actual_weight, а курьерские посылки не взвешивают вовсе.
+        // Ноль и пустая строка считаются «веса нет»: ноль килограммов — это не вес,
+        // а не заполненное поле.
+        if(isCourierDelivery(o.delivery_id))return false;
+        const w=parseFloat(o.weight);
+        if(!isNaN(w)&&w>0)return false;
       }else{
         const val=(o[of.missing]||'').toString().trim();
         if(val!=='')return false;
@@ -1467,7 +1476,9 @@ function drawOrders(){
   }
 }
 // сброс пагинации на первую страницу (при смене фильтров/поиска)
-function drawOrdersReset(){ordersPage=1;ordersMobileLimit=MOBILE_STEP;ketSelectAll=false;drawOrders();}
+// Любая смена фильтра проходит через эту функцию — здесь же обновляем подпись на кнопке
+// «Фильтры», иначе счётчик включённых фильтров отставал бы от самих фильтров.
+function drawOrdersReset(){ordersPage=1;ordersMobileLimit=MOBILE_STEP;ketSelectAll=false;drawOrders();applyOrdersFiltersToggle();}
 // синхронизирует чекбокс «выбрать все»: отмечен, если выбраны все заказы текущего фильтра
 function updateKetAllChk(allRows){
   const chk=$('ketChkAll');if(!chk)return;
