@@ -288,6 +288,32 @@ function renderDashboard(){
   const ordAstana=ordMonth.filter(o=>isAstana(o.pickup_city_id)).length;
   const ordAlmaty=ordMonth.filter(o=>isAlmaty(o.pickup_city_id)).length;
 
+  // ── ЗАБОРЩИКИ ПО ДНЯМ ──
+  // Сколько посылок забрал каждый курьер-заборщик в каждый день месяца.
+  // «Посылок» — это заказы, реально созданные по его собранным заявкам (orders.pickup_id),
+  // а НЕ число, которое партнёр указал в заявке: заявленное регулярно расходится с фактом.
+  // Считаем только собранные заявки — назначенная, но не собранная ничего не забрала.
+  const ordersByPickup={};
+  orders.forEach(o=>{if(o.pickup_id)ordersByPickup[o.pickup_id]=(ordersByPickup[o.pickup_id]||0)+1;});
+  const pickerRows=allDates.map(dt=>{
+    const day=pickups.filter(p=>(p.pickup_date||'').slice(0,10)===dt&&isCollectedStatus(p.status_id));
+    const per={};
+    day.forEach(p=>{
+      const nm=p.courier_id?courierName(p.courier_id):'— не назначен —';
+      if(!per[nm])per[nm]={parcels:0,pickups:0};
+      per[nm].parcels+=ordersByPickup[p.id]||0;
+      per[nm].pickups++;
+    });
+    return {dt,per};
+  });
+  const pickerTotals={};
+  pickerRows.forEach(r=>Object.entries(r.per).forEach(([nm,v])=>{
+    if(!pickerTotals[nm])pickerTotals[nm]={parcels:0,pickups:0};
+    pickerTotals[nm].parcels+=v.parcels;pickerTotals[nm].pickups+=v.pickups;
+  }));
+  // столбцы — только те, кто работал в этом месяце, самые загруженные слева
+  const pickerNames=Object.keys(pickerTotals).sort((a,b)=>pickerTotals[b].parcels-pickerTotals[a].parcels);
+
   $('main').innerHTML=`
     <div class="page-head dash-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div>
       <div class="dash-period-filter">
@@ -337,6 +363,32 @@ function renderDashboard(){
           <td class="num c-ast">${statRows.reduce((s,r)=>s+r.pkAstana,0)}</td>
           <td class="num">${statRows.reduce((s,r)=>s+r.courierDel,0)}</td>
           <td class="num">${statRows.reduce((s,r)=>s+r.mailDel,0)}</td>
+        </tr></tfoot>`:''}
+      </table></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Заборщики по дням</h2><span class="count">${pickerNames.length}</span></div>
+      <div class="table-scroll dash-stat-scroll"><table class="dash-stat dash-pickers"><thead>
+        <tr>
+          <th rowspan="2">Дата</th>
+          <th colspan="${pickerNames.length||1}" class="grp grp-pk">Посылок забрано <small>(заявок)</small></th>
+          <th rowspan="2">Всего</th>
+        </tr>
+        <tr>${pickerNames.length?pickerNames.map(nm=>`<th>${esc(nm)}</th>`).join(''):'<th>—</th>'}</tr>
+        </thead>
+        <tbody>${pickerNames.length?pickerRows.map(r=>{
+          const dayTotal=Object.values(r.per).reduce((s2,v)=>s2+v.parcels,0);
+          if(!dayTotal&&!Object.keys(r.per).length)return '';
+          return `<tr>
+          <td class="d-date"><b>${esc(fmtDate(r.dt))}</b></td>
+          ${pickerNames.map(nm=>{const v=r.per[nm];
+            return `<td class="num">${v?`<b>${v.parcels}</b><small style="color:var(--muted)"> (${v.pickups})</small>`:'—'}</td>`;}).join('')}
+          <td class="num"><b>${dayTotal}</b></td>
+        </tr>`;}).join(''):`<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:30px">За этот месяц заборов нет</td></tr>`}</tbody>
+        ${pickerNames.length?`<tfoot><tr class="dash-total">
+          <td>Итого</td>
+          ${pickerNames.map(nm=>`<td class="num"><b>${pickerTotals[nm].parcels}</b><small style="color:var(--muted)"> (${pickerTotals[nm].pickups})</small></td>`).join('')}
+          <td class="num"><b>${pickerNames.reduce((s2,nm)=>s2+pickerTotals[nm].parcels,0)}</b></td>
         </tr></tfoot>`:''}
       </table></div>
     </div>`;
