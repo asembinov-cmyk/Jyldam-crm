@@ -1201,3 +1201,10 @@
 .excl-row:hover{background:var(--line,#eef1f6)}
 .excl-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .excl-row b{color:var(--muted);font-weight:600;font-size:13px}
+
+/* Кнопка в ряду фильтров заказов («Исключить партнёров»). Размеры и оформление
+   в точности как у соседних выпадающих списков — иначе выбивалась бы из строки. */
+.filters .filters-btn{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
+  border-radius:9px;background:var(--card);color:var(--ink);min-width:140px;
+  cursor:pointer;white-space:nowrap;text-align:left}
+.filters .filters-btn:hover{border-color:var(--ink)}
