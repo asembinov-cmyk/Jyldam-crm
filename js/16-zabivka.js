@@ -29,6 +29,12 @@ let fillBusy = false;            // защита от двойного нажа�
 // бесплатно: заказы грузятся через select('*'), и если колонка есть, она есть и в строке.
 const fillReady = () => !!(S.orders && S.orders.length && ('filled_at' in S.orders[0]));
 
+// Местная дата отметки времени. Брать slice(0,10) от ISO нельзя: там UTC, и заказ,
+// заполненный в половине первого ночи, попадал бы во вчерашний день (Астана +5).
+const localDateOf = ts => {
+  const d = new Date(ts), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 const fillMeName = () => (S.me && (S.me.full_name || S.me.email)) || '';
 const fillCutoff = () => new Date(Date.now() - FILL_CLAIM_MIN * 60000).toISOString();
 
@@ -45,7 +51,8 @@ function fillNeedsWork(o){
   return Array.isArray(photos) ? photos.length > 0 : !!photos;
 }
 // Дата заказа: по забору, а если её нет — по созданию.
-const fillOrderDate = o => String(o.pickup_date || o.created_at || '').slice(0, 10);
+const fillOrderDate = o => o.pickup_date ? String(o.pickup_date).slice(0, 10)
+  : (o.created_at ? localDateOf(o.created_at) : '');
 // Выдаём только сегодняшние заказы. Вчерашние и более старые пустые «болванки» —
 // это почти всегда то, что партнёр заявил, но не отдал; заполнять там нечего, а
 // менеджер потратит время. Их число показываем отдельно, чтобы не пропали из виду.
@@ -99,53 +106,87 @@ async function fillRelease(id){
 /* ---------- статистика ---------- */
 // Период считаем по дате ЗАПОЛНЕНИЯ: вопрос «сколько сделал сегодня» — про работу
 // сегодня, а не про то, когда заказ создали.
-function fillStatsRows(){
-  // Границы периода. Пусто — сегодняшний день: чаще всего смотрят именно его.
+const fillPeriod = () => {
   const from = fillFrom || localToday();
-  const to   = fillTo   || from;
-  const done = (S.orders || []).filter(o => {
+  return { from, to: fillTo || from };
+};
+// Сколько заказ реально делали. null — измерить нельзя.
+function fillOrderSecs(o){
+  // Время засчитываем, только если заказ заполнил тот же, кто его брал: админ,
+  // правящий чужой заказ из общего списка, иначе получил бы чужое время.
+  if(!o.filled_at || !o.claimed_at || !o.claimed_by || o.claimed_by !== o.filled_by) return null;
+  const sec = (new Date(o.filled_at) - new Date(o.claimed_at)) / 1000;
+  // Дольше окна захвата — человек отошёл, а не работал. Такое не берём ни в
+  // среднее, ни в общее время за день: один обед превратил бы цифры в бессмыслицу.
+  return (sec >= 0 && sec <= FILL_CLAIM_MIN * 60) ? sec : null;
+}
+function fillDoneIn(from, to){
+  return (S.orders || []).filter(o => {
     if(!o.filled_at) return false;
-    const d = String(o.filled_at).slice(0, 10);
+    const d = localDateOf(o.filled_at);
     return d >= from && d <= to;
   });
+}
+function fillStatsRows(){
+  const { from, to } = fillPeriod();
   const by = {};
-  done.forEach(o => {
-    const nm = o.filled_by_name || '— без имени —';
-    if(!by[nm]) by[nm] = { name: nm, count: 0, secs: [], slow: 0 };
-    by[nm].count++;
-    // Время считаем, только если заказ заполнил тот же, кто его брал. Админ,
-    // правящий чужой заказ из общего списка, иначе получил бы чужое время.
-    if(o.claimed_at && o.claimed_by && o.claimed_by === o.filled_by){
-      const sec = (new Date(o.filled_at) - new Date(o.claimed_at)) / 1000;
-      // Дольше окна захвата — человек отошёл, а не работал: в среднее такое не берём,
-      // иначе один обед превращает статистику в бессмыслицу.
-      if(sec >= 0 && sec <= FILL_CLAIM_MIN * 60){
-        by[nm].secs.push(sec);
-        if(sec > FILL_NORM_SEC) by[nm].slow++;
-      }
+  const add = nm => (by[nm] = by[nm] || { name: nm, count: 0, secs: [], totalSec: 0, inNorm: 0, last: null });
+  fillDoneIn(from, to).forEach(o => {
+    const r = add(o.filled_by_name || '— без имени —');
+    r.count++;
+    if(!r.last || o.filled_at > r.last) r.last = o.filled_at;
+    const sec = fillOrderSecs(o);
+    if(sec != null){
+      r.secs.push(sec);
+      r.totalSec += sec;
+      if(sec <= FILL_NORM_SEC) r.inNorm++;
     }
   });
   const inWork = {};
   fillQueue().filter(fillClaimAlive).forEach(o => {
     const nm = o.claimed_by_name || '—';
     inWork[nm] = (inWork[nm] || 0) + 1;
+    add(nm);
   });
-  Object.keys(inWork).forEach(nm => { if(!by[nm]) by[nm] = { name: nm, count: 0, secs: [], slow: 0 }; });
-  return Object.values(by).map(r => {
-    const avg = r.secs.length ? r.secs.reduce((s,x) => s+x, 0) / r.secs.length : null;
-    return { ...r, avg, inWork: inWork[r.name] || 0 };
-  }).sort((a,b) => b.count - a.count);
+  return Object.values(by).map(r => ({
+    ...r,
+    avg: r.secs.length ? r.secs.reduce((s,x) => s+x, 0) / r.secs.length : null,
+    normPct: r.secs.length ? Math.round(r.inNorm / r.secs.length * 100) : null,
+    inWork: inWork[r.name] || 0,
+  })).sort((a,b) => b.count - a.count);
+}
+// Тот же период, сдвинутый назад на свою длину, — для «▲ 12% к прошлому периоду».
+function fillPrevCount(){
+  const { from, to } = fillPeriod();
+  const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+  const shift = d => new Date(new Date(d).getTime() - days * 86400000).toISOString().slice(0, 10);
+  return fillDoneIn(shift(from), shift(to)).length;
 }
 const fillFmtSec = s => {
   if(s == null) return '—';
   const m = Math.floor(s / 60), ss = Math.round(s % 60);
   return m ? `${m}:${String(ss).padStart(2,'0')}` : `${ss} сек`;
 };
+// Общее время за период — часы и минуты, секунды тут не нужны.
+const fillFmtDur = s => {
+  if(!s) return '—';
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  if(h) return `${h} ч ${String(m).padStart(2,'0')} мин`;
+  return m ? `${m} мин` : `${Math.round(s)} сек`;
+};
 const fillAgo = iso => {
+  if(!iso) return '';
   const m = Math.floor((Date.now() - new Date(iso)) / 60000);
   if(m < 1) return 'только что';
-  return `${m} мин назад`;
+  if(m < 60) return `${m} мин назад`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h} ч назад` : `${Math.floor(h / 24)} дн назад`;
 };
+// Инициалы для кружка с именем: «Шамшиев Мирас» → «ШМ».
+const fillInitials = nm => nm.trim().split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase() || '?';
+// Цвет кружка — по имени, чтобы у человека он не менялся от раза к разу.
+const FILL_AVA = ['#2546c9', '#5b57c9', '#2f7d54', '#b06a28', '#4a5d3a', '#7a4a86'];
+const fillAvaColor = nm => FILL_AVA[[...nm].reduce((a,c) => a + c.charCodeAt(0), 0) % FILL_AVA.length];
 
 /* ---------- обновление данных ---------- */
 // Realtime приносит чужие правки сам, но фото к заказу могли приложить прямо сейчас,
@@ -169,78 +210,182 @@ async function fillRefresh(){
 }
 
 /* ---------- экран ---------- */
+// Быстрые периоды. Диапазон дат рядом остаётся — им задают любой отрезок.
+const FILL_TABS=[['today','Сегодня'],['yest','Вчера'],['week','Неделя'],['month','Месяц']];
+function fillSetTab(k){
+  const d=n=>new Date(new Date(localToday()).getTime()-n*86400000).toISOString().slice(0,10);
+  if(k==='today'){fillFrom='';fillTo='';}
+  else if(k==='yest'){fillFrom=d(1);fillTo=d(1);}
+  else if(k==='week'){fillFrom=d(6);fillTo=localToday();}
+  else if(k==='month'){fillFrom=localToday().slice(0,8)+'01';fillTo=localToday();}
+  renderFilling();
+}
+function fillActiveTab(){
+  const {from,to}=fillPeriod(), t=localToday();
+  const d=n=>new Date(new Date(t).getTime()-n*86400000).toISOString().slice(0,10);
+  if(from===t&&to===t)return 'today';
+  if(from===d(1)&&to===d(1))return 'yest';
+  if(from===d(6)&&to===t)return 'week';
+  if(from===t.slice(0,8)+'01'&&to===t)return 'month';
+  return '';
+}
+// Кольцо «в норме»: обычный круг с обводкой, нарисованной по длине дуги.
+function fillRing(pct){
+  const r=22, c=2*Math.PI*r, on=c*(pct||0)/100;
+  return `<svg class="fk-ring" viewBox="0 0 56 56" width="56" height="56">
+    <circle cx="28" cy="28" r="${r}" fill="none" stroke="var(--line)" stroke-width="6"/>
+    <circle cx="28" cy="28" r="${r}" fill="none" stroke="var(--moss)" stroke-width="6" stroke-linecap="round"
+      stroke-dasharray="${on} ${c}" transform="rotate(-90 28 28)"/></svg>`;
+}
+
 function renderFilling(){
   if(!canMod('filling')){ $('main').innerHTML = '<div class="empty"><div class="big">Нет доступа</div></div>'; return; }
   if(!fillReady()){
     $('main').innerHTML = `
       <div class="page-head"><div><h1>Заполнение</h1></div></div>
       <div class="empty"><div class="big">Раздел ещё не включён</div>
-      <p>В таблице заказов нет полей для учёта забивки. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
+      <p>В таблице заказов нет полей для учёта. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
     return;
   }
-  const queue = fillQueue(), free = fillFree(), mine = fillMine(), other = fillOther();
-  // Кто сколько заполнил — только администратору. Менеджеру эта таблица не нужна
-  // в работе, а сравнивать себя с соседями по ходу смены — лишнее.
-  const rows = isAdmin() ? fillStatsRows() : [];
-  $('main').innerHTML = `
-    <div class="page-head"><div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
+  const queue=fillQueue(), free=fillFree(), mine=fillMine(), other=fillOther();
+  const admin=isAdmin();
+  const rows=admin?fillStatsRows():[];
+  const team=rows.reduce((a,r)=>({
+    count:a.count+r.count, secs:a.secs+r.totalSec, inNorm:a.inNorm+r.inNorm,
+    measured:a.measured+r.secs.length, inWork:a.inWork+r.inWork,
+  }),{count:0,secs:0,inNorm:0,measured:0,inWork:0});
+  const teamAvg=team.measured?team.secs/team.measured:null;
+  const teamNorm=team.measured?Math.round(team.inNorm/team.measured*100):null;
+  const prev=admin?fillPrevCount():0;
+  const delta=prev?Math.round((team.count-prev)/prev*100):null;
+  const maxCount=rows.reduce((m,r)=>Math.max(m,r.count),0)||1;
+  const {from,to}=fillPeriod();
+  const tab=fillActiveTab();
+  const reload='<button class="btn sm ghost" id="fillReload" title="Подтянуть свежие заказы — фото могли приложить только что">🔄 Обновить</button>';
+
+  $('main').innerHTML=`
+    <div class="fill-head">
+      <div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
+      <div class="fill-head-act">
+        <div class="fh-queue"><span>В очереди</span><b>${free.length}</b></div>
+        <button class="btn primary" id="fillNext" ${free.length||mine.length?'':'disabled'}>
+          Взять следующий <kbd>Space</kbd></button>
+      </div>
     </div>
-    <div class="dash-cards">
-      <div class="dash-card"><div class="dc-ic">📝</div><div><div class="dc-v">${queue.length}</div><div class="dc-k">Ждут заполнения сегодня</div><div class="dc-extra">свободно ${free.length}${other.length?` · за прошлые дни: ${other.length}`:''}</div></div></div>
-      <div class="dash-card"><div class="dc-ic">✋</div><div><div class="dc-v">${mine.length}</div><div class="dc-k">У меня в работе</div></div></div>
-      <div class="dash-card"><div class="dc-ic">⏱</div><div><div class="dc-v">${FILL_NORM_SEC} сек</div><div class="dc-k">Норма на заказ</div><div class="dc-extra">захват снимается через ${FILL_CLAIM_MIN} мин</div></div></div>
+    ${other.length?`<div class="fill-note">
+      <span>⚠ ${other.length} ${other.length===1?'заказ':'заказов'} с прошлых дней остались незаполненными — в выдачу они не идут</span>
+    </div>`:''}
+    <div class="fill-kpi${admin?'':' one'}">
+      <div class="fk fk-main">
+        <div class="fk-k">Ждут заполнения</div>
+        <div class="fk-v">${queue.length}</div>
+        <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}</div>
+      </div>
+      ${admin?`
+      <div class="fk">
+        <div class="fk-k">Заполнено${tab==='today'?' сегодня':''}</div>
+        <div class="fk-v">${team.count}</div>
+        <div class="fk-s">${delta===null?'не с чем сравнить':
+          `<span class="${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta)}%</span> к прошлому периоду`}</div>
+      </div>
+      <div class="fk">
+        <div class="fk-k">Среднее время</div>
+        <div class="fk-v">${esc(fillFmtSec(teamAvg))}<small> / ${FILL_NORM_SEC} сек</small></div>
+        <div class="fk-s">захват снимается через ${FILL_CLAIM_MIN} мин</div>
+      </div>
+      <div class="fk fk-ringrow">
+        <div>
+          <div class="fk-k">В норме</div>
+          <div class="fk-v">${teamNorm===null?'—':teamNorm+'%'}</div>
+          <div class="fk-s">${team.inNorm} из ${team.measured} замеров</div>
+        </div>
+        ${fillRing(teamNorm)}
+      </div>`:''}
     </div>
-    ${mine.length ? `<div class="panel">
+    ${mine.length?`<div class="panel">
       <div class="panel-head"><h2>У меня в работе</h2><span class="count">${mine.length}</span></div>
       <div class="table-scroll"><table class="resp-table"><thead><tr><th>Заказ</th><th>Партнёр</th><th>Взят</th><th></th></tr></thead><tbody>
-        ${mine.map(o => `<tr>
+        ${mine.map(o=>`<tr>
           <td data-label="Заказ"><strong style="font-family:'Fraunces',serif">${esc(o.code||'')}</strong></td>
-          <td data-label="Партнёр">${esc(o.sender || partnerName(o.partner_id) || '—')}</td>
+          <td data-label="Партнёр">${esc(o.sender||partnerName(o.partner_id)||'—')}</td>
           <td data-label="Взят">${esc(fillAgo(o.claimed_at))}</td>
           <td data-label=""><button class="btn sm" data-fillopen="${o.id}">Заполнить</button>
             <button class="btn sm ghost" data-fillrel="${o.id}">Вернуть</button></td>
         </tr>`).join('')}
-      </tbody></table></div></div>` : ''}
-    ${isAdmin() ? `<div class="panel">
-      <div class="panel-head"><h2>Менеджеры заказов</h2>
-        <div class="filters-row" style="margin:0;gap:8px;display:flex;align-items:center;flex-wrap:wrap">
-          <button class="btn sm ghost" id="fillReload" title="Подтянуть свежие заказы — фото могли приложить только что">🔄 Обновить</button>
-          <button class="btn ghost sm" id="fillToday">Сегодня</button>
-          <input type="date" id="fillFromInp" value="${esc(fillFrom || localToday())}" max="${esc(localToday())}" title="С какого дня">
-          <input type="date" id="fillToInp" value="${esc(fillTo || fillFrom || localToday())}" max="${esc(localToday())}" title="По какой день">
+      </tbody></table></div></div>`:''}
+    ${admin?`<div class="panel fill-team">
+      <div class="panel-head">
+        <h2>Менеджеры заказов</h2>
+        <div class="ft-period">
+          ${FILL_TABS.map(([k,l])=>`<button data-filltab="${k}" class="${tab===k?'active':''}">${l}</button>`).join('')}
+          <input type="date" id="fillFromInp" value="${esc(from)}" max="${esc(localToday())}" title="С какого дня">
+          <input type="date" id="fillToInp" value="${esc(to)}" max="${esc(localToday())}" title="По какой день">
+          ${reload}
         </div>
       </div>
-      <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>Менеджер</th><th class="num">Заполнил</th><th class="num">Среднее время</th><th class="num">Сверх нормы</th><th class="num">Сейчас в работе</th>
+      <div class="table-scroll"><table class="resp-table ft-tbl"><thead><tr>
+        <th>#</th><th>Менеджер</th><th>Заполнил</th><th>Среднее</th><th>В норме</th><th>За день</th><th>Сейчас</th>
       </tr></thead><tbody>
-        ${rows.length ? rows.map(r => `<tr>
-          <td data-label="Менеджер"><strong>${esc(r.name)}</strong></td>
-          <td data-label="Заполнил" class="num"><b>${r.count}</b></td>
-          <td data-label="Среднее время" class="num">${esc(fillFmtSec(r.avg))}</td>
-          <td data-label="Сверх нормы" class="num">${r.slow ? `<span style="color:var(--rust)">${r.slow}</span>` : '—'}</td>
-          <td data-label="Сейчас в работе" class="num">${r.inWork || '—'}</td>
-        </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:30px">Пока никто ничего не заполнил</td></tr>'}
-      </tbody></table></div>
-    </div>` : ''}
+        ${rows.length?rows.map((r,i)=>`<tr>
+          <td data-label="#"><span class="ft-rank ${i===0?'top':''}">${i+1}</span></td>
+          <td data-label="Менеджер"><div class="ft-who">
+            <span class="ft-ava" style="background:${fillAvaColor(r.name)}">${esc(fillInitials(r.name))}</span>
+            <div><b>${esc(r.name)}</b><span class="ft-sub">${r.inWork?'сейчас в работе':(r.last?esc(fillAgo(r.last)):'—')}</span></div>
+          </div></td>
+          <td data-label="Заполнил"><b class="ft-num">${r.count}</b>
+            <span class="ft-bar"><i style="width:${Math.round(r.count/maxCount*100)}%"></i></span></td>
+          <td data-label="Среднее"><span class="ft-chip ${r.avg==null?'':(r.avg<=FILL_NORM_SEC?'ok':(r.avg<=FILL_NORM_SEC+10?'warn':'bad'))}">${esc(fillFmtSec(r.avg))}</span></td>
+          <td data-label="В норме">${r.normPct===null?'—':`${r.normPct}%
+            <span class="ft-bar"><i class="${r.normPct>=80?'ok':(r.normPct>=60?'warn':'bad')}" style="width:${r.normPct}%"></i></span>`}</td>
+          <td data-label="За день"><b>${esc(fillFmtDur(r.totalSec))}</b></td>
+          <td data-label="Сейчас">${r.inWork?`<span class="ft-busy">${r.inWork} в работе</span>`:'свободен'}</td>
+        </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">За этот период никто ничего не заполнил</td></tr>'}
+      </tbody>
+      ${rows.length?`<tfoot><tr class="ft-total">
+        <td></td><td>Итого по команде</td><td><b>${team.count}</b></td>
+        <td>${esc(fillFmtSec(teamAvg))}</td><td>${teamNorm===null?'—':teamNorm+'%'}</td>
+        <td><b>${esc(fillFmtDur(team.secs))}</b></td><td>${team.inWork} в работе</td>
+      </tr></tfoot>`:''}
+      </table></div>
+      <div class="ft-legend">
+        <span>Среднее время:</span>
+        <i class="ok">до ${FILL_NORM_SEC} сек</i>
+        <i class="warn">до ${FILL_NORM_SEC+10} сек</i>
+        <i class="bad">дольше</i>
+        <span class="ft-legend-note">«За день» — сколько времени реально ушло на заказы, простои не считаются</span>
+      </div>
+    </div>`:''}
     <div class="fill-take">
-      <button class="btn" id="fillNext" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
-      <span>${free.length ? `свободных заказов: ${free.length}` : 'свободных заказов нет'}</span>
-      ${isAdmin() ? '' : `<button class="btn sm ghost" id="fillReload" title="Подтянуть свежие заказы — фото могли приложить только что">🔄 Обновить</button>`}
+      <button class="btn" id="fillNextBottom" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
+      <span>${free.length?`свободных заказов: ${free.length}`:'свободных заказов нет'}</span>
+      ${admin?'':reload}
     </div>`;
-  const nx = $('fillNext'); if(nx) nx.onclick = () => fillTakeNext();
-  const rl = $('fillReload'); if(rl) rl.onclick = () => fillRefresh();
-  $('main').querySelectorAll('[data-fillopen]').forEach(b => b.onclick = () => orderModal(b.dataset.fillopen));
-  $('main').querySelectorAll('[data-fillrel]').forEach(b => b.onclick = () => fillRelease(b.dataset.fillrel));
-  const ft = $('fillToday'); if(ft) ft.onclick = () => { fillFrom = ''; fillTo = ''; renderFilling(); };
-  const fi = $('fillFromInp'); if(fi) fi.onchange = () => {
-    fillFrom = fi.value || '';
-    // «по» не может быть раньше «с» — иначе период пустой и таблица молча пустеет
-    if(fillTo && fillFrom && fillTo < fillFrom) fillTo = fillFrom;
+
+  ['fillNext','fillNextBottom'].forEach(id=>{const b=$(id);if(b)b.onclick=()=>fillTakeNext();});
+  const rl=$('fillReload'); if(rl) rl.onclick=()=>fillRefresh();
+  $('main').querySelectorAll('[data-fillopen]').forEach(b=>b.onclick=()=>orderModal(b.dataset.fillopen));
+  $('main').querySelectorAll('[data-fillrel]').forEach(b=>b.onclick=()=>fillRelease(b.dataset.fillrel));
+  $('main').querySelectorAll('[data-filltab]').forEach(b=>b.onclick=()=>fillSetTab(b.dataset.filltab));
+  const fi=$('fillFromInp'); if(fi) fi.onchange=()=>{
+    fillFrom=fi.value||'';
+    if(fillTo&&fillFrom&&fillTo<fillFrom)fillTo=fillFrom; // период наизнанку — таблица молча пустела бы
     renderFilling();
   };
-  const ti = $('fillToInp'); if(ti) ti.onchange = () => {
-    fillTo = ti.value || '';
-    if(fillTo && fillFrom && fillTo < fillFrom) fillFrom = fillTo;
+  const ti=$('fillToInp'); if(ti) ti.onchange=()=>{
+    fillTo=ti.value||'';
+    if(fillTo&&fillFrom&&fillTo<fillFrom)fillFrom=fillTo;
     renderFilling();
   };
 }
+
+// Пробел берёт следующий заказ: руки менеджера на клавиатуре, и тянуться мышью
+// к кнопке после каждого заказа — лишнее движение сотню раз за смену.
+document.addEventListener('keydown',e=>{
+  if(S.tab!=='filling'||e.code!=='Space'||e.repeat)return;
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  const t=e.target;
+  if(t&&(t.matches('input,textarea,select,button')||t.isContentEditable))return;
+  if(document.querySelector('.overlay'))return; // открыта карточка — пробел печатает
+  e.preventDefault();
+  fillTakeNext();
+});
