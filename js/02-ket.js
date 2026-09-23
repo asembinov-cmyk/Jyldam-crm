@@ -512,6 +512,7 @@ function startAutoRefresh(){
   if(_autoRefreshTimer)clearInterval(_autoRefreshTimer);
   _autoRefreshTimer=setInterval(autoRefreshTick,180000); // 3 минуты — просто подстраховка, если Realtime отвалится (сам Realtime обновляет мгновенно)
   startRealtime(); // мгновенные обновления
+  startPresence(); // кто сейчас в системе
 }
 
 /* ── REALTIME: мгновенное обновление статусов и данных ── */
@@ -529,6 +530,54 @@ function startRealtime(){
       .subscribe();
   }catch(e){console.warn('realtime',e);}
 }
+/* ── КТО СЕЙЧАС В СИСТЕМЕ ──
+   Presence у Supabase Realtime: каждая открытая вкладка сообщает в канал, кто за
+   ней сидит, и все остальные это видят. Базы это не касается вовсе — ни записи,
+   ни чтения; список живёт в самом соединении.
+
+   КАНАЛ ОТДЕЛЬНЫЙ, и это важно. Через `jyldam-live` всем прилетают изменения
+   заказов и заявок; если подцепить presence туда и ошибиться, вместе с зелёными
+   точками отвалится живое обновление заказов. Здесь сломается — пропадут только
+   точки. Лишнего соединения это не создаёт: все каналы идут через один сокет.
+
+   ЧЕГО PRESENCE НЕ ЗНАЕТ: он показывает, у кого ОТКРЫТА CRM, а не кто работает.
+   Вкладка, забытая на ночь, считается «онлайн». Поэтому рядом всегда показываем
+   время последнего действия — вместе это читается честно. */
+let _presenceChannel=null;
+S.online={};  // id сотрудника → { name, since }
+function startPresence(){
+  try{
+    if(_presenceChannel){sb.removeChannel(_presenceChannel);_presenceChannel=null;}
+    const me=S.me&&S.me.id;if(!me)return;
+    _presenceChannel=sb.channel('jyldam-presence',{config:{presence:{key:me}}});
+    const sync=()=>{
+      const state=_presenceChannel.presenceState()||{};
+      const next={};
+      Object.keys(state).forEach(id=>{
+        const first=(state[id]||[])[0]||{};
+        next[id]={name:first.name||'',since:first.since||null};
+      });
+      // Перерисовываем, только если список реально изменился: presence шлёт
+      // обновление на каждый вход и выход, и без этой проверки экран дёргался бы
+      // под руками у того, кто в этот момент работает.
+      const same=Object.keys(next).length===Object.keys(S.online).length
+        && Object.keys(next).every(id=>S.online[id]);
+      S.online=next;
+      if(!same&&(S.tab==='filling'||S.tab==='users'))scheduleRtRender('presence');
+    };
+    _presenceChannel
+      .on('presence',{event:'sync'},sync)
+      .subscribe(async status=>{
+        if(status!=='SUBSCRIBED')return;
+        await _presenceChannel.track({name:(S.me&&(S.me.full_name||S.me.email))||'',since:new Date().toISOString()});
+      });
+  }catch(e){console.warn('presence',e);}
+}
+// Онлайн ли сотрудник. Без presence (канал не поднялся) — false, а не «неизвестно»:
+// лучше не показать точку, чем показать её ошибочно.
+const isOnline=id=>!!(id&&S.online&&S.online[id]);
+const onlineCount=()=>Object.keys(S.online||{}).length;
+
 // применяем изменение из базы к данным в памяти
 const RT_TABLE_ARR={pickups:'pickups',orders:'orders',inbound_orders:'inbound_orders'};
 function applyRealtime(table,payload){

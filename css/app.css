@@ -1360,3 +1360,9 @@
   .sh-nums b{font-size:30px}
   .sort-card{padding:18px}
 }
+
+/* Зелёная точка «сейчас в системе». Presence знает только про открытую вкладку,
+   поэтому рядом всегда стоит время последнего действия — вместе читается честно. */
+.ft-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#2f9e5c;
+  margin-right:6px;vertical-align:middle}
+td .ft-dot{margin:0 0 0 8px}

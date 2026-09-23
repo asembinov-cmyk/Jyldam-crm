@@ -80,7 +80,7 @@ function renderStaff(){
         <th></th></tr>
     </thead>
     <tbody>${rows.length?rows.map(u=>`<tr>
-      <td><strong>${esc(u.full_name||'—')}</strong></td>
+      <td><strong>${esc(u.full_name||'—')}</strong>${isOnline(u.id)?'<span class="ft-dot" title="Сейчас в системе"></span>':''}</td>
       <td>${u.phone?phoneLink(u.phone):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
       <td>${u.city_id?esc(cityName(u.city_id)):'—'}</td>
       <td>${esc(u.position)||'—'}</td>

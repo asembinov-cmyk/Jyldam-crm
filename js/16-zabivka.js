@@ -130,9 +130,14 @@ function fillDoneIn(from, to){
 function fillStatsRows(){
   const { from, to } = fillPeriod();
   const by = {};
-  const add = nm => (by[nm] = by[nm] || { name: nm, count: 0, secs: [], totalSec: 0, inNorm: 0, last: null });
+  // id нужен, чтобы понять, в системе ли человек сейчас (см. presence в js/02-ket.js).
+  const add = (nm, id) => {
+    const r = by[nm] = by[nm] || { name: nm, id: null, count: 0, secs: [], totalSec: 0, inNorm: 0, last: null };
+    if(!r.id && id) r.id = id;
+    return r;
+  };
   fillDoneIn(from, to).forEach(o => {
-    const r = add(o.filled_by_name || '— без имени —');
+    const r = add(o.filled_by_name || '— без имени —', o.filled_by);
     r.count++;
     if(!r.last || o.filled_at > r.last) r.last = o.filled_at;
     const sec = fillOrderSecs(o);
@@ -146,7 +151,7 @@ function fillStatsRows(){
   fillQueue().filter(fillClaimAlive).forEach(o => {
     const nm = o.claimed_by_name || '—';
     inWork[nm] = (inWork[nm] || 0) + 1;
-    add(nm);
+    add(nm, o.claimed_by);
   });
   return Object.values(by).map(r => ({
     ...r,
@@ -330,7 +335,9 @@ function renderFilling(){
           <td data-label="#"><span class="ft-rank ${i===0?'top':''}">${i+1}</span></td>
           <td data-label="Менеджер"><div class="ft-who">
             <span class="ft-ava" style="background:${fillAvaColor(r.name)}">${esc(fillInitials(r.name))}</span>
-            <div><b>${esc(r.name)}</b><span class="ft-sub">${r.inWork?'сейчас в работе':(r.last?esc(fillAgo(r.last)):'—')}</span></div>
+            <div><b>${esc(r.name)}</b><span class="ft-sub">${
+              isOnline(r.id)?'<i class="ft-dot"></i>в системе':''
+            }${r.inWork?(isOnline(r.id)?' · ':'')+'сейчас в работе':(r.last?(isOnline(r.id)?' · ':'')+esc(fillAgo(r.last)):(isOnline(r.id)?'':'—'))}</span></div>
           </div></td>
           <td data-label="Заполнил"><b class="ft-num">${r.count}</b>
             <span class="ft-bar"><i style="width:${Math.round(r.count/maxCount*100)}%"></i></span></td>
