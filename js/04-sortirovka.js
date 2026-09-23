@@ -157,7 +157,9 @@ function renderSorting(){
   const isToday=sortingDate===localToday();
   const labelQueue=processed.filter(labelNeedsPrint);
   // для админа (город не задан) — разбивка по городам: сколько заказов в каждом, сколько принято
-  let cityBreakdownHtml='';
+  // Разбивка по городам — только тем, у кого город не задан (админ, общий доступ):
+  // кладовщик и так видит один свой склад, строка про чужой город ему не нужна.
+  let cityRowsHtml='';
   if(!myCity){
     const byCity={};
     processed.forEach(o=>{
@@ -166,48 +168,51 @@ function renderSorting(){
       byCity[nm].total++;if(o.sorted_at)byCity[nm].sorted++;
     });
     const entries=Object.entries(byCity).sort((a,b)=>b[1].total-a[1].total);
-    if(entries.length){
-      cityBreakdownHtml=`<div class="panel" style="margin-bottom:16px">
-        <div class="panel-head"><h2>По городам</h2></div>
-        <div class="table-scroll"><table class="resp-table"><thead><tr><th>Город</th><th>Заказов</th><th>Принято</th><th>Осталось</th></tr></thead><tbody>
-          ${entries.map(([nm,c])=>`<tr>
-            <td data-label="Город"><strong>${esc(nm)}</strong></td>
-            <td data-label="Заказов">${c.total}</td>
-            <td data-label="Принято" style="color:var(--rust)">${c.sorted}</td>
-            <td data-label="Осталось">${c.total-c.sorted}</td>
-          </tr>`).join('')}
-        </tbody></table></div>
-      </div>`;
-    }
+    cityRowsHtml=entries.length
+      ? entries.map(([nm,c])=>`<div class="sc-row">
+          <span class="sc-city">${esc(nm)}</span>
+          <span class="sc-n" title="Заказов">${c.total}</span>
+          <span class="sc-n sc-ok" title="Принято">${c.sorted}</span>
+          <span class="sc-n sc-left" title="Осталось">${c.total-c.sorted}</span>
+        </div>`).join('')
+      : '<div class="sc-empty">За этот день заказов нет</div>';
   }
+
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Сортировка</h1><p>Отсканируйте накладную посылки — подскажем, в какой она город${myCity?` · только ${esc(cityName(myCity))}`:''}</p></div></div>
-    <div class="stats stats-3" style="margin-bottom:8px">
-      <div class="stat"><div class="k">Заказов${isToday?' сегодня':''}</div><div class="v">${total}</div></div>
-      <div class="stat"><div class="k">Принято</div><div class="v" style="color:var(--rust)">${sorted}</div></div>
-      <div class="stat"><div class="k">Осталось</div><div class="v">${left}</div></div>
-    </div>
-    <div class="stats stats-3" style="margin-bottom:16px">
-      <div class="stat"><div class="k">🚚 Курьерских</div><div class="v">${courierCnt}</div></div>
-      <div class="stat"><div class="k">📮 Почтовых</div><div class="v">${mailCnt}</div></div>
-      <div class="stat"><div class="k">Не обработано</div><div class="v" style="color:var(--muted)">${notProcessed}</div></div>
-    </div>
-    ${cityBreakdownHtml}
-    <div class="panel" style="max-width:560px;margin:0 auto">
-      <div style="text-align:center;padding:24px 16px">
-        <label class="btn primary" style="cursor:pointer;font-size:17px;padding:18px 28px;display:inline-block">
-          📷 Сканировать накладную
-          <input type="file" accept="image/*" capture="environment" id="sortPhotoInput" style="display:none">
+    <div class="sort-hero">
+      <div class="sh-left">
+        <h1>Сортировка</h1>
+        <p>Отсканируйте накладную — подскажем, в какой она город${myCity?` · склад ${esc(cityName(myCity))}`:''}</p>
+        <label class="sh-scan">
+          <svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M4 8V6a2 2 0 012-2h2M18 4h2a2 2 0 012 2v2M20 16v2a2 2 0 01-2 2h-2M6 20H4a2 2 0 01-2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="7" y="8" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.8"/></svg>
+          Сканировать накладную
+          <input type="file" accept="image/*" capture="environment" id="sortPhotoInput">
         </label>
       </div>
-      <div id="sortResult"></div>
-      <div style="border-top:1px solid var(--line);padding:14px 16px;display:flex;align-items:center;gap:10px;justify-content:center">
-        <label style="font-size:13px;color:var(--muted)">Дата:</label>
+      <div class="sh-nums">
+        <div><b>${total}</b><span>заказов${isToday?' сегодня':''}</span></div>
+        <div><b class="ok">${sorted}</b><span>принято</span></div>
+        <div><b>${left}</b><span>осталось</span></div>
+      </div>
+    </div>
+    <div id="sortResult"></div>
+    <div class="sort-chips">
+      <div class="sort-chip"><span>🚚 Курьерских</span><b>${courierCnt}</b></div>
+      <div class="sort-chip"><span>📮 Почтовых</span><b>${mailCnt}</b></div>
+      <div class="sort-chip"><span>Не обработано</span><b class="dim">${notProcessed}</b></div>
+      <div class="sort-chip sort-chip-date">
+        <span>Дата</span>
         <input type="date" id="sortDateFilter" value="${sortingDate}" max="${localToday()}">
         ${!isToday?'<button class="btn ghost sm" id="sortDateToday">Сегодня</button>':''}
       </div>
     </div>
+    <div class="sort-two">
+      ${cityRowsHtml?`<div class="sort-card sort-cities">
+        <div class="sc-head"><h2>По городам</h2><span class="sc-legend">заказов · принято · осталось</span></div>
+        ${cityRowsHtml}
+      </div>`:''}
     ${labelPrintPanelHtml(labelQueue,isToday)}
+    </div>
     <div class="panel" style="margin-top:18px">
       <div class="panel-head"><h2>Список заказов</h2><span class="count">${total}</span></div>
       <p class="hint" style="margin:0 20px 10px;color:var(--muted)">Двойное нажатие по заказу открывает карточку: вес, штрих-код, отметка о приёмке.</p>
@@ -465,24 +470,25 @@ function labelNeedsPrint(o){
 function labelPrintPanelHtml(queue,isToday){
   const auto=labelAutoPrintOn();
   return `
-    <div class="panel" style="max-width:560px;margin:16px auto 0">
-      <div class="panel-head"><h2>🖨 Печать бланков</h2><span class="count">${queue.length}</span></div>
-      <div style="padding:12px 16px 16px">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:15px">
-          <input type="checkbox" id="labelAutoPrint" ${auto?'checked':''} style="width:18px;height:18px">
-          <span>Автопечать на этом устройстве</span>
-        </label>
-        <p class="hint" style="margin:8px 0 0;color:var(--muted);font-size:12px">
-          Включайте только на компьютере, к которому подключён принтер. На лист A4 идут два
-          бланка, по линии реза лист разрезается пополам. Одинокий бланк ждёт пару до минуты,
-          потом печатается один.
-        </p>
-        ${!isToday?'<p class="hint" style="margin:8px 0 0;color:var(--rust);font-size:12px">Выбран прошлый день — автопечать не работает, чтобы не напечатать старое. Кнопкой ниже можно напечатать вручную.</p>':''}
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          <button class="btn primary sm" id="labelPrintNow" ${queue.length?'':'disabled'}>🖨 Печатать все (${queue.length})</button>
-          <button class="btn ghost sm" id="labelOpenPdf" ${queue.length?'':'disabled'}>Открыть PDF</button>
-          ${_lastLabelSheet?'<button class="btn ghost sm" id="labelReprint">↻ Перепечатать последний лист</button>':''}
+    <div class="sort-card sort-print">
+      <div class="sp-main">
+        <span class="sp-ic">🖨</span>
+        <div>
+          <div class="sp-t">Печать бланков</div>
+          <div class="sp-s">${queue.length?`${queue.length} готово к печати`:'нечего печатать'}</div>
         </div>
+        <button class="btn primary" id="labelPrintNow" ${queue.length?'':'disabled'}>Печатать все</button>
+      </div>
+      <label class="sp-auto">
+        <input type="checkbox" id="labelAutoPrint" ${auto?'checked':''}>
+        <span>Автопечать на этом устройстве</span>
+      </label>
+      <p class="sp-hint">Включайте только там, где подключён принтер. На лист A4 идут два бланка,
+        по линии реза лист разрезается пополам. Одинокий бланк ждёт пару до минуты.</p>
+      ${!isToday?'<p class="sp-hint sp-warn">Выбран прошлый день — автопечать выключена, чтобы не напечатать старое. Кнопкой выше можно напечатать вручную.</p>':''}
+      <div class="sp-more">
+        <button class="btn ghost sm" id="labelOpenPdf" ${queue.length?'':'disabled'}>Открыть PDF</button>
+        ${_lastLabelSheet?'<button class="btn ghost sm" id="labelReprint">↻ Перепечатать последний лист</button>':''}
       </div>
     </div>`;
 }

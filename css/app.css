@@ -1208,3 +1208,79 @@
   border-radius:9px;background:var(--card);color:var(--ink);min-width:140px;
   cursor:pointer;white-space:nowrap;text-align:left}
 .filters .filters-btn:hover{border-color:var(--ink)}
+
+/* ─── Модуль «Сортировка» ───────────────────────────────────────────────
+   Шапка-баннер вместо россыпи одинаковых плашек: у кладовщика одно главное
+   действие — отсканировать накладную, и оно должно быть самым заметным на
+   экране, а цифры дня — рядом, а не выше него. */
+.sort-hero{display:flex;align-items:center;justify-content:space-between;gap:28px;flex-wrap:wrap;
+  background:linear-gradient(135deg,var(--rust),var(--rust-dk));color:#fff;
+  border-radius:18px;padding:30px 34px;margin-bottom:16px}
+.sort-hero h1{font-family:'Fraunces',serif;font-weight:900;font-size:38px;line-height:1;margin:0;color:#fff}
+.sort-hero p{margin:8px 0 0;font-size:14px;color:rgba(255,255,255,.82)}
+/* Кнопка сканирования — это <label> с полем выбора файла внутри: так камера
+   открывается прямо с телефона, без промежуточного экрана. */
+.sh-scan{display:inline-flex;align-items:center;gap:10px;margin-top:20px;cursor:pointer;
+  background:#fff;color:var(--rust);font-weight:700;font-size:16px;
+  padding:15px 26px;border-radius:12px;border:none;transition:transform .12s ease}
+.sh-scan:hover{transform:translateY(-1px)}
+.sh-scan:active{transform:none}
+.sh-scan input{display:none}
+.sh-nums{display:flex;align-items:center;gap:28px}
+.sh-nums>div{text-align:center;padding-left:28px;border-left:1px solid rgba(255,255,255,.22)}
+.sh-nums>div:first-child{padding-left:0;border-left:none}
+.sh-nums b{display:block;font-family:'Fraunces',serif;font-weight:900;font-size:40px;line-height:1}
+/* Мятный вместо --moss: тёмно-зелёный на синем фоне не читается. */
+.sh-nums b.ok{color:#8ce8b4}
+.sh-nums span{display:block;margin-top:6px;font-size:12px;color:rgba(255,255,255,.78)}
+
+.sort-chips{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.sort-chip{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 18px;box-shadow:var(--shadow)}
+.sort-chip span{font-size:14px;color:var(--muted)}
+.sort-chip b{font-family:'Fraunces',serif;font-weight:900;font-size:22px;line-height:1}
+.sort-chip b.dim{color:var(--muted)}
+.sort-chip-date input[type=date]{font:inherit;font-size:14px;border:none;background:none;color:var(--ink);padding:0}
+.sort-chip-date{gap:8px;flex-wrap:wrap}
+
+.sort-two{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.sort-card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+  padding:22px 26px;box-shadow:var(--shadow)}
+.sc-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px}
+.sc-head h2{font-family:'Fraunces',serif;font-weight:900;font-size:19px;margin:0}
+.sc-legend{font-size:11px;color:var(--muted);white-space:nowrap}
+.sc-row{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.sc-row:last-child{border-bottom:none}
+.sc-city{flex:1;font-weight:600}
+.sc-n{min-width:46px;text-align:right;font-family:'Fraunces',serif;font-weight:900;font-size:17px}
+.sc-n.sc-ok{color:var(--rust)}
+.sc-n.sc-left{color:var(--muted)}
+.sc-empty{padding:14px 0;color:var(--muted);font-size:14px}
+
+.sp-main{display:flex;align-items:center;gap:14px}
+.sp-ic{font-size:24px;line-height:1}
+.sp-t{font-family:'Fraunces',serif;font-weight:900;font-size:19px;white-space:nowrap}
+.sp-s{font-size:13px;color:var(--muted);margin-top:2px}
+.sp-main{flex-wrap:wrap}
+.sp-main .btn{margin-left:auto;white-space:nowrap}
+.sp-auto{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;margin-top:16px}
+.sp-auto input{width:18px;height:18px}
+.sp-hint{margin:8px 0 0;font-size:12px;color:var(--muted);line-height:1.5}
+.sp-hint.sp-warn{color:var(--rust)}
+.sp-more{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+
+@media(max-width:900px){
+  .sort-chips{grid-template-columns:repeat(2,1fr)}
+  .sort-two{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .sort-hero{padding:22px;gap:18px}
+  .sort-hero h1{font-size:30px}
+  .sh-scan{width:100%;justify-content:center}
+  /* На телефоне числа встают в ряд без разделителей: вертикальные линии на узком
+     экране выглядят как обрывки таблицы. */
+  .sh-nums{width:100%;justify-content:space-between;gap:0}
+  .sh-nums>div{padding-left:0;border-left:none;flex:1}
+  .sh-nums b{font-size:30px}
+  .sort-card{padding:18px}
+}
