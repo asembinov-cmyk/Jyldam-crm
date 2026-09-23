@@ -1187,3 +1187,10 @@
   .content.has-pager{padding-bottom:96px}
   /* и у самой таблицы — иначе плавающая панель перекрывает строки уже на первом экране, а не только в самом низу списка */
   .content.has-pager .panel:last-of-type{margin-bottom:76px}
+
+/* «Взять следующий» в разделе «Заполнение». Главное действие раздела, но стоит
+   внизу — менеджер сначала видит, кто сколько сделал, и только потом берёт
+   следующий заказ. Поэтому кнопка крупнее обычной и в своей строке. */
+.fill-take{display:flex;align-items:center;justify-content:center;gap:12px;margin:18px 0 40px;flex-wrap:wrap}
+.fill-take .btn{padding:14px 34px;font-size:16px}
+.fill-take span{color:var(--muted);font-size:13px}

@@ -23,7 +23,7 @@
 const FILL_CLAIM_MIN = 10;   // сколько минут заказ держится за менеджером
 const FILL_NORM_SEC  = 60;   // норма времени на один заказ
 const FILL_MAX_AGE_DAYS = 14;    // старше этого в выдачу не идут
-let fillStatsPeriod = 'today';   // today | month
+let fillFrom = '', fillTo = '';  // период статистики, пусто = сегодня
 let fillBusy = false;            // защита от двойного нажатия «Взять следующий»
 
 // Колонки могли ещё не появиться в базе (SQL из db/11 не выполнен). Понять это можно
@@ -104,8 +104,14 @@ async function fillRelease(id){
 // Период считаем по дате ЗАПОЛНЕНИЯ: вопрос «сколько сделал сегодня» — про работу
 // сегодня, а не про то, когда заказ создали.
 function fillStatsRows(){
-  const from = fillStatsPeriod === 'today' ? localToday() : localToday().slice(0,7);
-  const done = (S.orders || []).filter(o => o.filled_at && String(o.filled_at).slice(0, from.length) === from);
+  // Границы периода. Пусто — сегодняшний день: чаще всего смотрят именно его.
+  const from = fillFrom || localToday();
+  const to   = fillTo   || from;
+  const done = (S.orders || []).filter(o => {
+    if(!o.filled_at) return false;
+    const d = String(o.filled_at).slice(0, 10);
+    return d >= from && d <= to;
+  });
   const by = {};
   done.forEach(o => {
     const nm = o.filled_by_name || '— без имени —';
@@ -157,7 +163,6 @@ function renderFilling(){
   const rows = fillStatsRows();
   $('main').innerHTML = `
     <div class="page-head"><div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
-      <div class="head-actions"><button class="btn" id="fillNext" ${free.length||mine.length?'':'disabled'}>Взять следующий</button></div>
     </div>
     <div class="dash-cards">
       <div class="dash-card"><div class="dc-ic">📝</div><div><div class="dc-v">${queue.length}</div><div class="dc-k">Ждут заполнения</div><div class="dc-extra">свободно ${free.length}${stale.length?` · старше ${FILL_MAX_AGE_DAYS} дней: ${stale.length}`:''}</div></div></div>
@@ -177,9 +182,10 @@ function renderFilling(){
       </tbody></table></div></div>` : ''}
     <div class="panel">
       <div class="panel-head"><h2>Менеджеры заказов</h2>
-        <div class="subtabs" style="margin:0">
-          <button data-fillper="today" class="${fillStatsPeriod==='today'?'active':''}">Сегодня</button>
-          <button data-fillper="month" class="${fillStatsPeriod==='month'?'active':''}">За месяц</button>
+        <div class="filters-row" style="margin:0;gap:8px;display:flex;align-items:center;flex-wrap:wrap">
+          <button class="btn ghost sm" id="fillToday">Сегодня</button>
+          <input type="date" id="fillFromInp" value="${esc(fillFrom || localToday())}" max="${esc(localToday())}" title="С какого дня">
+          <input type="date" id="fillToInp" value="${esc(fillTo || fillFrom || localToday())}" max="${esc(localToday())}" title="По какой день">
         </div>
       </div>
       <div class="table-scroll"><table class="resp-table"><thead><tr>
@@ -193,9 +199,24 @@ function renderFilling(){
           <td data-label="Сейчас в работе" class="num">${r.inWork || '—'}</td>
         </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:30px">Пока никто ничего не заполнил</td></tr>'}
       </tbody></table></div>
+    </div>
+    <div class="fill-take">
+      <button class="btn" id="fillNext" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
+      <span>${free.length ? `свободных заказов: ${free.length}` : 'свободных заказов нет'}</span>
     </div>`;
   const nx = $('fillNext'); if(nx) nx.onclick = () => fillTakeNext();
   $('main').querySelectorAll('[data-fillopen]').forEach(b => b.onclick = () => orderModal(b.dataset.fillopen));
   $('main').querySelectorAll('[data-fillrel]').forEach(b => b.onclick = () => fillRelease(b.dataset.fillrel));
-  $('main').querySelectorAll('[data-fillper]').forEach(b => b.onclick = () => { fillStatsPeriod = b.dataset.fillper; renderFilling(); });
+  const ft = $('fillToday'); if(ft) ft.onclick = () => { fillFrom = ''; fillTo = ''; renderFilling(); };
+  const fi = $('fillFromInp'); if(fi) fi.onchange = () => {
+    fillFrom = fi.value || '';
+    // «по» не может быть раньше «с» — иначе период пустой и таблица молча пустеет
+    if(fillTo && fillFrom && fillTo < fillFrom) fillTo = fillFrom;
+    renderFilling();
+  };
+  const ti = $('fillToInp'); if(ti) ti.onchange = () => {
+    fillTo = ti.value || '';
+    if(fillTo && fillFrom && fillTo < fillFrom) fillFrom = fillTo;
+    renderFilling();
+  };
 }
