@@ -1850,11 +1850,15 @@ function orderModal(id,readonly){
       // где db/11 ещё не выполнен, сохранение заказа падало бы целиком.
       if(typeof fillReady==='function'&&fillReady()){
         const nowProcessed=!!(row.client&&row.client.trim())&&!!row.delivery_id;
-        if(nowProcessed){
-          if(!o||!o.filled_at){row.filled_at=new Date().toISOString();
-            row.filled_by=(S.me&&S.me.id)||null;row.filled_by_name=(S.me&&(S.me.full_name||S.me.email))||'';}
-          row.claimed_by=null;row.claimed_by_name=null;row.claimed_at=null;
+        if(nowProcessed&&(!o||!o.filled_at)){
+          row.filled_at=new Date().toISOString();
+          row.filled_by=(S.me&&S.me.id)||null;
+          row.filled_by_name=(S.me&&(S.me.full_name||S.me.email))||'';
         }
+        // claimed_* НЕ трогаем: claimed_at — это момент, когда человек взял заказ, и
+        // от него считается время работы. Раньше оно тут обнулялось вместе с захватом,
+        // и в статистике среднее время всегда выходило пустым. Держать заказ занятым
+        // это не заставляет: заполненный заказ в очередь всё равно не попадает.
       }
       if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
         await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:buildChanges(before,o)});}

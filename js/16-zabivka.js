@@ -113,7 +113,9 @@ function fillStatsRows(){
     const nm = o.filled_by_name || '— без имени —';
     if(!by[nm]) by[nm] = { name: nm, count: 0, secs: [], slow: 0 };
     by[nm].count++;
-    if(o.claimed_at){
+    // Время считаем, только если заказ заполнил тот же, кто его брал. Админ,
+    // правящий чужой заказ из общего списка, иначе получил бы чужое время.
+    if(o.claimed_at && o.claimed_by && o.claimed_by === o.filled_by){
       const sec = (new Date(o.filled_at) - new Date(o.claimed_at)) / 1000;
       // Дольше окна захвата — человек отошёл, а не работал: в среднее такое не берём,
       // иначе один обед превращает статистику в бессмыслицу.
