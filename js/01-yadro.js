@@ -155,6 +155,28 @@ const findPartnerByName = nm => {
   const k = normName(nm);
   return k ? ((S.partners || []).find(p => normName(p.name) === k) || null) : null;
 };
+// То же, но прощает приписку в конце: в заявках в поле названия пишут заметку для
+// курьера — «Злиха Алматы ( ТикТок) к 12/00 пакеты». Из-за неё название переставало
+// совпадать со справочником, партнёр не находился, и заказы создавались без привязки
+// к нему — за сентябрь так потерялось 208 заказов, вместе с их деньгами в калькуляции.
+// Берём партнёра, чьё название совпадает с НАЧАЛОМ строки, из нескольких — самое
+// длинное. Кавычки убираем: «Физ лицо "Астана"» и «Физ лицо Астана» — один партнёр.
+const NAME_PREFIX_MIN = 4; // короткие названия совпали бы со всем подряд
+const stripQuotes = v => String(v == null ? '' : v).replace(/["«»„“”]/g, '');
+const findPartnerByNameLoose = nm => {
+  const exact = findPartnerByName(nm);
+  if(exact) return exact;
+  const k = normName(stripQuotes(nm));
+  if(!k) return null;
+  let best = null;
+  (S.partners || []).forEach(p => {
+    const pk = normName(stripQuotes(p.name));
+    if(pk.length < NAME_PREFIX_MIN) return;
+    if(k !== pk && !k.startsWith(pk + ' ')) return;
+    if(!best || pk.length > normName(stripQuotes(best.name)).length) best = p;
+  });
+  return best;
+};
 function toast(m,ms){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms||2200);}
 
 const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',courier:'Курьер'};

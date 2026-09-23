@@ -43,7 +43,9 @@ function isFizlicoPartner(partner){
 function buildPickupOrderRows(p,count){
   const pickupId=p.id;
   // ищем партнёра по имени из заявки, чтобы подтянуть его данные
-  const partner=findPartnerByName(p.name);
+  // Заявка от партнёра по QR уже знает своего партнёра точно; у заявки, заведённой
+  // сотрудником, partner_id не ставится (это признак QR) — там ищем по названию.
+  const partner=(p.partner_id&&(S.partners||[]).find(x=>x.id===p.partner_id))||findPartnerByNameLoose(p.name);
   // тип доставки по умолчанию — курьерский, если есть такой тип
   const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
   const baseStatus=defaultOrderStatusId();

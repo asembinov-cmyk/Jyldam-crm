@@ -604,7 +604,7 @@ function pickupModal(id,readonly){
     const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
       $('m_district').innerHTML='<option value="">—</option>'+dOpts(cid).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
       $('m_courier').innerHTML='<option value="">— выберите курьера —</option>'+cOpts(cid).map(x=>`<option value="${x.id}">${esc(x.fio)}</option>`).join('');saveDraft();};
-    $('m_name').onchange=e=>{const pt=findPartnerByName(e.target.value);if(pt){
+    $('m_name').onchange=e=>{const pt=findPartnerByNameLoose(e.target.value);if(pt){
       if(pt.address)$('m_address').value=pt.address;
       if(pt.phone){const el=$('m_phone');el.dataset.phone=phoneStored(pt.phone);el.value=fmt10(phoneStored(pt.phone));}
       if(pt.city_id){cs.value=pt.city_id;cs.onchange();}
