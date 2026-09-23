@@ -160,11 +160,12 @@ function fillStatsRows(){
   })).sort((a,b) => b.count - a.count);
 }
 // Тот же период, сдвинутый назад на свою длину, — для «▲ 12% к прошлому периоду».
-function fillPrevCount(){
+function fillPrevCount(byId){
   const { from, to } = fillPeriod();
   const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
   const shift = d => new Date(new Date(d).getTime() - days * 86400000).toISOString().slice(0, 10);
-  return fillDoneIn(shift(from), shift(to)).length;
+  const rows = fillDoneIn(shift(from), shift(to));
+  return byId ? rows.filter(o => o.filled_by === byId).length : rows.length;
 }
 const fillFmtSec = s => {
   if(s == null) return '—';
@@ -253,15 +254,21 @@ function renderFilling(){
   }
   const queue=fillQueue(), free=fillFree(), mine=fillMine();
   const admin=isAdmin();
-  const rows=admin?fillStatsRows():[];
+  // Статистику считаем всегда: администратору — по всем, менеджеру — только его строку.
+  // Сравнивать себя с коллегами по ходу смены незачем, а свой темп видеть полезно.
+  const rows=fillStatsRows();
+  const me=(S.me&&S.me.id)||null;
+  const mine0={count:0,totalSec:0,secs:[],inNorm:0,avg:null,normPct:null};
+  const my=admin?null:(rows.find(r=>r.id===me)||mine0);
   const team=rows.reduce((a,r)=>({
     count:a.count+r.count, secs:a.secs+r.totalSec, inNorm:a.inNorm+r.inNorm,
     measured:a.measured+r.secs.length, inWork:a.inWork+r.inWork,
   }),{count:0,secs:0,inNorm:0,measured:0,inWork:0});
   const teamAvg=team.measured?team.secs/team.measured:null;
   const teamNorm=team.measured?Math.round(team.inNorm/team.measured*100):null;
-  const prev=admin?fillPrevCount():0;
-  const delta=prev?Math.round((team.count-prev)/prev*100):null;
+  const prev=fillPrevCount(admin?null:me);
+  const cur=admin?team.count:my.count;
+  const delta=prev?Math.round((cur-prev)/prev*100):null;
   const maxCount=rows.reduce((m,r)=>Math.max(m,r.count),0)||1;
   const {from,to}=fillPeriod();
   const tab=fillActiveTab();
@@ -276,12 +283,29 @@ function renderFilling(){
           Взять следующий <kbd>Space</kbd></button>
       </div>
     </div>
-    <div class="fill-kpi${admin?'':' one'}">
+    <div class="fill-kpi">
       <div class="fk fk-main">
         <div class="fk-k">Ждут заполнения</div>
         <div class="fk-v">${queue.length}</div>
         <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}</div>
       </div>
+      ${!admin?`
+      <div class="fk">
+        <div class="fk-k">Заполнено мной сегодня</div>
+        <div class="fk-v">${my.count}</div>
+        <div class="fk-s">${delta===null?'не с чем сравнить':
+          `<span class="${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta)}%</span> ко вчерашнему дню`}</div>
+      </div>
+      <div class="fk">
+        <div class="fk-k">Моё среднее время</div>
+        <div class="fk-v">${esc(fillFmtSec(my.avg))}<small> / ${FILL_NORM_SEC} сек</small></div>
+        <div class="fk-s">${my.normPct===null?'замеров пока нет':`${my.normPct}% заказов в норме`}</div>
+      </div>
+      <div class="fk">
+        <div class="fk-k">Моё время за день</div>
+        <div class="fk-v">${esc(fillFmtDur(my.totalSec))}</div>
+        <div class="fk-s">простои не считаются</div>
+      </div>`:''}
       ${admin?`
       <div class="fk">
         <div class="fk-k">Заполнено${tab==='today'?' сегодня':''}</div>
