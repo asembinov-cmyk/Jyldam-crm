@@ -62,7 +62,6 @@ function fillClaimAlive(o){ return !!(o.claimed_at && o.claimed_at > fillCutoff(
 function fillIsMine(o){ return fillClaimAlive(o) && o.claimed_by === (S.me && S.me.id); }
 
 function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillIsToday(o)); }
-function fillOther(){ return (S.orders || []).filter(o => fillNeedsWork(o) && !fillIsToday(o)); }
 function fillFree(){ return fillQueue().filter(o => !fillClaimAlive(o)); }
 function fillMine(){ return fillQueue().filter(fillIsMine); }
 
@@ -252,7 +251,7 @@ function renderFilling(){
       <p>В таблице заказов нет полей для учёта. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
     return;
   }
-  const queue=fillQueue(), free=fillFree(), mine=fillMine(), other=fillOther();
+  const queue=fillQueue(), free=fillFree(), mine=fillMine();
   const admin=isAdmin();
   const rows=admin?fillStatsRows():[];
   const team=rows.reduce((a,r)=>({
@@ -277,9 +276,6 @@ function renderFilling(){
           Взять следующий <kbd>Space</kbd></button>
       </div>
     </div>
-    ${other.length?`<div class="fill-note">
-      <span>⚠ ${other.length} ${other.length===1?'заказ':'заказов'} с прошлых дней остались незаполненными — в выдачу они не идут</span>
-    </div>`:''}
     <div class="fill-kpi${admin?'':' one'}">
       <div class="fk fk-main">
         <div class="fk-k">Ждут заполнения</div>
