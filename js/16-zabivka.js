@@ -160,7 +160,9 @@ function renderFilling(){
     return;
   }
   const queue = fillQueue(), free = fillFree(), mine = fillMine(), stale = fillStale();
-  const rows = fillStatsRows();
+  // Кто сколько заполнил — только администратору. Менеджеру эта таблица не нужна
+  // в работе, а сравнивать себя с соседями по ходу смены — лишнее.
+  const rows = isAdmin() ? fillStatsRows() : [];
   $('main').innerHTML = `
     <div class="page-head"><div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
     </div>
@@ -180,7 +182,7 @@ function renderFilling(){
             <button class="btn sm ghost" data-fillrel="${o.id}">Вернуть</button></td>
         </tr>`).join('')}
       </tbody></table></div></div>` : ''}
-    <div class="panel">
+    ${isAdmin() ? `<div class="panel">
       <div class="panel-head"><h2>Менеджеры заказов</h2>
         <div class="filters-row" style="margin:0;gap:8px;display:flex;align-items:center;flex-wrap:wrap">
           <button class="btn ghost sm" id="fillToday">Сегодня</button>
@@ -199,7 +201,7 @@ function renderFilling(){
           <td data-label="Сейчас в работе" class="num">${r.inWork || '—'}</td>
         </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:30px">Пока никто ничего не заполнил</td></tr>'}
       </tbody></table></div>
-    </div>
+    </div>` : ''}
     <div class="fill-take">
       <button class="btn" id="fillNext" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
       <span>${free.length ? `свободных заказов: ${free.length}` : 'свободных заказов нет'}</span>
