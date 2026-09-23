@@ -409,7 +409,7 @@ async function renderInboundOrders(){
   // (это и было основной нагрузкой). Более широкий набор подгружается только когда реально нужен —
   // при поиске/фильтре (см. redraw() ниже) или по явному нажатию «Все даты».
   if(!S.inbound_orders){
-    $('main').innerHTML='<div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div><div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
+    $('main').innerHTML='<div class="page-head"><div><h1>SPA трафик</h1><p>Входящие заказы, полученные от KET и партнёров</p></div></div><div class="panel"><div class="empty"><div class="big">Загрузка…</div></div></div>';
     try{
       if(!S.inbound_partners)S.inbound_partners=await dbList('inbound_partners',{order:'partner_name'}).catch(()=>[]);
       await loadInboundCounts();
@@ -769,7 +769,7 @@ function drawInboundOrders(){
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
   const colCount=19+(admin?1:0);
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Заказы партнёров</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
+    <div class="page-head"><div><h1>SPA трафик</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
       <div class="head-actions" style="margin-left:auto">
         <button class="btn ghost sm" id="inbUnmatched" title="Показать, каких товаров не хватает">🔍 Непривязанные коды</button>
         <button class="btn btn-excel" id="inbExportXlsx">⬇ Выгрузить Excel</button>

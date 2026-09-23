@@ -805,8 +805,8 @@ function val(id){const el=$(id);return el?el.value:'';}
 // SVG-иконки для меню
 const ICONS={
   dashboard:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
-  pickups:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 7h11l-2 5h2M5 12h8M6 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 8l4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  orders:'<svg viewBox="0 0 24 24" fill="none"><path d="M6 2l1.5 2h9L18 2M4 6h16l-1.5 14a1 1 0 01-1 .9H6.5a1 1 0 01-1-.9L4 6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 10v6M15 10v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  pickups:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v8.5M12 11.5l-3.2-3.2M12 11.5l3.2-3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h4.2l1.4 2.6h6.8L16.8 13H21v5a3 3 0 01-3 3H6a3 3 0 01-3-3v-5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  orders:'<svg viewBox="0 0 24 24" fill="none"><path d="M12.6 2.6l8.8 8.8a2 2 0 010 2.8l-6.2 6.2a2 2 0 01-2.8 0L3.6 11.6A2 2 0 013 10.2V4a1 1 0 011-1h6.2a2 2 0 011.4.6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7.6" cy="7.6" r="1.4" stroke="currentColor" stroke-width="1.7"/></svg>',
   handshake:'<svg viewBox="0 0 24 24" fill="none"><path d="M2 12l5-4 4 3 3-2 5 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 8l3.5 3.5a1.8 1.8 0 002.5 0v0a1.8 1.8 0 000-2.5L9 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12v5a1 1 0 001 1h2M22 12v5a1 1 0 01-1 1h-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="16" y="7" width="4" height="9" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="7" width="4" height="9" rx="1" stroke="currentColor" stroke-width="1.7"/></svg>',
   today:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="15" r="2" fill="currentColor"/></svg>',
   mail:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M4 7l8 6 8-6" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
@@ -825,6 +825,7 @@ const ICONS={
   finance:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v10M9.5 9.3c0-1 1-1.8 2.5-1.8s2.5.8 2.5 1.8c0 2.4-5 1.2-5 3.6 0 1 1 1.8 2.5 1.8s2.5-.8 2.5-1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   intercity:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 8l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 8v8l9 4 9-4V8" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 12v8" stroke="currentColor" stroke-width="1.7"/></svg>',
   fill:'<svg viewBox="0 0 24 24" fill="none"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8 8h6M8 12h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M19.4 10.6l2 2-6.1 6.1-2.7.6.6-2.7 6.2-6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  traffic:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 21V4M7 4L3.5 7.5M7 4l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 3v17M17 20l3.5-3.5M17 20l-3.5-3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   scan:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 012-2h2M18 4h2a2 2 0 012 2v2M20 16v2a2 2 0 01-2 2h-2M6 20H4a2 2 0 01-2-2v-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="7" y="8" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
 };
 
@@ -868,7 +869,7 @@ function buildNav(opts){
     if(canMod('courier'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
     if(canMod('mail'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
     if(canMod('intercity'))delivery.push({k:'intercity',label:'Отправки межгород',icon:'intercity'});
-    if(isAdmin()||canMod('ket_orders'))delivery.push({k:'ket_orders',label:'Заказы партнёров',icon:'handshake'});
+    if(isAdmin()||canMod('ket_orders'))delivery.push({k:'ket_orders',label:'SPA трафик',icon:'traffic'});
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
 
     // раздел «Деньги»
