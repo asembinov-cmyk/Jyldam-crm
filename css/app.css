@@ -1372,10 +1372,14 @@ td .ft-dot{margin:0 0 0 8px}
   background:none;color:var(--muted);cursor:pointer}
 .seg button.active{background:var(--ink);color:#fff}
 
-.staff-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
-.staff-tools .search{min-width:230px;flex:1 1 230px}
-.staff-tools input,.staff-tools select{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
+/* Заголовок «Сотрудники» внутри панели убран: он уже стоит над страницей, и два
+   одинаковых слова подряд ничего не добавляли. Слева — счётчик и фильтры, кнопка
+   добавления одна уходит вправо: так правый край не пустует широкой полосой. */
+.staff-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.staff-head .search{flex:0 1 280px;min-width:200px}
+.staff-head input,.staff-head select{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
   border-radius:9px;background:var(--card);color:var(--ink)}
+.staff-head #addStaff{margin-left:auto}
 .staff-hint{margin:0 20px 10px;font-size:12.5px;color:var(--muted)}
 
 .staff-tbl tbody tr{cursor:default}
@@ -1409,8 +1413,8 @@ td .ft-dot{margin:0 0 0 8px}
 .st-menu button.danger:hover{background:#fbe6e3}
 
 @media(max-width:760px){
-  .staff-tools{width:100%;margin-left:0}
-  .staff-tools .search{flex:1 1 100%}
+  .staff-head .search{flex:1 1 100%}
+  .staff-head #addStaff{margin-left:0;width:100%}
   /* Меню у последней строки не должно уезжать за край экрана. */
   .st-menu{right:auto;left:0}
 }

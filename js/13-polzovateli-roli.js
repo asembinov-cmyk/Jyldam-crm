@@ -83,15 +83,13 @@ function renderStaff(){
 
   $('usersContent').innerHTML=`
     <div class="panel staff-panel">
-      <div class="panel-head">
-        <h2>Сотрудники</h2><span class="count">${anyF?rows.length+' / '+all.length:all.length}</span>
-        <div class="staff-tools">
-          <input id="stq" class="search" placeholder="Поиск: ФИО, телефон, должность…" value="${esc(f.q)}">
-          <select id="stcity"><option value="">Город: все</option>${cityVals.map(v=>`<option value="${esc(v)}" ${f.city===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
-          <select id="strole"><option value="">Роль: все</option>${roleVals.map(v=>`<option value="${esc(v)}" ${f.role===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
-          ${anyF?'<button class="btn ghost sm" id="streset">× Сброс</button>':''}
-          ${can('users','create')?`<button class="btn primary sm" id="addStaff">＋ Добавить сотрудника</button>`:''}
-        </div>
+      <div class="panel-head staff-head">
+        <span class="count">${anyF?rows.length+' / '+all.length:all.length}</span>
+        <input id="stq" class="search" placeholder="Поиск: ФИО, телефон, должность…" value="${esc(f.q)}">
+        <select id="stcity"><option value="">Город: все</option>${cityVals.map(v=>`<option value="${esc(v)}" ${f.city===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
+        <select id="strole"><option value="">Роль: все</option>${roleVals.map(v=>`<option value="${esc(v)}" ${f.role===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
+        ${anyF?'<button class="btn ghost sm" id="streset">× Сброс</button>':''}
+        ${can('users','create')?`<button class="btn primary sm" id="addStaff">＋ Добавить сотрудника</button>`:''}
       </div>
       <p class="staff-hint">«Добавить сотрудника» создаёт аккаунт с логином и паролем — сотрудник сразу сможет войти. Двойное нажатие по строке открывает карточку.</p>
       <div class="table-scroll" id="staffTable"><table class="resp-table staff-tbl"><thead>
