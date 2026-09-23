@@ -22,7 +22,6 @@
 
 const FILL_CLAIM_MIN = 10;   // сколько минут заказ держится за менеджером
 const FILL_NORM_SEC  = 60;   // норма времени на один заказ
-const FILL_MAX_AGE_DAYS = 14;    // старше этого в выдачу не идут
 let fillFrom = '', fillTo = '';  // период статистики, пусто = сегодня
 let fillBusy = false;            // защита от двойного нажатия «Взять следующий»
 
@@ -47,19 +46,16 @@ function fillNeedsWork(o){
 }
 // Дата заказа: по забору, а если её нет — по созданию.
 const fillOrderDate = o => String(o.pickup_date || o.created_at || '').slice(0, 10);
-// Свежий ли заказ. Пустые «болванки» месячной давности — это почти всегда заказы,
-// которые партнёр заявил, но не отдал. Выдавать их менеджеру бессмысленно: он
-// потратит время на то, что никуда не поедет. Показываем их числом отдельно.
-function fillIsFresh(o){
-  const edge = new Date(Date.now() - FILL_MAX_AGE_DAYS * 86400000).toISOString().slice(0, 10);
-  return fillOrderDate(o) >= edge;
-}
+// Выдаём только сегодняшние заказы. Вчерашние и более старые пустые «болванки» —
+// это почти всегда то, что партнёр заявил, но не отдал; заполнять там нечего, а
+// менеджер потратит время. Их число показываем отдельно, чтобы не пропали из виду.
+function fillIsToday(o){ return fillOrderDate(o) === localToday(); }
 // захват ещё живой?
 function fillClaimAlive(o){ return !!(o.claimed_at && o.claimed_at > fillCutoff()); }
 function fillIsMine(o){ return fillClaimAlive(o) && o.claimed_by === (S.me && S.me.id); }
 
-function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillIsFresh(o)); }
-function fillStale(){ return (S.orders || []).filter(o => fillNeedsWork(o) && !fillIsFresh(o)); }
+function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillIsToday(o)); }
+function fillOther(){ return (S.orders || []).filter(o => fillNeedsWork(o) && !fillIsToday(o)); }
 function fillFree(){ return fillQueue().filter(o => !fillClaimAlive(o)); }
 function fillMine(){ return fillQueue().filter(fillIsMine); }
 
@@ -149,6 +145,27 @@ const fillAgo = iso => {
   return `${m} мин назад`;
 };
 
+/* ---------- обновление данных ---------- */
+// Realtime приносит чужие правки сам, но фото к заказу могли приложить прямо сейчас,
+// а вкладка висит открытой с утра. Тянем только то, что относится к сегодняшнему дню:
+// вся таблица заказов — это десятки тысяч строк, ради очереди их качать незачем.
+async function fillRefresh(){
+  const b = $('fillReload');
+  if(b){ b.disabled = true; b.textContent = 'Обновляем…'; }
+  try{
+    const today = localToday();
+    const { data, error } = await sb.from('orders').select('*')
+      .or(`pickup_date.eq.${today},created_at.gte.${today}T00:00:00`);
+    if(error) throw error;
+    const byId = {}; (S.orders || []).forEach((o, i) => { byId[o.id] = i; });
+    (data || []).forEach(row => {
+      if(byId[row.id] != null) Object.assign(S.orders[byId[row.id]], row);
+      else S.orders.unshift(row);
+    });
+  }catch(e){ console.error('fillRefresh', e); toast('Не удалось обновить'); }
+  renderFilling();
+}
+
 /* ---------- экран ---------- */
 function renderFilling(){
   if(!canMod('filling')){ $('main').innerHTML = '<div class="empty"><div class="big">Нет доступа</div></div>'; return; }
@@ -159,7 +176,7 @@ function renderFilling(){
       <p>В таблице заказов нет полей для учёта забивки. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
     return;
   }
-  const queue = fillQueue(), free = fillFree(), mine = fillMine(), stale = fillStale();
+  const queue = fillQueue(), free = fillFree(), mine = fillMine(), other = fillOther();
   // Кто сколько заполнил — только администратору. Менеджеру эта таблица не нужна
   // в работе, а сравнивать себя с соседями по ходу смены — лишнее.
   const rows = isAdmin() ? fillStatsRows() : [];
@@ -167,7 +184,7 @@ function renderFilling(){
     <div class="page-head"><div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
     </div>
     <div class="dash-cards">
-      <div class="dash-card"><div class="dc-ic">📝</div><div><div class="dc-v">${queue.length}</div><div class="dc-k">Ждут заполнения</div><div class="dc-extra">свободно ${free.length}${stale.length?` · старше ${FILL_MAX_AGE_DAYS} дней: ${stale.length}`:''}</div></div></div>
+      <div class="dash-card"><div class="dc-ic">📝</div><div><div class="dc-v">${queue.length}</div><div class="dc-k">Ждут заполнения сегодня</div><div class="dc-extra">свободно ${free.length}${other.length?` · за прошлые дни: ${other.length}`:''}</div></div></div>
       <div class="dash-card"><div class="dc-ic">✋</div><div><div class="dc-v">${mine.length}</div><div class="dc-k">У меня в работе</div></div></div>
       <div class="dash-card"><div class="dc-ic">⏱</div><div><div class="dc-v">${FILL_NORM_SEC} сек</div><div class="dc-k">Норма на заказ</div><div class="dc-extra">захват снимается через ${FILL_CLAIM_MIN} мин</div></div></div>
     </div>
@@ -185,6 +202,7 @@ function renderFilling(){
     ${isAdmin() ? `<div class="panel">
       <div class="panel-head"><h2>Менеджеры заказов</h2>
         <div class="filters-row" style="margin:0;gap:8px;display:flex;align-items:center;flex-wrap:wrap">
+          <button class="btn sm ghost" id="fillReload" title="Подтянуть свежие заказы — фото могли приложить только что">🔄 Обновить</button>
           <button class="btn ghost sm" id="fillToday">Сегодня</button>
           <input type="date" id="fillFromInp" value="${esc(fillFrom || localToday())}" max="${esc(localToday())}" title="С какого дня">
           <input type="date" id="fillToInp" value="${esc(fillTo || fillFrom || localToday())}" max="${esc(localToday())}" title="По какой день">
@@ -205,8 +223,10 @@ function renderFilling(){
     <div class="fill-take">
       <button class="btn" id="fillNext" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
       <span>${free.length ? `свободных заказов: ${free.length}` : 'свободных заказов нет'}</span>
+      ${isAdmin() ? '' : `<button class="btn sm ghost" id="fillReload" title="Подтянуть свежие заказы — фото могли приложить только что">🔄 Обновить</button>`}
     </div>`;
   const nx = $('fillNext'); if(nx) nx.onclick = () => fillTakeNext();
+  const rl = $('fillReload'); if(rl) rl.onclick = () => fillRefresh();
   $('main').querySelectorAll('[data-fillopen]').forEach(b => b.onclick = () => orderModal(b.dataset.fillopen));
   $('main').querySelectorAll('[data-fillrel]').forEach(b => b.onclick = () => fillRelease(b.dataset.fillrel));
   const ft = $('fillToday'); if(ft) ft.onclick = () => { fillFrom = ''; fillTo = ''; renderFilling(); };
