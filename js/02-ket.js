@@ -731,7 +731,7 @@ function canMod(key){
   if(S.myPerms[permKey]&&typeof S.myPerms[permKey].view!=='undefined')return !!S.myPerms[permKey].view;
   // фолбэк: старая привязка модулей к базовым правам
   const fb={dashboard:'orders',pickups:'pickups',orders:'orders',courier:'orders',mail:'orders',
-    intercity:null,cash:null,sorting:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
+    intercity:null,cash:null,sorting:null,filling:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
     users:'users',settings:'directories'};
   const base=fb[key];
   if(base===null)return isAdminBase(); // модули, что были только для админа
@@ -861,6 +861,7 @@ function buildNav(opts){
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
+    if(canMod('filling'))main.push({k:'filling',label:'Забивка заказов',icon:'orders'});
     if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];

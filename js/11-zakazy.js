@@ -1818,6 +1818,19 @@ function orderModal(id,readonly){
           row.paid_by_sender=false;row.order_sum_orig=null;
         }
       }
+      // Отметка «кто заполнил» для раздела «Забивка». Ставится один раз — в момент,
+      // когда заказ впервые становится обработанным (есть ФИО и тип доставки), и
+      // снимает захват: работа сделана, держать заказ за собой больше незачем.
+      // Поля пишем только если они есть в базе (см. fillReady), иначе на проекте,
+      // где db/11 ещё не выполнен, сохранение заказа падало бы целиком.
+      if(typeof fillReady==='function'&&fillReady()){
+        const nowProcessed=!!(row.client&&row.client.trim())&&!!row.delivery_id;
+        if(nowProcessed){
+          if(!o||!o.filled_at){row.filled_at=new Date().toISOString();
+            row.filled_by=(S.me&&S.me.id)||null;row.filled_by_name=(S.me&&(S.me.full_name||S.me.email))||'';}
+          row.claimed_by=null;row.claimed_by_name=null;row.claimed_at=null;
+        }
+      }
       if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
         await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:buildChanges(before,o)});}
       else{
@@ -1831,7 +1844,11 @@ function orderModal(id,readonly){
         }
         const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);
         await logAction('create','orders',{entity_id:u.id,entity_label:orderLabel(u)});}
-      toast(id?'Заказ сохранён':'Заказ создан');renderOrders();return true;
+      toast(id?'Заказ сохранён':'Заказ создан');
+      // из «Забивки» карточку открывают там же — renderOrders() увёл бы менеджера
+      // на другой экран после каждого сохранённого заказа
+      if(S.tab==='filling'&&typeof renderFilling==='function')renderFilling();else renderOrders();
+      return true;
     }),{readonly:ro,wide:true});
   attachPhone('o_phone',d.phone);
   // кнопка «Отправить в KET»

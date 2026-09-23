@@ -320,6 +320,7 @@ function render(){
   else if(S.tab==='notify')renderNotify();
   else if(S.tab==='cash')renderCash();
   else if(S.tab==='sorting')renderSorting();
+  else if(S.tab==='filling')renderFilling();
   else if(S.tab==='finance')renderFinance();
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
