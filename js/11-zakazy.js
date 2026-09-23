@@ -351,7 +351,7 @@ async function pickupOrdersModal(pickupId){
             const sizes=packageSizesFor(pt);
             if(sizes[size]&&!o.paid_by_sender){
               const courier=isCourierDelivery(o.delivery_id);
-              const amount=sizes[size][courier?'courier':'mail'];
+              const amount=sizes[size][courier?'courier':'mail']+weightSurcharge(o.weight,courier);
               patch.order_sum=amount;patch.cost=amount;
             }
           }
@@ -1435,7 +1435,15 @@ function drawOrders(){
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       <td data-label="Фото">${photoCell}</td>
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
-      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${(o.created_at&&String(o.created_at).slice(0,10)!==String(o.pickup_date||'').slice(0,10))?`<small class="cell-time">создан ${esc(fmtDateTime(o.created_at))}</small>`:''}</td>
+      <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?(()=>{
+        // время создания показываем всегда: по нему видно, когда заказ реально завели.
+        // Если создан не в день забора — дату тоже, иначе одно время вводит в заблуждение.
+        const t=fmtDateTime(o.created_at);
+        // Сравниваем МЕСТНЫЕ даты, а не строку created_at: она в UTC, и заказ,
+        // заведённый ночью, выглядел созданным в другой день, чем показан рядом.
+        const same=t.slice(0,10)===fmtDate(o.pickup_date);
+        return `<small class="cell-time">создан ${esc(same?t.slice(-5):t)}</small>`;
+      })():''}</td>
       <td data-label="${isCourierDelivery(o.delivery_id)?'Дата доставки':'Статус обзвона'}" ${isCourierDelivery(o.delivery_id)?'':'onclick="event.stopPropagation()"'}>${isCourierDelivery(o.delivery_id)
         ?(o.deliver_date?esc(fmtDate(o.deliver_date)):'—')
         :`<select class="status-pick" data-ocall="${o.id}" style="border-color:${callStatusColor(o.call_status)}">
@@ -1679,6 +1687,17 @@ function packageSizesFor(partner){
     L:{label:PACKAGE_SIZE_LABELS.L,courier:baseCourier+4000,mail:baseMail+1500},
   };
 }
+// Надбавка за перевес у ПОЧТОВЫХ заказов: всё тяжелее 2 кг считается по 100 ₸ за
+// каждый НАЧАТЫЙ килограмм сверх. 2,000 — без надбавки, 2,1 → +100, 3,1 → +200.
+// Начатый, а не полный: посылка в 2,1 кг занимает у почты место как трёхкилограммовая.
+// У курьерских заказов надбавки нет — там цена по размеру пакета.
+const WEIGHT_FREE_KG = 2, WEIGHT_STEP_FEE = 100;
+function weightSurcharge(weight, isCourier){
+  if(isCourier) return 0;
+  const w = parseFloat(weight);
+  if(isNaN(w) || w <= WEIGHT_FREE_KG) return 0;
+  return Math.ceil(w - WEIGHT_FREE_KG) * WEIGHT_STEP_FEE;
+}
 function isExplicitNum(v){return v!=null&&v!==''&&!isNaN(+v);}
 // вариант без привязки к партнёру — на случай, если партнёр ещё не определён/не выбран (базовые значения)
 const PACKAGE_SIZES=packageSizesFor(null);
@@ -1742,7 +1761,7 @@ function orderModal(id,readonly){
       <div class="field full"><label>Адрес получателя</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
       <div class="field"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Вес (кг)</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
+      <div class="field"><label>Вес (кг)</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint" id="o_weight_hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label>
         <div style="display:flex;gap:8px">
           <input id="o_track" value="${esc(d.track)}" ${dis} style="flex:1">
@@ -2084,13 +2103,23 @@ function orderModal(id,readonly){
     // Выбор размера — явное действие сотрудника, поэтому подставляем сумму даже если до этого
     // что-то уже было в поле вручную, но саму сумму «ручной правкой» не считаем — если сменится
     // тип доставки, пересчитается снова.
+    // Подпись под весом: видно, откуда взялась надбавка, иначе сумма меняется молча.
+    const updateWeightHint=()=>{
+      const wh=$('o_weight_hint');if(!wh)return;
+      const extra=weightSurcharge(parseWeight(val('o_weight')),isCourierDelivery(val('o_delivery')));
+      wh.textContent=extra
+        ? `Перевес: +${extra} ₸ — по ${WEIGHT_STEP_FEE} ₸ за каждый начатый кг свыше ${WEIGHT_FREE_KG}`
+        : 'Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.';
+    };
     const applySize=()=>{
       const sizeEl=$('o_size');if(!sizeEl||!sizeEl.value)return;
       const sizes=packageSizesFor(findPartner());
       const cfg=sizes[sizeEl.value];if(!cfg)return;
       const courier=isCourierDelivery($('o_delivery').value);
       const sumEl=$('o_sum');
-      if(sumEl&&!sumEl.disabled){sumEl.value=courier?cfg.courier:cfg.mail;sumTouched=false;}
+      const extra=weightSurcharge(parseWeight(val('o_weight')),courier);
+      if(sumEl&&!sumEl.disabled){sumEl.value=(courier?cfg.courier:cfg.mail)+extra;sumTouched=false;}
+      updateWeightHint();
       // подпись под списком тоже обновляем — числа могли смениться вместе с партнёром
       const hintEl=$('o_size_hint');
       if(hintEl){
@@ -2100,6 +2129,8 @@ function orderModal(id,readonly){
     };
     const sumEl=$('o_sum');if(sumEl)sumEl.oninput=()=>{sumTouched=true;};
     const sizeEl=$('o_size');if(sizeEl)sizeEl.onchange=()=>{applySize();};
+    const wEl=$('o_weight');if(wEl)wEl.onchange=()=>{applySize();};
+    updateWeightHint(); // у уже сохранённого заказа надбавка видна сразу, сумму при этом не трогаем
     // галочка «Оплачен заказ»: обнуляет поле суммы и блокирует его (исходная вернётся при снятии)
     const paidChk=$('o_paidorder');
     if(paidChk){
