@@ -22,6 +22,7 @@
 
 const FILL_CLAIM_MIN = 10;   // сколько минут заказ держится за менеджером
 const FILL_NORM_SEC  = 60;   // норма времени на один заказ
+const FILL_MAX_AGE_DAYS = 14;    // старше этого в выдачу не идут
 let fillStatsPeriod = 'today';   // today | month
 let fillBusy = false;            // защита от двойного нажатия «Взять следующий»
 
@@ -32,19 +33,33 @@ const fillReady = () => !!(S.orders && S.orders.length && ('filled_at' in S.orde
 const fillMeName = () => (S.me && (S.me.full_name || S.me.email)) || '';
 const fillCutoff = () => new Date(Date.now() - FILL_CLAIM_MIN * 60000).toISOString();
 
-// Заказ ждёт забивки: фото бланка уже есть, а ФИО или тип доставки ещё нет.
-// Без фото менеджеру неоткуда взять данные — такие в очередь не попадают.
+// Заказ ждёт заполнения: фото бланка есть, данных клиента нет.
+//
+// Проверяем именно ПУСТОЕ ФИО, а не orderIsProcessed() из «Сортировки». То правило
+// требует ещё и типа доставки, и под него попадал заказ с заполненным ФИО, но без
+// типа: системе он «не обработан», а менеджеру выдавался уже забитым. Таких много
+// среди старых заказов.
 function fillNeedsWork(o){
   if(o.filled_at) return false;
+  if(String(o.client || '').trim()) return false;
   const photos = o.photos;
-  const hasPhoto = Array.isArray(photos) ? photos.length > 0 : !!photos;
-  return hasPhoto && !orderIsProcessed(o);
+  return Array.isArray(photos) ? photos.length > 0 : !!photos;
+}
+// Дата заказа: по забору, а если её нет — по созданию.
+const fillOrderDate = o => String(o.pickup_date || o.created_at || '').slice(0, 10);
+// Свежий ли заказ. Пустые «болванки» месячной давности — это почти всегда заказы,
+// которые партнёр заявил, но не отдал. Выдавать их менеджеру бессмысленно: он
+// потратит время на то, что никуда не поедет. Показываем их числом отдельно.
+function fillIsFresh(o){
+  const edge = new Date(Date.now() - FILL_MAX_AGE_DAYS * 86400000).toISOString().slice(0, 10);
+  return fillOrderDate(o) >= edge;
 }
 // захват ещё живой?
 function fillClaimAlive(o){ return !!(o.claimed_at && o.claimed_at > fillCutoff()); }
 function fillIsMine(o){ return fillClaimAlive(o) && o.claimed_by === (S.me && S.me.id); }
 
-function fillQueue(){ return (S.orders || []).filter(fillNeedsWork); }
+function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillIsFresh(o)); }
+function fillStale(){ return (S.orders || []).filter(o => fillNeedsWork(o) && !fillIsFresh(o)); }
 function fillFree(){ return fillQueue().filter(o => !fillClaimAlive(o)); }
 function fillMine(){ return fillQueue().filter(fillIsMine); }
 
@@ -138,14 +153,14 @@ function renderFilling(){
       <p>В таблице заказов нет полей для учёта забивки. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
     return;
   }
-  const queue = fillQueue(), free = fillFree(), mine = fillMine();
+  const queue = fillQueue(), free = fillFree(), mine = fillMine(), stale = fillStale();
   const rows = fillStatsRows();
   $('main').innerHTML = `
     <div class="page-head"><div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
       <div class="head-actions"><button class="btn" id="fillNext" ${free.length||mine.length?'':'disabled'}>Взять следующий</button></div>
     </div>
     <div class="dash-cards">
-      <div class="dash-card"><div class="dc-ic">📝</div><div><div class="dc-v">${queue.length}</div><div class="dc-k">Ждут забивки</div><div class="dc-extra">свободно ${free.length}</div></div></div>
+      <div class="dash-card"><div class="dc-ic">📝</div><div><div class="dc-v">${queue.length}</div><div class="dc-k">Ждут заполнения</div><div class="dc-extra">свободно ${free.length}${stale.length?` · старше ${FILL_MAX_AGE_DAYS} дней: ${stale.length}`:''}</div></div></div>
       <div class="dash-card"><div class="dc-ic">✋</div><div><div class="dc-v">${mine.length}</div><div class="dc-k">У меня в работе</div></div></div>
       <div class="dash-card"><div class="dc-ic">⏱</div><div><div class="dc-v">${FILL_NORM_SEC} сек</div><div class="dc-k">Норма на заказ</div><div class="dc-extra">захват снимается через ${FILL_CLAIM_MIN} мин</div></div></div>
     </div>
