@@ -27,10 +27,11 @@ function roleName(id){const r=S.roles.find(x=>x.id===id);return r?r.name:'—';}
 function renderUsers(){
   if(!can('users','view')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div></div>';return;}
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Пользователи</h1><p>Сотрудники и роли с правами доступа</p></div></div>
-    <div class="subtabs">
-      <button data-us="staff" class="${usersSub==='staff'?'active':''}">Сотрудники</button>
-      <button data-us="roles" class="${usersSub==='roles'?'active':''}">Роли и права</button>
+    <div class="page-head"><div><h1>Сотрудники</h1><p>Сотрудники и роли с правами доступа</p></div>
+      <div class="seg">
+        <button data-us="staff" class="${usersSub==='staff'?'active':''}">Сотрудники</button>
+        <button data-us="roles" class="${usersSub==='roles'?'active':''}">Роли и права</button>
+      </div>
     </div>
     <div id="usersContent"></div>`;
   $('main').querySelectorAll('[data-us]').forEach(b=>b.onclick=()=>{usersSub=b.dataset.us;saveNav();renderUsers();});
@@ -38,71 +39,116 @@ function renderUsers(){
 }
 
 /* ---- СОТРУДНИКИ ---- */
-let staffFilters={name:'',login:'',city:'',position:'',role:''};
+// q — один поиск вместо пяти отдельных фильтров: ищет сразу по ФИО, логину и должности.
+// online — показать только тех, кто сейчас в системе (включается кликом по плашке).
+let staffFilters={q:'',city:'',role:''};
+// Группа роли — по ней и цвет плашки, и цвет кружка с инициалами. Курьеров двое
+// разных: заборщик приезжает к партнёру, доставщик везёт получателю, и в списке на
+// полсотни строк их полезно различать взглядом, а не вчитываясь в текст.
+function staffRoleGroup(u){
+  const base=(S.roles.find(r=>r.id===u.role_id)||{}).base_type||u.role||'';
+  if(base==='admin')return 'admin';
+  const nm=normName(u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||''));
+  if(base==='courier')return /забор/.test(nm)?'pickup':'courier';
+  return 'staff';
+}
+const STAFF_AVA={admin:'#b06a28',pickup:'#2f7d54',courier:'#2546c9',staff:'#5b57c9',bad:'#c0392b'};
+
 function renderStaff(){
   const f=staffFilters;
   const all=[...S.profiles].sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''));
-  // текстовые представления граф для фильтрации
-  const rowText=u=>({
-    name:u.full_name||'',
-    login:u.phone?phoneDisplay(u.phone):((u.email&&!u.email.endsWith('@jyldam.local'))?u.email:''),
-    city:u.city_id?cityName(u.city_id):'',
-    position:u.position||'',
-    role:u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||''),
-  });
+  const loginOf=u=>u.phone?phoneDisplay(u.phone):((u.email&&!u.email.endsWith('@jyldam.local'))?u.email:'');
+  const roleOf=u=>u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'');
+  // Роль, названная именем самого сотрудника, — это не роль, а чья-то ошибка при
+  // заведении: права тогда достаются одному человеку, и выдать их второму нечем.
+  // Проверяем только имена из двух и более слов: у администратора имя и роль
+  // совпадают буквально — «Администратор», и однословные совпадения дают ложную
+  // тревогу. Фамилия с именем ролью быть не может.
+  const roleLooksWrong=u=>{
+    const r=normName(roleOf(u)), n=normName(u.full_name);
+    return !!r && r===n && n.split(' ').length>=2;
+  };
+  const q=normName(f.q);
   const rows=all.filter(u=>{
-    const t=rowText(u);
-    if(f.name&&!t.name.toLowerCase().includes(f.name.toLowerCase()))return false;
-    if(f.login&&!t.login.toLowerCase().includes(f.login.toLowerCase()))return false;
-    if(f.city&&t.city!==f.city)return false;
-    if(f.position&&!t.position.toLowerCase().includes(f.position.toLowerCase()))return false;
-    if(f.role&&t.role!==f.role)return false;
-    return true;
+    if(f.city&&(u.city_id?cityName(u.city_id):'')!==f.city)return false;
+    if(f.role&&roleOf(u)!==f.role)return false;
+    if(!q)return true;
+    // Один поиск по всей строке: искать телефон отдельным полем — лишнее движение,
+    // а пять фильтров занимали в таблице целую строку.
+    return normName([u.full_name,loginOf(u),u.position,roleOf(u)].join(' ')).includes(q);
   });
-  // опции для select-фильтров (город, роль) — из всех строк
   const cityVals=[...new Set(all.map(u=>u.city_id?cityName(u.city_id):'').filter(Boolean))].sort();
-  const roleVals=[...new Set(all.map(u=>u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'')).filter(Boolean))].sort();
-  const anyF=f.name||f.login||f.city||f.position||f.role;
-  $('usersContent').innerHTML=`<div class="panel">
-    <div class="panel-head"><h2>Сотрудники</h2><span class="count">${anyF?rows.length+' / '+all.length:all.length}</span>
-      ${can('users','create')?`<button class="btn primary sm" id="addStaff" style="margin-left:auto">＋ Добавить сотрудника</button>`:''}</div>
-    <div class="filters" style="background:var(--card);border-bottom:1px solid var(--line)">
-      <span style="font-size:13px;color:var(--muted)">«Добавить сотрудника» создаёт аккаунт с логином и паролем — сотрудник сразу сможет войти.</span>
-    </div>
-    <div class="table-scroll" id="staffTable"><table><thead>
-      <tr><th>ФИО</th><th>Логин (телефон)</th><th>Город</th><th>Должность</th><th>Роль</th><th></th></tr>
-      <tr class="filter-row staff-fr">
-        <th><input class="staff-filter" data-sf="name" placeholder="фильтр…" value="${esc(f.name)}"></th>
-        <th><input class="staff-filter" data-sf="login" placeholder="фильтр…" value="${esc(f.login)}"></th>
-        <th><select class="staff-filter" data-sf="city"><option value="">Все</option>${cityVals.map(v=>`<option value="${esc(v)}" ${f.city===v?'selected':''}>${esc(v)}</option>`).join('')}</select></th>
-        <th><input class="staff-filter" data-sf="position" placeholder="фильтр…" value="${esc(f.position)}"></th>
-        <th><select class="staff-filter" data-sf="role"><option value="">Все</option>${roleVals.map(v=>`<option value="${esc(v)}" ${f.role===v?'selected':''}>${esc(v)}</option>`).join('')}</select></th>
-        <th></th></tr>
-    </thead>
-    <tbody>${rows.length?rows.map(u=>`<tr>
-      <td><strong>${esc(u.full_name||'—')}</strong>${isOnline(u.id)?'<span class="ft-dot" title="Сейчас в системе"></span>':''}</td>
-      <td>${u.phone?phoneLink(u.phone):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
-      <td>${u.city_id?esc(cityName(u.city_id)):'—'}</td>
-      <td>${esc(u.position)||'—'}</td>
-      <td><span class="pill ${(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='admin'?'gold':'moss'}">${esc(u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'—'))}</span></td>
-      <td><div class="row-actions">
-        ${can('users','edit')?`<button class="btn sm ghost" data-uedit="${u.id}">Изменить</button>`:''}
-        ${can('users','edit')&&(isAdmin()||(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='courier')?`<button class="btn sm ghost" data-upass="${u.id}">Пароль</button>`:''}
-        ${can('users','delete')&&u.id!==S.me.id?`<button class="btn sm danger" data-udel="${u.id}">Удалить</button>`:''}
-      </div></td></tr>`).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Ничего не найдено</td></tr>`}</tbody></table></div></div>`;
+  const roleVals=[...new Set(all.map(roleOf).filter(Boolean))].sort();
+  const anyF=f.q||f.city||f.role;
+
+  $('usersContent').innerHTML=`
+    <div class="panel staff-panel">
+      <div class="panel-head">
+        <h2>Сотрудники</h2><span class="count">${anyF?rows.length+' / '+all.length:all.length}</span>
+        <div class="staff-tools">
+          <input id="stq" class="search" placeholder="Поиск: ФИО, телефон, должность…" value="${esc(f.q)}">
+          <select id="stcity"><option value="">Город: все</option>${cityVals.map(v=>`<option value="${esc(v)}" ${f.city===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
+          <select id="strole"><option value="">Роль: все</option>${roleVals.map(v=>`<option value="${esc(v)}" ${f.role===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
+          ${anyF?'<button class="btn ghost sm" id="streset">× Сброс</button>':''}
+          ${can('users','create')?`<button class="btn primary sm" id="addStaff">＋ Добавить сотрудника</button>`:''}
+        </div>
+      </div>
+      <p class="staff-hint">«Добавить сотрудника» создаёт аккаунт с логином и паролем — сотрудник сразу сможет войти. Двойное нажатие по строке открывает карточку.</p>
+      <div class="table-scroll" id="staffTable"><table class="resp-table staff-tbl"><thead>
+        <tr><th>Сотрудник</th><th>Логин (телефон)</th><th>Город</th><th>Должность</th><th>Роль</th><th></th></tr>
+      </thead>
+      <tbody>${rows.length?rows.map(u=>{
+        const canPass=can('users','edit')&&(isAdmin()||(S.roles.find(r=>r.id===u.role_id)||{}).base_type==='courier');
+        const canDel=can('users','delete')&&u.id!==S.me.id;
+        const nm=u.full_name||u.email||'—';
+        const grp=staffRoleGroup(u), bad=roleLooksWrong(u), none=!roleOf(u);
+        return `<tr data-srow="${u.id}" class="st-row ${grp==='admin'?'st-admin':''} ${bad||none?'st-bad':''}">
+        <td data-label="Сотрудник"><div class="st-who">
+          <span class="ft-ava" style="background:${bad||none?STAFF_AVA.bad:STAFF_AVA[grp]}">${esc(fillInitials(nm))}</span>
+          <b>${esc(nm)}</b>${isOnline(u.id)?'<i class="ft-dot" title="Сейчас в системе"></i>':''}
+        </div></td>
+        <td data-label="Логин">${u.phone?phoneLink(u.phone):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
+        <td data-label="Город">${u.city_id?`<span class="st-city">${esc(cityName(u.city_id))}</span>`:'<span class="st-dim">—</span>'}</td>
+        <td data-label="Должность">${u.position?esc(u.position):'<span class="st-dim">—</span>'}</td>
+        <td data-label="Роль">${none
+          ? '<span class="st-role bad" title="Роль не выбрана — сотрудник не увидит ни одного раздела">⚠ не задана</span>'
+          : `<span class="st-role ${bad?'bad':grp}" ${bad?'title="Роль названа именем сотрудника — похоже, её завели под одного человека по ошибке"':''}>${bad?'⚠ ':''}${esc(roleOf(u))}</span>`}</td>
+        <td data-label="" class="cell-actions" onclick="event.stopPropagation()"><div class="st-more">
+          <button class="st-more-btn" data-umore="${u.id}" title="Действия">⋯</button>
+          <div class="st-menu">
+            ${can('users','edit')?`<button data-uedit="${u.id}">Изменить</button>`:''}
+            ${canPass?`<button data-upass="${u.id}">Сменить пароль</button>`:''}
+            ${canDel?`<button class="danger" data-udel="${u.id}">Удалить сотрудника</button>`:''}
+          </div></div></td></tr>`;}).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:26px">Ничего не найдено</td></tr>`}</tbody></table></div>
+    </div>`;
+
   $('usersContent').querySelectorAll('[data-uedit]').forEach(b=>b.onclick=()=>staffModal(b.dataset.uedit));
   $('usersContent').querySelectorAll('[data-upass]').forEach(b=>b.onclick=()=>changePassModal(b.dataset.upass));
   $('usersContent').querySelectorAll('[data-udel]').forEach(b=>b.onclick=()=>delStaff(b.dataset.udel));
   if($('addStaff'))$('addStaff').onclick=()=>createStaffModal();
-  // фильтры
-  $('usersContent').querySelectorAll('.staff-filter').forEach(el=>{
-    const ev=el.tagName==='SELECT'?'onchange':'oninput';
-    el[ev]=()=>{staffFilters[el.dataset.sf]=el.value;
-      const act=document.activeElement;const sf=act&&act.dataset?act.dataset.sf:null;const pos=act&&act.selectionStart;
-      renderStaff();
-      if(sf){const e2=$('usersContent').querySelector(`.staff-filter[data-sf="${sf}"]`);if(e2){e2.focus();try{e2.setSelectionRange(pos,pos);}catch(e){}}}
-    };
+  // Двойное нажатие по строке открывает карточку — как в «Сортировке». Одиночное не
+  // годится: по строке кликают, чтобы выделить телефон.
+  if(can('users','edit'))$('usersContent').querySelectorAll('[data-srow]').forEach(tr=>{
+    bindDoubleTap(tr,()=>staffModal(tr.dataset.srow));
   });
+  // Три кнопки в каждой строке заменены одним меню: в списке на полсотни человек
+  // красная «Удалить» рядом с «Пароль» однажды сработает не по тому ряду.
+  $('usersContent').querySelectorAll('[data-umore]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const box=b.parentElement, open=box.classList.contains('open');
+    document.querySelectorAll('.st-more.open').forEach(x=>x.classList.remove('open'));
+    if(!open)box.classList.add('open');
+  });
+
+  const redraw=()=>{
+    const act=document.activeElement, wasQ=act&&act.id==='stq', pos=wasQ?act.selectionStart:0;
+    renderStaff();
+    if(wasQ){const e2=$('stq');if(e2){e2.focus();try{e2.setSelectionRange(pos,pos);}catch(e){}}}
+  };
+  if($('stq'))$('stq').oninput=e=>{staffFilters.q=e.target.value;redraw();};
+  if($('stcity'))$('stcity').onchange=e=>{staffFilters.city=e.target.value;renderStaff();};
+  if($('strole'))$('strole').onchange=e=>{staffFilters.role=e.target.value;renderStaff();};
+  if($('streset'))$('streset').onclick=()=>{staffFilters={q:'',city:'',role:''};renderStaff();};
 }
 function createStaffModal(){
   // не-админ с правом «Сотрудники» может создавать только курьеров — на выбор только курьерские роли

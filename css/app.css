@@ -1362,3 +1362,55 @@
 .ft-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#2f9e5c;
   margin-right:6px;vertical-align:middle}
 td .ft-dot{margin:0 0 0 8px}
+
+/* ─── Список сотрудников ────────────────────────────────────────────────
+   Полсотни строк, и почти все — курьеры. Цвет кружка и плашки роли делают
+   список сканируемым взглядом: синий — доставщик, зелёный — заборщик,
+   оранжевый — админ, красный — с ролью что-то не так. */
+.seg{display:inline-flex;background:var(--paper);border-radius:12px;padding:4px;gap:4px}
+.seg button{font:inherit;font-size:13px;font-weight:600;padding:8px 18px;border:none;border-radius:9px;
+  background:none;color:var(--muted);cursor:pointer}
+.seg button.active{background:var(--ink);color:#fff}
+
+.staff-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+.staff-tools .search{min-width:230px;flex:1 1 230px}
+.staff-tools input,.staff-tools select{font:inherit;font-size:13px;padding:8px 11px;border:1px solid var(--line);
+  border-radius:9px;background:var(--card);color:var(--ink)}
+.staff-hint{margin:0 20px 10px;font-size:12.5px;color:var(--muted)}
+
+.staff-tbl tbody tr{cursor:default}
+.staff-tbl .st-row.st-admin td{background:#fdf8ec}
+.staff-tbl .st-row.st-bad td{background:#fdf1ef}
+.st-who{display:flex;align-items:center;gap:10px}
+.st-who b{font-weight:600}
+.st-city{display:inline-block;padding:3px 10px;border-radius:8px;background:var(--paper);font-size:12.5px}
+.st-dim{color:var(--muted)}
+.st-role{display:inline-block;padding:4px 11px;border-radius:9px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.st-role.courier{background:#e8edfb;color:#2546c9}
+.st-role.pickup{background:#e7f3ec;color:#2f7d54}
+.st-role.admin{background:#f8eeda;color:#96661c}
+.st-role.staff{background:#eeedfb;color:#4b46b5}
+.st-role.bad{background:#fbe6e3;color:#a5342a}
+
+/* Одна иконка вместо трёх кнопок в строке. «Удалить» лежит внутри: аккаунт
+   удаляется безвозвратно, и красной кнопке в каждой из 53 строк там не место. */
+.st-more{position:relative;display:inline-block}
+.st-more-btn{font:inherit;font-size:18px;line-height:1;letter-spacing:.06em;color:var(--muted);
+  background:none;border:1px solid transparent;border-radius:9px;padding:4px 10px;cursor:pointer}
+.st-more-btn:hover{background:var(--paper);color:var(--ink)}
+.st-menu{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:200px;
+  background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px;
+  box-shadow:0 12px 30px rgba(22,33,58,.16)}
+.st-more.open .st-menu{display:block}
+.st-menu button{display:block;width:100%;text-align:left;font:inherit;font-size:13.5px;
+  padding:9px 12px;border:none;border-radius:8px;background:none;color:var(--ink);cursor:pointer}
+.st-menu button:hover{background:var(--paper)}
+.st-menu button.danger{color:#a5342a}
+.st-menu button.danger:hover{background:#fbe6e3}
+
+@media(max-width:760px){
+  .staff-tools{width:100%;margin-left:0}
+  .staff-tools .search{flex:1 1 100%}
+  /* Меню у последней строки не должно уезжать за край экрана. */
+  .st-menu{right:auto;left:0}
+}
