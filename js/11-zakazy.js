@@ -1691,7 +1691,13 @@ function orderModal(id,readonly){
   // отрисовки формы; при смене отправителя/типа доставки дальше пересчитывается через findPartner())
   const _initPartner=d.sender?S.partners.find(pp=>(pp.name||'').trim().toLowerCase()===d.sender.trim().toLowerCase()):null;
   const _initSizes=packageSizesFor(_initPartner);
-  const ro=readonly||!can("orders","edit");const dis=ro?'disabled':'';
+  // Менеджер «Заполнения» правит ровно тот заказ, который сам взял в работу, — и
+  // только пока захват живой. Общего права на «Заказы заборов» у него нет, и
+  // выдавать его ради этого не надо: тогда он получил бы доступ ко всем заказам.
+  // Без этой проверки карточка открывалась заблокированной и заполнить её было нельзя.
+  const myClaimed=!!(o&&S.me&&o.claimed_by===S.me.id&&typeof fillClaimAlive==='function'&&fillClaimAlive(o)
+    &&typeof canMod==='function'&&canMod('filling'));
+  const ro=readonly||!(can("orders","edit")||myClaimed);const dis=ro?'disabled':'';
   // Сохранение карточки держим в переменной: им пользуется не только кнопка «Сохранить»,
   // но и «Получить трек» с «Отправить в KET». И трек, и отправка читают заказ на сервере
   // ИЗ БАЗЫ, поэтому перед ними карточку надо сохранить — иначе всё, что человек только
