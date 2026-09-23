@@ -147,6 +147,14 @@ function bindDoubleTap(el,fn){
     fn(e);
   };
 }
+// Названия сравниваем без учёта регистра и лишних пробелов. «Асанали», «асанали»
+// и «Асанали  » — один и тот же партнёр. Точное сравнение по строке уже приводило
+// к тому, что партнёр не подтягивался и заказы оставались без привязки к нему.
+const normName = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
+const findPartnerByName = nm => {
+  const k = normName(nm);
+  return k ? ((S.partners || []).find(p => normName(p.name) === k) || null) : null;
+};
 function toast(m,ms){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms||2200);}
 
 const ROLE_LABEL={admin:'Администратор',manager:'Менеджер',courier:'Курьер'};

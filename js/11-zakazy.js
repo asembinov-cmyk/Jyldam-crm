@@ -1,5 +1,5 @@
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partner:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:'',callStatus:''};
+let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:'',callStatus:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -43,7 +43,7 @@ function isFizlicoPartner(partner){
 function buildPickupOrderRows(p,count){
   const pickupId=p.id;
   // ищем партнёра по имени из заявки, чтобы подтянуть его данные
-  const partner=S.partners.find(x=>x.name===p.name)||null;
+  const partner=findPartnerByName(p.name);
   // тип доставки по умолчанию — курьерский, если есть такой тип
   const courierDelivery=S.delivery.find(x=>/курьер/i.test(x.name));
   const baseStatus=defaultOrderStatusId();
@@ -477,7 +477,7 @@ function activeOrdersFilterCount(){
   // createFrom/createTo не считаем: это фильтр дня, он стоит по умолчанию на сегодня и
   // переключается отдельными кнопками «Сегодня» / «Все даты» — на виду и без того.
   ['status','delivery','partner','sales','processor','missing','pickupCity','destCity',
-   'paidBySender','callStatus'].forEach(k=>{if(of[k])n++;});
+   'paidBySender','callStatus','partnerQ'].forEach(k=>{if(of[k])n++;});
   if(of.q)n++;
   if(of.pickFrom||of.pickTo||of.delFrom||of.delTo)n++;
   return n;
@@ -531,7 +531,7 @@ function renderOrders(mode){
         <div class="filters-body" id="ofFiltersBody">
         <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
-        ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partner?partnerName(of.partner):'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
+        ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partnerQ||'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
         <select id="ofpickupcity" title="Город, откуда забрали заказ"><option value="">Город забора: все</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${of.pickupCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
         <select id="ofdestcity" title="Город, куда уходит заказ"><option value="">Город получения: все</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${of.destCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
         <select id="ofsales" title="Менеджер по продажам"><option value="">Менеджер: все</option>${S.sales.map(s=>`<option value="${s.id}" ${of.sales===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select>
@@ -770,10 +770,9 @@ function renderOrders(mode){
   $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrdersReset();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrdersReset();};
   if($('ofpartner'))$('ofpartner').oninput=e=>{
-    const name=e.target.value.trim().toLowerCase();
-    if(!name){of.partner='';drawOrdersReset();return;}
-    const p=S.partners.find(x=>(x.name||'').trim().toLowerCase()===name);
-    of.partner=p?p.id:'__none__'; // если ввели текст, но партнёр не найден — показываем пусто
+    // Раньше требовалось точное совпадение с названием целиком: набрал часть — список
+    // пустел, будто у партнёра нет заказов. Теперь это поиск по вхождению.
+    of.partnerQ=e.target.value.trim();
     drawOrdersReset();
   };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
@@ -870,8 +869,10 @@ function filteredOrders(){
   return ordersDateScopedList().filter(o=>{
     if(of.status&&o.status_id!==of.status)return false;
     if(!ordersMode&&of.delivery&&o.delivery_id!==of.delivery)return false;
-    if(of.partner==='__none__')return false; // введён партнёр, которого нет
-    if(of.partner&&of.partner!=='__none__'&&o.partner_id!==of.partner)return false;
+    // Партнёр: по части названия, без учёта регистра. Сверяем с тем же названием,
+    // что показано в гриде (своё поле заказа, а если пусто — отправитель): у заказов,
+    // созданных пачкой из заявки, partner_id часто не заполнен.
+    if(of.partnerQ&&!normName(orderPartnerLabel(o)).includes(normName(of.partnerQ)))return false;
     // диапазон даты забора
     const pd=(o.pickup_date||'').slice(0,10);
     if(of.pickFrom&&(!pd||pd<of.pickFrom))return false;
