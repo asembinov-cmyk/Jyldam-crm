@@ -1194,3 +1194,10 @@
 .fill-take{display:flex;align-items:center;justify-content:center;gap:12px;margin:18px 0 40px;flex-wrap:wrap}
 .fill-take .btn{padding:14px 34px;font-size:16px}
 .fill-take span{color:var(--muted);font-size:13px}
+
+/* Список партнёров в окне «Исключить партнёров»: строка — галочка, имя и сколько
+   заказов этого партнёра сейчас отмечено. */
+.excl-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer}
+.excl-row:hover{background:var(--line,#eef1f6)}
+.excl-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.excl-row b{color:var(--muted);font-weight:600;font-size:13px}

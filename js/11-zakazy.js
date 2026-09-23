@@ -511,7 +511,7 @@ function renderOrders(mode){
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
-      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isAdmin()&&ketSelected.size)?`<button class="btn danger" id="ordersDelSel">✕ Удалить выбранные (${ketSelected.size})</button>`:''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
+      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${isStaff()?'<button class="btn ghost" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}${(isAdmin()&&ketSelected.size)?`<button class="btn danger" id="ordersDelSel">✕ Удалить выбранные (${ketSelected.size})</button>`:''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -799,9 +799,53 @@ function renderOrders(mode){
     ketSelected.clear();ketSelectAll=false;
     renderOrders(ordersMode);
   };
+  const exclBtn=$('ordersExclPartners');
+  if(exclBtn)exclBtn.onclick=()=>ordersExcludePartnersModal();
   drawOrders();
 }
 // число заказов с заполненным телефоном клиента
+// Как партнёр подписан у заказа. Своё поле бывает пустым у заказов, созданных
+// пачкой из заявки, — тогда берём имя отправителя, как в самом гриде.
+function orderPartnerLabel(o){
+  if(o.partner_id){const n=partnerName(o.partner_id);if(n&&n!=='—')return n;}
+  return (o.sender||'').trim()||'— без партнёра —';
+}
+
+// «Кроме них»: отметили галочкой всё, а потом убираем из выбора партнёров, которые
+// в эту отправку не идут. Удобнее, чем снимать галочки по одной на сотне строк.
+function ordersExcludePartnersModal(){
+  const rows=filteredOrders().filter(o=>ketSelected.has(o.id));
+  if(!rows.length){toast('Сначала отметьте заказы');return;}
+  const by={};
+  rows.forEach(o=>{const n=orderPartnerLabel(o);by[n]=(by[n]||0)+1;});
+  const names=Object.keys(by).sort((a,b)=>by[b]-by[a]||a.localeCompare(b)); // сначала у кого больше заказов
+  showModal('Исключить партнёров из выбора',`
+    <p style="color:var(--muted);font-size:13px;margin:0 0 10px">
+      Отмечено заказов: <b>${ketSelected.size}</b>. Отметьте партнёров, чьи заказы не нужны —
+      с них галочки снимутся.</p>
+    <input id="exclSearch" placeholder="Поиск партнёра" style="width:100%;margin-bottom:10px">
+    <div id="exclList" style="max-height:46vh;overflow:auto">
+      ${names.map(n=>`<label class="excl-row"><input type="checkbox" data-excl="${esc(n)}"><span>${esc(n)}</span><b>${by[n]}</b></label>`).join('')}
+    </div>`,
+    ()=>{
+      const picked=[...document.querySelectorAll('[data-excl]')].filter(c=>c.checked).map(c=>c.dataset.excl);
+      if(!picked.length){toast('Ни один партнёр не отмечен');return false;}
+      let removed=0;
+      rows.forEach(o=>{if(picked.includes(orderPartnerLabel(o))){ketSelected.delete(o.id);removed++;}});
+      // «выбраны все» больше не действует: иначе при перелистывании снятые вернутся
+      ketSelectAll=false;
+      toast(`Снято ${removed} · осталось отмечено ${ketSelected.size}`);
+      drawOrders();
+      return true;
+    },{mid:true});
+  const sr=$('exclSearch');
+  if(sr)sr.oninput=()=>{
+    const q=sr.value.trim().toLowerCase();
+    document.querySelectorAll('#exclList .excl-row').forEach(el=>{
+      el.style.display=el.textContent.toLowerCase().includes(q)?'':'none';
+    });
+  };
+}
 function ordersWithPhone(list){return list.filter(o=>(o.phone||'').toString().replace(/\D/g,'').length>=10).length;}
 // список заказов с учётом режима вкладки (курьер/почта/сегодня)
 function ordersScopedList(){
