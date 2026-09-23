@@ -1,5 +1,5 @@
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:'',callStatus:''};
+let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -479,7 +479,7 @@ function activeOrdersFilterCount(){
   // createFrom/createTo не считаем: это фильтр дня, он стоит по умолчанию на сегодня и
   // переключается отдельными кнопками «Сегодня» / «Все даты» — на виду и без того.
   ['status','delivery','partner','sales','processor','missing','pickupCity','destCity',
-   'paidBySender','callStatus','partnerQ'].forEach(k=>{if(of[k])n++;});
+   'paidBySender','partnerQ'].forEach(k=>{if(of[k])n++;});
   if(of.q)n++;
   if(of.pickFrom||of.pickTo||of.delFrom||of.delTo)n++;
   return n;
@@ -551,13 +551,6 @@ function renderOrders(mode){
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
-        ${ordersMode==='mail'?`<select id="ofcallstatus" title="Статус обзвона клиента">
-          <option value="">Статус обзвона: все</option>
-          <option value="none" ${of.callStatus==='none'?'selected':''}>Не установлен</option>
-          <option value="Недозвон" ${of.callStatus==='Недозвон'?'selected':''}>Недозвон</option>
-          <option value="Прозвонен" ${of.callStatus==='Прозвонен'?'selected':''}>Прозвонен</option>
-          <option value="Изменен" ${of.callStatus==='Изменен'?'selected':''}>Изменен</option>
-        </select>`:''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
           <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
@@ -568,9 +561,11 @@ function renderOrders(mode){
           <span class="fdate-lbl">Доставка:</span>
           <input type="date" id="ofdelfrom" value="${esc(of.delFrom)}" title="Дата доставки с">
           <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">
-          <button class="btn sm" id="oftoday">Сегодня</button>
-          <button class="btn sm" id="ofdateclear">Все даты</button>
-          <button class="btn sm ghost" id="ofreset" title="Снять все фильтры и показать сегодняшние заказы">✕ Сброс</button>
+          <span class="fdate-btns">
+            <button class="btn sm" id="oftoday">Сегодня</button>
+            <button class="btn sm" id="ofdateclear">Все даты</button>
+            <button class="btn sm ghost" id="ofreset" title="Снять все фильтры и показать сегодняшние заказы">✕ Сброс</button>
+          </span>
         </div>
         </div>
       </div>
@@ -779,7 +774,6 @@ function renderOrders(mode){
   };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
   if($('ofpaid'))$('ofpaid').onchange=e=>{of.paidBySender=e.target.value;drawOrdersReset();};
-  if($('ofcallstatus'))$('ofcallstatus').onchange=e=>{of.callStatus=e.target.value;drawOrdersReset();};
   if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
   if($('ofdestcity'))$('ofdestcity').onchange=e=>{of.destCity=e.target.value;drawOrdersReset();};
   if($('ofsales'))$('ofsales').onchange=e=>{of.sales=e.target.value;drawOrdersReset();};
@@ -848,6 +842,83 @@ function ordersExcludePartnersModal(){
     });
   };
 }
+/* ── ПЕРЕСТАНОВКА КОЛОНОК В ГРИДЕ ЗАКАЗОВ ──
+   Порядок колонок у каждого свой: кладовщику важен вес, менеджеру — телефон.
+   Заголовок можно перетащить мышью, порядок запоминается в этом браузере.
+
+   Сделано перестановкой готовых ячеек, а не переписыванием разметки таблицы:
+   колонок полтора десятка, часть появляется и исчезает в зависимости от режима
+   и прав, и таблица собирается одной строкой шаблона. Раскладывать её на модель
+   колонок ради перетаскивания — большая правка в самом нагруженном месте.
+
+   Крайние колонки не двигаются: слева галочка выбора, справа кнопки действий.
+   Их перенос в середину только ломал бы строку. */
+const ORDERS_COL_ORDER_KEY='jyldam-orders-col-order';
+function ordersColOrderLoad(){
+  try{const v=JSON.parse(localStorage.getItem(ORDERS_COL_ORDER_KEY)||'[]');return Array.isArray(v)?v:[];}
+  catch(e){return [];}
+}
+function ordersColOrderSave(arr){
+  try{localStorage.setItem(ORDERS_COL_ORDER_KEY,JSON.stringify(arr));}catch(e){}
+}
+// Подвижный диапазон — всё между галочкой и колонкой действий.
+function ordersMovableRange(table){
+  const ths=[...table.querySelectorAll('thead th')];
+  let from=0,to=ths.length-1;
+  if(ths[0]&&!ths[0].textContent.trim())from=1;      // галочка «выбрать все»
+  if(ths[to]&&!ths[to].textContent.trim())to=to-1;   // кнопки действий
+  return {from,to,ths};
+}
+function ordersApplyColOrder(table){
+  const saved=ordersColOrderLoad(); if(!saved.length)return;
+  const {from,to,ths}=ordersMovableRange(table);
+  const keys=ths.slice(from,to+1).map(th=>th.textContent.trim());
+  // Порядок берём из сохранённого; колонки, которых там нет (появились позже или
+  // видны только в другом режиме), остаются на своих местах в конце.
+  const idx=k=>{const i=saved.indexOf(k);return i<0?1e6:i;};
+  const target=keys.map((k,i)=>({k,i})).sort((a,b)=>idx(a.k)-idx(b.k)||a.i-b.i).map(x=>x.i);
+  if(target.every((v,i)=>v===i))return; // уже в нужном порядке
+  table.querySelectorAll('tr').forEach(tr=>{
+    const cells=[...tr.children];
+    if(cells.length!==ths.length)return; // строка «ничего не найдено» с colspan
+    // Собираем во фрагмент и вставляем один раз: если вставлять ячейки по очереди
+    // перед одним и тем же местом, порядок получается обратным.
+    const anchor=cells[to]?cells[to].nextSibling:null;
+    const frag=document.createDocumentFragment();
+    target.forEach(i=>frag.appendChild(cells[from+i]));
+    tr.insertBefore(frag,anchor);
+  });
+}
+function ordersBindColDrag(table){
+  const {from,to}=ordersMovableRange(table);
+  const ths=[...table.querySelectorAll('thead th')];
+  let dragKey=null;
+  ths.slice(from,to+1).forEach(th=>{
+    th.draggable=true;
+    th.classList.add('col-move');
+    th.title='Потяните, чтобы переставить колонку';
+    th.ondragstart=e=>{dragKey=th.textContent.trim();e.dataTransfer.effectAllowed='move';
+      try{e.dataTransfer.setData('text/plain',dragKey);}catch(_e){}};
+    th.ondragover=e=>{e.preventDefault();th.classList.add('col-over');};
+    th.ondragleave=()=>th.classList.remove('col-over');
+    th.ondrop=e=>{
+      e.preventDefault();th.classList.remove('col-over');
+      const dropKey=th.textContent.trim();
+      if(!dragKey||dragKey===dropKey)return;
+      // Пересобираем порядок от того, что видно сейчас: сохранённый список мог
+      // остаться с другого режима, где набор колонок другой.
+      const cur=[...table.querySelectorAll('thead th')].slice(from,to+1).map(x=>x.textContent.trim());
+      const saved=ordersColOrderLoad();
+      const rest=saved.filter(k=>!cur.includes(k));   // колонки других режимов не теряем
+      const next=cur.filter(k=>k!==dragKey);
+      next.splice(next.indexOf(dropKey),0,dragKey);
+      ordersColOrderSave([...next,...rest]);
+      drawOrders();
+    };
+    th.ondragend=()=>{dragKey=null;table.querySelectorAll('.col-over').forEach(x=>x.classList.remove('col-over'));};
+  });
+}
+
 function ordersWithPhone(list){return list.filter(o=>(o.phone||'').toString().replace(/\D/g,'').length>=10).length;}
 // список заказов с учётом режима вкладки (курьер/почта/сегодня)
 function ordersScopedList(){
@@ -904,11 +975,6 @@ function filteredOrders(){
     }
     // фильтр по городу забора
     if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
-    // фильтр по статусу обзвона (актуален для почтовых заказов)
-    if(of.callStatus){
-      if(of.callStatus==='none'){if(o.call_status)return false;}
-      else if(o.call_status!==of.callStatus)return false;
-    }
     if(of.destCity&&o.courier_city_id!==of.destCity)return false;
     if(of.sales&&o.sales_id!==of.sales)return false;
     // фильтр по оплате отправителем
@@ -1384,7 +1450,7 @@ function exportOrdersToExcel(){
     const row={
       'ID':o.code||'',
       'Дата забора':o.pickup_date?fmtDate(o.pickup_date):'',
-      'Дата доставки / Статус обзвона':isCourierDelivery(o.delivery_id)?(o.deliver_date?fmtDate(o.deliver_date):''):(o.call_status||''),
+      'Дата доставки':o.deliver_date?fmtDate(o.deliver_date):'',
       'Отправитель':o.sender||'',
       'ФИО клиента':o.client||'',
       'Телефон':o.phone?phoneDisplay(o.phone):'',
@@ -1471,8 +1537,8 @@ function drawOrders(){
   // если включён режим «выбраны все» — добавляем id текущей страницы в выбор
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
   el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>${ordersMode==='mail'?'Статус обзвона':'Дата доставки'}</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}${staff&&ordersMode!=='mail'?'<th>Менеджер</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
@@ -1492,20 +1558,12 @@ function drawOrders(){
         const same=t.slice(0,10)===fmtDate(o.pickup_date);
         return `<small class="cell-time">создан ${esc(same?t.slice(-5):t)}</small>`;
       })():''}</td>
-      <td data-label="${isCourierDelivery(o.delivery_id)?'Дата доставки':'Статус обзвона'}" ${isCourierDelivery(o.delivery_id)?'':'onclick="event.stopPropagation()"'}>${isCourierDelivery(o.delivery_id)
-        ?(o.deliver_date?esc(fmtDate(o.deliver_date)):'—')
-        :`<select class="status-pick" data-ocall="${o.id}" style="border-color:${callStatusColor(o.call_status)}">
-        <option value="">— нет —</option>
-        <option value="Недозвон" ${o.call_status==='Недозвон'?'selected':''}>Недозвон</option>
-        <option value="Прозвонен" ${o.call_status==='Прозвонен'?'selected':''}>Прозвонен</option>
-        <option value="Изменен" ${o.call_status==='Изменен'?'selected':''}>Изменен</option>
-      </select>`}</td>
+      <td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       ${ordersMode!=='mail'?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
-      ${staff&&ordersMode!=='mail'?`<td data-label="Менеджер">${o.sales_id?esc(salesName(o.sales_id)):'<span style="color:var(--muted)">—</span>'}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
       <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
@@ -1517,6 +1575,8 @@ function drawOrders(){
         ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
       </div></td></tr>`;
     }).join('')}</tbody></table></div>`;
+  const _tbl=el.querySelector('table');
+  if(_tbl){ordersApplyColOrder(_tbl);ordersBindColDrag(_tbl);}
   el.querySelectorAll('[data-oviewphoto]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.oviewphoto);});
   el.querySelectorAll('[data-oedit]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oedit));
   el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));
@@ -1544,14 +1604,6 @@ function drawOrders(){
       if(badge){badge.textContent=o.status_id?(so.name||'—'):'— нет —';badge.style.color=so.color||'var(--muted)';badge.style.background=so.color?(so.color+'1a'):'transparent';badge.style.borderColor=so.color||'var(--line)';}
       toast('Статус обновлён');}});
   // статус обзвона клиента (Недозвон / Прозвонен / Изменен)
-  el.querySelectorAll('[data-ocall]').forEach(sel=>sel.onchange=async()=>{
-    const o=S.orders.find(x=>x.id===sel.dataset.ocall);if(!o)return;
-    const oldV=o.call_status;
-    const u=await dbUpdate('orders',o.id,{call_status:sel.value||null});
-    if(u){o.call_status=u.call_status;
-      sel.style.borderColor=callStatusColor(o.call_status);
-      logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[{field:'call_status',label:'Статус обзвона',old:oldV||'—',new:o.call_status||'—'}]});
-      toast('Статус обзвона обновлён');}});
   // отдельные чекбоксы строк — обновляют множество выбранных
   el.querySelectorAll('.ketChk').forEach(c=>c.onchange=()=>{
     const id=c.dataset.ketchk;

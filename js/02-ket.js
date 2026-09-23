@@ -738,13 +738,6 @@ function statusBadge(id){const s=statusObj(id);if(!s)return '<span style="color:
 const orderStatusObj=id=>S.orderStatuses.find(s=>s.id===id)||null;
 function orderStatusBadge(id){const s=orderStatusObj(id);if(!s)return '<span style="color:var(--muted)">—</span>';
   return `<span class="pill" style="color:${s.color};background:${s.color}1a;border-color:${s.color}55">${esc(s.name)}</span>`;}
-// статус обзвона клиента (Недозвон / Прозвонен / Изменен) — цвет для плашки в гриде заказов
-function callStatusColor(v){
-  if(v==='Недозвон')return '#c0392b';
-  if(v==='Прозвонен')return '#2e7d32';
-  if(v==='Изменен')return '#c08a2d';
-  return 'var(--line)';
-}
 // статус заказа по умолчанию — «Получено от отправителя» (первый в списке)
 function defaultOrderStatusId(){
   const byName=S.orderStatuses.find(s=>/получено от отправител/i.test(s.name||''));

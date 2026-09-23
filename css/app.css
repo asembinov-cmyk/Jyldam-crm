@@ -1418,3 +1418,12 @@ td .ft-dot{margin:0 0 0 8px}
   /* Меню у последней строки не должно уезжать за край экрана. */
   .st-menu{right:auto;left:0}
 }
+
+/* Кнопки дат держим одной группой: «Сброс» отрывался на следующую строку и
+   выглядел отдельным фильтром, хотя относится к тем же двум. */
+.filters .fdate-btns{display:inline-flex;gap:8px;flex-wrap:nowrap;align-items:center}
+
+/* Перетаскивание колонок грида заказов. */
+.orders-tbl th.col-move{cursor:grab;user-select:none}
+.orders-tbl th.col-move:active{cursor:grabbing}
+.orders-tbl th.col-over{box-shadow:inset 2px 0 0 var(--rust)}
