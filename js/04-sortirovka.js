@@ -680,7 +680,14 @@ function openSortOrderModal(o,opts){
     if(wEl){
       const w=parseWeight(wEl.value);
       if(isNaN(w)){toast('Вес указан неверно — например 2,400');return false;}
-      if(w!=null)payload.weight=w;
+      if(w!=null){
+        payload.weight=w;
+        // Перевес удорожает почтовую посылку. Раньше вес сохранялся отсюда молча, и
+        // сумма заказа оставалась прежней: в карточке надбавка появлялась, а в списке
+        // заказов стояла старая цена.
+        const re=(typeof repriceForWeight==='function')?repriceForWeight(o,w):null;
+        if(re)Object.assign(payload,re);
+      }
     }
     const bcEl=ov.querySelector('#sortBarcode');
     const bc=bcEl?(bcEl.value||'').trim():'';
@@ -689,7 +696,8 @@ function openSortOrderModal(o,opts){
     if(!u){toast('Не удалось сохранить, попробуйте ещё раз');return false;}
     Object.assign(o,u);
     stopBarcodeScan();
-    toast(unmark?'Отметка снята' : `Отмечено: «${cty||'без города'}» · ${o.client||''}`);
+    const priced=(payload.order_sum!=null)?` · сумма ${payload.order_sum} ₸ (перевес)`:'';
+    toast(unmark?'Отметка снята' : `Отмечено: «${cty||'без города'}» · ${o.client||''}${priced}`);
     renderSorting();
   },{mid:true});
   // «Заказ найден» — в шапку окна, рядом с заголовком: это про само окно, а не про

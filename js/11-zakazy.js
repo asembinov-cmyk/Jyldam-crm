@@ -1698,6 +1698,21 @@ function weightSurcharge(weight, isCourier){
   if(isNaN(w) || w <= WEIGHT_FREE_KG) return 0;
   return Math.ceil(w - WEIGHT_FREE_KG) * WEIGHT_STEP_FEE;
 }
+// Пересчёт суммы заказа при смене веса — для мест, где вес вводят ОТДЕЛЬНО от карточки
+// («Сортировка»: кладовщик взвесил посылку). Возвращает поля для записи или null.
+//
+// Считаем РАЗНИЦУ надбавок, а не цену заново. Так сохраняется сумма, выставленная
+// вручную: заказ за 2500 при перевесе станет 2700, а не упадёт до тарифной цены.
+// Пересчитать «от размера пакета» здесь нельзя — кладовщик не занимается ценой и не
+// должен случайно стереть то, что поставил менеджер.
+function repriceForWeight(order, newWeight){
+  if(!order || order.paid_by_sender) return null;      // сумма намеренно 0
+  if(isCourierDelivery(order.delivery_id)) return null; // у курьерских надбавки нет
+  const delta = weightSurcharge(newWeight, false) - weightSurcharge(order.weight, false);
+  if(!delta) return null;
+  const sum = Math.max(0, (orderSum(order) || 0) + delta);
+  return {order_sum: sum, cost: sum};
+}
 function isExplicitNum(v){return v!=null&&v!==''&&!isNaN(+v);}
 // вариант без привязки к партнёру — на случай, если партнёр ещё не определён/не выбран (базовые значения)
 const PACKAGE_SIZES=packageSizesFor(null);
@@ -2121,6 +2136,8 @@ function orderModal(id,readonly){
       const cfg=sizes[sizeEl.value];if(!cfg)return;
       const courier=isCourierDelivery($('o_delivery').value);
       const sumEl=$('o_sum');
+      // Выбор размера — явное действие: цена считается заново, от тарифа, и вес
+      // учитывается тут же, иначе надбавка потерялась бы при смене размера.
       const extra=weightSurcharge(parseWeight(val('o_weight')),courier);
       if(sumEl&&!sumEl.disabled){sumEl.value=(courier?cfg.courier:cfg.mail)+extra;sumTouched=false;}
       updateWeightHint();
@@ -2133,7 +2150,23 @@ function orderModal(id,readonly){
     };
     const sumEl=$('o_sum');if(sumEl)sumEl.oninput=()=>{sumTouched=true;};
     const sizeEl=$('o_size');if(sizeEl)sizeEl.onchange=()=>{applySize();};
-    const wEl=$('o_weight');if(wEl)wEl.onchange=()=>{applySize();};
+    // Смена веса меняет сумму на РАЗНИЦУ надбавок, а не пересчитывает цену заново:
+    // иначе сумма, выставленная вручную (скажем, 2500), при взвешивании падала бы до
+    // тарифной. Так же считает «Сортировка» — правило на вес должно быть одно.
+    let lastWeight=parseWeight(fmtWeight(d.weight));
+    const wEl=$('o_weight');
+    if(wEl)wEl.onchange=()=>{
+      const courier=isCourierDelivery(val('o_delivery'));
+      const newW=parseWeight(val('o_weight'));
+      const delta=weightSurcharge(newW,courier)-weightSurcharge(lastWeight,courier);
+      lastWeight=newW;
+      const sumEl=$('o_sum');
+      if(delta&&sumEl&&!sumEl.disabled){
+        sumEl.value=Math.max(0,(parseFloat(sumEl.value)||0)+delta);
+        sumTouched=true; // цена уже учитывает вес — смена партнёра не должна её затереть
+      }
+      updateWeightHint();
+    };
     updateWeightHint(); // у уже сохранённого заказа надбавка видна сразу, сумму при этом не трогаем
     // галочка «Оплачен заказ»: обнуляет поле суммы и блокирует его (исходная вернётся при снятии)
     const paidChk=$('o_paidorder');
