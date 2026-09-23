@@ -824,6 +824,7 @@ const ICONS={
   calc:'<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 6h8M8 11h2M12 11h.01M15 11h1M8 15h2M12 15h.01M15 15v3M8 18h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   finance:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v10M9.5 9.3c0-1 1-1.8 2.5-1.8s2.5.8 2.5 1.8c0 2.4-5 1.2-5 3.6 0 1 1 1.8 2.5 1.8s2.5-.8 2.5-1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   intercity:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 8l9-4 9 4-9 4-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 8v8l9 4 9-4V8" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 12v8" stroke="currentColor" stroke-width="1.7"/></svg>',
+  fill:'<svg viewBox="0 0 24 24" fill="none"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8 8h6M8 12h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M19.4 10.6l2 2-6.1 6.1-2.7.6.6-2.7 6.2-6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   scan:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 012-2h2M18 4h2a2 2 0 012 2v2M20 16v2a2 2 0 01-2 2h-2M6 20H4a2 2 0 01-2-2v-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="7" y="8" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
 };
 
@@ -861,7 +862,6 @@ function buildNav(opts){
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
-    if(canMod('filling'))main.push({k:'filling',label:'Забивка заказов',icon:'orders'});
     if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];
@@ -885,6 +885,7 @@ function buildNav(opts){
     const histItems=[];
     if(canMod('history'))histItems.push({k:'history',label:'История изменений',icon:'history'});
     if(canMod('notify'))histItems.push({k:'notify',label:'Центр контроля',icon:'bell'});
+    if(canMod('filling'))histItems.push({k:'filling',label:'Заполнение',icon:'fill'});
     if(histItems.length)groups.push({title:'История',items:histItems});
 
     const team=[];

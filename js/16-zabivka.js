@@ -133,7 +133,7 @@ function renderFilling(){
   if(!canMod('filling')){ $('main').innerHTML = '<div class="empty"><div class="big">Нет доступа</div></div>'; return; }
   if(!fillReady()){
     $('main').innerHTML = `
-      <div class="page-head"><div><h1>Забивка заказов</h1></div></div>
+      <div class="page-head"><div><h1>Заполнение</h1></div></div>
       <div class="empty"><div class="big">Раздел ещё не включён</div>
       <p>В таблице заказов нет полей для учёта забивки. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
     return;
@@ -141,7 +141,7 @@ function renderFilling(){
   const queue = fillQueue(), free = fillFree(), mine = fillMine();
   const rows = fillStatsRows();
   $('main').innerHTML = `
-    <div class="page-head"><div><h1>Забивка заказов</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
+    <div class="page-head"><div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
       <div class="head-actions"><button class="btn" id="fillNext" ${free.length||mine.length?'':'disabled'}>Взять следующий</button></div>
     </div>
     <div class="dash-cards">
