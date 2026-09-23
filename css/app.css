@@ -144,7 +144,7 @@
   .app-body{display:flex;align-items:flex-start;min-height:calc(100vh - 57px)}
   /* ── ТЁМНОЕ БОКОВОЕ МЕНЮ ── */
   .sidebar{width:224px;flex:0 0 224px;border-right:1px solid rgba(255,255,255,.06);
-    background:linear-gradient(180deg,#161d2f 0%,#111726 100%);
+    background:#26282c;
     position:sticky;top:57px;align-self:stretch;height:calc(100vh - 57px);padding:16px 12px;
     display:flex;flex-direction:column;overflow:visible;transition:width .18s ease,flex-basis .18s ease}
   .side-nav{display:flex;flex-direction:column;gap:3px;overflow-y:auto;flex:1;min-height:0}
@@ -154,7 +154,7 @@
     color:#ff8f7a;border-color:rgba(255,143,122,.3);background:transparent}
   .sidebar-logout:hover{background:#c0392b;color:#fff;border-color:#c0392b}
   .side-nav button,.side-nav a{font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:left;text-decoration:none;
-    border:1px solid transparent;background:transparent;color:rgba(255,255,255,.62);padding:10px 13px;border-radius:10px;
+    border:1px solid transparent;background:transparent;color:#b0b3b8;padding:10px 13px;border-radius:10px;
     transition:background .16s,color .16s,transform .16s;display:flex;align-items:center;gap:11px;position:relative}
   .side-nav button:hover,.side-nav a:hover{color:#fff;background:rgba(255,255,255,.07);transform:translateX(2px)}
   /* активный пункт — заливка в цвете группы */
@@ -163,9 +163,9 @@
   .side-nav button.active svg{color:#fff}
   .side-nav button svg,.side-nav a svg{width:19px;height:19px;flex:none;opacity:.9}
   .side-nav button.disabled{opacity:.32;cursor:default}
-  .side-nav button.disabled:hover{background:transparent;color:rgba(255,255,255,.62);transform:none}
+  .side-nav button.disabled:hover{background:transparent;color:#b0b3b8;transform:none}
   .side-nav .nav-group{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
-    color:rgba(255,255,255,.38);padding:15px 13px 5px;display:flex;align-items:center;gap:7px}
+    color:rgba(255,255,255,.55);padding:15px 13px 5px;display:flex;align-items:center;gap:7px}
   .ng-dot{width:7px;height:7px;border-radius:50%;flex:none;box-shadow:0 0 6px currentColor}
   .side-nav .nav-badge{margin-left:auto;font-size:11px;font-weight:800;background:rgba(255,255,255,.16);color:#fff;
     min-width:20px;height:19px;border-radius:10px;display:inline-grid;place-items:center;padding:0 6px}
@@ -969,7 +969,7 @@
     .menu-toggle{display:block}
     .sidebar{position:fixed;top:0;left:0;height:100vh;width:270px;max-width:82vw;z-index:200;
       transform:translateX(-100%);transition:transform .26s ease;border-right:1px solid rgba(255,255,255,.06);
-      border-bottom:none;background:linear-gradient(180deg,#161d2f 0%,#111726 100%);padding:18px 14px;
+      border-bottom:none;background:#26282c;padding:18px 14px;
       overflow-y:auto;-webkit-overflow-scrolling:touch;
       display:flex;flex-direction:column;align-items:stretch;box-shadow:0 0 40px -8px rgba(0,0,0,.5)}
     .sidebar.open{transform:translateX(0)}
