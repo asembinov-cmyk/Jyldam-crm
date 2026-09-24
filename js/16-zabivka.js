@@ -57,13 +57,17 @@ const fillOrderDate = o => o.pickup_date ? String(o.pickup_date).slice(0, 10)
 // это почти всегда то, что партнёр заявил, но не отдал; заполнять там нечего, а
 // менеджер потратит время. Их число показываем отдельно, чтобы не пропали из виду.
 function fillIsToday(o){ return fillOrderDate(o) === localToday(); }
-// захват ещё живой?
-function fillClaimAlive(o){ return !!(o.claimed_at && o.claimed_at > fillCutoff()); }
+// Захват живой? Отложенный заказ не протухает: менеджер ждёт данных от партнёра,
+// и отдавать заказ соседу через десять минут — значит потерять то, чего он ждал.
+const fillHoldReady = () => !!(S.orders && S.orders.length && ('claim_hold' in S.orders[0]));
+function fillIsHeld(o){ return !!o.claim_hold; }
+function fillClaimAlive(o){ return fillIsHeld(o) || !!(o.claimed_at && o.claimed_at > fillCutoff()); }
 function fillIsMine(o){ return fillClaimAlive(o) && o.claimed_by === (S.me && S.me.id); }
 
 function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillIsToday(o)); }
 function fillFree(){ return fillQueue().filter(o => !fillClaimAlive(o)); }
-function fillMine(){ return fillQueue().filter(fillIsMine); }
+function fillMine(){ return fillQueue().filter(o => fillIsMine(o) && !fillIsHeld(o)); }
+function fillHeld(){ return fillQueue().filter(o => fillIsMine(o) && fillIsHeld(o)); }
 
 /* ---------- выдача следующего заказа ---------- */
 async function fillTakeNext(){
@@ -94,11 +98,24 @@ async function fillTakeNext(){
   } finally { fillBusy = false; }
 }
 
+// Отложить за собой: заказ не уходит в общую очередь и ждёт своего часа.
+async function fillHold(id, on){
+  const o = (S.orders || []).find(x => x.id === id);
+  if(!o) return;
+  const row = { claim_hold: !!on };
+  // Возвращаем в работу — заново отсчитываем десять минут, иначе заказ,
+  // пролежавший до вечера, тут же считался бы брошенным.
+  if(!on) row.claimed_at = new Date().toISOString();
+  const u = await dbUpdate('orders', id, row);
+  if(u){ Object.assign(o, u); toast(on ? 'Отложен — останется за вами' : 'Вернули в работу'); renderFilling(); }
+}
+
 // вернуть заказ в общую очередь, не заполняя
 async function fillRelease(id){
   const o = (S.orders || []).find(x => x.id === id);
   if(!o) return;
-  const u = await dbUpdate('orders', id, { claimed_by: null, claimed_by_name: null, claimed_at: null });
+  const u = await dbUpdate('orders', id, { claimed_by: null, claimed_by_name: null, claimed_at: null,
+    ...(fillHoldReady() ? { claim_hold: false } : {}) });
   if(u){ Object.assign(o, u); toast('Заказ возвращён в очередь'); renderFilling(); }
 }
 
@@ -146,10 +163,11 @@ function fillStatsRows(){
       if(sec <= FILL_NORM_SEC) r.inNorm++;
     }
   });
-  const inWork = {};
+  const inWork = {}, onHold = {};
   fillQueue().filter(fillClaimAlive).forEach(o => {
     const nm = o.claimed_by_name || '—';
-    inWork[nm] = (inWork[nm] || 0) + 1;
+    const box = fillIsHeld(o) ? onHold : inWork;
+    box[nm] = (box[nm] || 0) + 1;
     add(nm, o.claimed_by);
   });
   return Object.values(by).map(r => ({
@@ -157,6 +175,7 @@ function fillStatsRows(){
     avg: r.secs.length ? r.secs.reduce((s,x) => s+x, 0) / r.secs.length : null,
     normPct: r.secs.length ? Math.round(r.inNorm / r.secs.length * 100) : null,
     inWork: inWork[r.name] || 0,
+    onHold: onHold[r.name] || 0,
   })).sort((a,b) => b.count - a.count);
 }
 // Тот же период, сдвинутый назад на свою длину, — для «▲ 12% к прошлому периоду».
@@ -252,7 +271,8 @@ function renderFilling(){
       <p>В таблице заказов нет полей для учёта. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
     return;
   }
-  const queue=fillQueue(), free=fillFree(), mine=fillMine();
+  const queue=fillQueue(), free=fillFree(), mine=fillMine(), held=fillHeld();
+  const canHold=fillHoldReady();
   const admin=isAdmin();
   // Статистику считаем всегда: администратору — по всем, менеджеру — только его строку.
   // Сравнивать себя с коллегами по ходу смены незачем, а свой темп видеть полезно.
@@ -262,8 +282,8 @@ function renderFilling(){
   const my=admin?null:(rows.find(r=>r.id===me)||mine0);
   const team=rows.reduce((a,r)=>({
     count:a.count+r.count, secs:a.secs+r.totalSec, inNorm:a.inNorm+r.inNorm,
-    measured:a.measured+r.secs.length, inWork:a.inWork+r.inWork,
-  }),{count:0,secs:0,inNorm:0,measured:0,inWork:0});
+    measured:a.measured+r.secs.length, inWork:a.inWork+r.inWork, hold:a.hold+r.onHold,
+  }),{count:0,secs:0,inNorm:0,measured:0,inWork:0,hold:0});
   const teamAvg=team.measured?team.secs/team.measured:null;
   const teamNorm=team.measured?Math.round(team.inNorm/team.measured*100):null;
   const prev=fillPrevCount(admin?null:me);
@@ -287,7 +307,7 @@ function renderFilling(){
       <div class="fk fk-main">
         <div class="fk-k">Ждут заполнения</div>
         <div class="fk-v">${queue.length}</div>
-        <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}</div>
+        <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}${held.length?` · отложено ${held.length}`:''}</div>
       </div>
       ${!admin?`
       <div class="fk">
@@ -335,7 +355,21 @@ function renderFilling(){
           <td data-label="Партнёр">${esc(o.sender||partnerName(o.partner_id)||'—')}</td>
           <td data-label="Взят">${esc(fillAgo(o.claimed_at))}</td>
           <td data-label=""><button class="btn sm" data-fillopen="${o.id}">Заполнить</button>
+            ${canHold?`<button class="btn sm ghost" data-fillhold="${o.id}" title="Заказ останется за вами, пока не заполните или не вернёте">Отложить</button>`:''}
             <button class="btn sm ghost" data-fillrel="${o.id}">Вернуть</button></td>
+        </tr>`).join('')}
+      </tbody></table></div></div>`:''}
+    ${held.length?`<div class="panel">
+      <div class="panel-head"><h2>Отложенные</h2><span class="count">${held.length}</span></div>
+      <p class="staff-hint">Ждут данных от партнёра. В общую очередь не уходят и остаются за вами.</p>
+      <div class="table-scroll"><table class="resp-table"><thead><tr><th>Заказ</th><th>Партнёр</th><th>Отложен</th><th></th></tr></thead><tbody>
+        ${held.map(o=>`<tr>
+          <td data-label="Заказ"><strong style="font-family:'Fraunces',serif">${esc(o.code||'')}</strong></td>
+          <td data-label="Партнёр">${esc(o.sender||partnerName(o.partner_id)||'—')}</td>
+          <td data-label="Отложен">${esc(fillAgo(o.claimed_at))}</td>
+          <td data-label=""><button class="btn sm" data-fillopen="${o.id}">Заполнить</button>
+            <button class="btn sm ghost" data-fillunhold="${o.id}">Вернуть в работу</button>
+            <button class="btn sm ghost" data-fillrel="${o.id}">В общую очередь</button></td>
         </tr>`).join('')}
       </tbody></table></div></div>`:''}
     ${admin?`<div class="panel fill-team">
@@ -365,13 +399,13 @@ function renderFilling(){
           <td data-label="В норме">${r.normPct===null?'—':`${r.normPct}%
             <span class="ft-bar"><i class="${r.normPct>=80?'ok':(r.normPct>=60?'warn':'bad')}" style="width:${r.normPct}%"></i></span>`}</td>
           <td data-label="За день"><b>${esc(fillFmtDur(r.totalSec))}</b></td>
-          <td data-label="Сейчас">${r.inWork?`<span class="ft-busy">${r.inWork} в работе</span>`:'свободен'}</td>
+          <td data-label="Сейчас">${r.inWork?`<span class="ft-busy">${r.inWork} в работе</span>`:(r.onHold?'':'свободен')}${r.onHold?`<span class="ft-sub">отложено ${r.onHold}</span>`:''}</td>
         </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">За этот период никто ничего не заполнил</td></tr>'}
       </tbody>
       ${rows.length?`<tfoot><tr class="ft-total">
         <td></td><td>Итого по команде</td><td><b>${team.count}</b></td>
         <td>${esc(fillFmtSec(teamAvg))}</td><td>${teamNorm===null?'—':teamNorm+'%'}</td>
-        <td><b>${esc(fillFmtDur(team.secs))}</b></td><td>${team.inWork} в работе</td>
+        <td><b>${esc(fillFmtDur(team.secs))}</b></td><td>${team.inWork} в работе${team.hold?` · ${team.hold} отложено`:''}</td>
       </tr></tfoot>`:''}
       </table></div>
       <div class="ft-legend">
@@ -392,6 +426,8 @@ function renderFilling(){
   const rl=$('fillReload'); if(rl) rl.onclick=()=>fillRefresh();
   $('main').querySelectorAll('[data-fillopen]').forEach(b=>b.onclick=()=>orderModal(b.dataset.fillopen));
   $('main').querySelectorAll('[data-fillrel]').forEach(b=>b.onclick=()=>fillRelease(b.dataset.fillrel));
+  $('main').querySelectorAll('[data-fillhold]').forEach(b=>b.onclick=()=>fillHold(b.dataset.fillhold,true));
+  $('main').querySelectorAll('[data-fillunhold]').forEach(b=>b.onclick=()=>fillHold(b.dataset.fillunhold,false));
   $('main').querySelectorAll('[data-filltab]').forEach(b=>b.onclick=()=>fillSetTab(b.dataset.filltab));
   const fi=$('fillFromInp'); if(fi) fi.onchange=()=>{
     fillFrom=fi.value||'';
