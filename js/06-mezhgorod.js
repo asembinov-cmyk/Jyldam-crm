@@ -21,28 +21,31 @@ function warehousePickupCityId(whId){
 // вторник → среда, четверг → пятница, суббота → воскресенье. Понедельник отдельно не донорит
 // никому — перед ним сразу воскресенье, тоже день отправки, разрыва нет.
 const INTERCITY_LIMITED_SCHEDULE_CITIES=['тараз','костанай','петропавловск'];
-// по дате ОТПРАВКИ возвращает список дат ЗАБОРА, заказы за которые нужно учитывать —
-// саму дату всегда, и день-донор перед ней, если он есть
-function intercityRollupDates(dateStr){
-  const d=new Date(dateStr+'T00:00:00');
-  const dow=d.getDay(); // 0=вс,1=пн,2=вт,3=ср,4=чт,5=пт,6=сб
-  const hasDonor=(dow===3)||(dow===5)||(dow===0); // ср←вт, пт←чт, вс←сб
-  const dates=[dateStr];
-  // День-донор считаем строкой, а не через toISOString: в поясе +5 он уезжал на сутки назад
-  // (та же ловушка, что и в окне транзита ниже).
-  if(hasDonor)dates.push(shiftDateStr(dateStr,-1));
-  return dates;
-}
+// Список городов с редким расписанием оставлен как справка: отдельного правила по нему
+// больше нет — окно в INTERCITY_TRANSIT_MAX_DAYS дней покрывает и дни-доноры, и любые
+// пропущенные рейсы.
 // города, куда со склада Алматы заказы едут НЕ напрямую, а через Астану (сначала едут в Астану,
 // это занимает день, и уже оттуда дальше по городам вместе с астанинскими заказами). Поэтому:
 //  - при отправке СО СКЛАДА АЛМАТЫ в эти города заказов быть не должно вообще (их забирает Астана)
 //  - при отправке СО СКЛАДА АСТАНА в эти города — дополнительно подтягиваются заказы, забранные
 //    в Алматы НА ДЕНЬ РАНЬШЕ (успели доехать до Астаны только к этому дню)
+// Города, куда со склада Астана заказы едут, ПОДТЯГИВАЯ по пути забранные в Алматы (транзит).
+// Список оставлен как справка, но правилом он больше не является — см. intercityViaAstana().
 const INTERCITY_VIA_ASTANA_CITIES=['усть-каменогорск','семей','костанай','павлодар','петропавловск','караганд','кокшетау','сатпаев','жезк','актобе','уральск','актау','атырау'];
 // со склада Алматы отправка идёт напрямую ТОЛЬКО в эти города — весь остальной список городов
 // не должен даже появляться в выборе при складе Алматы (едут через Астану транзитом, либо это
 // внутригородские, либо просто не обслуживаются напрямую с Алматы)
 const INTERCITY_ALMATY_ALLOWED_CITIES=['астана','шымкент','тараз','кызылорда','талдыкорган'];
+// ТРАНЗИТ ЧЕРЕЗ АСТАНУ — правило, а не список. Со склада Алматы уезжают только пять городов
+// выше; всё остальное физически едет Алматы → Астана → город, значит и подтягиваться должно
+// из Астаны. Раньше тут стоял перечень из тринадцати городов, и любой город вне его (новый
+// в справочнике, редкое направление) попадал в мёртвую зону: с Алматы не отправить, из
+// Астаны не подтянуть — заказ висел непривязанным сколько угодно долго.
+function intercityViaAstana(destNm){
+  const nm=String(destNm||'').trim().toLowerCase();
+  if(!nm)return false;
+  return !INTERCITY_ALMATY_ALLOWED_CITIES.some(n=>nm.includes(n));
+}
 // Сколько дней назад ищем транзитные заказы из Алматы. Не «сколько угодно»: иначе в свежую
 // отправку однажды подтянулся бы заказ полугодовой давности, который по факту потеряли или
 // отменили, и его стоимость легла бы на сегодняшнюю коробку.
@@ -64,13 +67,18 @@ function ordersForIntercity(cityId,date,whId){
   const destNm=(courierCityName(cityId)||'').toLowerCase();
   // отправка города самого в себя не имеет смысла (склад Астана → город получения Астана и т.п.)
   if(whCityNm&&destNm&&whCityNm===destNm)return [];
-  const isViaAstana=INTERCITY_VIA_ASTANA_CITIES.some(n=>destNm.includes(n));
+  const isViaAstana=intercityViaAstana(destNm);
   const isAlmatyWh=whCityNm.includes('алматы');
   const isAstanaWh=whCityNm.includes('астана');
   // со склада Алматы — только 5 разрешённых городов, все остальные исключаем целиком
   if(isAlmatyWh&&!INTERCITY_ALMATY_ALLOWED_CITIES.some(n=>destNm.includes(n)))return [];
-  const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>destNm.includes(n));
-  const allowedDates=(date&&isLimited)?intercityRollupDates(date):null;
+  // СВОЙ ГОРОД. Раньше брались только заказы, забранные РОВНО в день отправки, а для городов
+  // с редким расписанием — ещё и «день-донор» (intercityRollupDates). Болезнь та же, что была
+  // у транзита: заказ, не уехавший в свой день, выпадал из выдачи навсегда и копился
+  // непривязанным. Теперь берём всё незабранное вплоть до дня отправки, в пределах
+  // INTERCITY_TRANSIT_MAX_DAYS — дни-доноры этим правилом покрыты целиком.
+  // Молча ничего не уедет: при создании отправки список заказов показывается галочками.
+  const ownFrom=date?shiftDateStr(date,-INTERCITY_TRANSIT_MAX_DAYS):null;
   // ТРАНЗИТ ЧЕРЕЗ АСТАНУ. Заказ, забранный в Алматы, физически едет Алматы → Астана → город,
   // и в алматинскую коробку попасть не может: со склада Алматы разрешены только пять городов.
   // Значит его забирает отправка из Астаны.
@@ -94,7 +102,7 @@ function ordersForIntercity(cityId,date,whId){
     const d=(o.pickup_date||o.created_at||'').slice(0,10);
     const isTransitOrder=almatyCityId&&o.pickup_city_id===almatyCityId&&d&&d<=transitTo&&d>=transitFrom;
     if(date){
-      const matchesOwnDay=allowedDates?allowedDates.includes(d):d===date;
+      const matchesOwnDay=!!d&&d<=date&&d>=ownFrom;
       if(!matchesOwnDay&&!isTransitOrder)return false;
     }
     // фильтр по складу: свой город забора, ИЛИ транзитный заказ из Алматы (для Астаны)
@@ -515,7 +523,7 @@ function intercityPlanAssign(){
       // свой город: заказ забран в том же городе, что и склад, не позже дня отправки
       if(whNm===pickupNm)return d<=sd;
       // транзит: забран в Алматы, уезжает из Астаны, и успел доехать (минимум сутки)
-      const viaAstana=INTERCITY_VIA_ASTANA_CITIES.some(n=>destNm.includes(n));
+      const viaAstana=intercityViaAstana(destNm);
       if(whNm.includes('астана')&&almatyId&&o.pickup_city_id===almatyId&&viaAstana)return dayBefore(d,sd);
       return false;
     }).sort((a,b)=>(a.ship_date||'').localeCompare(b.ship_date||''));
