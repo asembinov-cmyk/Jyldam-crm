@@ -622,13 +622,22 @@ function shipmentCityName(whId){
   });
   return city?(city.name||'').trim().toLowerCase():'';
 }
-// Сколько дней назад ищем заказ для УЖЕ СОЗДАННОЙ отправки при разборе накопившегося.
-// К ежедневной работе отношения не имеет: там окно ровно сутки. Здесь нужен предел, иначе
-// заказ месячной давности лёг бы в свежую коробку и уменьшил долю тем, кто в ней реально ехал.
-const INTERCITY_BACKLOG_MAX_DAYS=14;
+// Насколько далеко от дня забора ищем уже созданную отправку при разборе накопившегося.
+// К ежедневной работе отношения не имеет: там окно ровно сутки. Предел нужен, чтобы заказ
+// не лёг в коробку, ушедшую спустя месяцы, — но он шире окна, потому что разбирают как раз
+// то, что залежалось.
+const INTERCITY_BACKLOG_MAX_DAYS=45;
+// С какой даты забора разбирать. По умолчанию — начало текущего месяца: именно за месяц
+// накопившееся и разбирают, а прошлые месяцы уже закрыты по деньгам.
+//
+// Значение по умолчанию считаем ЛЕНИВО, а не при загрузке файла: localToday() объявлена
+// в js/10-zayavki.js, то есть позже этого файла, и вызов на верхнем уровне роняет весь
+// скрипт (см. CLAUDE.md, раздел 9, пункт 2 — «Cannot access before initialization»).
+let icAssignFrom='';
+const icAssignFromDate=()=>icAssignFrom||(localToday().slice(0,8)+'01');
 function intercityPlanAssign(){
   const shipments=(S.shipments||[]).filter(s=>s.dest_city_id&&s.ship_date);
-  const why={candidates:0,shipments:shipments.length,noCity:0,dateNoFit:0,whUnknown:0,badRoute:0};
+  const why={candidates:0,shipments:shipments.length,noCity:0,dateNoFit:0,whUnknown:0,badRoute:0,tooOld:0};
   const plan={};   // shipment_id → {ship, add:[]}
   const skipped=[];
   const nameOf=id=>(courierCityName(id)||'').trim().toLowerCase();
@@ -644,6 +653,7 @@ function intercityPlanAssign(){
     const destNm=nameOf(o.courier_city_id);
     const d=(o.pickup_date||o.created_at||'').slice(0,10);
     if(!d)return;
+    if(d<icAssignFromDate()){why.tooOld++;return;}
     why.candidates++;
     const notOlder=shiftDateStr(d,INTERCITY_BACKLOG_MAX_DAYS);
     let missing=0,placed=0,sawCity=false,sawDate=false;
@@ -697,21 +707,40 @@ function intercityWhyHtml(why,skipped){
     ${line(why.whUnknown,'склад отправки не сопоставился ни с одним городом. Назовите склад так же, как город («Астана», «Алматы»), либо добавьте город в справочник')}
     ${line(why.dateNoFit,'все отправки в этот город ушли РАНЬШЕ, чем заказ забрали — ему нужна новая')}
     ${line(why.badRoute,'маршрут не совпал: со склада Алматы эти города не возят, а отправки из Астаны нет')}
+    ${line(why.tooOld,'забраны раньше выбранной даты — сдвиньте её, если их тоже надо разобрать')}
   </ul>`;
 }
 function intercityAssignModal(){
-  const {rows,skipped,why}=intercityPlanAssign();
+  // Плана два состояния — «что нашлось» и «почему нет», — и оба зависят от выбранной даты.
+  // Поэтому тело окна строим функцией и перерисовываем при смене даты, не закрывая окно.
   const money=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
-  const totalAdd=rows.reduce((a,r)=>a+r.add.length,0);
-  if(!totalAdd){
-    showModal('Разложить по отправкам',
+  let plan=intercityPlanAssign();
+  const dateBar=()=>`<div class="filters" style="margin:0 0 12px">
+      <label class="date-field"><span>Заказы забором с</span>
+        <input type="date" id="icAssignFrom" value="${esc(icAssignFromDate())}" max="${esc(localToday())}"></label>
+      <span class="hint" style="align-self:center">Отправку под заказ ищем в пределах
+        ${INTERCITY_BACKLOG_MAX_DAYS} дней после забора, самую раннюю подходящую.</span>
+    </div>`;
+  const render=()=>{
+    const box=document.querySelector('.modal-body');
+    if(box){box.innerHTML=bodyHtml();bind();}
+    const ttl=document.querySelector('.modal-head h3');
+    if(ttl)ttl.textContent=`Разложить по отправкам · ${totalAdd()} заказов`;
+    const sv=document.querySelector('[data-save]');
+    if(sv)sv.disabled=!totalAdd();
+  };
+  const bind=()=>{
+    const f=$('icAssignFrom');
+    if(f)f.onchange=e=>{icAssignFrom=e.target.value||'';plan=intercityPlanAssign();render();};
+  };
+  const totalAdd=()=>plan.rows.reduce((a,r)=>a+r.add.length,0);
+  const bodyHtml=()=>{
+    const {rows,skipped,why}=plan;
+    if(!totalAdd())return dateBar()+
       `<div class="big" style="margin-bottom:6px">Ни один заказ не лёг в существующие отправки</div>
        <p class="hint" style="margin:0">Вот по каким причинам:</p>
-       ${intercityWhyHtml(why,skipped)}`,
-      null,{readonly:true,wide:true,closeLabel:'Закрыть'});
-    return;
-  }
-  const body=`
+       ${intercityWhyHtml(why,skipped)}`;
+    return dateBar()+`
     <p class="hint" style="margin-bottom:12px">Заказы уехали, но к коробкам их не приписали.
       Ниже — куда каждый из них встанет. <b>Стоимость коробки делится на число заказов</b>,
       поэтому доля каждого заказа в этих отправках уменьшится — включая те, что уже в них.
@@ -735,8 +764,11 @@ function intercityAssignModal(){
     </tbody></table></div>
     ${skipped.length?`<p class="hint" style="margin-top:12px">Останутся без отправки: <b>${skipped.length}</b> заказов.
       Почему:</p>${intercityWhyHtml(why,skipped)}`:''}`;
-  showModal(`Разложить по отправкам · ${totalAdd} заказов`,body,async()=>{
-    if(!confirm(`Приписать ${totalAdd} заказов к ${rows.length} отправкам?\n\nДоля за заказ в них пересчитается, и прибыль за эти месяцы изменится.`))return false;
+  };
+  showModal(`Разложить по отправкам · ${totalAdd()} заказов`,bodyHtml(),async()=>{
+    const rows=plan.rows, n=totalAdd();
+    if(!n){toast('Раскладывать нечего');return false;}
+    if(!confirm(`Приписать ${n} заказов к ${rows.length} отправкам?\n\nДоля за заказ в них пересчитается, и прибыль за эти месяцы изменится.`))return false;
     let okCnt=0,errCnt=0;
     for(const r of rows){
       const ids=[...new Set([...(r.ship.order_ids||[]),...r.add.map(o=>o.id)])];
@@ -759,4 +791,5 @@ function intercityAssignModal(){
     toast(errCnt?`Разложено ${okCnt}, с ошибками ${errCnt}`:`Разложено заказов: ${okCnt}`,6000);
     renderIntercity();return true;
   },{wide:true,saveLabel:'Разложить'});
+  bind();  // поле даты живёт внутри окна — привязываем после того, как оно нарисовано
 }
