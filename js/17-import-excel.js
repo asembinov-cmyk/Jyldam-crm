@@ -165,11 +165,22 @@ function impPreviewModal(fileName, rows){
     const fresh = ok.filter(r => !exists.has(r.track));
     if(!fresh.length){ toast('Все эти заказы уже загружены'); return false; }
     busy = true;
+    // ЗАРАНЕЕ ВЫДАННЫЕ БЛАНКИ. Если этот трек мы сами выпустили и отдали партнёру
+    // (db/17), заказ должен сесть НА ТОТ ЖЕ номер: Казпочта выдала ШПИ именно под него,
+    // и новый код развёл бы их между собой — у неё один номер заказа, у нас другой.
+    const poolByTrack = new Map();
+    try{
+      const { data } = await sb.from('track_pool').select('id,code,track,amount,post_ip_id')
+        .in('track', fresh.map(r => r.track)).is('order_id', null);
+      (data || []).forEach(x => poolByTrack.set(String(x.track || '').trim(), x));
+    }catch(e){ console.error('pool lookup', e); } // таблицы может не быть — тогда как раньше
     const mail = (S.delivery || []).find(d => /почт/i.test(d.name || ''));
     const bar = (typeof baraholkaReady === 'function' && baraholkaReady());
     const now = new Date().toISOString();
-    const built = fresh.map(r => ({
-      code: genOrderCode(),
+    const built = fresh.map(r => {
+      const pool = poolByTrack.get(String(r.track || '').trim());
+      return {
+      code: pool ? pool.code : genOrderCode(),
       partner_id: pt.id,
       sender: pt.name,
       client: r.client,
@@ -196,8 +207,25 @@ function impPreviewModal(fileName, rows){
       ...(typeof fillReady === 'function' && fillReady()
         ? { filled_at: now, filled_by: (S.me && S.me.id) || null,
             filled_by_name: 'загрузка из Excel' } : {}),
-    }));
+      // ИП с бланка, а не из настроек: бланк уже напечатан и переиграть его нечем
+      ...(pool && pool.post_ip_id ? { post_ip_id: pool.post_ip_id } : {}),
+    };});
     const made = await insertOrderRows(built);
+    // Отмечаем в пуле, какой заказ сел на номер. Если не вышло — заказ уже создан и
+    // работает, потеряется только отметка, поэтому молчать тут нельзя.
+    if(poolByTrack.size && made.length){
+      const nowIso = new Date().toISOString();
+      let bound = 0;
+      for(const o of made){
+        const pool = poolByTrack.get(String(o.track || '').trim());
+        if(!pool) continue;
+        const { error } = await sb.from('track_pool')
+          .update({ order_id: o.id, used_at: nowIso }).eq('id', pool.id);
+        if(error) console.error('pool bind', error); else bound++;
+      }
+      if(bound) toast(`Из них по выданным бланкам: ${bound}`, 5000);
+      if(bound < poolByTrack.size) toast('Часть бланков не отметилась в пуле — заказы созданы, проверьте раздел «Бланки»', 7000);
+    }
     const skipped = rows.length - made.length;
     toast(`Создано заказов: ${made.length}${skipped ? ` · пропущено: ${skipped}` : ''}`, 6000);
     logAction('import', 'orders', { entity_label: fileName, meta: { created: made.length, skipped } });

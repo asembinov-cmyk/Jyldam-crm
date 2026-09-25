@@ -324,4 +324,5 @@ function render(){
   else if(S.tab==='finance')renderFinance();
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
+  else if(S.tab==='blanks')renderBlanks();
 }

@@ -781,7 +781,7 @@ function canMod(key){
   if(S.myPerms[permKey]&&typeof S.myPerms[permKey].view!=='undefined')return !!S.myPerms[permKey].view;
   // фолбэк: старая привязка модулей к базовым правам
   const fb={dashboard:'orders',pickups:'pickups',orders:'orders',courier:'orders',mail:'orders',
-    intercity:null,cash:null,sorting:null,filling:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
+    intercity:null,blanks:null,cash:null,sorting:null,filling:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
     users:'users',settings:'directories'};
   const base=fb[key];
   if(base===null)return isAdminBase(); // модули, что были только для админа
@@ -919,6 +919,7 @@ function buildNav(opts){
     if(canMod('courier'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
     if(canMod('mail'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
     if(canMod('intercity'))delivery.push({k:'intercity',label:'Отправки межгород',icon:'intercity'});
+    if(canMod('blanks'))delivery.push({k:'blanks',label:'Бланки Казпочты',icon:'mail'});
     if(isAdmin()||canMod('ket_orders'))delivery.push({k:'ket_orders',label:'SPA трафик',icon:'traffic'});
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
 
