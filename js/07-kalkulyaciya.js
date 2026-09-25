@@ -188,6 +188,36 @@ function calcSalesTotalSalary(period){
   ids.forEach(id=>{sum+=calcSalesNorm(id,'salary',period);});
   return sum;
 }
+// таблицы может ещё не быть (db/16) — тогда блок не показываем и считаем по-старому
+const processorNormsReady=()=>Array.isArray(S.calcProcessorNorms);
+// ставка обработчика (оклад/за заказ) по id и периоду — как у менеджеров продаж
+function calcProcessorNorm(procId,key,period){
+  if(!procId)return 0;
+  const all=S.calcProcessorNorms||[];
+  let row=period?all.find(r=>r.processor_id===procId&&r.period===period):null;
+  if(!row&&period)row=all.filter(r=>r.processor_id===procId&&r.period&&r.period<period).sort((a,b)=>b.period.localeCompare(a.period))[0];
+  if(!row)row=all.find(r=>r.processor_id===procId&&!r.period)||all.find(r=>r.processor_id===procId);
+  return row&&row[key]!=null&&row[key]!==''?parseFloat(row[key]):0;
+}
+// сумма окладов всех обработчиков за период (общий котёл)
+function calcProcessorTotalSalary(period){
+  let sum=0;
+  (S.processors||[]).forEach(pr=>{sum+=calcProcessorNorm(pr.id,'salary',period);});
+  return sum;
+}
+// Обработчиков стало двое, и платят им по-разному, поэтому появились персональные
+// строки. Переход плавный и раздельный по двум статьям: пока персональные оклады не
+// заданы, действует прежний общий оклад; пока у обработчика заказа нет своей ставки
+// за заказ — прежняя общая. Иначе в день выполнения SQL зарплата обработчика молча
+// выпала бы из расходов и прибыль подскочила бы на пустом месте.
+function calcProcessorSalaryTotal(period){
+  const personal=calcProcessorTotalSalary(period);
+  return personal>0?personal:calcNorm('salary_processor',period);
+}
+function calcProcessorPerOrder(o,period){
+  const personal=o&&o.processor_id?calcProcessorNorm(o.processor_id,'per_order',period):0;
+  return personal>0?personal:calcNorm('perorder_processor',period);
+}
 // заборщик заказа: через заявку, из которой создан заказ (pickup.courier_id)
 function orderPickerCourier(o){
   if(!o.pickup_id)return null;
@@ -209,12 +239,12 @@ function orderCourierFinance(o){
   const pack=calcNorm('pack',P);
   const adminCourier=calcNorm('admin_courier',P); // фикс 120 по умолчанию
   // ОБЩИЙ ОКЛАД = сумма окладов менеджеров продаж (все трое) + оклад обработчика + фонд логиста, ÷ все заказы месяца
-  const totalSalary=calcSalesTotalSalary(P)+calcNorm('salary_processor',P)+calcNorm('fund_logist',P);
+  const totalSalary=calcSalesTotalSalary(P)+calcProcessorSalaryTotal(P)+calcNorm('fund_logist',P);
   const commonSalary=Math.round((totalSalary/monthOrders)*100)/100;
   // менеджер по продажам: персональная ставка за заказ того менеджера, что указан в заказе
   const manager=o.sales_id?calcSalesNorm(o.sales_id,'per_order',P):0;
   // менеджер обработчик: ставка за заказ (80), на все заказы
-  const processor=calcNorm('perorder_processor',P);
+  const processor=calcProcessorPerOrder(o,P);
   const totalCost=intercity+courierPay+pickerPay+blank+pack+adminCourier+commonSalary+manager+processor;
   const remainder=revenue-totalCost;
   return {revenue,intercity,courierPay,pickerId,pickerPay,blank,pack,adminCourier,commonSalary,
@@ -319,11 +349,11 @@ function calcOrder(o){
     items=postItems.concat(fundItems);
   }
   // статьи «оклад + за заказ»: обработчик (общий) + менеджер продаж (персональный)
-  CALC_SALARY_FIELDS.forEach(f=>{
-    const salary=Math.round((calcNorm(f.salaryKey,P)/monthOrders)*100)/100;
-    const per=calcNorm(f.perKey,P);
-    items.push({key:f.salaryKey,label:f.label,amount:salary+per});
-  });
+  // обработчик: оклады всех в котёл ÷ заказы месяца + ставка за заказ того,
+  // кто указан в заказе (персональная, иначе общая)
+  const procCommon=Math.round((calcProcessorSalaryTotal(P)/monthOrders)*100)/100;
+  const procPer=calcProcessorPerOrder(o,P);
+  items.push({key:'salary_processor',label:'Менеджер обработчик',amount:procCommon+procPer});
   // менеджер продаж: оклады всех в котёл ÷ заказы месяца + персональная ставка за заказ
   const P2=orderPeriodStr(o);
   const salesCommon=Math.round((calcSalesTotalSalary(P2)/monthOrders)*100)/100;
@@ -801,6 +831,19 @@ function renderCalcNorms(){
           <input type="number" min="0" step="0.01" data-calcnorm="${f.salaryKey}" value="${cs[f.salaryKey]!=null&&cs[f.salaryKey]!==''?esc(cs[f.salaryKey]):''}" placeholder="0">
           <input type="number" min="0" step="0.01" data-calcnorm="${f.perKey}" value="${cs[f.perKey]!=null&&cs[f.perKey]!==''?esc(cs[f.perKey]):''}" placeholder="0">
         </div>`).join('')}
+        ${processorNormsReady()?`<h3 class="calc-h" style="margin-top:18px">Менеджеры обработчики (персонально)</h3>
+        <p class="calc-note">Оклад каждого идёт в общий котёл и делится на все заказы месяца.
+          Ставка за заказ применяется к заказам этого обработчика. Пока поля пусты, действуют
+          общие значения из строки «Менеджер обработчик» выше.</p>
+        <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Обработчик</span><span>Оклад/мес</span><span>За заказ</span></div>
+        ${(S.processors||[]).map(pr=>{
+          const salV=calcProcessorNorm(pr.id,'salary',P);const perV=calcProcessorNorm(pr.id,'per_order',P);
+          return `<div class="calc-city-row" data-procpay="${pr.id}" style="grid-template-columns:1fr 110px 110px">
+            <span class="ccr-name">${esc(pr.fio)}</span>
+            <input type="number" min="0" step="0.01" data-psalary="${pr.id}" value="${salV?esc(salV):''}" placeholder="0">
+            <input type="number" min="0" step="0.01" data-pper="${pr.id}" value="${perV?esc(perV):''}" placeholder="0">
+          </div>`;
+        }).join('')}`:''}
         <h3 class="calc-h" style="margin-top:18px">Менеджеры по продажам (персонально)</h3>
         <p class="calc-note">Оклад каждого идёт в общий котёл. Ставка за заказ применяется к заказам этого менеджера.</p>
         <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Менеджер</span><span>Оклад/мес</span><span>За заказ</span></div>
@@ -937,6 +980,18 @@ async function saveCalcSettings(){
       const up=await dbUpdate('pricing_settings',S.pricing.id,pr);
       if(up)S.pricing=up;
     }
+    // ставки обработчиков за период — так же, как у менеджеров продаж
+    const procRows=document.querySelectorAll('[data-procpay]');
+    for(const el of procRows){
+      const pid=el.dataset.procpay;
+      const sal=el.querySelector(`[data-psalary="${pid}"]`).value.trim();
+      const per=el.querySelector(`[data-pper="${pid}"]`).value.trim();
+      const existing=(S.calcProcessorNorms||[]).find(r=>r.processor_id===pid&&r.period===P);
+      if(sal===''&&per===''&&!existing)continue;
+      const payload={processor_id:pid,period:P,salary:sal===''?0:parseFloat(sal)||0,per_order:per===''?0:parseFloat(per)||0};
+      if(existing){const u=await dbUpdate('calc_processor_norms',existing.id,payload);if(u)Object.assign(existing,u);}
+      else{const u=await dbInsert('calc_processor_norms',payload);if(u){if(!S.calcProcessorNorms)S.calcProcessorNorms=[];S.calcProcessorNorms.push(u);}}
+    }
     const s=$('calcSaved');if(s){s.textContent='Сохранено ✓';setTimeout(()=>{if(s)s.textContent='';},2500);}
     toast('Нормативы сохранены за '+P);
   }catch(e){console.error(e);toast('Ошибка сохранения');}
@@ -1031,6 +1086,27 @@ function renderCalcSummary(){
       return {...r,salary,total:r.margin+r.per+salary,name:salesName(r.id)};
     }).sort((a,b)=>b.total-a.total);
   })();
+  // Обработчиков двое, платят им по-разному — считаем каждому: сколько заказов он
+  // обработал, сколько набежало по ставке за заказ и какой у него оклад.
+  const procRowsSum=(()=>{
+    const by={};
+    calcs.forEach(({o})=>{
+      if(!o.processor_id)return;
+      const r=by[o.processor_id]||(by[o.processor_id]={id:o.processor_id,cnt:0,per:0});
+      r.cnt++;r.per+=calcProcessorPerOrder(o,sel);
+    });
+    (S.processors||[]).forEach(pr=>{
+      const sal=calcProcessorNorm(pr.id,'salary',sel);
+      if(sal&&!by[pr.id])by[pr.id]={id:pr.id,cnt:0,per:0};
+    });
+    return Object.values(by).map(r=>{
+      const salary=calcProcessorNorm(r.id,'salary',sel);
+      const pr=(S.processors||[]).find(x=>x.id===r.id);
+      return {...r,salary,total:r.per+salary,name:pr?pr.fio:'—'};
+    }).sort((a,b)=>b.total-a.total);
+  })();
+  const procTotals=procRowsSum.reduce((a,r)=>({cnt:a.cnt+r.cnt,per:a.per+r.per,salary:a.salary+r.salary,
+    total:a.total+r.total}),{cnt:0,per:0,salary:0,total:0});
   const salesTotals=salesRows.reduce((a,r)=>({cnt:a.cnt+r.cnt,margin:a.margin+r.margin,per:a.per+r.per,
     salary:a.salary+r.salary,total:a.total+r.total}),{cnt:0,margin:0,per:0,salary:0,total:0});
   const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
@@ -1064,6 +1140,21 @@ function renderCalcSummary(){
         <td><b>Итого</b></td><td><b>${salesTotals.cnt}</b></td><td><b>${fmtMoney(salesTotals.margin)}</b></td>
         <td><b>${fmtMoney(salesTotals.per)}</b></td><td><b>${fmtMoney(salesTotals.salary)}</b></td>
         <td><b>${fmtMoney(salesTotals.total)}</b></td></tr></tfoot></table></div>
+    </div>`:''}
+    ${procRowsSum.length?`<div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Заработок менеджеров обработчиков</h3>
+      <p class="calc-note">Заказы считаются по обработчику, указанному в самом заказе.
+        Оклад показан целиком за месяц, он не зависит от числа заказов.</p>
+      <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
+        <th>Обработчик</th><th>Заказов</th><th>За заказ</th><th>Оклад</th><th>Итого</th>
+      </tr></thead><tbody>
+        ${procRowsSum.map(r=>`<tr>
+          <td>${esc(r.name)}</td><td>${r.cnt}</td>
+          <td>${fmtMoney(r.per)}${r.cnt?`<small class="cell-time">${fmtMoney(r.per/r.cnt)} на заказ</small>`:''}</td>
+          <td>${fmtMoney(r.salary)}</td><td><b>${fmtMoney(r.total)}</b></td></tr>`).join('')}
+      </tbody><tfoot><tr style="border-top:2px solid var(--line)">
+        <td><b>Итого</b></td><td><b>${procTotals.cnt}</b></td><td><b>${fmtMoney(procTotals.per)}</b></td>
+        <td><b>${fmtMoney(procTotals.salary)}</b></td><td><b>${fmtMoney(procTotals.total)}</b></td></tr></tfoot></table></div>
     </div>`:''}
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по типу доставки</h3>

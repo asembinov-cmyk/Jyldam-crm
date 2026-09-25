@@ -359,6 +359,7 @@ async function loadAll(){
     dbList('calc_city_norms',{}).catch(()=>[]),
     dbList('calc_courier_norms',{}).catch(()=>[]),
     dbList('calc_sales_norms',{}).catch(()=>[]),
+    dbList('calc_processor_norms',{}).catch(()=>null), // null = таблицы нет, считаем по общей строке
     dbList('shipments',{}).catch(()=>[]),
     dbList('warehouses',{order:'name'}).catch(()=>[]),
     dbList('products',{order:'name',select:PRODUCT_LIST_COLS}).catch(()=>[]),
@@ -378,10 +379,10 @@ async function loadAll(){
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
-  S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
-  S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];S.wh_reservations=tail[11]||[];
-  S.finance_kassa=tail[12]||[];S.finance_categories=tail[13]||[];S.finance_income_categories=tail[14]||[];S.finance_partners=tail[15]||[];S.finance_entries=tail[16]||[];
-  S.pricing=(tail[17]&&tail[17][0])||null; // null = таблицы ещё нет, действуют значения из кода
+  S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];S.calcProcessorNorms=tail[5];
+  S.shipments=tail[6]||[];S.warehouses=tail[7]||[];S.products=tail[8]||[];S.warehouse_partners=tail[9]||[];S.wh_moves=tail[10]||[];S.wh_order_items=tail[11]||[];S.wh_reservations=tail[12]||[];
+  S.finance_kassa=tail[13]||[];S.finance_categories=tail[14]||[];S.finance_income_categories=tail[15]||[];S.finance_partners=tail[16]||[];S.finance_entries=tail[17]||[];
+  S.pricing=(tail[18]&&tail[18][0])||null; // null = таблицы ещё нет, действуют значения из кода
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк за всё время) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем.
   // Сначала — быстрый узкий запрос ТОЛЬКО за сегодня (большинство экранов по умолчанию и
@@ -473,11 +474,12 @@ async function refreshForTab(tab){
     }else if(tab==='calc'){
       // нормативы грузим параллельно (быстрее, чем по очереди)
       try{
-        const [cs,cc,cn,sn]=await Promise.all([
+        const [cs,cc,cn,sn,pn]=await Promise.all([
           dbList('calc_settings',{}),dbList('calc_city_norms',{}),
-          dbList('calc_courier_norms',{}),dbList('calc_sales_norms',{})
+          dbList('calc_courier_norms',{}),dbList('calc_sales_norms',{}),
+          dbList('calc_processor_norms',{}).catch(()=>null)
         ]);
-        S.calcSettingsAll=cs;S.calcCityNorms=cc;S.calcCourierNorms=cn;S.calcSalesNorms=sn;
+        S.calcSettingsAll=cs;S.calcCityNorms=cc;S.calcCourierNorms=cn;S.calcSalesNorms=sn;S.calcProcessorNorms=pn;
         try{const pr=await dbList('pricing_settings',{});if(pr&&pr[0])S.pricing=pr[0];}catch(e){}
       }catch(e){}
       // заказы уже загружены при входе — перезагружаем только если их нет
