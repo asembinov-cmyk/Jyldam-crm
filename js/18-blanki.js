@@ -196,7 +196,7 @@ function renderBlanksBatch(id){
     return `<tr class="open" style="${COLOR[s]||''}">
       <td data-label="Номер">${esc(r.code)}</td>
       <td data-label="Трек">${r.track?esc(r.track):'<span class="muted">—</span>'}</td>
-      <td data-label="Состояние">${BLANK_STATE_LABEL[s]}${r.error&&!r.track?`<small class="cell-time">${esc(String(r.error).slice(0,120))}</small>`:''}</td>
+      <td data-label="Состояние">${BLANK_STATE_LABEL[s]}${r.error&&!r.track?`<small class="cell-time" style="white-space:normal;display:block;max-width:520px">${esc(String(r.error))}</small>`:''}</td>
       <td data-label="Заказ">${r.order_id?esc(blanksOrderCode(r.order_id)):'—'}</td>
     </tr>`;
   }).join('');
