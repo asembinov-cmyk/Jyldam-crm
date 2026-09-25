@@ -500,6 +500,7 @@ async function fillFind(){
       .limit(20);
     if(error)throw error;
     fillFindRes=data||[];
+    await fillFindFromLog(fillFindRes);
   }catch(e){
     console.error('fillFind',e);
     fillFindRes=[];
@@ -507,6 +508,40 @@ async function fillFind(){
   }
   fillFindBusy=false;
   fillFindDraw();
+}
+
+// ОТМЕТКИ «КТО ЗАПОЛНИЛ» У СТАРЫХ ЗАКАЗОВ НЕТ — и это не ошибка.
+//
+// `filled_at` проставляется в момент, когда заказ ВПЕРВЫЕ становится обработанным, и
+// только с тех пор, как в базе появились эти колонки (db/11). Всё, что заполнили
+// раньше, отметки не получило и уже не получит: задним числом её взять неоткуда.
+//
+// Зато есть журнал изменений: `dbUpdate` пишет туда запись при каждой правке вместе
+// со списком изменённых полей. Ищем самую раннюю, где ФИО получателя появилось из
+// пустого, — это и есть заполнение. Если такой нет, берём первую правку вообще.
+//
+// Показываем это ОТДЕЛЬНОЙ подписью «по журналу правок», а не подменяем ею настоящую
+// отметку: журнал говорит, кто менял заказ, а не кто сидел и забивал его с бланка.
+async function fillFindFromLog(list){
+  const need=(list||[]).filter(o=>!o.filled_at&&o.id);
+  if(!need.length)return;
+  try{
+    const {data,error}=await sb.from('activity_log')
+      .select('entity_id,user_name,created_at,action,changes')
+      .eq('entity','orders').in('entity_id',need.map(o=>String(o.id)))
+      .order('created_at',{ascending:true}).limit(500);
+    if(error)throw error;
+    const byOrder={};
+    (data||[]).forEach(r=>{(byOrder[String(r.entity_id)]=byOrder[String(r.entity_id)]||[]).push(r);});
+    need.forEach(o=>{
+      const rows=byOrder[String(o.id)]||[];
+      if(!rows.length)return;
+      const filledIt=rows.find(r=>Array.isArray(r.changes)&&r.changes.some(c=>
+        c&&c.field==='client'&&!String(c.old||'').trim()&&String(c.new||'').trim()));
+      const first=filledIt||rows.find(r=>r.action==='update')||rows[0];
+      if(first){o._logName=first.user_name||'';o._logAt=first.created_at;o._logExact=!!filledIt;}
+    });
+  }catch(e){console.error('fillFindFromLog',e);} // журнал мог быть закрыт правами — не беда
 }
 
 // Кто держит заказ сейчас — по тем же правилам, что и очередь: захват живой
@@ -539,14 +574,22 @@ function fillFindDraw(note){
       who=esc(o.filled_by_name||'—');
       when=esc(fmtDateTime(o.filled_at))+(secs!=null?` · за ${Math.round(secs)} сек`:'');
       cls='ff-done';
+    }else if(o._logName){
+      // Заказ заполнен, но до появления отметок — восстановили по журналу правок.
+      who=esc(o._logName)+'<small class="cell-time">по журналу правок</small>';
+      when=esc(fmtDateTime(o._logAt))+(o._logExact?'<small class="cell-time">тогда появилось ФИО получателя</small>':'<small class="cell-time">первая правка заказа</small>');
+      cls='ff-done';
     }else if(claim){
       who=esc(claim.name);
       when=claim.hold?'отложен, держит за собой':'взят в работу, ещё не заполнен';
       cls='ff-work';
     }else{
-      who='<span class="ff-dim">никто</span>';
-      when='ждёт заполнения';
-      cls='ff-wait';
+      // Отличаем «ещё не заполнен» от «заполнен, но кем — не записано»: у старого
+      // заказа с данными писать «ждёт заполнения» было бы прямым враньём.
+      const done=!!(o.client&&String(o.client).trim());
+      who='<span class="ff-dim">'+(done?'не записано':'никто')+'</span>';
+      when=done?'<span class="ff-dim">заполнен до того, как появился учёт</span>':'ждёт заполнения';
+      cls=done?'ff-wait':'ff-wait';
     }
     return `<tr class="${cls}">
       <td data-label="Заказ"><b>${esc(o.code||'—')}</b>${o.sender?`<small class="cell-time">${esc(o.sender)}</small>`:''}</td>
