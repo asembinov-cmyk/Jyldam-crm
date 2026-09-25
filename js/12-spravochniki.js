@@ -1,19 +1,59 @@
 /* ================= МОДУЛЬ: СПРАВОЧНИКИ ================= */
 const canEditDir=()=>can('directories','create')||can('directories','edit');
 
+// Справочников девятнадцать, и одной лентой наверху они давно перестали читаться:
+// строка переносилась на три ряда, и найти нужное было быстрее поиском по странице.
+// Теперь — боковой список по разделам. Названия убраны из подписей там, где раздел
+// и так о них говорит: в «Финансах» это «Кассы», а не «Финансы · Кассы».
+const SET_ICO={
+  pin:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.4 7-11a7 7 0 10-14 0c0 5.6 7 11 7 11z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>',
+  grid:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9h18M9 21V9" stroke="currentColor" stroke-width="1.7"/></svg>',
+  truck:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 7a1 1 0 011-1h9v10H4a1 1 0 01-1-1V7z" stroke="currentColor" stroke-width="1.7"/><path d="M13 10h4l3 3v3h-7v-6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7.5" cy="18" r="1.8" stroke="currentColor" stroke-width="1.7"/><circle cx="16.5" cy="18" r="1.8" stroke="currentColor" stroke-width="1.7"/></svg>',
+  user:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.7"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.7"/><path d="M3 20c0-3.1 2.7-5.2 6-5.2s6 2.1 6 5.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 5.2a3.2 3.2 0 010 6.1M17 14.9c2.4.5 4 2.3 4 5.1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M8.2 12.3l2.6 2.6 5-5.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  bag:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M9 7V5.5A2.5 2.5 0 0111.5 3h1A2.5 2.5 0 0115 5.5V7" stroke="currentColor" stroke-width="1.7"/></svg>',
+  box:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M4 7l8 4 8-4M12 11v10" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  house:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1v-9.5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  card:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 10h18" stroke="currentColor" stroke-width="1.7"/><path d="M7 15h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  out:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 9h13l-3-3M20 15H7l3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  env:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 7l8.5 6 8.5-6" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  label:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M7 10v4M10 10v4M13 10v4M17 10v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  code:'<svg viewBox="0 0 24 24" fill="none"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+const SET_GROUPS=[
+  ['География',[['cities','Города','pin'],['districts','Районы','grid'],['courier_cities','Курьерские города','truck']]],
+  ['Люди',[['couriers','Курьеры (заборщики)','user'],['order_couriers','Курьеры по заказам','user'],
+           ['sales','Менеджеры продаж','users'],['processors','Менеджеры-обработчики','users']]],
+  ['Статусы и типы',[['statuses','Статус забора','check'],['order_statuses','Статус заказа','check'],
+                     ['delivery','Тип доставки','bag']]],
+  ['Партнёры и склады',[['post_ips','ИП для Почты','box'],['warehouses','Склады отправки','house']]],
+  ['Финансы',[['fin_kassa','Кассы','card'],['fin_categories','Категории расходов','out'],
+              ['fin_income_categories','Категории приходов','out'],['fin_partners','Партнёры (финансы)','user']]],
+  ['Казпочта',[['maillabel','Бланк Казпочты','env'],['blanks','Бланки заранее','label']]],
+  ['Разработка',[['apidocs','Документация API','code']]],
+];
+const setAllItems=()=>SET_GROUPS.flatMap(([g,items])=>items.map(it=>[...it,g]));
 function renderSettings(){
-  const dirs=[['cities','Города'],['districts','Районы'],
-    ['couriers','Курьеры (заборщики)'],['order_couriers','Курьеры по заказам'],
-    ['sales','Менеджеры по продажам'],['processors','Менеджеры-обработчики'],
-    ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
-    ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки'],
-    ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории расходов'],['fin_income_categories','Финансы · Категории приходов'],['fin_partners','Финансы · Партнёры'],
-    ['maillabel','Бланк Казпочты'],['blanks','Бланки заранее'],['apidocs','Документация API']];
+  const all=setAllItems();
+  if(!all.some(it=>it[0]===S.dir))S.dir='cities'; // в адресе мог остаться справочник, которого уже нет
+  const side=SET_GROUPS.map(([title,items])=>`
+    <div class="set-group">
+      <div class="set-group-title">${esc(title)}</div>
+      ${items.map(([k,label,ico])=>`<button class="set-item${S.dir===k?' active':''}" data-dir="${k}">
+        ${SET_ICO[ico]||''}<span>${esc(label)}</span></button>`).join('')}
+    </div>`).join('');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
-    <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
-    <div id="dirContent"></div>`;
+    <div class="set-wrap">
+      <select class="set-mobile" id="setPick">${SET_GROUPS.map(([title,items])=>
+        `<optgroup label="${esc(title)}">${items.map(([k,label])=>
+          `<option value="${k}" ${S.dir===k?'selected':''}>${esc(label)}</option>`).join('')}</optgroup>`).join('')}</select>
+      <aside class="set-side">${side}</aside>
+      <div id="dirContent"></div>
+    </div>`;
   $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;saveNav();renderSettings();});
+  if($('setPick'))$('setPick').onchange=e=>{S.dir=e.target.value;saveNav();renderSettings();};
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,

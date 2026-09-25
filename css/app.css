@@ -636,6 +636,29 @@
     border:1px solid var(--line);background:var(--card);color:var(--muted);transition:.15s}
   .subtabs button.active{background:var(--moss);color:#fff;border-color:var(--moss)}
 
+  /* НАСТРОЙКИ: боковой список справочников по разделам. Девятнадцать вкладок
+     одной лентой переносились на три ряда и не читались. */
+  .set-wrap{display:grid;grid-template-columns:252px minmax(0,1fr);gap:18px;align-items:start}
+  .set-side{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px;
+    position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+  .set-group+.set-group{margin-top:6px}
+  .set-group-title{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
+    font-weight:700;padding:12px 12px 6px}
+  .set-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;font-size:14px;
+    font-weight:500;color:var(--ink);background:none;border:0;border-radius:10px;padding:9px 12px;cursor:pointer;
+    transition:.12s}
+  .set-item:hover{background:#f2f4f9}
+  .set-item.active{background:#e8ecfb;color:#2451c4;font-weight:600}
+  .set-item svg{width:18px;height:18px;flex:0 0 18px;opacity:.7}
+  .set-item.active svg{opacity:1}
+  .set-mobile{display:none;font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);
+    border-radius:10px;background:var(--paper);color:var(--ink);width:100%;margin-bottom:4px}
+  @media(max-width:900px){
+    .set-wrap{grid-template-columns:1fr}
+    .set-side{display:none}
+    .set-mobile{display:block}
+  }
+
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
   .stats.stats-5{grid-template-columns:repeat(5,1fr)}
   .simple-pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 10px;flex-wrap:wrap}
