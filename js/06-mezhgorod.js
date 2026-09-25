@@ -28,10 +28,9 @@ function intercityRollupDates(dateStr){
   const dow=d.getDay(); // 0=вс,1=пн,2=вт,3=ср,4=чт,5=пт,6=сб
   const hasDonor=(dow===3)||(dow===5)||(dow===0); // ср←вт, пт←чт, вс←сб
   const dates=[dateStr];
-  if(hasDonor){
-    const donor=new Date(d);donor.setDate(donor.getDate()-1);
-    dates.push(donor.toISOString().slice(0,10));
-  }
+  // День-донор считаем строкой, а не через toISOString: в поясе +5 он уезжал на сутки назад
+  // (та же ловушка, что и в окне транзита ниже).
+  if(hasDonor)dates.push(shiftDateStr(dateStr,-1));
   return dates;
 }
 // города, куда со склада Алматы заказы едут НЕ напрямую, а через Астану (сначала едут в Астану,
@@ -44,6 +43,21 @@ const INTERCITY_VIA_ASTANA_CITIES=['усть-каменогорск','семей
 // не должен даже появляться в выборе при складе Алматы (едут через Астану транзитом, либо это
 // внутригородские, либо просто не обслуживаются напрямую с Алматы)
 const INTERCITY_ALMATY_ALLOWED_CITIES=['астана','шымкент','тараз','кызылорда','талдыкорган'];
+// Сколько дней назад ищем транзитные заказы из Алматы. Не «сколько угодно»: иначе в свежую
+// отправку однажды подтянулся бы заказ полугодовой давности, который по факту потеряли или
+// отменили, и его стоимость легла бы на сегодняшнюю коробку.
+const INTERCITY_TRANSIT_MAX_DAYS=30;
+// Сдвиг ДАТЫ-СТРОКИ на N дней. Считаем в UTC и читаем UTC-полями: `new Date('2026-09-26')`
+// в браузере с поясом +5 при обратном toISOString() даёт 2026-09-25 вместо 2026-09-26, и
+// «вчера» превращалось во «позавчера» — ровно поэтому транзитные заказы и выпадали из выдачи
+// (та же ловушка, из-за которой в CRM есть localToday(), см. CLAUDE.md раздел 8).
+function shiftDateStr(dateStr,days){
+  const [y,m,d]=String(dateStr).slice(0,10).split('-').map(Number);
+  if(!y||!m||!d)return dateStr;
+  const t=new Date(Date.UTC(y,m-1,d));
+  t.setUTCDate(t.getUTCDate()+days);
+  return t.toISOString().slice(0,10);
+}
 function ordersForIntercity(cityId,date,whId){
   const whCityId=whId?warehousePickupCityId(whId):null;
   const whCityNm=(whCityId?cityName(whCityId):'').toLowerCase();
@@ -57,21 +71,28 @@ function ordersForIntercity(cityId,date,whId){
   if(isAlmatyWh&&!INTERCITY_ALMATY_ALLOWED_CITIES.some(n=>destNm.includes(n)))return [];
   const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>destNm.includes(n));
   const allowedDates=(date&&isLimited)?intercityRollupDates(date):null;
-  // для Астаны, отправляющей в один из транзитных городов, вычисляем «вчера» (когда эти заказы
-  // должны были быть забраны в Алматы, чтобы успеть доехать до Астаны к сегодняшней отправке)
-  let almatyCityId=null,transitPrevDate=null;
+  // ТРАНЗИТ ЧЕРЕЗ АСТАНУ. Заказ, забранный в Алматы, физически едет Алматы → Астана → город,
+  // и в алматинскую коробку попасть не может: со склада Алматы разрешены только пять городов.
+  // Значит его забирает отправка из Астаны.
+  //
+  // Раньше окно было ровно сутки: подтягивались только заказы, забранные НАКАНУНЕ. На практике
+  // они лежат в Астане дольше, и всё, что пролежало два дня и больше, выпадало из выдачи и
+  // копилось непривязанным. Теперь берём всё, что забрали не позже чем за день до отправки,
+  // в пределах INTERCITY_TRANSIT_MAX_DAYS. Двойного включения это не создаёт: заказ с привязкой
+  // к любой отправке из выдачи исключён (проверка intercity_shipment_id ниже).
+  let almatyCityId=null,transitFrom=null,transitTo=null;
   if(isAstanaWh&&isViaAstana&&date){
     const almatyCity=(S.cities||[]).find(c=>(c.name||'').trim().toLowerCase().includes('алматы'));
     almatyCityId=almatyCity?almatyCity.id:null;
-    const d=new Date(date+'T00:00:00');d.setDate(d.getDate()-1);
-    transitPrevDate=d.toISOString().slice(0,10);
+    transitTo=shiftDateStr(date,-1);                          // самое позднее: день до отправки
+    transitFrom=shiftDateStr(date,-INTERCITY_TRANSIT_MAX_DAYS); // самое раннее, чтобы не тянуть архив
   }
   return (S.orders||[]).filter(o=>{
     if(!isCourierDelivery(o.delivery_id))return false;
     if(o.courier_city_id!==cityId)return false;
     if(o.intercity_shipment_id)return false;
     const d=(o.pickup_date||o.created_at||'').slice(0,10);
-    const isTransitOrder=almatyCityId&&o.pickup_city_id===almatyCityId&&d===transitPrevDate;
+    const isTransitOrder=almatyCityId&&o.pickup_city_id===almatyCityId&&d&&d<=transitTo&&d>=transitFrom;
     if(date){
       const matchesOwnDay=allowedDates?allowedDates.includes(d):d===date;
       if(!matchesOwnDay&&!isTransitOrder)return false;
@@ -124,7 +145,16 @@ function unassignedIntercityOrdersModal(){
       </tr>`).join('')}
     </tbody></table></div>`
     :'<div class="empty"><div class="big">Непривязанных заказов нет</div>За текущий месяц все межгородние заказы уже привязаны к отправкам.</div>';
-  showModal('🔍 Непривязанные заказы (текущий месяц)',body,null,{readonly:true,wide:true,closeLabel:'Закрыть'});
+  showModal('🔍 Непривязанные заказы (текущий месяц)',
+    body+(groups.length&&can('intercity','edit')?`<div style="margin-top:14px">
+      <button class="btn primary sm" id="icAssign">→ Разложить по уже созданным отправкам</button>
+      <span class="hint" style="margin-left:10px">Покажет, куда встанет каждый, до того как что-то менять.</span></div>`:''),
+    null,{readonly:true,wide:true,closeLabel:'Закрыть'});
+  if($('icAssign'))$('icAssign').onclick=()=>{
+    document.querySelectorAll('.overlay').forEach(e=>e.remove());
+    document.body.classList.remove('modal-open');
+    intercityAssignModal();
+  };
 }
 function renderIntercity(){
   if(!canMod('intercity')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
@@ -442,4 +472,118 @@ async function delShipment(id){
   }
   S.shipments=(S.shipments||[]).filter(x=>x.id!==id);
   toast('Отправка удалена');renderIntercity();
+}
+// ============ РАСКЛАДКА НАКОПИВШИХСЯ ЗАКАЗОВ ПО УЖЕ СОЗДАННЫМ ОТПРАВКАМ ============
+//
+// Пока окно транзита было ровно сутки, всё, что пролежало в Астане дольше, в выдачу не
+// попадало и копилось непривязанным. Эти заказы физически уехали — просто ни к одной
+// коробке их не приписали. Здесь они раскладываются по отправкам, которые уже есть.
+//
+// ЭТО МЕНЯЕТ ДЕНЬГИ ЗАДНИМ ЧИСЛОМ, и по-другому быть не может: стоимость коробки делится
+// на число заказов в ней, добавили заказ — доля каждого уменьшилась. Поэтому:
+//   1) сначала показываем, что именно изменится, и только по кнопке применяем;
+//   2) пересчитываем intercity_cost У ВСЕХ заказов затронутой отправки, а не только у новых,
+//      иначе старые остались бы со старой долей и сумма по коробке перестала бы сходиться.
+//
+// Отправку выбираем САМУЮ РАННЮЮ из подходящих: заказ уехал первым же рейсом, который мог
+// его увезти, а не последним.
+function intercityPlanAssign(){
+  const shipments=(S.shipments||[]).filter(s=>s.dest_city_id&&s.ship_date);
+  const almatyCity=(S.cities||[]).find(c=>(c.name||'').trim().toLowerCase().includes('алматы'));
+  const almatyId=almatyCity?almatyCity.id:null;
+  const dayBefore=(a,b)=>a<b; // забран строго раньше дня отправки
+  const plan={};   // shipment_id → {ship, add:[]}
+  const skipped=[];
+  (S.orders||[]).forEach(o=>{
+    if(!isCourierDelivery(o.delivery_id))return;
+    if(o.intercity_shipment_id)return;                 // уже в какой-то коробке
+    if(!o.courier_city_id)return;
+    const pickupNm=(cityName(o.pickup_city_id)||'').trim().toLowerCase();
+    const destNm=(courierCityName(o.courier_city_id)||'').trim().toLowerCase();
+    if(!pickupNm||!destNm||pickupNm===destNm)return;    // свой город — не межгород
+    const d=(o.pickup_date||o.created_at||'').slice(0,10);
+    if(!d)return;
+    const notOlder=shiftDateStr(d,INTERCITY_TRANSIT_MAX_DAYS); // дальше этой даты заказ уже не «свежий»
+    const fits=shipments.filter(s=>{
+      if(s.dest_city_id!==o.courier_city_id)return false;
+      const whNm=(cityName(warehousePickupCityId(s.warehouse_id))||'').trim().toLowerCase();
+      const sd=(s.ship_date||'').slice(0,10);
+      if(!whNm||!sd)return false;
+      // Тот же предел, что и в выдаче: заказ месячной давности не должен внезапно лечь
+      // в свежую коробку и уменьшить долю тем, кто в ней реально ехал.
+      if(sd>notOlder)return false;
+      // свой город: заказ забран в том же городе, что и склад, не позже дня отправки
+      if(whNm===pickupNm)return d<=sd;
+      // транзит: забран в Алматы, уезжает из Астаны, и успел доехать (минимум сутки)
+      const viaAstana=INTERCITY_VIA_ASTANA_CITIES.some(n=>destNm.includes(n));
+      if(whNm.includes('астана')&&almatyId&&o.pickup_city_id===almatyId&&viaAstana)return dayBefore(d,sd);
+      return false;
+    }).sort((a,b)=>(a.ship_date||'').localeCompare(b.ship_date||''));
+    if(!fits.length){skipped.push(o);return;}
+    const s=fits[0];
+    (plan[s.id]=plan[s.id]||{ship:s,add:[]}).add.push(o);
+  });
+  return {rows:Object.values(plan).sort((a,b)=>(a.ship.ship_date||'').localeCompare(b.ship.ship_date||'')),skipped};
+}
+
+function intercityAssignModal(){
+  const {rows,skipped}=intercityPlanAssign();
+  const money=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  const totalAdd=rows.reduce((a,r)=>a+r.add.length,0);
+  if(!totalAdd){
+    showModal('Разложить по отправкам',
+      `<div class="empty"><div class="big">Раскладывать нечего</div>
+        Непривязанных заказов, для которых нашлась бы подходящая отправка, нет.
+        ${skipped.length?`<p class="hint">Осталось без отправки: <b>${skipped.length}</b> — под них отправку ещё не создавали.</p>`:''}</div>`,
+      null,{readonly:true,wide:true,closeLabel:'Закрыть'});
+    return;
+  }
+  const body=`
+    <p class="hint" style="margin-bottom:12px">Заказы уехали, но к коробкам их не приписали.
+      Ниже — куда каждый из них встанет. <b>Стоимость коробки делится на число заказов</b>,
+      поэтому доля каждого заказа в этих отправках уменьшится — включая те, что уже в них.
+      Калькуляция за эти месяцы изменится.</p>
+    <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Отправка</th><th>Город</th><th>Сумма коробки</th><th>Было заказов</th><th>Станет</th><th>За заказ: было → станет</th>
+    </tr></thead><tbody>
+      ${rows.map(r=>{
+        const was=(r.ship.order_ids||[]).length, will=was+r.add.length;
+        const cost=parseFloat(r.ship.box_cost)||0;
+        const perWas=was?Math.round(cost/was):0, perWill=will?Math.round(cost/will):0;
+        return `<tr>
+          <td data-label="Отправка">${esc(fmtDate(r.ship.ship_date))}<small class="cell-time">${esc(warehouseName(r.ship.warehouse_id))}</small></td>
+          <td data-label="Город">${esc(courierCityName(r.ship.dest_city_id))}</td>
+          <td data-label="Сумма коробки">${money(cost)}</td>
+          <td data-label="Было заказов">${was}</td>
+          <td data-label="Станет"><b>${will}</b> <span style="color:var(--moss)">+${r.add.length}</span></td>
+          <td data-label="За заказ">${money(perWas)} → <b>${money(perWill)}</b></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>
+    ${skipped.length?`<p class="hint" style="margin-top:10px">Останутся без отправки: <b>${skipped.length}</b> заказов —
+      подходящей коробки для них нет, создайте отправку вручную.</p>`:''}`;
+  showModal(`Разложить по отправкам · ${totalAdd} заказов`,body,async()=>{
+    if(!confirm(`Приписать ${totalAdd} заказов к ${rows.length} отправкам?\n\nДоля за заказ в них пересчитается, и прибыль за эти месяцы изменится.`))return false;
+    let okCnt=0,errCnt=0;
+    for(const r of rows){
+      const ids=[...new Set([...(r.ship.order_ids||[]),...r.add.map(o=>o.id)])];
+      const cost=parseFloat(r.ship.box_cost)||0;
+      const per=ids.length?Math.round(cost/ids.length):0;
+      const saved=await dbUpdate('shipments',r.ship.id,{order_ids:ids,per_order:per});
+      if(!saved){errCnt+=r.add.length;continue;}
+      Object.assign(r.ship,saved);
+      // Пересчитываем ВСЕ заказы коробки, а не только добавленные: у старых доля тоже стала другой.
+      for(const oid of ids){
+        const u=await dbUpdate('orders',oid,{intercity_cost:per,intercity_shipment_id:r.ship.id});
+        const o=(S.orders||[]).find(x=>x.id===oid);
+        if(o){o.intercity_cost=per;o.intercity_shipment_id=r.ship.id;}
+        if(!u)errCnt++;
+      }
+      okCnt+=r.add.length;
+    }
+    await logAction('update','shipments',{entity_label:'раскладка непривязанных',
+      meta:{orders:okCnt,shipments:rows.length,errors:errCnt}});
+    toast(errCnt?`Разложено ${okCnt}, с ошибками ${errCnt}`:`Разложено заказов: ${okCnt}`,6000);
+    renderIntercity();return true;
+  },{wide:true,saveLabel:'Разложить'});
 }
