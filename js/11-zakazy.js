@@ -407,26 +407,50 @@ async function pickupOrdersModal(pickupId){
         if(!emptyOrders.length){toast('У всех заказов уже есть хотя бы одно фото');bulkInp.value='';return;}
         const n=Math.min(files.length,emptyOrders.length);
         const pairs=[];for(let i=0;i<n;i++)pairs.push({order:emptyOrders[i],file:files[i]});
-        let ok=0,done=0;
+        let done=0;
+        const failed=[];
         const setProgress=()=>{if(bulkLabel)bulkLabel.childNodes[0].textContent=`⏳ Загружено ${done}/${n}…`;};
         if(bulkLabel){bulkLabel.style.pointerEvents='none';bulkLabel.childNodes[0].textContent=`⏳ Загружено 0/${n}…`;}
-        const BATCH=5; // 5 фото одновременно — заметно быстрее одиночной загрузки, но не перегружает мобильный интернет
+        const one=async({order,file})=>{
+          const r=await uploadPhoto('order/'+order.id,file);
+          if(!r)return false;
+          const arr=pickupPhotos(order).concat([r]);
+          const u=await dbUpdate('orders',order.id,{photos:arr});
+          if(!u)return false;
+          Object.assign(order,u);return true;
+        };
+        // На телефоне грузим по два, а не по пять. Safari распаковывает каждое фото в
+        // память целиком, и на пятёрке снимков с камеры он после первых десятков просто
+        // перестаёт справляться: по одному грузится, пачкой — «сначала работало, потом нет».
+        const BATCH=isMobileView()?2:5;
         for(let i=0;i<pairs.length;i+=BATCH){
           const chunk=pairs.slice(i,i+BATCH);
-          await Promise.all(chunk.map(async({order,file})=>{
-            const r=await uploadPhoto('order/'+order.id,file);
-            if(r){
-              const arr=pickupPhotos(order).concat([r]);
-              const u=await dbUpdate('orders',order.id,{photos:arr});
-              if(u){Object.assign(order,u);ok++;}
-            }
+          const res=await Promise.all(chunk.map(async p=>{
+            const good=await one(p);
             done++;setProgress();
+            return good?null:p;
           }));
+          res.forEach(p=>{if(p)failed.push(p);});
+          // Пауза между пачками — Safari успевает освободить память после распаковки.
+          if(BATCH<5&&i+BATCH<pairs.length)await new Promise(r=>setTimeout(r,250));
+        }
+        // Не вышедшие пробуем ещё раз по одному: часть отказов — это нехватка памяти
+        // в момент пика, а поодиночке те же фото проходят.
+        if(failed.length){
+          if(bulkLabel)bulkLabel.childNodes[0].textContent=`⏳ Повтор ${failed.length}…`;
+          const again=[...failed];failed.length=0;
+          for(const p of again){
+            if(!await one(p))failed.push(p);
+            await new Promise(r=>setTimeout(r,150));
+          }
         }
         bulkInp.value='';
         if(bulkLabel){bulkLabel.style.pointerEvents='';bulkLabel.childNodes[0].textContent='📷 Загрузить фото пачкой';}
         const leftover=files.length-n;
-        toast(`Загружено фото: ${ok}${leftover?` · ещё ${leftover} не распределено (пустых заказов не хватило) — добавьте вручную`:''}`);
+        toast(`Загружено фото: ${n-failed.length}`
+          +(failed.length?` · не вышло ${failed.length} — попробуйте их ещё раз`:'')
+          +(leftover?` · ещё ${leftover} не распределено (пустых заказов не хватило) — добавьте вручную`:''),
+          failed.length?6000:3000);
         const body=wrap.querySelector('.modal-body');if(body){body.innerHTML=renderBody();bind();}
       };
       // «Добавить заказы» — спрашиваем сколько и создаём ровно столько же новых
