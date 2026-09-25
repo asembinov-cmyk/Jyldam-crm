@@ -8,7 +8,7 @@ function renderSettings(){
     ['statuses','Статус забора'],['order_statuses','Статус заказа'],['delivery','Тип доставки'],
     ['courier_cities','Курьерские города'],['post_ips','ИП для Почты'],['warehouses','Склады отправки'],
     ['fin_kassa','Финансы · Кассы'],['fin_categories','Финансы · Категории расходов'],['fin_income_categories','Финансы · Категории приходов'],['fin_partners','Финансы · Партнёры'],
-    ['maillabel','Бланк Казпочты'],['apidocs','Документация API']];
+    ['maillabel','Бланк Казпочты'],['blanks','Бланки заранее'],['apidocs','Документация API']];
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
     <div class="subtabs">${dirs.map(([k,l])=>`<button data-dir="${k}" class="${S.dir===k?'active':''}">${l}</button>`).join('')}</div>
@@ -18,7 +18,7 @@ function renderSettings(){
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
     fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners,
-    maillabel:dirMailLabel,apidocs:renderApiDocsSettings};
+    maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings};
   (map[S.dir]||dirCities)();
 }
 // вкладка «Документация API» в Настройках — две ссылки на документацию по интеграциям,

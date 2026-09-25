@@ -12,6 +12,10 @@
 //  не выдаёт, Казпочта возвращает прежний с кодом 20012.
 //
 //  Заказ садится на номер позже — при загрузке реестра из Excel, по совпадению трека.
+//
+//  Живёт вкладкой в «Настройках» («Бланки заранее»), а не отдельным пунктом меню:
+//  пользуются им редко и только свои, а меню и без того длинное. Отсюда и права —
+//  общие с настройками (canEditDir), они же в правилах базы у db/17.
 // ============================================================
 
 let blanksBatchOpen=null;   // id открытой партии
@@ -88,16 +92,15 @@ function blanksNewCodes(taken,qty){
 // ── СПИСОК ПАРТИЙ ──
 function renderBlanks(){
   if(!blanksReady()){
-    $('main').innerHTML=`<div class="page"><div class="page-head"><h2>Бланки Казпочты</h2></div>
-      <div class="panel"><p class="muted">Загружаю…</p></div></div>`;
+    $('dirContent').innerHTML=`<div class="panel"><div class="loading">Загружаю…</div></div>`;
     loadBlanks().then(okLoad=>{
       if(!okLoad){
-        $('main').innerHTML=`<div class="page"><div class="page-head"><h2>Бланки Казпочты</h2></div>
-          <div class="panel"><p class="muted">Раздел ещё не включён: нет таблиц <code>track_batches</code> и
-          <code>track_pool</code>. Выполните <code>db/17</code> и обновите страницу.</p></div></div>`;
+        $('dirContent').innerHTML=`<div class="panel"><div class="panel-head"><h2>Бланки заранее</h2></div>
+          <p class="hint" style="padding:0 16px 18px">Раздел ещё не включён: нет таблиц <code>track_batches</code>
+          и <code>track_pool</code>. Выполните <code>db/17</code> и обновите страницу.</p></div>`;
         return;
       }
-      if(S.tab==='blanks')renderBlanks();
+      if(S.dir==='blanks')renderBlanks();
     });
     return;
   }
@@ -116,20 +119,19 @@ function renderBlanks(){
       <td data-label="Использовано">${st.used}</td>
     </tr>`;
   }).join('');
-  $('main').innerHTML=`<div class="page">
-    <div class="page-head">
-      <h2>Бланки Казпочты</h2>
-      <div class="ph-actions">${can('orders','create')?`<button class="btn primary" id="blNew">＋ Новая партия</button>`:''}</div>
-    </div>
+  $('dirContent').innerHTML=`
     <div class="panel">
-      <p class="calc-note" style="margin-top:0">Номера выпускаются заранее, чтобы раздать партнёрам готовые бланки.
-        Заказ садится на номер сам — при загрузке реестра из Excel, по совпадению трека.
-        Сумма партии печатается на бланке и уходит наложенным платежом; изменить её потом нельзя.</p>
-      ${rows?`<div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>Партия</th><th>ИП</th><th>Номинал</th><th>Бланков</th><th>С треком</th><th>Отдано</th><th>Использовано</th>
-      </tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="muted">Партий пока нет.</p>'}
-    </div>
-  </div>`;
+      <div class="panel-head"><h2>Бланки, выпущенные заранее</h2>
+        ${canEditDir()?`<button class="btn primary" id="blNew">＋ Новая партия</button>`:''}</div>
+      <div style="padding:4px 16px 18px">
+        <p class="hint" style="margin-bottom:14px">Номера выпускаются заранее, чтобы раздать партнёрам готовые бланки.
+          Заказ садится на номер сам — при загрузке реестра из Excel, по совпадению трека.
+          Сумма партии печатается на бланке и уходит наложенным платежом; изменить её потом нельзя.</p>
+        ${rows?`<div class="table-scroll"><table class="resp-table"><thead><tr>
+          <th>Партия</th><th>ИП</th><th>Номинал</th><th>Бланков</th><th>С треком</th><th>Отдано</th><th>Использовано</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="hint">Партий пока нет.</p>'}
+      </div>
+    </div>`;
   if($('blNew'))$('blNew').onclick=blanksNewBatchModal;
   document.querySelectorAll('[data-batch]').forEach(tr=>tr.onclick=()=>{blanksBatchOpen=parseInt(tr.dataset.batch,10);renderBlanks();});
 }
@@ -175,7 +177,7 @@ function blanksNewBatchModal(){
       await loadBlanks();
       blanksBatchOpen=batch.id;
       toast(made===qty?`Партия создана: ${made} номеров`:`Создано ${made} из ${qty} номеров`);
-      render();
+      renderBlanks();
       return true;
     });
 }
@@ -198,17 +200,17 @@ function renderBlanksBatch(id){
       <td data-label="Заказ">${r.order_id?esc(blanksOrderCode(r.order_id)):'—'}</td>
     </tr>`;
   }).join('');
-  $('main').innerHTML=`<div class="page">
-    <div class="page-head">
-      <h2>Партия №${b.id}</h2>
-      <div class="ph-actions">
-        <button class="btn ghost" id="blBack">‹ К списку</button>
-        ${st.tracked<st.all&&can('orders','edit')?`<button class="btn primary" id="blGetTracks">📮 Получить треки (${st.all-st.tracked})</button>`:''}
-        ${st.tracked?`<button class="btn" id="blPrintA4">🖨 Печать A4</button>`:''}
-        ${st.tracked&&!b.partner_id?`<button class="btn ghost" id="blIssue">Отдать партнёру</button>`:''}
-      </div>
-    </div>
+  $('dirContent').innerHTML=`
     <div class="panel">
+      <div class="panel-head"><h2>Партия №${b.id}</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn ghost" id="blBack">‹ К списку</button>
+          ${st.tracked<st.all&&canEditDir()?`<button class="btn primary" id="blGetTracks">📮 Получить треки (${st.all-st.tracked})</button>`:''}
+          ${st.tracked?`<button class="btn" id="blPrintA4">🖨 Печать A4</button>`:''}
+          ${st.tracked&&!b.partner_id&&canEditDir()?`<button class="btn ghost" id="blIssue">Отдать партнёру</button>`:''}
+        </div>
+      </div>
+      <div style="padding:4px 16px 18px">
       <div class="calc-totals">
         <div class="ct-card"><div class="ct-k">ИП</div><div class="ct-v" style="font-size:16px">${esc(ip?ip.name:'—')}</div></div>
         <div class="ct-card"><div class="ct-k">Номинал</div><div class="ct-v">${Math.round(b.amount||0).toLocaleString('ru-RU')} ₸</div></div>
@@ -223,10 +225,10 @@ function renderBlanksBatch(id){
       <div class="table-scroll"><table class="resp-table"><thead><tr>
         <th>Номер</th><th>Трек</th><th>Состояние</th><th>Заказ</th>
       </tr></thead><tbody>${list}</tbody></table></div>
-      ${rows.length>500?`<p class="muted">Показаны первые 500 из ${rows.length}.</p>`:''}
-    </div>
-  </div>`;
-  $('blBack').onclick=()=>{blanksBatchOpen=null;render();};
+      ${rows.length>500?`<p class="hint">Показаны первые 500 из ${rows.length}.</p>`:''}
+      </div>
+    </div>`;
+  $('blBack').onclick=()=>{blanksBatchOpen=null;renderBlanks();};
   if($('blGetTracks'))$('blGetTracks').onclick=()=>blanksGetTracks(id);
   if($('blPrintA4'))$('blPrintA4').onclick=()=>blanksPrint(id);
   if($('blIssue'))$('blIssue').onclick=()=>blanksIssueModal(id);
@@ -263,7 +265,7 @@ async function blanksGetTracks(batchId){
   blanksBusy=false;
   await loadBlanks();
   toast(failed?`Получено ${done}, не вышло ${failed}`:`Получено треков: ${done}`);
-  render();
+  renderBlanks();
 }
 
 // ── ВЫДАЧА ПАРТНЁРУ ──
@@ -283,7 +285,7 @@ function blanksIssueModal(batchId){
       if(error){toast('Не удалось отметить выдачу: '+error.message);return false;}
       await dbUpdate('track_batches',batchId,{partner_id:pid});
       await loadBlanks();
-      toast('Отмечено');render();
+      toast('Отмечено');renderBlanks();
       return true;
     });
 }
