@@ -190,6 +190,9 @@ function impPreviewModal(fileName, rows){
       // Заказ из реестра считается заполненным сразу: ФИО, адрес и телефон уже есть,
       // менеджеру с ним делать нечего — в очередь «Заполнения» он попадать не должен.
       ...(bar ? { calc_group: pt.is_baraholka ? 'baraholka' : null } : {}),
+      ...((typeof salesMarginReady === 'function' && salesMarginReady() && pt.sales_id)
+        ? { sales_margin: salesMarginFor({ sales_id: pt.sales_id, partner_id: pt.id,
+            delivery_id: mail ? mail.id : null }, date.slice(0, 7)) } : {}),
       ...(typeof fillReady === 'function' && fillReady()
         ? { filled_at: now, filled_by: (S.me && S.me.id) || null,
             filled_by_name: 'загрузка из Excel' } : {}),

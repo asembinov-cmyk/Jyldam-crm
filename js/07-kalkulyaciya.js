@@ -63,7 +63,12 @@ function orderPartnerObj(o){
 // габарит и вес его доля не идёт.
 //
 // Только если у заказа указан менеджер: без него разница остаётся прибылью компании.
+// Снимок в заказе есть — берём его. Базовый тариф хранится по месяцам, а тариф
+// партнёра в карточке один на всё время: без снимка подъём цены пересчитал бы
+// надбавку задним числом за все прошлые месяцы, уже после расчёта с менеджером.
+const salesMarginReady=()=>!!(S.orders&&S.orders.length&&('sales_margin' in S.orders[0]));
 function salesMarginFor(o,P){
+  if(o.sales_margin!=null&&o.sales_margin!=='')return parseFloat(o.sales_margin)||0;
   if(!o.sales_id)return 0;
   const pt=orderPartnerObj(o);if(!pt)return 0;
   const courier=isCourierDelivery(o.delivery_id);

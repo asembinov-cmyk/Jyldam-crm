@@ -1855,6 +1855,16 @@ function orderModal(id,readonly){
   // размеры пакетов — сразу по партнёру из поля «Отправитель», если он уже известен (для первичной
   // отрисовки формы; при смене отправителя/типа доставки дальше пересчитывается через findPartner())
   const _initPartner=d.sender?S.partners.find(pp=>(pp.name||'').trim().toLowerCase()===d.sender.trim().toLowerCase()):null;
+  // Партнёр заказа — по id, а если его нет, по имени отправителя из поля. Нужен и при
+  // отрисовке (размеры/тариф), и при сохранении (раздел калькуляции, надбавка менеджера),
+  // поэтому объявлен на уровне всей карточки: ниже такой же поиск жил внутри блока
+  // `if(!ro)`, и сохранение падало на нём с ReferenceError.
+  const cardPartner=()=>{
+    if(d.partner_id){const p=S.partners.find(x=>x.id===d.partner_id);if(p)return p;}
+    const name=(($('o_sender')&&$('o_sender').value)||d.sender||'').trim().toLowerCase().replace(/\s+/g,' ');
+    if(!name)return null;
+    return S.partners.find(x=>(x.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name)||null;
+  };
   const _initSizes=packageSizesFor(_initPartner);
   // Менеджер «Заполнения» правит ровно тот заказ, который сам взял в работу, — и
   // только пока захват живой. Общего права на «Заказы заборов» у него нет, и
@@ -1975,8 +1985,17 @@ function orderModal(id,readonly){
       // Новый заказ получает раздел от партнёра; у существующего не трогаем —
       // он мог быть выставлен вручную или создан, когда партнёр был другим.
       if(!id&&typeof baraholkaReady==='function'&&baraholkaReady()){
-        const pt=findPartner();
+        const pt=cardPartner();
         row.calc_group=(pt&&pt.is_baraholka)?'baraholka':null;
+      }
+      // Надбавку менеджера запоминаем в заказе, иначе подъём тарифа партнёру
+      // пересчитал бы прошлые месяцы задним числом. Берём снимок при сохранении, а
+      // не при создании «болванки»: та рождается курьерской, а тип выбирают позже,
+      // и снимок ушёл бы от курьерского тарифа вместо почтового.
+      if(typeof salesMarginReady==='function'&&salesMarginReady()
+         &&(!o||o.sales_margin==null)&&row.sales_id&&row.delivery_id){
+        row.sales_margin=salesMarginFor(Object.assign({},row,{partner_id:(cardPartner()||{}).id}),
+          (row.pickup_date||localToday()).slice(0,7));
       }
       // галочка «Оплачено отправителем»: сумма→0 (исходная запоминается), снятие — возврат
       if($('o_paidorder')){
@@ -2210,13 +2229,7 @@ function orderModal(id,readonly){
     // Если размер выбран (значит сумму подставил именно он) — при смене типа доставки сумма должна
     // пересчитываться automatически и дальше, а не «замирать» на старом значении.
     let sumTouched=(d.order_sum!=null&&d.order_sum!==''&&!d.size);
-    const findPartner=()=>{
-      // 1) по partner_id заказа, если есть
-      if(d.partner_id){const p=S.partners.find(x=>x.id===d.partner_id);if(p)return p;}
-      // 2) по имени отправителя без учёта регистра и лишних пробелов
-      const name=($('o_sender').value||'').trim().toLowerCase().replace(/\s+/g,' ');
-      return S.partners.find(x=>(x.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name)||null;
-    };
+    const findPartner=cardPartner; // см. объявление выше
     const applyTariff=()=>{
       // если у партнёра тариф ИМЕННО ПО ЭТОМУ ТИПУ ДОСТАВКИ (курьер или почта — какой сейчас выбран
       // у заказа) стоит ровно 0 — эту доставку он оплачивает сам отдельно, не через сумму заказа —
