@@ -210,13 +210,21 @@ function calcProcessorTotalSalary(period){
 // заданы, действует прежний общий оклад; пока у обработчика заказа нет своей ставки
 // за заказ — прежняя общая. Иначе в день выполнения SQL зарплата обработчика молча
 // выпала бы из расходов и прибыль подскочила бы на пустом месте.
+// Переключатель — ЛЮБОЕ заполненное персональное поле. Пока их нет, всё считается по
+// прежней общей строке «Менеджер обработчик»; как только появилось хоть одно, она
+// перестаёт применяться целиком — и оклад, и ставка за заказ, — и уходит с экрана.
+// Состояние ровно два, промежуточных нет: иначе строку убрали бы с глаз, а она
+// продолжала бы влиять на прибыль, и искать её было бы негде.
+const calcProcessorPersonal=period=>processorNormsReady()&&(S.processors||[]).some(pr=>
+  calcProcessorNorm(pr.id,'salary',period)>0||calcProcessorNorm(pr.id,'per_order',period)>0);
 function calcProcessorSalaryTotal(period){
-  const personal=calcProcessorTotalSalary(period);
-  return personal>0?personal:calcNorm('salary_processor',period);
+  return calcProcessorPersonal(period)?calcProcessorTotalSalary(period):calcNorm('salary_processor',period);
 }
+// В персональном режиме ставку несут только заказы того обработчика, кому она задана.
+// Заказ без обработчика (такие остались у старых записей) не несёт её вовсе.
 function calcProcessorPerOrder(o,period){
-  const personal=o&&o.processor_id?calcProcessorNorm(o.processor_id,'per_order',period):0;
-  return personal>0?personal:calcNorm('perorder_processor',period);
+  if(!calcProcessorPersonal(period))return calcNorm('perorder_processor',period);
+  return o&&o.processor_id?calcProcessorNorm(o.processor_id,'per_order',period):0;
 }
 // заборщик заказа: через заявку, из которой создан заказ (pickup.courier_id)
 function orderPickerCourier(o){
@@ -823,18 +831,19 @@ function renderCalcNorms(){
         <h3 class="calc-h">Распределяемые фонды (в месяц)</h3>
         <p class="calc-note">Делятся на количество заказов за месяц. Чем больше заказов — тем меньше на каждый.</p>
         ${fundFields.map(fieldRow).join('')}
-        <h3 class="calc-h" style="margin-top:18px">Сотрудники: оклад + за заказ</h3>
+        ${calcProcessorPersonal(P)?'':`        <h3 class="calc-h" style="margin-top:18px">Сотрудники: оклад + за заказ</h3>
         <p class="calc-note">Оклад делится на все заказы за месяц. «За заказ»: менеджер продаж (150₸) — заказам с указанным менеджером; обработчик (80₸) — на каждый.</p>
         <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Сотрудник</span><span>Оклад/мес</span><span>За заказ</span></div>
         ${CALC_SALARY_FIELDS.map(f=>`<div class="calc-city-row" style="grid-template-columns:1fr 110px 110px">
           <span class="ccr-name">${esc(f.label)}</span>
           <input type="number" min="0" step="0.01" data-calcnorm="${f.salaryKey}" value="${cs[f.salaryKey]!=null&&cs[f.salaryKey]!==''?esc(cs[f.salaryKey]):''}" placeholder="0">
           <input type="number" min="0" step="0.01" data-calcnorm="${f.perKey}" value="${cs[f.perKey]!=null&&cs[f.perKey]!==''?esc(cs[f.perKey]):''}" placeholder="0">
-        </div>`).join('')}
+        </div>`).join('')}`}
         ${processorNormsReady()?`<h3 class="calc-h" style="margin-top:18px">Менеджеры обработчики (персонально)</h3>
         <p class="calc-note">Оклад каждого идёт в общий котёл и делится на все заказы месяца.
-          Ставка за заказ применяется к заказам этого обработчика. Пока поля пусты, действуют
-          общие значения из строки «Менеджер обработчик» выше.</p>
+          Ставка за заказ применяется к заказам этого обработчика.
+          ${calcProcessorPersonal(P)?'Общая строка «Менеджер обработчик» больше не применяется — считается только то, что здесь.':
+            'Пока оклады не заданы, действует общая строка «Менеджер обработчик» выше.'}</p>
         <div class="calc-city-head" style="grid-template-columns:1fr 110px 110px"><span>Обработчик</span><span>Оклад/мес</span><span>За заказ</span></div>
         ${(S.processors||[]).map(pr=>{
           const salV=calcProcessorNorm(pr.id,'salary',P);const perV=calcProcessorNorm(pr.id,'per_order',P);
