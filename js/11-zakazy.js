@@ -1797,8 +1797,10 @@ async function delOrder(id){const o=S.orders.find(x=>x.id===id);if(!confirm(`У�
   if(await dbDelete('orders',id)){await logAction('delete','orders',{entity_id:id,entity_label:orderLabel(o)});S.orders=S.orders.filter(x=>x.id!==id);toast('Заказ удалён');renderOrders();}}
 // расценки по размеру пакета (S/M/L) — раздельно для почтовой и курьерской доставки.
 // Больше не единая цена на всех: размер S = собственный тариф ПАРТНЁРА (курьер/почта), а M и L
-// считаются от него с надбавкой — курьерская: +2000 на каждый шаг (S→M→L); почтовая: M = S+500,
-// L = S+1500. Если у партнёра тариф не указан (пусто) — используются базовые значения по умолчанию.
+// считаются от него с надбавкой. Сами надбавки правятся в «Калькуляции» → «Размеры пакетов
+// и перевес» (priceNorm, js/01-yadro.js); пока их там не меняли, действуют прежние значения —
+// почта M = S+500, L = S+1500; курьер +2000 и +4000.
+// Если у партнёра тариф не указан (пусто) — используются базовые значения по умолчанию.
 const PACKAGE_SIZE_LABELS={S:'S — малый',M:'M — средний',L:'L — большой'};
 function packageSizesFor(partner){
   const baseCourier=isExplicitNum(partner&&partner.tariff_courier)?+partner.tariff_courier:3000;
@@ -1814,20 +1816,21 @@ function packageSizesFor(partner){
   }
   return {
     S:{label:PACKAGE_SIZE_LABELS.S,courier:baseCourier,mail:baseMail},
-    M:{label:PACKAGE_SIZE_LABELS.M,courier:baseCourier+2000,mail:baseMail+500},
-    L:{label:PACKAGE_SIZE_LABELS.L,courier:baseCourier+4000,mail:baseMail+1500},
+    M:{label:PACKAGE_SIZE_LABELS.M,courier:baseCourier+priceNorm('size_courier_m'),mail:baseMail+priceNorm('size_mail_m')},
+    L:{label:PACKAGE_SIZE_LABELS.L,courier:baseCourier+priceNorm('size_courier_l'),mail:baseMail+priceNorm('size_mail_l')},
   };
 }
-// Надбавка за перевес у ПОЧТОВЫХ заказов: всё тяжелее 2 кг считается по 100 ₸ за
-// каждый НАЧАТЫЙ килограмм сверх. 2,000 — без надбавки, 2,1 → +100, 3,1 → +200.
-// Начатый, а не полный: посылка в 2,1 кг занимает у почты место как трёхкилограммовая.
-// У курьерских заказов надбавки нет — там цена по размеру пакета.
-const WEIGHT_FREE_KG = 2, WEIGHT_STEP_FEE = 100;
+// Надбавка за перевес у ПОЧТОВЫХ заказов: всё тяжелее порога считается по ставке за
+// каждый НАЧАТЫЙ килограмм сверх. При пороге 2 кг и ставке 100: 2,000 — без надбавки,
+// 2,1 → +100, 3,1 → +200. Начатый, а не полный: посылка в 2,1 кг занимает у почты место
+// как трёхкилограммовая. У курьерских заказов надбавки нет — там цена по размеру пакета.
+// Порог и ставка правятся в «Калькуляции» → «Размеры пакетов и перевес».
 function weightSurcharge(weight, isCourier){
   if(isCourier) return 0;
+  const free=priceNorm('weight_free_kg'), fee=priceNorm('weight_step_fee');
   const w = parseFloat(weight);
-  if(isNaN(w) || w <= WEIGHT_FREE_KG) return 0;
-  return Math.ceil(w - WEIGHT_FREE_KG) * WEIGHT_STEP_FEE;
+  if(isNaN(w) || w <= free) return 0;
+  return Math.ceil(w - free) * fee;
 }
 // Пересчёт суммы заказа при смене веса — для мест, где вес вводят ОТДЕЛЬНО от карточки
 // («Сортировка»: кладовщик взвесил посылку). Возвращает поля для записи или null.
@@ -2277,7 +2280,7 @@ function orderModal(id,readonly){
       const wh=$('o_weight_hint');if(!wh)return;
       const extra=weightSurcharge(parseWeight(val('o_weight')),isCourierDelivery(val('o_delivery')));
       wh.textContent=extra
-        ? `Перевес: +${extra} ₸ — по ${WEIGHT_STEP_FEE} ₸ за каждый начатый кг свыше ${WEIGHT_FREE_KG}`
+        ? `Перевес: +${extra} ₸ — по ${priceNorm('weight_step_fee')} ₸ за каждый начатый кг свыше ${String(priceNorm('weight_free_kg')).replace('.',',')} кг`
         : 'Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.';
     };
     const applySize=()=>{

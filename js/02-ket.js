@@ -371,12 +371,17 @@ async function loadAll(){
     dbList('finance_income_categories',{order:'name'}).catch(()=>[]),
     dbList('finance_partners',{order:'name'}).catch(()=>[]),
     dbList('finance_entries',{order:'entry_date',asc:false}).catch(()=>[]),
+    // Цены размеров пакета и перевеса. Грузим ВСЕМ, а не по праву «Калькуляция»:
+    // размер пакета выбирает менеджер заказов, и без этих значений сумма заказа
+    // посчиталась бы по прежним, зашитым в код (см. priceNorm в js/01-yadro.js).
+    dbList('pricing_settings',{}).catch(()=>null),
   ]);
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];
   S.shipments=tail[5]||[];S.warehouses=tail[6]||[];S.products=tail[7]||[];S.warehouse_partners=tail[8]||[];S.wh_moves=tail[9]||[];S.wh_order_items=tail[10]||[];S.wh_reservations=tail[11]||[];
   S.finance_kassa=tail[12]||[];S.finance_categories=tail[13]||[];S.finance_income_categories=tail[14]||[];S.finance_partners=tail[15]||[];S.finance_entries=tail[16]||[];
+  S.pricing=(tail[17]&&tail[17][0])||null; // null = таблицы ещё нет, действуют значения из кода
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк за всё время) грузим ПАРАЛЛЕЛЬНО с ядром,
   // но вход их НЕ ждёт — стартуем загрузку и продолжаем.
   // Сначала — быстрый узкий запрос ТОЛЬКО за сегодня (большинство экранов по умолчанию и
@@ -473,6 +478,7 @@ async function refreshForTab(tab){
           dbList('calc_courier_norms',{}),dbList('calc_sales_norms',{})
         ]);
         S.calcSettingsAll=cs;S.calcCityNorms=cc;S.calcCourierNorms=cn;S.calcSalesNorms=sn;
+        try{const pr=await dbList('pricing_settings',{});if(pr&&pr[0])S.pricing=pr[0];}catch(e){}
       }catch(e){}
       // заказы уже загружены при входе — перезагружаем только если их нет
       if(!S.orders||!S.orders.length){try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}}

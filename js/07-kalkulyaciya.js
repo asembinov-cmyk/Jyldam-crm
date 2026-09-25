@@ -46,6 +46,46 @@ const CALC_BASE_FIELDS=[
   {key:'base_post',   label:'Базовый тариф · почта (₸)',  hint:'Наша цена. Всё, что партнёр платит сверх, — доля менеджера'},
   {key:'base_courier',label:'Базовый тариф · курьер (₸)', hint:'То же для курьерской доставки'},
 ];
+// Цены размеров пакета и перевеса. Хранятся НЕ в calc_settings, а в отдельной
+// pricing_settings — её читают все вошедшие (см. priceNorm в js/01-yadro.js).
+// Поэтому они не привязаны к месяцу: правка действует на новые заказы, а уже
+// выставленные суммы не меняются — они записаны в самом заказе.
+const CALC_PRICE_FIELDS=[
+  {key:'size_mail_m',    label:'Почта · надбавка за M (₸)',   hint:'Сколько прибавить к тарифу партнёра за средний пакет'},
+  {key:'size_mail_l',    label:'Почта · надбавка за L (₸)',   hint:'То же за большой пакет'},
+  {key:'size_courier_m', label:'Курьер · надбавка за M (₸)',  hint:'Сколько прибавить к курьерскому тарифу партнёра'},
+  {key:'size_courier_l', label:'Курьер · надбавка за L (₸)',  hint:'То же за большой пакет'},
+  {key:'weight_free_kg', label:'Перевес · с какого веса (кг)', hint:'Всё до этого веса включительно — без надбавки', unit:'кг', step:'0.001'},
+  {key:'weight_step_fee',label:'Перевес · за каждый кг (₸)',  hint:'За каждый НАЧАТЫЙ килограмм сверх порога. Только у почтовых'},
+];
+// Пример «S · M · L» под панелью: цифры проще проверить глазами, чем надбавки.
+// Тариф для примера — базовый тариф компании, а если он не задан, самый частый
+// тариф среди партнёров: абстрактная «надбавка 500» ни о чём не говорит.
+function priceExampleTariff(courier,P){
+  const base=calcNorm(courier?'base_courier':'base_post',P);
+  if(base)return base;
+  const cnt={};
+  (S.partners||[]).forEach(p=>{const t=courier?p.tariff_courier:p.tariff_post;
+    if(t!=null&&t!==''&&+t>0)cnt[+t]=(cnt[+t]||0)+1;});
+  const top=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
+  return top?+top:0;
+}
+function priceExampleHtml(P){
+  const money=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  const read=k=>{const el=document.querySelector(`[data-pricenorm="${k}"]`);
+    return el&&el.value.trim()!==''?(parseFloat(el.value)||0):priceNorm(k);};
+  const line=(courier,name)=>{
+    const t=priceExampleTariff(courier,P);
+    if(!t)return '';
+    const m=t+read(courier?'size_courier_m':'size_mail_m');
+    const l=t+read(courier?'size_courier_l':'size_mail_l');
+    return `<div>${name} с тарифом <b>${money(t)}</b>: S ${money(t)} · M <b>${money(m)}</b> · L <b>${money(l)}</b></div>`;
+  };
+  const free=read('weight_free_kg'),fee=read('weight_step_fee');
+  const kg=n=>String(Math.round(n*1000)/1000).replace('.',',');
+  const w=fee?`<div>Посылка ${kg(free+0.1)} кг → +${money(fee)}, ${kg(free+1.1)} кг → +${money(fee*2)}</div>`:'';
+  return line(false,'Почта')+line(true,'Курьер')+w;
+}
 const baseTariffReady=()=>{
   const cs=(S.calcSettingsAll||[])[0];
   return !!cs&&('base_post' in cs);
@@ -736,6 +776,12 @@ function renderCalcNorms(){
     <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
     <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
   </div>`;
+  // Цены размеров/перевеса — своя строка: единица не всегда ₸ (порог задаётся в кг),
+  // и пишутся они в другую таблицу, поэтому и атрибут другой — data-pricenorm.
+  const priceRow=f=>`<div class="calc-norm-row">
+    <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
+    <div class="cn-input"><input type="number" min="0" step="${f.step||'0.01'}" data-pricenorm="${f.key}" value="${(S.pricing&&S.pricing[f.key]!=null&&S.pricing[f.key]!=='')?esc(S.pricing[f.key]):''}" placeholder="${esc(PRICING_DEFAULTS[f.key])}"> ${esc(f.unit||'₸')}</div>
+  </div>`;
   const cities=(S.cities||[]);
   const cityNorm=(cid,key)=>{const all=S.calcCityNorms||[];let r=all.find(x=>x.city_id===cid&&x.period===P)||all.find(x=>x.city_id===cid&&!x.period);return r&&r[key]!=null&&r[key]!==''?r[key]:'';};
   const periodBar=`<div class="calc-period-bar"><span>Нормативы за:</span>
@@ -788,6 +834,14 @@ function renderCalcNorms(){
             отдельной статьёй расхода — и видно в сводке по каждому.</p>
           ${CALC_BASE_FIELDS.map(fieldRow).join('')}
         </div>`:''}
+        ${pricingReady()?`<div class="panel calc-panel" style="margin-top:18px">
+          <h3 class="calc-h">Размеры пакетов и перевес</h3>
+          <p class="calc-note">Размер S — это тариф партнёра из его карточки. M и L считаются от него
+            с надбавкой, которую вы задаёте здесь. Действует на новые заказы: суммы уже выставленных
+            заказов не пересчитываются — они записаны в самом заказе.</p>
+          ${CALC_PRICE_FIELDS.map(priceRow).join('')}
+          <div class="calc-note" id="priceExample" style="margin:12px 0 0">${priceExampleHtml(P)}</div>
+        </div>`:''}
         <div class="panel calc-panel" style="margin-top:18px">
           <h3 class="calc-h">Почтовая доставка — фиксированные расходы (за заказ)</h3>
           <p class="calc-note">Применяются к заказам с типом доставки «почта».</p>
@@ -804,6 +858,9 @@ function renderCalcNorms(){
   $('calcContent').innerHTML=periodBar+html+
     `<div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>`;
   $('calcSaveBtn').onclick=saveCalcSettings;
+  // пример S/M/L пересчитываем прямо при вводе — иначе надбавку приходится складывать в уме
+  document.querySelectorAll('[data-pricenorm]').forEach(inp=>{inp.oninput=()=>{
+    const box=$('priceExample');if(box)box.innerHTML=priceExampleHtml(P);};});
   if($('calcNormMonth'))$('calcNormMonth').onchange=e=>{calcNormPeriod.month=parseInt(e.target.value,10);renderCalc();};
   if($('calcNormYear'))$('calcNormYear').onchange=e=>{calcNormPeriod.year=parseInt(e.target.value,10);renderCalc();};
   const showAllBtn=$('cityShowAll');if(showAllBtn)showAllBtn.onclick=()=>{_calcShowAllCities=true;renderCalc();};
@@ -869,6 +926,16 @@ async function saveCalcSettings(){
       const payload={sales_id:sid,period:P,salary:sal===''?0:parseFloat(sal)||0,per_order:per===''?0:parseFloat(per)||0};
       if(existing){const u=await dbUpdate('calc_sales_norms',existing.id,payload);if(u)Object.assign(existing,u);}
       else{const u=await dbInsert('calc_sales_norms',payload);if(u){if(!S.calcSalesNorms)S.calcSalesNorms=[];S.calcSalesNorms.push(u);}}
+    }
+    // Цены размеров и перевеса — в свою таблицу и БЕЗ периода: они не месячные.
+    // Пустое поле = «как в коде», поэтому пишем null, а не 0: ноль значил бы
+    // «надбавки нет», и пакет L стоил бы столько же, сколько S.
+    const priceInputs=document.querySelectorAll('[data-pricenorm]');
+    if(priceInputs.length&&S.pricing){
+      const pr={};
+      priceInputs.forEach(inp=>{const v=inp.value.trim();pr[inp.dataset.pricenorm]=v===''?null:(parseFloat(v)||0);});
+      const up=await dbUpdate('pricing_settings',S.pricing.id,pr);
+      if(up)S.pricing=up;
     }
     const s=$('calcSaved');if(s){s.textContent='Сохранено ✓';setTimeout(()=>{if(s)s.textContent='';},2500);}
     toast('Нормативы сохранены за '+P);
