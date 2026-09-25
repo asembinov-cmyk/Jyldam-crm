@@ -200,12 +200,46 @@ function orderFreightTotal(orderId,shipments){
   return sum;
 }
 // Переписать intercity_cost у списка заказов по текущему составу отправок.
+// Для одной коробки (десятки заказов) — обычным dbUpdate, с записью в журнал.
 async function syncOrderFreight(orderIds){
   for(const oid of [...new Set(orderIds)]){
     const total=orderFreightTotal(oid);
     await dbUpdate('orders',oid,{intercity_cost:total});
     const o=(S.orders||[]).find(x=>x.id===oid);if(o)o.intercity_cost=total;
   }
+}
+// То же ПАЧКОЙ — для разбора накопившегося, где заказов сотни.
+//
+// По одному запросу на заказ там не годится: на 800 заказах это 800 обращений подряд,
+// каждое со своей записью в журнал, — минуты ожидания при внешне мёртвой кнопке.
+// Здесь заказы группируются по одинаковой паре «сумма + последняя коробка» и правятся
+// одним запросом на группу: у коробки доля общая, так что групп выходит десяток.
+// Журнал по каждому заказу не пишем — разбор логируется одной записью с итогами.
+async function syncOrderFreightBulk(orderIds,lastShipByOrder,onProgress){
+  const groups=new Map();
+  [...new Set(orderIds)].forEach(id=>{
+    const total=orderFreightTotal(id);
+    const ship=lastShipByOrder?(lastShipByOrder.get(id)||null):undefined;
+    const key=total+'|'+(ship===undefined?'-':String(ship));
+    if(!groups.has(key))groups.set(key,{total,ship,ids:[]});
+    groups.get(key).ids.push(id);
+  });
+  let done=0,failed=0;
+  for(const g of groups.values()){
+    const patch={intercity_cost:g.total};
+    if(g.ship!==undefined)patch.intercity_shipment_id=g.ship;
+    // PostgREST складывает список id в адрес запроса, поэтому режем на части:
+    // одним куском сотни идентификаторов не уходят.
+    for(let i=0;i<g.ids.length;i+=100){
+      const part=g.ids.slice(i,i+100);
+      const {error}=await sb.from('orders').update(patch).in('id',part);
+      if(error){console.error('bulk freight',error);failed+=part.length;continue;}
+      part.forEach(id=>{const o=(S.orders||[]).find(x=>x.id===id);if(o)Object.assign(o,patch);});
+      done+=part.length;
+      if(onProgress)onProgress(done,failed);
+    }
+  }
+  return {done,failed};
 }
 
 // имя склада отправки из справочника
@@ -769,7 +803,15 @@ function intercityAssignModal(){
     const rows=plan.rows, n=totalAdd();
     if(!n){toast('Раскладывать нечего');return false;}
     if(!confirm(`Приписать ${n} заказов к ${rows.length} отправкам?\n\nДоля за заказ в них пересчитается, и прибыль за эти месяцы изменится.`))return false;
+    // Без этого кнопка выглядит мёртвой: работа идёт секунды, а иногда и дольше.
+    const sv=document.querySelector('[data-save]');if(sv){sv.disabled=true;sv.textContent='Раскладываю…';}
+    const box=document.querySelector('.modal-body');
+    const say=t=>{const el=$('icAssignProgress');if(el)el.textContent=t;};
+    if(box)box.insertAdjacentHTML('afterbegin','<p class="hint" id="icAssignProgress" style="margin:0 0 10px">Обновляю отправки…</p>');
     let okCnt=0,errCnt=0;
+    const touched=[];                  // все заказы затронутых коробок
+    const lastShip=new Map();          // заказ → коробка, которую открывать из карточки
+    // 1) Сначала сами отправки: их немного, и от их состава зависит доля.
     for(const r of rows){
       const ids=[...new Set([...(r.ship.order_ids||[]),...r.add.map(o=>o.id)])];
       const cost=parseFloat(r.ship.box_cost)||0;
@@ -777,17 +819,18 @@ function intercityAssignModal(){
       const saved=await dbUpdate('shipments',r.ship.id,{order_ids:ids,per_order:per});
       if(!saved){errCnt+=r.add.length;continue;}
       Object.assign(r.ship,saved);
-      // Пересчитываем ВСЕ заказы коробки, а не только добавленные: у старых доля тоже стала
-      // другой. Сумма — по всем коробкам заказа, у транзитного их две.
-      await syncOrderFreight(ids);
-      for(const oid of ids){
-        await dbUpdate('orders',oid,{intercity_shipment_id:r.ship.id});
-        const o=(S.orders||[]).find(x=>x.id===oid);if(o)o.intercity_shipment_id=r.ship.id;
-      }
+      ids.forEach(id=>{touched.push(id);lastShip.set(id,r.ship.id);});
       okCnt+=r.add.length;
+      say(`Обновляю отправки: ${okCnt} из ${n}…`);
     }
+    // 2) Потом одним махом доли — пачками, а не по заказу: на сотнях заказов поштучные
+    //    запросы превращали нажатие кнопки в многоминутное ожидание без признаков жизни.
+    const uniq=[...new Set(touched)];
+    say(`Пересчитываю доли: 0 из ${uniq.length}…`);
+    const res=await syncOrderFreightBulk(uniq,lastShip,(done)=>say(`Пересчитываю доли: ${done} из ${uniq.length}…`));
+    errCnt+=res.failed;
     await logAction('update','shipments',{entity_label:'раскладка непривязанных',
-      meta:{orders:okCnt,shipments:rows.length,errors:errCnt}});
+      meta:{orders:okCnt,shipments:rows.length,recalced:res.done,errors:errCnt}});
     toast(errCnt?`Разложено ${okCnt}, с ошибками ${errCnt}`:`Разложено заказов: ${okCnt}`,6000);
     renderIntercity();return true;
   },{wide:true,saveLabel:'Разложить'});
