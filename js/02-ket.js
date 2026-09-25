@@ -854,6 +854,7 @@ function val(id){const el=$(id);return el?el.value:'';}
 /* ---------- NAV по правам ---------- */
 // SVG-иконки для меню
 const ICONS={
+  stats:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 20h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="13" width="3.4" height="5" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="10.3" y="10" width="3.4" height="8" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="16.6" y="6.5" width="3.4" height="11.5" rx="1" stroke="currentColor" stroke-width="1.7"/><path d="M4.5 9.2L9 5.6l3.4 2.2L20 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16.4 3H20v3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   dashboard:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
   pickups:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v8.5M12 11.5l-3.2-3.2M12 11.5l3.2-3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h4.2l1.4 2.6h6.8L16.8 13H21v5a3 3 0 01-3 3H6a3 3 0 01-3-3v-5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   orders:'<svg viewBox="0 0 24 24" fill="none"><path d="M12.6 2.6l8.8 8.8a2 2 0 010 2.8l-6.2 6.2a2 2 0 01-2.8 0L3.6 11.6A2 2 0 013 10.2V4a1 1 0 011-1h6.2a2 2 0 011.4.6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7.6" cy="7.6" r="1.4" stroke="currentColor" stroke-width="1.7"/></svg>',
@@ -908,9 +909,9 @@ function buildNav(opts){
   // структура: группы и пункты. active:false — нарисован, но неактивен
   const groups=[];
   if(!courier){
-    // Дашборд (только staff/admin)
+    // Статистика (только staff/admin)
     const main=[];
-    if(canMod('dashboard'))main.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
+    if(canMod('dashboard'))main.push({k:'dashboard',label:'Статистика',icon:'stats'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
     if(main.length)groups.push({title:'Основное',items:main});
@@ -1017,7 +1018,7 @@ function buildBottomNav(){
     if(can('pickups','view'))items.push({k:'pickups',label:'Заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Заказы',icon:'orders'});
   }else{
-    items.push({k:'dashboard',label:'Дашборд',icon:'dashboard'});
+    items.push({k:'dashboard',label:'Статистика',icon:'stats'});
     if(can('pickups','view'))items.push({k:'pickups',label:'Заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Заказы',icon:'orders'});
     if(can('directories','view'))items.push({k:'partners',label:'Партнёры',icon:'partners'});

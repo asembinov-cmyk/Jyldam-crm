@@ -300,13 +300,19 @@ function drawHistory(){
 }
 
 /* ---------- РОУТЕР ---------- */
+let _lastTab='';
 function render(){
   if(typeof removeOrdersPager==='function')removeOrdersPager(); // снять плавающую панель пагинации
   if(typeof removePickupsPager==='function')removePickupsPager();
   if(typeof removeInboundPager==='function')removeInboundPager();
   if(typeof removeWhProductsPager==='function')removeWhProductsPager();
   if(typeof removeSortListPager==='function')removeSortListPager();
-  if(S.tab==='dashboard')renderDashboard();
+  if(S.tab==='dashboard'){
+    // Таблицы по дням при входе всегда свёрнуты: они длинные, и из-за них не видно
+    // карточек наверху. Раскрывает их человек сам, и только на время этого захода.
+    if(typeof dashOpen==='object'&&_lastTab!=='dashboard'){dashOpen.days=false;dashOpen.pickers=false;}
+    renderDashboard();
+  }
   else if(S.tab==='pickups')renderPickups();
   else if(S.tab==='orders')renderOrders();
   else if(S.tab==='ket_orders')renderInboundOrders();
@@ -324,4 +330,5 @@ function render(){
   else if(S.tab==='finance')renderFinance();
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
+  _lastTab=S.tab;
 }

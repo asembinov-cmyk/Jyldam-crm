@@ -650,6 +650,16 @@
   .fill-find-box tr.ff-wait td{background:#fbfbfc}
   @media(max-width:760px){.fh-find{width:100%}.fh-find input{min-width:0;flex:1}}
 
+  /* СТАТИСТИКА: таблицы по дням сворачиваются. При входе обе закрыты — они длинные,
+     и из-за них не видно карточек наверху, ради которых в раздел и заходят. */
+  .dash-fold-head{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    font:inherit;background:none;border:0;cursor:pointer}
+  .dash-fold-head h2{margin:0}
+  .dash-fold-ar{margin-left:auto;font-style:normal;color:var(--muted);transition:transform .18s}
+  .dash-fold.open .dash-fold-ar{transform:rotate(180deg)}
+  .dash-fold .dash-fold-body{display:none}
+  .dash-fold.open .dash-fold-body{display:block}
+
   /* РОЛИ И ПРАВА: матрица «роль × модуль» квадратами. Текстовые «просмотр +СРУ»
      читались построчно — чтобы понять картину, приходилось вчитываться в каждую
      ячейку. Цвет виден всей таблицей сразу, точный состав — в подсказке. */

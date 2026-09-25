@@ -168,6 +168,9 @@ function aiAssistantModal(){
   if($('aiQ'))$('aiQ').onkeydown=e=>{if(e.key==='Enter')ask();};
 }
 
+// Какие таблицы раскрыты. Сбрасывается при каждом входе в раздел (см. render в js/03):
+// по умолчанию обе свёрнуты.
+const dashOpen={days:false,pickers:false};
 function renderDashboard(){
   // заказы ещё догружаются в фоне — показываем аккуратный лоадер вместо нулей
   if((!S.orders||!S.orders.length)&&S._heavyLoading&&!S._heavyLoaded){
@@ -333,8 +336,11 @@ function renderDashboard(){
       <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Заказы по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAstana/30)))||'○'}</span><span class="dcity-v">${ordAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAlmaty/30)))||'○'}</span><span class="dcity-v">${ordAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
     </div>
-    <div class="panel">
-      <div class="panel-head"><h2>Статистика по дням</h2><span class="count">${statRows.length}</span></div>
+    <div class="panel dash-fold${dashOpen.days?' open':''}">
+      <button type="button" class="panel-head dash-fold-head" data-fold="days">
+        <h2>Статистика по дням</h2><span class="count">${statRows.length}</span>
+        <i class="dash-fold-ar">▾</i></button>
+      <div class="dash-fold-body">
       <div class="table-scroll dash-stat-scroll"><table class="dash-stat"><thead>
         <tr>
           <th rowspan="2">Дата</th>
@@ -365,9 +371,13 @@ function renderDashboard(){
           <td class="num">${statRows.reduce((s,r)=>s+r.mailDel,0)}</td>
         </tr></tfoot>`:''}
       </table></div>
+      </div>
     </div>
-    <div class="panel">
-      <div class="panel-head"><h2>Заборщики по дням</h2><span class="count">${pickerNames.length}</span></div>
+    <div class="panel dash-fold${dashOpen.pickers?' open':''}">
+      <button type="button" class="panel-head dash-fold-head" data-fold="pickers">
+        <h2>Заборщики по дням</h2><span class="count">${pickerNames.length}</span>
+        <i class="dash-fold-ar">▾</i></button>
+      <div class="dash-fold-body">
       <div class="table-scroll dash-stat-scroll"><table class="dash-stat dash-pickers"><thead>
         <tr>
           <th rowspan="2">Дата</th>
@@ -391,7 +401,16 @@ function renderDashboard(){
           <td class="num"><b>${pickerNames.reduce((s2,nm)=>s2+pickerTotals[nm].parcels,0)}</b></td>
         </tr></tfoot>`:''}
       </table></div>
+      </div>
     </div>`;
+  // Сворачивание больших таблиц. Открытое состояние держим в памяти вкладки, а не в
+  // localStorage: при заходе в раздел обе таблицы должны быть закрыты — они длинные, и
+  // из-за них не видно карточек наверху, ради которых сюда и заходят.
+  $('main').querySelectorAll('[data-fold]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.fold;
+    dashOpen[k]=!dashOpen[k];
+    b.closest('.dash-fold').classList.toggle('open',dashOpen[k]);
+  });
   // обработчики фильтра периода
   if($('dashMonth'))$('dashMonth').onchange=e=>{dashPeriod.month=parseInt(e.target.value,10);renderDashboard();};
   if($('dashYear'))$('dashYear').onchange=e=>{dashPeriod.year=parseInt(e.target.value,10);renderDashboard();};
