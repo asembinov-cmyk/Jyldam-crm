@@ -899,7 +899,7 @@ function showModal(title,bodyHtml,onSave,opts={}){
   const ov=document.createElement('div');ov.className='overlay';
   const foot=opts.readonly
     ? `<div class="modal-foot"><button class="btn primary" data-close>${esc(opts.closeLabel||'Закрыть')}</button></div>`
-    : `<div class="modal-foot">${opts.clearBtn?'<button class="btn ghost" data-clear>Очистить</button>':''}<button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>Сохранить</button></div>`;
+    : `<div class="modal-foot">${opts.clearBtn?'<button class="btn ghost" data-clear>Очистить</button>':''}<button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-save>${esc(opts.saveLabel||'Сохранить')}</button></div>`;
   ov.innerHTML=`<div class="modal${opts.wide?' modal-wide':''}${opts.mid?' modal-mid':''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="x">×</button></div>
     <div class="modal-body">${bodyHtml}</div>${foot}</div>`;
   document.body.appendChild(ov);

@@ -1427,3 +1427,14 @@ td .ft-dot{margin:0 0 0 8px}
 .orders-tbl th.col-move{cursor:grab;user-select:none}
 .orders-tbl th.col-move:active{cursor:grabbing}
 .orders-tbl th.col-over{box-shadow:inset 2px 0 0 var(--rust)}
+
+/* Разбор файла перед созданием заказов. Строки-пропуски подсвечены: решение
+   принимается по этой таблице, и увидеть их надо до нажатия, а не после. */
+.imp-head{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+.imp-head .field{flex:1 1 220px;margin:0}
+.imp-note{margin:0 0 12px;font-size:13px;color:var(--muted);line-height:1.6}
+.imp-table{max-height:46vh;overflow:auto}
+.imp-table table{font-size:13px}
+.imp-table tr.imp-bad td{background:#fdf1ef}
+.imp-ok{color:#2f7d54;font-weight:600}
+.imp-skip{color:#a5342a}
