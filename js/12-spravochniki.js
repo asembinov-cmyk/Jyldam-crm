@@ -96,17 +96,19 @@ function renderApiDocsSettings(){
   if($('docsPartnerBtn'))$('docsPartnerBtn').onclick=()=>partnerApiDocsModal();
 }
 // отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
-let partnersTab='delivery'; // delivery | warehouse
+let partnersTab='delivery'; // delivery | baraholka | warehouse
 function renderPartnersPage(){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Партнёры</h1><p>Партнёры доставки и партнёры склада</p></div></div>
     <div class="subtabs">
       <button data-ptab="delivery" class="${partnersTab==='delivery'?'active':''}">🚚 Партнёры доставки</button>
+      ${baraholkaReady()?`<button data-ptab="baraholka" class="${partnersTab==='baraholka'?'active':''}">🏷 Барахолка</button>`:''}
       <button data-ptab="warehouse" class="${partnersTab==='warehouse'?'active':''}">📦 Партнёры склада</button>
     </div>
     <div id="dirContent"></div>`;
   $('main').querySelectorAll('[data-ptab]').forEach(b=>b.onclick=()=>{partnersTab=b.dataset.ptab;renderPartnersPage();});
   if(partnersTab==='delivery')dirPartners();
+  else if(partnersTab==='baraholka')dirPartners(true);
   else renderWhPartners();
 }
 
@@ -181,8 +183,11 @@ function bindDir(table,arrKey,modalFn,deps){
 // состояние фильтров по справочникам: { arrKey: { colKey: value } }
 const dirFilters={};
 function dirGrid(cfg){
-  // cfg: {title, arrKey, table, modalFn, cols:[{key,label,text(row),cell(row)?,filter:'text'|'select',options(rows)?}], emptyText}
-  const arr=S[cfg.arrKey]||[];
+  // cfg: {title, arrKey, table, modalFn, cols:[{key,label,text(row),cell(row)?,filter:'text'|'select',options(rows)?}], emptyText, filterRows?}
+  // filterRows — отбор ДО фильтров пользователя: одна таблица показывается на двух
+  // вкладках (обычные партнёры и Барахолка), и значения выпадающих фильтров должны
+  // считаться уже по своей половине, иначе в списке городов будут чужие города.
+  const arr=cfg.filterRows?cfg.filterRows(S[cfg.arrKey]||[]):(S[cfg.arrKey]||[]);
   if(!dirFilters[cfg.arrKey])dirFilters[cfg.arrKey]={};
   const f=dirFilters[cfg.arrKey];
   // если выбранное значение select-фильтра больше не доступно с учётом других фильтров — сбрасываем
@@ -255,9 +260,14 @@ function redrawDirGrid(cfg){
 }
 
 /* Партнёры */
-function dirPartners(){
-  dirGrid({title:'Справочник партнёров',arrKey:'partners',table:'partners',modalFn:partnerModal,
-    emptyText:'Список партнёров пуст',
+// Барахолка — это те же партнёры, отмеченные галочкой, а не отдельная таблица:
+// заказ ссылается на партнёра из общего справочника, и вторая таблица заставила бы
+// тянуть вторую связь через всю систему.
+function dirPartners(onlyBar){
+  const bar=p=>!!p.is_baraholka;
+  dirGrid({title:onlyBar?'Партнёры Барахолки':'Справочник партнёров',arrKey:'partners',table:'partners',modalFn:partnerModal,
+    filterRows:rows=>rows.filter(p=>onlyBar?bar(p):!bar(p)),
+    emptyText:onlyBar?'Пока нет партнёров Барахолки — поставьте галочку в карточке партнёра':'Список партнёров пуст',
     sort:(a,b)=>(a.name||'').localeCompare(b.name||''),
     cols:[
       {key:'name',label:'Наименование',filter:'text',text:p=>p.name||'',cell:p=>`<strong>${esc(p.name)}</strong>`},
@@ -285,6 +295,7 @@ function partnerModal(id){
       <div class="field"><label>Тариф · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
       <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
     </div>
+    ${baraholkaReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_bar" ${p.is_baraholka?'checked':''}> Барахолка <span class="pom-paidhint">(заказы считаются по своим нормативам; на уже созданные не влияет)</span></label>`:''}
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
     <div class="field"><label>Доступ в кабинет партнёра</label>
@@ -326,7 +337,8 @@ function partnerModal(id){
       const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null,
         tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null,
         direct_pay_amount:val('p_direct_pay')!==''?parseFloat(val('p_direct_pay')):null,
-        is_protected:!!($('p_protected')&&$('p_protected').checked)};
+        is_protected:!!($('p_protected')&&$('p_protected').checked),
+        ...($('p_bar')?{is_baraholka:!!$('p_bar').checked}:{})};
       let syncMsg='';
       if(id){
         const before=S.partners.find(x=>x.id===id);

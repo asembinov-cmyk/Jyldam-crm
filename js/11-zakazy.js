@@ -85,7 +85,12 @@ function buildPickupOrderRows(p,count){
       // оплате) — иначе Калькуляции неоткуда взять «условную выручку» по этим заказам.
       paid_by_sender:!!(partner&&isExplicitZero(partner.tariff_courier)),
       order_sum_orig:(partner&&isExplicitZero(partner.tariff_courier)&&partner.direct_pay_amount!=null)?partner.direct_pay_amount:null,
-      index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null
+      index:'',track:'',pay_date:null,post_ip_id:null,order_courier_id:null,
+      // Раздел калькуляции запоминаем в момент создания, а не смотрим на партнёра
+      // каждый раз: партнёра могут перевести в Барахолку и обратно, и тогда прибыль
+      // за прошлые месяцы пересчиталась бы задним числом молча.
+      ...(typeof baraholkaReady==='function'&&baraholkaReady()
+        ? {calc_group:(partner&&partner.is_baraholka)?'baraholka':null} : {})
     });
   }
   return rows;
@@ -1965,6 +1970,12 @@ function orderModal(id,readonly){
         cost:(val('o_sum')!==''?parseFloat(val('o_sum')):0),pay_date:val('o_pay')||null,deliver_date:val('o_deliver')||null,post_ip_id:val('o_ip')||null,comment:val('o_comment').trim(),
         size:val('o_size')||null,
         order_courier_id:val('o_ocourier')||null};
+      // Новый заказ получает раздел от партнёра; у существующего не трогаем —
+      // он мог быть выставлен вручную или создан, когда партнёр был другим.
+      if(!id&&typeof baraholkaReady==='function'&&baraholkaReady()){
+        const pt=findPartner();
+        row.calc_group=(pt&&pt.is_baraholka)?'baraholka':null;
+      }
       // галочка «Оплачено отправителем»: сумма→0 (исходная запоминается), снятие — возврат
       if($('o_paidorder')){
         const paidNow=$('o_paidorder').checked;

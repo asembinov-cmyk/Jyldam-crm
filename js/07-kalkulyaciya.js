@@ -18,6 +18,27 @@ const CALC_FIELDS=[
   {key:'fund_smm',   label:'ЗП СММ команде (в месяц)', kind:'fund', group:'expense', hint:'Делится на кол-во заказов за месяц'},
   {key:'fund_other', label:'Иные расходы (в месяц)',   kind:'fund', group:'expense', hint:'Всё, что не вошло в другие статьи'},
 ];
+// БАРАХОЛКА — заказы, пришедшие готовым реестром Казпочты: трек уже присвоен,
+// курьер к партнёру не едет. Свой набор статей: ни курьера за забор, ни межгорода
+// у них нет, а фонды свои и делятся только на заказы Барахолки.
+const CALC_BAR_FIELDS=[
+  {key:'bar_pack',   label:'Пакет (за заказ)',          hint:'Упаковка'},
+  {key:'bar_gofra',  label:'Гофра (за заказ)',          hint:'Гофра'},
+  {key:'bar_blank',  label:'Бланк (за заказ)',          hint:'Печать наклейки'},
+  {key:'bar_sms',    label:'SMS (за заказ)',            hint:'SMS-уведомления'},
+  {key:'bar_freight',label:'Доставка почтой (за заказ)',hint:'Стоимость отправки почтой'},
+];
+const CALC_BAR_FUNDS=[
+  {key:'bar_fund_processor',label:'ЗП обработчика (в месяц)',      hint:'Делится на заказы Барахолки за месяц'},
+  {key:'bar_fund_manager',  label:'ЗП менеджера (в месяц)',        hint:'Делится на заказы Барахолки за месяц'},
+  {key:'bar_fund_warehouse',label:'Аренда склада (в месяц)',       hint:'Делится на заказы Барахолки за месяц'},
+  {key:'bar_fund_delivery', label:'ЗП доставки до почты (в месяц)',hint:'Делится на заказы Барахолки за месяц'},
+];
+// Раздел заказа. Пусто = обычный; метка проставляется при создании из карточки партнёра.
+const isBaraholkaOrder=o=>String(o&&o.calc_group||'')==='baraholka';
+// Вкладка появляется, только если колонки в базе есть (db/13 выполнен).
+const baraholkaReady=()=>!!(S.orders&&S.orders.length&&('calc_group' in S.orders[0]));
+
 // сотрудники с окладом (делится на заказы месяца) + ставкой за заказ
 const CALC_SALARY_FIELDS=[
   {salaryKey:'salary_processor', perKey:'perorder_processor', label:'Менеджер обработчик'},
@@ -131,12 +152,20 @@ let _monthCountCache=null,_monthCountLen=-1;
 function ordersInOrderMonth(o){
   const d=(o.pickup_date||o.created_at||'').slice(0,7); // YYYY-MM
   if(!d)return 1;
-  // строим кэш один раз за проход, а не перебираем все заказы для каждого
+  // Считаем отдельно по разделам: фонды Барахолки делятся на её заказы, общие — на
+  // остальные. Если делить общие фонды на все заказы вместе, Барахолка разбавляла бы
+  // общий котёл, ничего из него не оплачивая, и прибыль по обычным заказам росла бы
+  // на пустом месте.
+  const grp=isBaraholkaOrder(o)?'bar':'main';
   if(!_monthCountCache||_monthCountLen!==(S.orders||[]).length){
     _monthCountCache={};_monthCountLen=(S.orders||[]).length;
-    (S.orders||[]).forEach(x=>{const m=(x.pickup_date||x.created_at||'').slice(0,7);if(m)_monthCountCache[m]=(_monthCountCache[m]||0)+1;});
+    (S.orders||[]).forEach(x=>{
+      const m=(x.pickup_date||x.created_at||'').slice(0,7);if(!m)return;
+      const g=isBaraholkaOrder(x)?'bar':'main';
+      _monthCountCache[g+'|'+m]=(_monthCountCache[g+'|'+m]||0)+1;
+    });
   }
-  return _monthCountCache[d]||1;
+  return _monthCountCache[grp+'|'+d]||1;
 }
 // ПОЛНЫЙ РАСЧЁТ калькуляции заказа: выручка, статьи расходов, прибыль, маржа, ROI.
 // Если у заказа есть сохранённый снимок calc — используем его статьи (старые заказы не пересчитываются нормативами).
@@ -155,7 +184,29 @@ function calcOrder(o){
   const monthOrders=ordersInOrderMonth(o);
   // тип доставки: курьерская или почтовая
   const isCourierType=isCourierDelivery(o.delivery_id);
+  const isBar=isBaraholkaOrder(o);
   let items;
+  if(isBar){
+    // БАРАХОЛКА: свои пять статей за заказ и свои четыре фонда. Общие фонды,
+    // курьер, межгород и зарплаты из общего блока к таким заказам не применяются —
+    // курьер за ними не ездил, а свои расходы у них перечислены полностью.
+    const barFixed=CALC_BAR_FIELDS.map(f=>{
+      const amount=(snap&&snap.items&&snap.items[f.key]!=null)?(parseFloat(snap.items[f.key])||0):calcNorm(f.key,P);
+      return {key:f.key,label:f.label,amount};
+    });
+    const barFunds=CALC_BAR_FUNDS.map(f=>{
+      const amount=(snap&&snap.items&&snap.items[f.key]!=null)?(parseFloat(snap.items[f.key])||0)
+        :Math.round((calcNorm(f.key,P)/monthOrders)*100)/100;
+      return {key:f.key,label:f.label,amount};
+    });
+    const barItems=barFixed.concat(barFunds);
+    const barCost=barItems.reduce((s2,it)=>s2+(it.amount||0),0);
+    const barProfit=revenue-barCost;
+    return {revenue,items:barItems,totalCost:barCost,profit:barProfit,
+      margin:revenue>0?(barProfit/revenue*100):0,
+      roi:barCost>0?(barProfit/barCost*100):0,
+      cityId,monthOrders,isCourierType,period:P,isPaidBySender,notionalRevenue,isBar:true};
+  }
   if(isCourierType){
     // КУРЬЕРСКИЙ заказ — статьи из CALC_FIELDS (курьер/межгород по городу)
     items=CALC_FIELDS.map(f=>{
@@ -200,7 +251,7 @@ function calcOrder(o){
   const profit=revenue-totalCost;
   const margin=revenue>0?(profit/revenue*100):0;
   const roi=totalCost>0?(profit/totalCost*100):0;
-  return {revenue,items,totalCost,profit,margin,roi,cityId,monthOrders,isCourierType,period:P2,isPaidBySender,notionalRevenue};
+  return {revenue,items,totalCost,profit,margin,roi,cityId,monthOrders,isCourierType,period:P2,isPaidBySender,notionalRevenue,isBar:false};
 }
 // цвет индикации прибыли: red/yellow/green
 function calcProfitColor(profit,period){
@@ -230,6 +281,7 @@ function renderCalc(){
     <div class="page-head"><div><h1>Калькуляция</h1><p>Себестоимость, прибыль и заработок по заказам</p></div></div>
     <div class="subtabs">
       <button data-calcsub="norms" class="${calcSub==='norms'?'active':''}">Расходы компании</button>
+      ${baraholkaReady()?`<button data-calcsub="bar" class="${calcSub==='bar'?'active':''}">Барахолка</button>`:''}
       <button data-calcsub="summary" class="${calcSub==='summary'?'active':''}">Общая сводка</button>
       <button data-calcsub="partner" class="${calcSub==='partner'?'active':''}">Расчёт партнёра</button>
     </div>
@@ -238,7 +290,8 @@ function renderCalc(){
   // вкладок нормативов было две — курьерская и почтовая, но состав у них одинаковый,
   // поэтому осталась одна. Старые значения принимаем на случай, если calcSub где-то
   // выставят прежним именем.
-  if(calcSub==='norms'||calcSub==='courier'||calcSub==='mail')renderCalcNorms();
+  if(calcSub==='bar')renderCalcBarNorms();
+  else if(calcSub==='norms'||calcSub==='courier'||calcSub==='mail')renderCalcNorms();
   else if(calcSub==='partner')renderCalcPartner();
   else renderCalcSummary();
 }
@@ -536,6 +589,50 @@ function calcPartnerModal(id){
     toast('Сохранено');renderCalcPartner();return true;
   });
 }
+// Нормативы Барахолки — отдельной вкладкой, а не блоком на общей странице:
+// её фонды не имеют отношения к общим и делятся на другое число заказов.
+// Стоять рядом с ними — значит приглашать перепутать.
+function renderCalcBarNorms(){
+  const P=calcPeriodStr();
+  const cs=calcCurrentSettings();
+  const monthsRU=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const fieldRow=f=>`<div class="calc-norm-row">
+    <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
+    <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
+  </div>`;
+  // Сколько заказов Барахолки в выбранном месяце — по этому числу делятся её фонды.
+  // Показываем прямо тут: иначе «в месяц» остаётся абстракцией, и непонятно, сколько
+  // из фонда ляжет на один заказ.
+  const cnt=(S.orders||[]).filter(o=>isBaraholkaOrder(o)&&String(o.pickup_date||o.created_at||'').slice(0,7)===P).length;
+  const fundsSum=CALC_BAR_FUNDS.reduce((a,f)=>a+calcNorm(f.key,P),0);
+  const perOrder=cnt?Math.round(fundsSum/cnt*100)/100:null;
+  $('calcContent').innerHTML=`
+    <div class="calc-period-bar"><span>Нормативы за:</span>
+      <select id="calcNormMonth">${monthsRU.map((m,i)=>`<option value="${i}" ${calcNormPeriod.month===i?'selected':''}>${m}</option>`).join('')}</select>
+      <select id="calcNormYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${calcNormPeriod.year===y?'selected':''}>${y}</option>`;return o;})()}</select></div>
+    <div class="calc-grid">
+      <div class="panel calc-panel">
+        <h3 class="calc-h">Барахолка — расходы за заказ</h3>
+        <p class="calc-note">Применяются к заказам партнёров, отмеченных как «Барахолка».
+          Курьера и межгорода у них нет: посылки сданы в почту готовыми.</p>
+        ${CALC_BAR_FIELDS.map(fieldRow).join('')}
+      </div>
+      <div class="panel calc-panel">
+        <h3 class="calc-h">Барахолка — распределяемые фонды (в месяц)</h3>
+        <p class="calc-note">Делятся на заказы Барахолки за месяц. Общие фонды компании к этим заказам не применяются.</p>
+        ${CALC_BAR_FUNDS.map(fieldRow).join('')}
+        <p class="calc-note" style="margin-top:14px">
+          Заказов Барахолки за ${esc(P)}: <b>${cnt}</b>.
+          ${perOrder!=null?`Фонды дают <b>${perOrder.toLocaleString('ru-RU')} ₸</b> на заказ.`:'Пока делить не на что — заказов нет.'}
+        </p>
+      </div>
+    </div>
+    <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>`;
+  $('calcSaveBtn').onclick=saveCalcSettings;
+  if($('calcNormMonth'))$('calcNormMonth').onchange=e=>{calcNormPeriod.month=parseInt(e.target.value,10);renderCalc();};
+  if($('calcNormYear'))$('calcNormYear').onchange=e=>{calcNormPeriod.year=parseInt(e.target.value,10);renderCalc();};
+}
+
 function renderCalcNorms(){
   const P=calcPeriodStr();
   const cs=calcCurrentSettings();
@@ -704,10 +801,15 @@ function renderCalcSummary(){
   const avgRoi=totCost>0?(totProfit/totCost*100):0;
   // разбивка курьерские / почтовые — межгород (freight) относится только к курьерским, поэтому
   // корректировку по дате отправки применяем именно к курьерской сумме, почтовую не трогаем
-  const cour=calcs.filter(x=>x.c.isCourierType), post=calcs.filter(x=>!x.c.isCourierType);
+  // Барахолку считаем отдельной строкой, а не внутри «Почтовой»: набор расходов у неё
+  // свой, и в общей строке она бы растворилась — ради этого разделения всё и делалось.
+  const bar=calcs.filter(x=>x.c.isBar);
+  const cour=calcs.filter(x=>!x.c.isBar&&x.c.isCourierType);
+  const post=calcs.filter(x=>!x.c.isBar&&!x.c.isCourierType);
   const sumBlock=arr=>({cnt:arr.length,rev:arr.reduce((s,x)=>s+x.c.revenue,0),cost:arr.reduce((s,x)=>s+x.c.totalCost,0),profit:arr.reduce((s,x)=>s+(x.c.revenue-x.c.totalCost),0)});
   const courSum=sumBlock(cour);courSum.cost+=freightAdjust;courSum.profit-=freightAdjust;
   const postSum=sumBlock(post);
+  const barSum=sumBlock(bar);
   // заказы «Оплачено отправителем» — их выручка (условная, по сохранённой исходной сумме) уже
   // учтена в totRevenue/totProfit выше; здесь просто выделяем её отдельно для прозрачности
   const paidBySenderCalcs=calcs.filter(x=>x.c.isPaidBySender);
@@ -763,7 +865,8 @@ function renderCalcSummary(){
         <tbody>
           <tr><td>Курьерская</td><td>${courSum.cnt}</td><td>${fmtMoney(courSum.rev)}</td><td>${fmtMoney(courSum.cost)}</td><td><b style="color:${courSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(courSum.profit)}</b></td></tr>
           <tr><td>Почтовая</td><td>${postSum.cnt}</td><td>${fmtMoney(postSum.rev)}</td><td>${fmtMoney(postSum.cost)}</td><td><b style="color:${postSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(postSum.profit)}</b></td></tr>
-          <tr style="border-top:2px solid var(--line)"><td><b>Всего (общий котёл)</b></td><td><b>${courSum.cnt+postSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
+          ${barSum.cnt?`<tr><td>Барахолка<span class="cn-hint" style="display:block">свои нормативы, общие фонды не применяются</span></td><td>${barSum.cnt}</td><td>${fmtMoney(barSum.rev)}</td><td>${fmtMoney(barSum.cost)}</td><td><b style="color:${barSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(barSum.profit)}</b></td></tr>`:''}
+          <tr style="border-top:2px solid var(--line)"><td><b>Всего (общий котёл)</b></td><td><b>${courSum.cnt+postSum.cnt+barSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
         </tbody></table></div>
     </div>
     ${paidBySenderSum.cnt?`<div class="panel calc-panel" style="margin-bottom:18px">
