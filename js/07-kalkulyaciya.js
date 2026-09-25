@@ -627,10 +627,55 @@ function renderCalcBarNorms(){
         </p>
       </div>
     </div>
-    <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>`;
+    <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>
+    ${barSummaryHtml(P)}`;
   $('calcSaveBtn').onclick=saveCalcSettings;
   if($('calcNormMonth'))$('calcNormMonth').onchange=e=>{calcNormPeriod.month=parseInt(e.target.value,10);renderCalc();};
   if($('calcNormYear'))$('calcNormYear').onchange=e=>{calcNormPeriod.year=parseInt(e.target.value,10);renderCalc();};
+}
+
+// Сводка прямо под нормативами: поменял число — сразу видно, во что это вылилось.
+// Ходить за этим в «Общую сводку» и искать там одну строку — лишний круг.
+function barSummaryHtml(P){
+  const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  const list=(S.orders||[]).filter(o=>isBaraholkaOrder(o)&&String(o.pickup_date||o.created_at||'').slice(0,7)===P);
+  if(!list.length)return `<div class="panel calc-panel" style="margin-top:18px">
+    <h3 class="calc-h">Итоги за ${esc(P)}</h3>
+    <p class="calc-note">Заказов Барахолки за этот месяц пока нет — считать нечего.</p></div>`;
+  const calcs=list.map(o=>calcOrder(o));
+  const rev=calcs.reduce((a,c)=>a+c.revenue,0);
+  const cost=calcs.reduce((a,c)=>a+c.totalCost,0);
+  const profit=rev-cost;
+  const margin=rev>0?(profit/rev*100):0;
+  // по статьям — чтобы было видно, какая из них съедает больше всего
+  const byItem={};
+  calcs.forEach(c=>c.items.forEach(it=>{byItem[it.label]=(byItem[it.label]||0)+(it.amount||0);}));
+  const items=Object.entries(byItem).sort((a,b)=>b[1]-a[1]);
+  return `
+    <div class="panel calc-panel" style="margin-top:18px">
+      <h3 class="calc-h">Итоги Барахолки за ${esc(P)}</h3>
+      <div class="calc-kpi">
+        <div><span>Заказов</span><b>${list.length}</b></div>
+        <div><span>Выручка</span><b>${fmtMoney(rev)}</b></div>
+        <div><span>Расходы</span><b>${fmtMoney(cost)}</b></div>
+        <div><span>Прибыль</span><b style="color:${profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(profit)}</b>
+          <small>маржа ${margin.toFixed(1)}%</small></div>
+        <div><span>На один заказ</span><b>${fmtMoney(cost/list.length)}</b><small>себестоимость</small></div>
+      </div>
+      <div class="table-scroll" style="margin-top:14px"><table class="resp-table"><thead><tr>
+        <th>Статья</th><th class="num">Всего за месяц</th><th class="num">На заказ</th><th class="num">Доля</th>
+      </tr></thead><tbody>
+        ${items.map(([label,sum])=>`<tr>
+          <td data-label="Статья">${esc(label)}</td>
+          <td data-label="Всего за месяц" class="num">${fmtMoney(sum)}</td>
+          <td data-label="На заказ" class="num">${fmtMoney(sum/list.length)}</td>
+          <td data-label="Доля" class="num">${cost>0?Math.round(sum/cost*100):0}%</td>
+        </tr>`).join('')}
+      </tbody><tfoot><tr class="dash-total">
+        <td>Итого расходов</td><td class="num">${fmtMoney(cost)}</td>
+        <td class="num">${fmtMoney(cost/list.length)}</td><td class="num">100%</td>
+      </tr></tfoot></table></div>
+    </div>`;
 }
 
 function renderCalcNorms(){

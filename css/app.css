@@ -1438,3 +1438,11 @@ td .ft-dot{margin:0 0 0 8px}
 .imp-table tr.imp-bad td{background:#fdf1ef}
 .imp-ok{color:#2f7d54;font-weight:600}
 .imp-skip{color:#a5342a}
+
+/* Плашки итогов под нормативами Барахолки. */
+.calc-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.calc-kpi>div{background:var(--paper);border-radius:12px;padding:14px 16px}
+.calc-kpi span{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.calc-kpi b{display:block;margin-top:6px;font-family:'Fraunces',serif;font-weight:900;font-size:22px;line-height:1.1}
+.calc-kpi small{display:block;margin-top:4px;font-size:11px;color:var(--muted)}
+@media(max-width:900px){.calc-kpi{grid-template-columns:repeat(2,1fr)}}
