@@ -206,7 +206,8 @@ function renderBlanksBatch(id){
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn ghost" id="blBack">‹ К списку</button>
           ${st.tracked<st.all&&canEditDir()?`<button class="btn primary" id="blGetTracks">📮 Получить треки (${st.all-st.tracked})</button>`:''}
-          ${st.tracked?`<button class="btn" id="blPrintA4">🖨 Печать A4</button>`:''}
+          ${st.tracked?`<button class="btn" id="blPrintLabel">🖨 Печать 100×150</button>`:''}
+          ${st.tracked?`<button class="btn ghost" id="blPrintA4">A4</button>`:''}
           ${st.tracked&&!b.partner_id&&canEditDir()?`<button class="btn ghost" id="blIssue">Отдать партнёру</button>`:''}
         </div>
       </div>
@@ -230,7 +231,8 @@ function renderBlanksBatch(id){
     </div>`;
   $('blBack').onclick=()=>{blanksBatchOpen=null;renderBlanks();};
   if($('blGetTracks'))$('blGetTracks').onclick=()=>blanksGetTracks(id);
-  if($('blPrintA4'))$('blPrintA4').onclick=()=>blanksPrint(id);
+  if($('blPrintA4'))$('blPrintA4').onclick=()=>blanksPrint(id,'a4');
+  if($('blPrintLabel'))$('blPrintLabel').onclick=()=>blanksPrint(id,'label');
   if($('blIssue'))$('blIssue').onclick=()=>blanksIssueModal(id);
 }
 function blanksOrderCode(orderId){
@@ -293,7 +295,7 @@ function blanksIssueModal(batchId){
 // ── ПЕЧАТЬ ──
 // Печатаем тем же бланком, что и обычные заказы: подсовываем «заказ», которого ещё нет —
 // с кодом, треком, ИП и суммой партии. Получатель пуст, его впишет партнёр.
-async function blanksPrint(batchId){
+async function blanksPrint(batchId,fmt){
   const rows=blanksRows(batchId).filter(r=>r.track);
   if(!rows.length){toast('Сначала получите треки');return;}
   const b=(S.trackBatches||[]).find(x=>x.id===batchId)||{};
@@ -303,7 +305,7 @@ async function blanksPrint(batchId){
     client:'',address:'',phone:'',index:'',city_id:null,delivery_id:null,weight:null,
   }));
   toast(`Готовлю ${fake.length} бланков…`);
-  await printMailLabelsPdf(fake);
+  await printMailLabelsPdf(fake,fmt);
   const now=new Date().toISOString();
   await sb.from('track_pool').update({printed_at:now}).in('id',rows.map(r=>r.id));
   await loadBlanks();

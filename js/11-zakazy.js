@@ -1282,15 +1282,58 @@ function mailLabelItems(orders){
     order:o,   // нужен, чтобы взять данные выбранного ИП
     track:o.track||o.kz_code||'',
     client:o.client,address:o.address,index:o.index||'',
-    phone:typeof phoneDisplay==='function'?phoneDisplay(o.phone||''):(o.phone||''),
+    // Пустой телефон не форматируем: phoneDisplay('') возвращает одинокий «+».
+    // На бланк он и раньше не попадал (drawFitText пустое не рисует, да и «+» там
+    // напечатан самой формой Казпочты), а вот в списке «Сортировки» показывался.
+    phone:(String(o.phone||'').replace(/\D/g,'')
+      ?(typeof phoneDisplay==='function'?phoneDisplay(o.phone):o.phone):''),
     amount:orderSum(o),
   }));
 }
+// ЭТИКЕТКА 100×150 ММ ДЛЯ ТЕРМОПРИНТЕРА.
+//
+// Отдельного шаблона нет и не нужно: образец владельца оказался нашим же бланком A4,
+// повёрнутым на 90° и уменьшенным. Поэтому берём готовый A4-документ и перекладываем
+// каждую его страницу на этикетку — содержимое гарантированно то же самое, что на A4,
+// и расходиться между форматами ему нечем.
+//
+// Числа взяты из самого образца, а не подобраны: в его потоке стоит
+//   0.608... 0 0 0.608... -9.7529932 -32.4233243 cm
+// при повороте `0 1 -1 0 283.464567 0`. Масштаб больше «вписать целиком» (0.476):
+// поля бланка при этом обрезаются, а сама форма помещается — так и было в образце.
+const LABEL_W=283.464567, LABEL_H=425.19685;   // 100×150 мм в пунктах
+const LABEL_SCALE=0.60834861;
+const LABEL_DX=-9.7529932, LABEL_DY=-32.4233243;
+async function a4LabelsToThermal(a4Bytes){
+  await ensurePdfLib();
+  if(!window.PDFLib)return null;
+  const {PDFDocument,degrees}=PDFLib;
+  const src=await PDFDocument.load(a4Bytes);
+  const out=await PDFDocument.create();
+  const pages=src.getPages().map((_,i)=>i);
+  const embedded=await out.embedPages(src.getPages());
+  for(const i of pages){
+    const page=out.addPage([LABEL_W,LABEL_H]);
+    // drawPage у pdf-lib сначала сдвигает, потом поворачивает, потом масштабирует,
+    // поэтому сдвиг образца (он в повёрнутой системе) переносится в x/y так:
+    page.drawPage(embedded[i],{
+      x:LABEL_W-LABEL_DY, y:LABEL_DX,
+      xScale:LABEL_SCALE, yScale:LABEL_SCALE, rotate:degrees(90),
+    });
+  }
+  return await out.save();
+}
 // бланки для «своих» заказов (Заказы → Почтовая доставка)
-async function printMailLabelsPdf(orders){
-  const bytes=await generateMailLabelsPdf(mailLabelItems(orders));
+// fmt: 'a4' (по умолчанию) или 'label' — этикетка 100×150 для термопринтера
+async function printMailLabelsPdf(orders,fmt){
+  let bytes=await generateMailLabelsPdf(mailLabelItems(orders));
   if(!bytes)return;
-  await openOrDownloadPdf(bytes,'Бланки_почта.pdf');
+  if(fmt==='label'){
+    const conv=await a4LabelsToThermal(bytes);
+    if(!conv){toast('Не удалось собрать этикетки — печатаю A4');}
+    else bytes=conv;
+  }
+  await openOrDownloadPdf(bytes,fmt==='label'?'Бланки_100x150.pdf':'Бланки_почта.pdf');
   toast(`Готово: бланков ${orders.length}`);
 }
 
