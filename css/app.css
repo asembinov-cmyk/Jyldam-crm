@@ -636,6 +636,20 @@
     border:1px solid var(--line);background:var(--card);color:var(--muted);transition:.15s}
   .subtabs button.active{background:var(--moss);color:#fff;border-color:var(--moss)}
 
+  /* ЗАПОЛНЕНИЕ: поиск «кто заполнял этот заказ» на месте дублирующей кнопки. */
+  .fh-find{display:flex;gap:8px;align-items:center}
+  .fh-find input{font:inherit;font-size:14px;padding:10px 13px;border:1px solid var(--line);
+    border-radius:10px;background:var(--card);color:var(--ink);min-width:330px}
+  .fill-find-box{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px;margin-bottom:16px}
+  .ff-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .ff-note{color:var(--muted);font-size:13.5px;margin:0 0 8px}
+  .ff-dim{color:var(--muted)}
+  .fill-find-box tr.ff-done td{background:#f2f9f4}
+  .fill-find-box tr.ff-work td{background:#fdf6e8}
+  .fill-find-box tr.ff-wait td{background:#fbfbfc}
+  @media(max-width:760px){.fh-find{width:100%}.fh-find input{min-width:0;flex:1}}
+
   /* РОЛИ И ПРАВА: матрица «роль × модуль» квадратами. Текстовые «просмотр +СРУ»
      читались построчно — чтобы понять картину, приходилось вчитываться в каждую
      ячейку. Цвет виден всей таблицей сразу, точный состав — в подсказке. */

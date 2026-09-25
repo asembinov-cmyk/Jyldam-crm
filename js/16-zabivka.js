@@ -299,10 +299,14 @@ function renderFilling(){
       <div><h1>Заполнение</h1><p>Заказы выдаются по одному — двое не сядут за один и тот же</p></div>
       <div class="fill-head-act">
         <div class="fh-queue"><span>В очереди</span><b>${free.length}</b></div>
-        <button class="btn primary" id="fillNext" ${free.length||mine.length?'':'disabled'}>
-          Взять следующий <kbd>Space</kbd></button>
+        <div class="fh-find">
+          <input id="fillFind" class="search" placeholder="Номер заказа, ФИО или телефон — кто заполнял"
+            value="${esc(fillFindQ)}" autocomplete="off">
+          <button class="btn sm ghost" id="fillFindBtn">Найти</button>
+        </div>
       </div>
     </div>
+    <div id="fillFindBox"></div>
     <div class="fill-kpi">
       <div class="fk fk-main">
         <div class="fk-k">Ждут заполнения</div>
@@ -423,6 +427,15 @@ function renderFilling(){
     </div>`;
 
   ['fillNext','fillNextBottom'].forEach(id=>{const b=$(id);if(b)b.onclick=()=>fillTakeNext();});
+  if($('fillFindBtn'))$('fillFindBtn').onclick=()=>fillFind();
+  if($('fillFind')){
+    const inp=$('fillFind');
+    inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();fillFind();}};
+    // Пробел в поле поиска — это пробел, а не «взять следующий»: иначе имя не набрать.
+    inp.onkeyup=e=>e.stopPropagation();
+    inp.onkeypress=e=>e.stopPropagation();
+  }
+  if(fillFindRes!==null)fillFindDraw();
   const rl=$('fillReload'); if(rl) rl.onclick=()=>fillRefresh();
   $('main').querySelectorAll('[data-fillopen]').forEach(b=>b.onclick=()=>orderModal(b.dataset.fillopen));
   $('main').querySelectorAll('[data-fillrel]').forEach(b=>b.onclick=()=>fillRelease(b.dataset.fillrel));
@@ -452,3 +465,105 @@ document.addEventListener('keydown',e=>{
   e.preventDefault();
   fillTakeNext();
 });
+
+// ==================== «КТО ЗАПОЛНЯЛ ЭТОТ ЗАКАЗ» ====================
+// Раньше на этом месте стояла вторая кнопка «Взять следующий» — та же, что внизу
+// страницы. Дубль убран, вместо него поиск: по номеру заказа, ФИО или телефону
+// видно, кто заказ заполнил и когда.
+//
+// Ищем ЗАПРОСОМ К БАЗЕ, а не по S.orders: в памяти вкладки после входа лежат только
+// сегодняшние заказы, а спрашивают обычно про вчерашний или позавчерашний.
+let fillFindQ='', fillFindRes=null, fillFindBusy=false;
+
+async function fillFind(){
+  const inp=$('fillFind');
+  fillFindQ=inp?inp.value.trim():'';
+  if(!fillFindQ){fillFindRes=null;fillFindDraw();return;}
+  if(fillFindBusy)return;
+  fillFindBusy=true;fillFindDraw('Ищу…');
+  const q=fillFindQ;
+  const digits=q.replace(/\D/g,'');
+  const like=v=>v.replace(/[%,]/g,' ');
+  // Телефон в базе лежит цифрами, поэтому по нему ищем отдельным условием и только
+  // если цифры в запросе реально есть: пустая строка — подстрока чего угодно, и
+  // поиск по имени показывал бы вообще всё (те же грабли были в «Сортировке»).
+  const isTrack=/^[A-Za-z]{2}\d+[A-Za-z]{2}$/.test(q.replace(/\s/g,''));
+  const conds=[`code.ilike.%${like(q)}%`,`client.ilike.%${like(q)}%`];
+  if(isTrack)conds.push(`track.ilike.%${like(q.replace(/\s/g,''))}%`);
+  // Цифры трека телефоном быть не могут — лишнее условие по 26 тысячам строк ни к чему.
+  else if(digits.length>=4)conds.push(`phone.ilike.%${digits}%`);
+  try{
+    const {data,error}=await sb.from('orders')
+      .select('id,code,client,phone,track,pickup_date,created_at,filled_at,filled_by,filled_by_name,claimed_at,claimed_by,claim_hold,delivery_id,sender')
+      .or(conds.join(','))
+      .order('created_at',{ascending:false})
+      .limit(20);
+    if(error)throw error;
+    fillFindRes=data||[];
+  }catch(e){
+    console.error('fillFind',e);
+    fillFindRes=[];
+    toast('Не удалось выполнить поиск');
+  }
+  fillFindBusy=false;
+  fillFindDraw();
+}
+
+// Кто держит заказ сейчас — по тем же правилам, что и очередь: захват живой
+// FILL_CLAIM_MIN минут, потом заказ возвращается в общий пул.
+function fillClaimNow(o){
+  if(!o.claimed_by||!o.claimed_at)return null;
+  const alive=(Date.now()-new Date(o.claimed_at))/60000 < FILL_CLAIM_MIN;
+  if(!alive)return null;
+  const p=(S.profiles||[]).find(x=>x.id===o.claimed_by);
+  return {name:p?(p.full_name||p.email||'сотрудник'):'сотрудник',hold:!!o.claim_hold};
+}
+
+function fillFindDraw(note){
+  const box=$('fillFindBox');if(!box)return;
+  if(note){box.innerHTML=`<div class="fill-find-box"><p class="ff-note">${esc(note)}</p></div>`;return;}
+  if(fillFindRes===null){box.innerHTML='';return;}
+  if(!fillFindRes.length){
+    box.innerHTML=`<div class="fill-find-box">
+      <p class="ff-note">По запросу «${esc(fillFindQ)}» ничего не нашлось.
+        Ищем по номеру заказа, ФИО получателя, телефону и треку.</p>
+      <button class="btn sm ghost" id="ffClose">Закрыть</button></div>`;
+    if($('ffClose'))$('ffClose').onclick=()=>{fillFindRes=null;fillFindQ='';fillFindDraw();};
+    return;
+  }
+  const rows=fillFindRes.map(o=>{
+    const claim=fillClaimNow(o);
+    const secs=fillOrderSecs(o);
+    let who,when,cls;
+    if(o.filled_at){
+      who=esc(o.filled_by_name||'—');
+      when=esc(fmtDateTime(o.filled_at))+(secs!=null?` · за ${Math.round(secs)} сек`:'');
+      cls='ff-done';
+    }else if(claim){
+      who=esc(claim.name);
+      when=claim.hold?'отложен, держит за собой':'взят в работу, ещё не заполнен';
+      cls='ff-work';
+    }else{
+      who='<span class="ff-dim">никто</span>';
+      when='ждёт заполнения';
+      cls='ff-wait';
+    }
+    return `<tr class="${cls}">
+      <td data-label="Заказ"><b>${esc(o.code||'—')}</b>${o.sender?`<small class="cell-time">${esc(o.sender)}</small>`:''}</td>
+      <td data-label="Получатель">${esc(o.client||'—')}${o.phone?`<small class="cell-time">${esc(phoneDisplay(o.phone))}</small>`:''}</td>
+      <td data-label="Забор">${esc(String(o.pickup_date||o.created_at||'').slice(0,10))}</td>
+      <td data-label="Кто заполнил">${who}</td>
+      <td data-label="Когда">${when}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML=`<div class="fill-find-box">
+    <div class="ff-head"><b>Найдено: ${fillFindRes.length}</b>
+      <span class="ff-dim">по запросу «${esc(fillFindQ)}»</span>
+      <button class="btn sm ghost" id="ffClose" style="margin-left:auto">✕ Закрыть</button></div>
+    <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Заказ</th><th>Получатель</th><th>Забор</th><th>Кто заполнил</th><th>Когда</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    ${fillFindRes.length>=20?'<p class="ff-note">Показаны первые 20 — уточните запрос.</p>':''}
+  </div>`;
+  if($('ffClose'))$('ffClose').onclick=()=>{fillFindRes=null;fillFindQ='';fillFindDraw();};
+}
