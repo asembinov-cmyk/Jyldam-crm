@@ -500,8 +500,27 @@ async function delShipment(id){
 //
 // Отправку выбираем САМУЮ РАННЮЮ из подходящих: заказ уехал первым же рейсом, который мог
 // его увезти, а не последним.
+// Город склада: сначала точным совпадением имени (как в warehousePickupCityId), а если не
+// вышло — вхождением. Склад часто называют «Склад Астана» или «Астана (основной)», и при
+// строгом равенстве город не определяется вовсе: отправка выпадает из подбора, а почему —
+// по экрану не понять. Здесь ошибиться безопасно: подбор всё равно показывается заранее.
+function shipmentCityName(whId){
+  const exact=warehousePickupCityId(whId);
+  if(exact)return (cityName(exact)||'').trim().toLowerCase();
+  const wh=(S.warehouses||[]).find(w=>w.id===whId);
+  const nm=(wh&&wh.name||'').trim().toLowerCase();
+  if(!nm)return '';
+  const city=(S.cities||[]).find(c=>{
+    const cn=(c.name||'').trim().toLowerCase();
+    return cn&&(nm.includes(cn)||cn.includes(nm));
+  });
+  return city?(city.name||'').trim().toLowerCase():'';
+}
 function intercityPlanAssign(){
   const shipments=(S.shipments||[]).filter(s=>s.dest_city_id&&s.ship_date);
+  // Счётчики нужны для честного ответа «почему ничего не разложилось»: без них экран
+  // говорил «раскладывать нечего», и причина оставалась неизвестной.
+  const why={candidates:0,shipments:shipments.length,noCity:0,dateNoFit:0,whUnknown:0,badRoute:0};
   const almatyCity=(S.cities||[]).find(c=>(c.name||'').trim().toLowerCase().includes('алматы'));
   const almatyId=almatyCity?almatyCity.id:null;
   const dayBefore=(a,b)=>a<b; // забран строго раньше дня отправки
@@ -510,16 +529,20 @@ function intercityPlanAssign(){
   (S.orders||[]).forEach(o=>{
     if(!isCourierDelivery(o.delivery_id))return;
     if(o.intercity_shipment_id)return;                 // уже в какой-то коробке
+    if(o.intercity_cost!=null&&o.intercity_cost!==''&&o.intercity_cost!==0)return; // привязан по стоимости
     if(!o.courier_city_id)return;
     const pickupNm=(cityName(o.pickup_city_id)||'').trim().toLowerCase();
     const destNm=(courierCityName(o.courier_city_id)||'').trim().toLowerCase();
     if(!pickupNm||!destNm||pickupNm===destNm)return;    // свой город — не межгород
     const d=(o.pickup_date||o.created_at||'').slice(0,10);
     if(!d)return;
+    why.candidates++;
     const notOlder=shiftDateStr(d,INTERCITY_TRANSIT_MAX_DAYS); // дальше этой даты заказ уже не «свежий»
-    const fits=shipments.filter(s=>{
-      if(s.dest_city_id!==o.courier_city_id)return false;
-      const whNm=(cityName(warehousePickupCityId(s.warehouse_id))||'').trim().toLowerCase();
+    const sameCity=shipments.filter(s=>s.dest_city_id===o.courier_city_id);
+    if(!sameCity.length){why.noCity++;skipped.push(o);return;}
+    if(!sameCity.some(s=>shipmentCityName(s.warehouse_id))){why.whUnknown++;skipped.push(o);return;}
+    const fits=sameCity.filter(s=>{
+      const whNm=shipmentCityName(s.warehouse_id);
       const sd=(s.ship_date||'').slice(0,10);
       if(!whNm||!sd)return false;
       // Тот же предел, что и в выдаче: заказ месячной давности не должен внезапно лечь
@@ -532,22 +555,40 @@ function intercityPlanAssign(){
       if(whNm.includes('астана')&&almatyId&&o.pickup_city_id===almatyId&&viaAstana)return dayBefore(d,sd);
       return false;
     }).sort((a,b)=>(a.ship_date||'').localeCompare(b.ship_date||''));
-    if(!fits.length){skipped.push(o);return;}
+    if(!fits.length){
+      // Отправки в этот город есть, но ни одна не подходит: либо все раньше дня забора,
+      // либо маршрут не тот (например, заказ из Алматы, а коробки только алматинские).
+      const anyLater=sameCity.some(s=>(s.ship_date||'').slice(0,10)>=d);
+      if(anyLater)why.badRoute++;else why.dateNoFit++;
+      skipped.push(o);return;
+    }
     const s=fits[0];
     (plan[s.id]=plan[s.id]||{ship:s,add:[]}).add.push(o);
   });
-  return {rows:Object.values(plan).sort((a,b)=>(a.ship.ship_date||'').localeCompare(b.ship.ship_date||'')),skipped};
+  return {rows:Object.values(plan).sort((a,b)=>(a.ship.ship_date||'').localeCompare(b.ship.ship_date||'')),skipped,why};
 }
 
+// Разбор «почему не разложилось» — по пунктам, с подсказкой, что делать.
+function intercityWhyHtml(why,skipped){
+  const line=(n,txt)=>n?`<li><b>${n}</b> — ${txt}</li>`:'';
+  return `<ul class="hint" style="margin:10px 0 0;padding-left:18px;line-height:1.7">
+    <li>непривязанных межгородних заказов: <b>${why.candidates}</b></li>
+    <li>отправок в системе: <b>${why.shipments}</b></li>
+    ${line(why.noCity,'нет ни одной отправки в этот город — её нужно создать')}
+    ${line(why.whUnknown,'склад отправки не сопоставился ни с одним городом. Назовите склад так же, как город («Астана», «Алматы»), либо добавьте город в справочник')}
+    ${line(why.dateNoFit,'все отправки в этот город ушли РАНЬШЕ, чем заказ забрали — ему нужна новая')}
+    ${line(why.badRoute,'маршрут не совпал: со склада Алматы эти города не возят, а отправки из Астаны нет')}
+  </ul>`;
+}
 function intercityAssignModal(){
-  const {rows,skipped}=intercityPlanAssign();
+  const {rows,skipped,why}=intercityPlanAssign();
   const money=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
   const totalAdd=rows.reduce((a,r)=>a+r.add.length,0);
   if(!totalAdd){
     showModal('Разложить по отправкам',
-      `<div class="empty"><div class="big">Раскладывать нечего</div>
-        Непривязанных заказов, для которых нашлась бы подходящая отправка, нет.
-        ${skipped.length?`<p class="hint">Осталось без отправки: <b>${skipped.length}</b> — под них отправку ещё не создавали.</p>`:''}</div>`,
+      `<div class="big" style="margin-bottom:6px">Ни один заказ не лёг в существующие отправки</div>
+       <p class="hint" style="margin:0">Вот по каким причинам:</p>
+       ${intercityWhyHtml(why,skipped)}`,
       null,{readonly:true,wide:true,closeLabel:'Закрыть'});
     return;
   }
@@ -573,8 +614,8 @@ function intercityAssignModal(){
         </tr>`;
       }).join('')}
     </tbody></table></div>
-    ${skipped.length?`<p class="hint" style="margin-top:10px">Останутся без отправки: <b>${skipped.length}</b> заказов —
-      подходящей коробки для них нет, создайте отправку вручную.</p>`:''}`;
+    ${skipped.length?`<p class="hint" style="margin-top:12px">Останутся без отправки: <b>${skipped.length}</b> заказов.
+      Почему:</p>${intercityWhyHtml(why,skipped)}`:''}`;
   showModal(`Разложить по отправкам · ${totalAdd} заказов`,body,async()=>{
     if(!confirm(`Приписать ${totalAdd} заказов к ${rows.length} отправкам?\n\nДоля за заказ в них пересчитается, и прибыль за эти месяцы изменится.`))return false;
     let okCnt=0,errCnt=0;
