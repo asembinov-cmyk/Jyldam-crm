@@ -39,6 +39,41 @@ const isBaraholkaOrder=o=>String(o&&o.calc_group||'')==='baraholka';
 // Вкладка появляется, только если колонки в базе есть (db/13 выполнен).
 const baraholkaReady=()=>!!(S.orders&&S.orders.length&&('calc_group' in S.orders[0]));
 
+// БАЗОВЫЙ ТАРИФ КОМПАНИИ. Менеджер по продажам договаривается с партнёром выше
+// базового, и разница — его заработок. Тариф партнёра в системе есть давно, не
+// хватало цены, с которой его сравнивать.
+const CALC_BASE_FIELDS=[
+  {key:'base_post',   label:'Базовый тариф · почта (₸)',  hint:'Наша цена. Всё, что партнёр платит сверх, — доля менеджера'},
+  {key:'base_courier',label:'Базовый тариф · курьер (₸)', hint:'То же для курьерской доставки'},
+];
+const baseTariffReady=()=>{
+  const cs=(S.calcSettingsAll||[])[0];
+  return !!cs&&('base_post' in cs);
+};
+// Партнёр заказа: своё поле, а если пусто — по названию отправителя (у заказов,
+// созданных пачкой из заявки, partner_id часто не заполнен).
+function orderPartnerObj(o){
+  if(o.partner_id){const p=(S.partners||[]).find(x=>x.id===o.partner_id);if(p)return p;}
+  return (typeof findPartnerByNameLoose==='function')?findPartnerByNameLoose(o.sender):null;
+}
+// Доля менеджера: тариф партнёра минус базовый тариф компании.
+//
+// Считается от ТАРИФА, а не от суммы заказа: сумма растёт от размера пакета и
+// перевеса, но договорённость у менеджера — на базовую цену, и с доплат за
+// габарит и вес его доля не идёт.
+//
+// Только если у заказа указан менеджер: без него разница остаётся прибылью компании.
+function salesMarginFor(o,P){
+  if(!o.sales_id)return 0;
+  const pt=orderPartnerObj(o);if(!pt)return 0;
+  const courier=isCourierDelivery(o.delivery_id);
+  const tariff=courier?pt.tariff_courier:pt.tariff_post;
+  if(tariff==null||tariff==='')return 0;
+  const base=calcNorm(courier?'base_courier':'base_post',P);
+  if(!base)return 0; // базовый тариф не задан — считать не от чего
+  return Math.max(0,(parseFloat(tariff)||0)-base);
+}
+
 // сотрудники с окладом (делится на заказы месяца) + ставкой за заказ
 const CALC_SALARY_FIELDS=[
   {salaryKey:'salary_processor', perKey:'perorder_processor', label:'Менеджер обработчик'},
@@ -199,7 +234,9 @@ function calcOrder(o){
         :Math.round((calcNorm(f.key,P)/monthOrders)*100)/100;
       return {key:f.key,label:f.label,amount};
     });
-    const barItems=barFixed.concat(barFunds);
+    const barMargin=salesMarginFor(o,P);
+    const barItems=barFixed.concat(barFunds)
+      .concat(barMargin?[{key:'sales_margin',label:'Доля менеджера сверх базового тарифа',amount:barMargin}]:[]);
     const barCost=barItems.reduce((s2,it)=>s2+(it.amount||0),0);
     const barProfit=revenue-barCost;
     return {revenue,items:barItems,totalCost:barCost,profit:barProfit,
@@ -247,6 +284,11 @@ function calcOrder(o){
   const salesCommon=Math.round((calcSalesTotalSalary(P2)/monthOrders)*100)/100;
   const salesPer=o.sales_id?calcSalesNorm(o.sales_id,'per_order',P2):0;
   items.push({key:'sales_manager',label:'Менеджер по продажам',amount:salesCommon+salesPer});
+  // Доля менеджера сверх базового тарифа — отдельной статьёй, а не внутри строки
+  // выше: выручка остаётся полной (что партнёр платит), и видно, сколько из неё
+  // ушло менеджеру. Если вычитать её из выручки, обе цифры пропадают из виду.
+  const marg=salesMarginFor(o,P2);
+  if(marg)items.push({key:'sales_margin',label:'Доля менеджера сверх базового тарифа',amount:marg});
   const totalCost=items.reduce((s,it)=>s+(it.amount||0),0);
   const profit=revenue-totalCost;
   const margin=revenue>0?(profit/revenue*100):0;
@@ -735,6 +777,12 @@ function renderCalcNorms(){
           <p class="calc-note">Применяются к заказам с типом доставки «курьер».</p>
           ${fixedFields.map(fieldRow).join('')}
         </div>
+        ${baseTariffReady()?`<div class="panel calc-panel" style="margin-top:18px">
+          <h3 class="calc-h">Базовый тариф компании</h3>
+          <p class="calc-note">Наша цена доставки. Всё, что партнёр платит сверх неё, идёт менеджеру по продажам
+            отдельной статьёй расхода — и видно в сводке по каждому.</p>
+          ${CALC_BASE_FIELDS.map(fieldRow).join('')}
+        </div>`:''}
         <div class="panel calc-panel" style="margin-top:18px">
           <h3 class="calc-h">Почтовая доставка — фиксированные расходы (за заказ)</h3>
           <p class="calc-note">Применяются к заказам с типом доставки «почта».</p>
@@ -889,6 +937,30 @@ function renderCalcSummary(){
   // выше) — та же логика, что и для totCost, чтобы разбивка и итог не расходились между собой
   if(byExpense['Межгород / доставка груза'])byExpense['Межгород / доставка груза'].amount=freightByShipDate;
   const expenseRows=Object.values(byExpense).sort((a,b)=>b.amount-a.amount);
+  // Заработок менеджеров по продажам за месяц: надбавка сверх базового тарифа,
+  // ставка за заказ и оклад. Собираем по sales_id заказов.
+  const salesRows=(()=>{
+    const by={};
+    calcs.forEach(({o,c})=>{
+      if(!o.sales_id)return;
+      const r=by[o.sales_id]||(by[o.sales_id]={id:o.sales_id,cnt:0,margin:0,per:0});
+      r.cnt++;
+      r.margin+=((c.items.find(i=>i.key==='sales_margin')||{}).amount||0);
+      r.per+=calcSalesNorm(o.sales_id,'per_order',sel);
+    });
+    // Менеджеров с окладом показываем, даже если заказов за месяц не было:
+    // оклад им всё равно начислен, и в сводке он должен быть виден.
+    (S.sales||[]).forEach(sm=>{
+      const sal=calcSalesNorm(sm.id,'salary',sel);
+      if(sal&&!by[sm.id])by[sm.id]={id:sm.id,cnt:0,margin:0,per:0};
+    });
+    return Object.values(by).map(r=>{
+      const salary=calcSalesNorm(r.id,'salary',sel);
+      return {...r,salary,total:r.margin+r.per+salary,name:salesName(r.id)};
+    }).sort((a,b)=>b.total-a.total);
+  })();
+  const salesTotals=salesRows.reduce((a,r)=>({cnt:a.cnt+r.cnt,margin:a.margin+r.margin,per:a.per+r.per,
+    salary:a.salary+r.salary,total:a.total+r.total}),{cnt:0,margin:0,per:0,salary:0,total:0});
   const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
   const profitColor=totProfit<0?'#c0392b':(totProfit<calcMinProfit()*monthOrders.length?'#c08a2d':'#2e7d32');
   $('calcContent').innerHTML=`
@@ -904,6 +976,23 @@ function renderCalcSummary(){
       <div class="ct-card"><div class="ct-k">Маржинальность</div><div class="ct-v">${avgMargin.toFixed(1)}%</div></div>
       <div class="ct-card"><div class="ct-k">ROI</div><div class="ct-v">${avgRoi.toFixed(1)}%</div></div>
     </div>
+    ${salesRows.length?`<div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Заработок менеджеров по продажам</h3>
+      <p class="calc-note">«Надбавка» — разница между тарифом партнёра и базовым тарифом компании,
+        по заказам этого менеджера. Оклад показан целиком за месяц, он не зависит от числа заказов.</p>
+      <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
+        <th>Менеджер</th><th>Заказов</th><th>Надбавка</th><th>За заказ</th><th>Оклад</th><th>Итого</th>
+      </tr></thead><tbody>
+        ${salesRows.map(r=>`<tr>
+          <td>${esc(r.name)}</td><td>${r.cnt}</td>
+          <td>${fmtMoney(r.margin)}${r.cnt?`<small class="cell-time">${fmtMoney(r.margin/r.cnt)} на заказ</small>`:''}</td>
+          <td>${fmtMoney(r.per)}</td><td>${fmtMoney(r.salary)}</td>
+          <td><b>${fmtMoney(r.total)}</b></td></tr>`).join('')}
+      </tbody><tfoot><tr style="border-top:2px solid var(--line)">
+        <td><b>Итого</b></td><td><b>${salesTotals.cnt}</b></td><td><b>${fmtMoney(salesTotals.margin)}</b></td>
+        <td><b>${fmtMoney(salesTotals.per)}</b></td><td><b>${fmtMoney(salesTotals.salary)}</b></td>
+        <td><b>${fmtMoney(salesTotals.total)}</b></td></tr></tfoot></table></div>
+    </div>`:''}
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по типу доставки</h3>
       <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr><th>Тип</th><th>Заказов</th><th>Выручка</th><th>Расходы</th><th>Прибыль</th></tr></thead>
