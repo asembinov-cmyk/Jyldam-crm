@@ -59,6 +59,29 @@ function intercityViaAstana(destNm){
   if(!nm)return false;
   return !INTERCITY_ALMATY_ALLOWED_CITIES.some(n=>nm.includes(n));
 }
+// Города, куда со склада Астана НЕ возят напрямую: они уезжают через Алматы, тем же
+// порядком, что Актобе и прочие через Астану. Добавлено 26.09.2026 по просьбе владельца —
+// это пригороды и область Алматы, и из Астаны туда своего рейса нет.
+const INTERCITY_VIA_ALMATY_CITIES=['талдыкорган','конаев','каскелен','капчагай'];
+function intercityViaAlmaty(destNm){
+  const nm=String(destNm||'').trim().toLowerCase();
+  return !!nm&&INTERCITY_VIA_ALMATY_CITIES.some(n=>nm.includes(n));
+}
+// ПРАВИЛА ТРАНЗИТА — таблицей, а не зашиты под одно направление.
+//   Алматы → (Астана) → Актобе, Семей, Темиртау, Балхаш и все прочие дальние;
+//   Астана → (Алматы) → Талдыкорган, Конаев, Каскелен.
+// Плеч у такого заказа два: сначала коробка до пересадки, потом от неё до города.
+const INTERCITY_TRANSIT_RULES=[
+  {from:'алматы',hub:'астана',via:intercityViaAstana},
+  {from:'астана',hub:'алматы',via:intercityViaAlmaty},
+];
+// Правило для пары «где забрали → куда едет». Город назначения, совпадающий с городом
+// отправления правила, транзитом быть не может: заказ из Алматы не «транзитит» в Алматы.
+function intercityRuleFor(pickupNm,destNm){
+  const p=String(pickupNm||'').trim().toLowerCase(), d=String(destNm||'').trim().toLowerCase();
+  if(!p||!d||p===d)return null;
+  return INTERCITY_TRANSIT_RULES.find(r=>p.includes(r.from)&&!d.includes(r.from)&&r.via(d))||null;
+}
 // Окно транзита — ровно сутки: забрали в Алматы вчера, сегодня уехало из Астаны. Забор
 // сегодня уезжает сегодня, старое не тянем (решение владельца от 26.09.2026). Пробовали
 // расширить до месяца — оказалось неверно: накопившееся надо разбирать вручную, а не
@@ -126,12 +149,18 @@ const orderShippedFrom=(orderId,cityNm)=>{
   const set=orderLegsShipped().get(orderId);
   return !!(set&&set.has(cityNm));
 };
-// Сколько плеч нужно заказу: транзитному — два (из города забора и из Астаны), остальным — одно.
+// Сколько плеч нужно заказу: транзитному — два (до пересадки и от неё), остальным — одно.
 function orderLegsNeeded(o){
   const pickupNm=(cityName(o.pickup_city_id)||'').trim().toLowerCase();
   const destNm=(courierCityName(o.courier_city_id)||'').trim().toLowerCase();
   if(!pickupNm||!destNm||pickupNm===destNm)return 0;       // свой город — не межгород
-  return (pickupNm.includes('алматы')&&intercityViaAstana(destNm))?2:1;
+  return intercityRuleFor(pickupNm,destNm)?2:1;
+}
+// Город пересадки для заказа (или пусто, если он едет напрямую).
+function orderTransitHub(o){
+  const r=intercityRuleFor((cityName(o.pickup_city_id)||'').trim().toLowerCase(),
+                           (courierCityName(o.courier_city_id)||'').trim().toLowerCase());
+  return r?r.hub:'';
 }
 
 function ordersForIntercity(cityId,date,whId){
@@ -140,45 +169,47 @@ function ordersForIntercity(cityId,date,whId){
   const destNm=(courierCityName(cityId)||'').toLowerCase();
   // отправка города самого в себя не имеет смысла (склад Астана → город получения Астана и т.п.)
   if(whCityNm&&destNm&&whCityNm===destNm)return [];
-  const isViaAstana=intercityViaAstana(destNm);
-  const isAlmatyWh=whCityNm.includes('алматы');
-  const isAstanaWh=whCityNm.includes('астана');
-  // со склада Алматы — только разрешённые города, остальные едут транзитом через Астану
-  if(isAlmatyWh&&!INTERCITY_ALMATY_ALLOWED_CITIES.some(n=>destNm.includes(n)))return [];
+  // Со склада напрямую не возят туда, куда по правилу положен транзит: такие заказы заберёт
+  // коробка до пересадки. Для Алматы это все дальние города, для Астаны — Талдыкорган,
+  // Конаев и Каскелен.
+  if(intercityRuleFor(whCityNm,destNm))return [];
   // Города с редким расписанием: отправка не каждый день, поэтому подтягиваем ещё и заказы
   // «дня-донора» — вторник к среде, четверг к пятнице, суббота к воскресенью.
   const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>destNm.includes(n));
   const allowedDates=(date&&isLimited)?intercityRollupDates(date):null;
-  // ПЕРВОЕ ПЛЕЧО. Коробка Алматы → Астана везёт не только заказы с назначением «Астана», но и
-  // все транзитные: физически они едут в ней же. Без этого Нурлан возил бы их даром, а вся
-  // стоимость первого плеча ложилась бы на одни астанинские заказы.
-  const isFirstLeg=isAlmatyWh&&destNm.includes('астана');
-  // ВТОРОЕ ПЛЕЧО. Заказ, забранный в Алматы накануне, к сегодняшней отправке из Астаны уже
-  // доехал. Ровно накануне: забор сегодня — уезжает сегодня, старое не тянем.
-  let almatyCityId=null,transitPrevDate=null;
-  if(isAstanaWh&&isViaAstana&&date){
-    const almatyCity=(S.cities||[]).find(c=>(c.name||'').trim().toLowerCase().includes('алматы'));
-    almatyCityId=almatyCity?almatyCity.id:null;
+  // ПЕРВОЕ ПЛЕЧО. Коробка до пересадки везёт не только заказы с назначением в сам город
+  // пересадки, но и все транзитные: физически они едут в ней же. Без этого первое плечо
+  // возилось бы даром, а вся его стоимость ложилась бы на «свои» заказы.
+  //   Алматы → Астана: + Актобе, Семей, Темиртау, Балхаш и прочие дальние;
+  //   Астана → Алматы: + Талдыкорган, Конаев, Каскелен.
+  const firstLegRule=INTERCITY_TRANSIT_RULES.find(r=>whCityNm.includes(r.from)&&destNm.includes(r.hub))||null;
+  // ВТОРОЕ ПЛЕЧО. Заказ, забранный в городе отправления правила накануне, к сегодняшней
+  // отправке с пересадки уже доехал. Ровно накануне: забор сегодня — уезжает сегодня.
+  const secondLegRule=INTERCITY_TRANSIT_RULES.find(r=>whCityNm.includes(r.hub)&&!destNm.includes(r.from)&&r.via(destNm))||null;
+  let transitFromCityId=null,transitPrevDate=null;
+  if(secondLegRule&&date){
+    const c=(S.cities||[]).find(x=>(x.name||'').trim().toLowerCase().includes(secondLegRule.from));
+    transitFromCityId=c?c.id:null;
     transitPrevDate=shiftDateStr(date,-1);
   }
   return (S.orders||[]).filter(o=>{
     if(!isCourierDelivery(o.delivery_id))return false;
     const oDestNm=(courierCityName(o.courier_city_id)||'').toLowerCase();
     // на первом плече берём и «свои» астанинские, и транзитные — по городу их не отличить
-    const destOk=isFirstLeg
-      ? (o.courier_city_id===cityId||(oDestNm&&intercityViaAstana(oDestNm)))
+    const destOk=firstLegRule
+      ? (o.courier_city_id===cityId||(oDestNm&&!oDestNm.includes(firstLegRule.from)&&firstLegRule.via(oDestNm)))
       : (o.courier_city_id===cityId);
     if(!destOk)return false;
     // «уже уехал» — по этому плечу, а не вообще
     if(whCityNm&&orderShippedFrom(o.id,whCityNm))return false;
     if(!whCityNm&&o.intercity_shipment_id)return false; // склад не определён — старое правило
     const d=(o.pickup_date||o.created_at||'').slice(0,10);
-    const isTransitOrder=almatyCityId&&o.pickup_city_id===almatyCityId&&d===transitPrevDate;
+    const isTransitOrder=!!transitFromCityId&&o.pickup_city_id===transitFromCityId&&d===transitPrevDate;
     if(date){
       const matchesOwnDay=allowedDates?allowedDates.includes(d):d===date;
       if(!matchesOwnDay&&!isTransitOrder)return false;
     }
-    // фильтр по складу: свой город забора, ИЛИ транзитный заказ из Алматы (для Астаны)
+    // фильтр по складу: свой город забора, ИЛИ транзитный заказ из города отправления правила
     if(whCityId&&o.pickup_city_id!==whCityId&&!isTransitOrder)return false;
     return true;
   });
@@ -261,7 +292,8 @@ function findUnassignedIntercityOrders(){
     if(!need)return;
     const pickupCityNm=(cityName(o.pickup_city_id)||'').trim().toLowerCase();
     const doneFirst=orderShippedFrom(o.id,pickupCityNm);
-    const doneSecond=need<2||orderShippedFrom(o.id,'астана');
+    const hub=orderTransitHub(o);
+    const doneSecond=!hub||orderShippedFrom(o.id,hub);
     if(doneFirst&&doneSecond)return;
     const pickupNm=cityName(o.pickup_city_id)||'—';
     const destNm=courierCityName(o.courier_city_id)||'—';
@@ -692,14 +724,15 @@ function intercityPlanAssign(){
     const notOlder=shiftDateStr(d,INTERCITY_BACKLOG_MAX_DAYS);
     let missing=0,placed=0,sawCity=false,sawDate=false;
     const add=(ship)=>{(plan[ship.id]=plan[ship.id]||{ship,add:[]}).add.push(o);placed++;};
-    // ПЛЕЧО 1 — из города забора. У транзитного заказа эта коробка идёт в Астану, у прямого —
-    // сразу в город назначения.
+    const rule=intercityRuleFor(pickupNm,destNm);   // null — заказ едет напрямую
+    // ПЛЕЧО 1 — из города забора. У транзитного заказа эта коробка идёт до пересадки
+    // (Алматы → Астана либо Астана → Алматы), у прямого — сразу в город назначения.
     if(!orderShippedFrom(o.id,pickupNm)){
       missing++;
       const legOne=shipments.filter(s=>{
         const from=shipmentCityName(s.warehouse_id);
         if(!from||from!==pickupNm)return false;
-        return need===2?nameOf(s.dest_city_id).includes('астана'):s.dest_city_id===o.courier_city_id;
+        return rule?nameOf(s.dest_city_id).includes(rule.hub):s.dest_city_id===o.courier_city_id;
       });
       if(legOne.length){
         sawCity=true;
@@ -707,13 +740,13 @@ function intercityPlanAssign(){
         if(fit)add(fit);else sawDate=true;
       }
     }
-    // ПЛЕЧО 2 — из Астаны, только у транзитных. Минимум через сутки после забора: раньше
+    // ПЛЕЧО 2 — с пересадки, только у транзитных. Минимум через сутки после забора: раньше
     // заказ физически не доехал бы.
-    if(need===2&&!orderShippedFrom(o.id,'астана')){
+    if(rule&&!orderShippedFrom(o.id,rule.hub)){
       missing++;
       const legTwo=shipments.filter(s=>{
         const from=shipmentCityName(s.warehouse_id);
-        return from&&from.includes('астана')&&s.dest_city_id===o.courier_city_id;
+        return from&&from.includes(rule.hub)&&s.dest_city_id===o.courier_city_id;
       });
       if(legTwo.length){
         sawCity=true;
