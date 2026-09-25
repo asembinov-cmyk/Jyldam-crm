@@ -26,11 +26,20 @@ function roleName(id){const r=S.roles.find(x=>x.id===id);return r?r.name:'—';}
 
 function renderUsers(){
   if(!can('users','view')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div></div>';return;}
+  // «Роли и права» — только администратору. Запись в roles в базе и так admin-only
+  // (db/3), а вкладка показывалась любому с правом на сотрудников: он мог открыть
+  // роль, выдать себе тип «Админ» и получить отказ уже при сохранении — экран есть,
+  // толку нет. Заодно закрывается путь «поменяю себе роль через интерфейс».
+  const rolesOk=isAdmin();
+  if(usersSub==='roles'&&!rolesOk)usersSub='staff';
+  const head=usersSub==='roles'
+    ? {h:'Роли и права',p:'Кто что видит и может менять — по модулям'}
+    : {h:'Сотрудники',p:'Сотрудники и роли с правами доступа'};
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Сотрудники</h1><p>Сотрудники и роли с правами доступа</p></div>
+    <div class="page-head"><div><h1>${head.h}</h1><p>${head.p}</p></div>
       <div class="seg">
         <button data-us="staff" class="${usersSub==='staff'?'active':''}">Сотрудники</button>
-        <button data-us="roles" class="${usersSub==='roles'?'active':''}">Роли и права</button>
+        ${rolesOk?`<button data-us="roles" class="${usersSub==='roles'?'active':''}">Роли и права</button>`:''}
       </div>
     </div>
     <div id="usersContent"></div>`;
@@ -276,29 +285,65 @@ function staffModal(id){
 }
 
 /* ---- РОЛИ И ПРАВА ---- */
+// Уровень прав одним словом — по нему же красится квадрат в таблице.
+// Текстовые «просмотр +СРУ» читались построчно: чтобы понять, кто что может,
+// приходилось вчитываться в каждую ячейку. Цвет виден всей таблицей сразу.
+function permLevel(p){
+  if(!p||!p.view)return 'none';
+  const extra=['create','edit','delete'].filter(a=>p[a]);
+  if(!extra.length)return 'view';
+  return extra.length===3?'full':'partial';
+}
+const PERM_LEVEL_LABEL={none:'нет доступа',view:'только просмотр',partial:'просмотр + частично',full:'полный доступ'};
+// Короткие подписи столбцов: в матрице они стоят вертикально, и «Курьерская доставка»
+// растянула бы шапку вдвое. Полное название всё равно видно в подсказке ячейки.
+const MODULE_SHORT={pickups:'Заявки',orders:'Заказы',ket_orders:'SPA трафик',courier:'Курьерская',
+  mail:'Почтовая',intercity:'Межгород',cash:'Склад',notify:'Контроль',history:'История',
+  directories:'Настройки'};
+const moduleShort=(m,lbl)=>MODULE_SHORT[m]||lbl;
+// Точный состав прав — в подсказке при наведении: в таблице он занимал бы место,
+// а нужен редко.
+function permTitle(p){
+  if(!p||!p.view)return 'нет доступа';
+  const named=[['create','создание'],['edit','редактирование'],['delete','удаление']]
+    .filter(([a])=>p[a]).map(([,l])=>l);
+  return named.length?'просмотр + '+named.join(' + '):'только просмотр';
+}
 function renderRoles(){
   const rows=[...S.roles].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const baseLabel={admin:'Админ',staff:'Персонал',courier:'Курьер'};
-  $('usersContent').innerHTML=`<div class="panel">
-    <div class="panel-head"><h2>Роли</h2><span class="count">${rows.length}</span>
-      ${can('users','create')?`<button class="btn primary sm" id="addRole" style="margin-left:auto">＋ Добавить роль</button>`:''}</div>
-    <div class="table-scroll"><table><thead><tr><th>Роль</th><th>Тип</th>${MODULES.map(([m,lbl])=>`<th style="font-size:11px">${esc(lbl)}</th>`).join('')}<th></th></tr></thead>
-    <tbody>${rows.map(r=>`<tr>
-      <td><strong>${esc(r.name)}</strong></td>
-      <td><span class="pill ${r.base_type==='admin'?'gold':r.base_type==='courier'?'':'moss'}">${baseLabel[r.base_type]||r.base_type}</span></td>
-      ${MODULES.map(([m])=>`<td>${permSummary(r.perms&&r.perms[m])}</td>`).join('')}
-      <td><div class="row-actions">
-        ${can('users','edit')?`<button class="btn sm ghost" data-redit="${r.id}">Изменить</button>`:''}
-        ${can('users','delete')?`<button class="btn sm danger" data-rdel="${r.id}">Удалить</button>`:''}
-      </div></td></tr>`).join('')}</tbody></table></div></div>`;
+  const legend=['none','view','partial','full']
+    .map(k=>`<span class="rl-leg"><i class="rl-sq rl-${k}"></i>${PERM_LEVEL_LABEL[k]}</span>`).join('');
+  const types=['admin','staff','courier']
+    .map(k=>`<span class="rl-leg"><i class="rl-dot rl-t-${k}"></i>${baseLabel[k]}</span>`).join('');
+  $('usersContent').innerHTML=`
+    <div class="rl-bar">
+      <div class="rl-bar-l"><b>Уровень доступа:</b>${legend}</div>
+      <div class="rl-bar-r"><b>Тип роли:</b>${types}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Роли</h2><span class="count">${rows.length}</span>
+        ${can('users','create')?`<button class="btn primary sm" id="addRole" style="margin-left:auto">＋ Добавить роль</button>`:''}</div>
+      <p class="staff-hint">Двойное нажатие по строке открывает роль. Наведите на квадрат — покажет, что именно разрешено.</p>
+      <div class="table-scroll rl-scroll"><table class="rl-tbl">
+        <thead><tr><th class="rl-name-th">Роль</th>${MODULES.map(([m,lbl])=>
+          `<th class="rl-mod-th" title="${esc(lbl)}"><span>${esc(moduleShort(m,lbl))}</span></th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r=>`<tr data-rrow="${r.id}">
+          <td class="rl-name">
+            <i class="rl-tape rl-t-${esc(r.base_type||'staff')}"></i>
+            <b>${esc(r.name)}</b>
+            <span class="rl-type rl-t-${esc(r.base_type||'staff')}">${esc(baseLabel[r.base_type]||r.base_type||'')}</span>
+          </td>
+          ${MODULES.map(([m,lbl])=>{
+            const p=r.perms&&r.perms[m];
+            return `<td class="rl-cell"><i class="rl-sq rl-${permLevel(p)}" title="${esc(lbl)}: ${esc(permTitle(p))}"></i></td>`;
+          }).join('')}
+        </tr>`).join('')}</tbody></table></div>
+    </div>`;
   if($('addRole'))$('addRole').onclick=()=>roleModal();
-  $('usersContent').querySelectorAll('[data-redit]').forEach(b=>b.onclick=()=>roleModal(b.dataset.redit));
-  $('usersContent').querySelectorAll('[data-rdel]').forEach(b=>b.onclick=()=>delRole(b.dataset.rdel));
-}
-function permSummary(p){
-  if(!p||!p.view)return '<span style="color:var(--muted)">нет</span>';
-  const parts=[];if(p.create)parts.push('С');if(p.edit)parts.push('Р');if(p.delete)parts.push('У');
-  return parts.length?`<span class="pill moss">просмотр +${parts.join('')}</span>`:'<span class="pill">просмотр</span>';
+  $('usersContent').querySelectorAll('[data-rrow]').forEach(tr=>{
+    if(can('users','edit'))tr.ondblclick=()=>roleModal(tr.dataset.rrow);
+  });
 }
 async function delRole(id){
   const r=S.roles.find(x=>x.id===id);
@@ -323,6 +368,9 @@ function roleModal(id){
         <option value="courier" ${r.base_type==='courier'?'selected':''}>Курьер — видит только свои заявки/заказы</option>
       </select>
       <span class="hint">Базовый тип задаёт серверную защиту. «Курьер» автоматически ограничивает видимость только своими записями.</span></div>
+    ${id&&can('users','delete')?`<div class="field" style="margin-top:2px">
+      <button type="button" class="btn ghost sm" id="r_del" style="color:var(--rust)">Удалить роль</button>
+      <span class="hint">Роль, назначенную кому-то из сотрудников, удалить нельзя — сначала смените им роль.</span></div>`:''}
     <div class="field"><label>Права по модулям</label>
       <table style="font-size:13px;width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left"></th>${ACTIONS.map(([,al])=>`<th style="text-align:center;font-size:11px;text-transform:uppercase;color:var(--muted);padding:6px 4px">${al}</th>`).join('')}</tr></thead>
       <tbody>${matrix}</tbody></table></div>`,
@@ -336,4 +384,11 @@ function roleModal(id){
       // если изменили свою роль — пересчитать права
       if(id&&S.me.role_id===id)computeMyPerms();
       toast('Сохранено');renderUsers();return true;},{mid:true});
+  // Кнопка удаления живёт в карточке: колонку действий из таблицы убрали, она занимала
+  // место и мешала читать матрицу прав.
+  if($('r_del'))$('r_del').onclick=()=>{
+    const ov=document.querySelector('.overlay');if(ov)ov.remove();
+    document.body.classList.remove('modal-open');
+    delRole(id);
+  };
 }

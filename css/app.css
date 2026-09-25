@@ -636,6 +636,42 @@
     border:1px solid var(--line);background:var(--card);color:var(--muted);transition:.15s}
   .subtabs button.active{background:var(--moss);color:#fff;border-color:var(--moss)}
 
+  /* РОЛИ И ПРАВА: матрица «роль × модуль» квадратами. Текстовые «просмотр +СРУ»
+     читались построчно — чтобы понять картину, приходилось вчитываться в каждую
+     ячейку. Цвет виден всей таблицей сразу, точный состав — в подсказке. */
+  .rl-bar{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;justify-content:space-between;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 16px;margin-bottom:16px}
+  .rl-bar-l,.rl-bar-r{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+  .rl-bar b{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .rl-leg{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--ink)}
+  .rl-sq{width:22px;height:22px;border-radius:7px;display:inline-block;flex:0 0 22px;
+    background:#eef0f4;border:1px solid transparent}
+  .rl-view{background:#fff;border-color:#2451c4}
+  .rl-partial{background:#7d9ef0}
+  .rl-full{background:#2140ad}
+  .rl-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .rl-t-admin.rl-dot{background:#c2711f}.rl-t-staff.rl-dot{background:#2451c4}.rl-t-courier.rl-dot{background:#2f7d54}
+  .rl-scroll{overflow:auto}
+  .rl-tbl{border-collapse:separate;border-spacing:0;width:100%}
+  .rl-tbl th,.rl-tbl td{border-bottom:1px solid var(--line)}
+  .rl-name-th{position:sticky;left:0;z-index:2;background:var(--card);text-align:left;
+    font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:10px 14px;min-width:270px}
+  .rl-mod-th{height:96px;vertical-align:bottom;padding:0 0 10px;width:46px}
+  .rl-mod-th span{display:block;writing-mode:vertical-rl;transform:rotate(180deg);text-transform:none;letter-spacing:0;
+    font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap;margin:0 auto}
+  .rl-name{position:sticky;left:0;z-index:1;background:var(--card);padding:12px 14px;white-space:nowrap}
+  .rl-name b{font-size:14.5px;margin-right:10px}
+  .rl-tape{display:inline-block;width:3px;height:17px;border-radius:2px;vertical-align:-3px;margin-right:9px}
+  .rl-t-admin.rl-tape{background:#c2711f}.rl-t-staff.rl-tape{background:#2451c4}.rl-t-courier.rl-tape{background:#2f7d54}
+  .rl-type{font-size:11.5px;font-weight:600;border-radius:20px;padding:3px 10px}
+  .rl-t-admin.rl-type{background:#fbead9;color:#a4571a}
+  .rl-t-staff.rl-type{background:#e8ecfb;color:#2451c4}
+  .rl-t-courier.rl-type{background:#e4f2ea;color:#276b48}
+  .rl-cell{text-align:center;padding:10px 6px}
+  .rl-cell .rl-sq{cursor:help}
+  .rl-tbl tbody tr:hover .rl-name,.rl-tbl tbody tr:hover td{background:#f7f9fc}
+  .rl-tbl tbody tr{cursor:pointer}
+
   /* НАСТРОЙКИ: боковой список справочников по разделам. Девятнадцать вкладок
      одной лентой переносились на три ряда и не читались. */
   .set-wrap{display:grid;grid-template-columns:252px minmax(0,1fr);gap:18px;align-items:start}
