@@ -360,7 +360,8 @@ async function loadAll(){
     dbList('calc_courier_norms',{}).catch(()=>[]),
     dbList('calc_sales_norms',{}).catch(()=>[]),
     dbList('calc_processor_norms',{}).catch(()=>null), // null = таблицы нет, считаем по общей строке
-    dbList('shipments',{}).catch(()=>[]),
+    // null, а не [] — чтобы отличить «отправок нет» от «не смогли прочитать»
+    dbList('shipments',{}).catch(()=>null),
     dbList('warehouses',{order:'name'}).catch(()=>[]),
     dbList('products',{order:'name',select:PRODUCT_LIST_COLS}).catch(()=>[]),
     dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
@@ -380,7 +381,7 @@ async function loadAll(){
   if(tail[0])S.profiles=tail[0];
   S.calcSettingsAll=tail[1]||[];S.calcCityNorms=tail[2]||[];
   S.calcCourierNorms=tail[3]||[];S.calcSalesNorms=tail[4]||[];S.calcProcessorNorms=tail[5];
-  S.shipments=tail[6]||[];S.warehouses=tail[7]||[];S.products=tail[8]||[];S.warehouse_partners=tail[9]||[];S.wh_moves=tail[10]||[];S.wh_order_items=tail[11]||[];S.wh_reservations=tail[12]||[];
+  S.shipments=tail[6];S.warehouses=tail[7]||[];S.products=tail[8]||[];S.warehouse_partners=tail[9]||[];S.wh_moves=tail[10]||[];S.wh_order_items=tail[11]||[];S.wh_reservations=tail[12]||[];
   S.finance_kassa=tail[13]||[];S.finance_categories=tail[14]||[];S.finance_income_categories=tail[15]||[];S.finance_partners=tail[16]||[];S.finance_entries=tail[17]||[];
   S.pricing=(tail[18]&&tail[18][0])||null; // null = таблицы ещё нет, действуют значения из кода
   // ТЯЖЁЛОЕ (заказы + заявки, тысячи строк за всё время) грузим ПАРАЛЛЕЛЬНО с ядром,

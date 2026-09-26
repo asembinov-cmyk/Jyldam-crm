@@ -335,7 +335,19 @@ function unassignedIntercityOrdersModal(){
   };
 }
 function renderIntercity(){
-  if(!canMod('intercity')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
+  // Раздел по умолчанию только для администратора (карта fb в canMod: intercity:null).
+  // Сотруднику его нужно выдать явно, иначе он не увидит ни пункта меню, ни отправок —
+  // и по пустому экрану это было не понять.
+  if(!canMod('intercity')){
+    $('main').innerHTML=`<div class="empty"><div class="big">Нет доступа к «Отправкам межгород»</div>
+      <p>Раздел выдаётся отдельно: «Сотрудники» → «Роли и права» → ваша роль → столбец «Межгород».</p></div>`;
+    return;
+  }
+  if(S.shipments===null){
+    $('main').innerHTML=`<div class="empty"><div class="big">Отправки не загрузились</div>
+      <p>Обновите страницу. Если не помогло — скорее всего, нет прав на чтение отправок в базе.</p></div>`;
+    return;
+  }
   const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
   const all=[...(S.shipments||[])].sort((a,b)=>(b.ship_date||b.created_at||'').localeCompare(a.ship_date||a.created_at||''));
   // применяем фильтры
@@ -434,7 +446,9 @@ function renderIntercity(){
             ${can('intercity','delete')?`<button class="btn sm danger" data-icdel="${s.id}">Удалить</button>`:''}
           </div></td>
         </tr>`;
-      }).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.dateFrom||icFilter.dateTo||icFilter.wh||icFilter.dest||icFilter.transport)?'Измените фильтры.':'Нажмите «Создать отправку».'}</div></td></tr>`}
+      }).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.dateFrom||icFilter.dateTo||icFilter.wh||icFilter.dest||icFilter.transport)
+        ?`Ни одна из ${all.length} отправок не подходит под фильтры. <button class="btn ghost sm" id="icEmptyClear">✕ Сбросить фильтры</button>`
+        :'Нажмите «Создать отправку».'}</div></td></tr>`}
       </tbody></table></div>
     </div>`;
   if($('newShipment'))$('newShipment').onclick=()=>shipmentModal();
@@ -445,7 +459,9 @@ function renderIntercity(){
   if($('icfWh'))$('icfWh').onchange=e=>{icFilter.wh=e.target.value;renderIntercity();};
   if($('icfDest'))$('icfDest').onchange=e=>{icFilter.dest=e.target.value;renderIntercity();};
   if($('icfTr'))$('icfTr').onchange=e=>{icFilter.transport=e.target.value;renderIntercity();};
-  if($('icfClear'))$('icfClear').onclick=()=>{icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:''};renderIntercity();};
+  const clearF=()=>{icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:''};renderIntercity();};
+  if($('icfClear'))$('icfClear').onclick=clearF;
+  if($('icEmptyClear'))$('icEmptyClear').onclick=clearF;
   $('main').querySelectorAll('[data-icview]').forEach(b=>b.onclick=()=>shipmentOrdersModal(b.dataset.icview));
   $('main').querySelectorAll('[data-icedit]').forEach(b=>b.onclick=()=>shipmentEditModal(b.dataset.icedit));
   $('main').querySelectorAll('[data-icdel]').forEach(b=>b.onclick=()=>delShipment(b.dataset.icdel));
