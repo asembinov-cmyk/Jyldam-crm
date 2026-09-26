@@ -947,10 +947,32 @@ function buildNav(opts){
     // (пункт «Документация API» перенесён в Настройки)
     if(team.length)groups.push({title:'Команда и настройки',items:team});
   }else{
-    // курьер: только свои разделы, без групп
+    // Курьер: свои разделы плюс то, что роли выдали ЯВНО.
+    //
+    // Базовый тип «Курьер» ограничивает ДАННЫЕ — в заказах он видит только свои
+    // (visibleOrders). Набор модулей он ограничивать не должен: заборщик, который сам
+    // собирает коробки, обязан попадать в «Отправки межгород». Раньше список был жёстким,
+    // и выданное право просто не появлялось в меню — человек его не видел, а почему,
+    // понять было нельзя.
+    //
+    // Берём только ЯВНОЕ право (S.myPerms), без запасной карты fb: та отдаёт «Межгород»
+    // и прочие закрытые разделы администратору, и по ней курьер получил бы лишнее.
     const items=[];
     if(can('pickups','view'))items.push({k:'pickups',label:'Мои заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Мои заказы',icon:'orders'});
+    const COURIER_EXTRA=[
+      ['intercity','Отправки межгород','intercity'],['sorting','Сортировка','scan'],
+      ['cash','Склад','warehouse'],['filling','Заполнение','fill'],
+      ['courier','Курьерская доставка','courier'],['mail','Почтовая доставка','mail'],
+      ['dashboard','Статистика','stats'],['calc','Калькуляция','calc'],
+      ['finance','Финансы','finance'],['partners','Партнёры','partners'],
+      ['ket_orders','SPA трафик','traffic'],['history','История изменений','history'],
+      ['notify','Центр контроля','bell'],
+    ];
+    COURIER_EXTRA.forEach(([k,label,icon])=>{
+      const p=S.myPerms&&S.myPerms[k];
+      if(p&&p.view)items.push({k,label,icon});
+    });
     groups.push({title:'',items});
   }
   // собрать список активных ключей для проверки текущей вкладки
