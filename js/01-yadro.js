@@ -743,8 +743,11 @@ async function callEdge(name,payload){
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_ANON},
       body:JSON.stringify(payload),
     });
-    const out=await res.json().catch(()=>({}));
-    return {status:res.status,ok:res.ok,out};
+    // Тело читаем как текст: при отказе на уровне платформы (а не нашей функции) там
+    // может прийти не JSON, и тогда из ответа не осталось бы вообще ничего.
+    const raw=await res.text().catch(()=>'');
+    let out={};try{out=raw?JSON.parse(raw):{};}catch(e){out={};}
+    return {status:res.status,ok:res.ok,out,raw};
   };
   try{
     const {data:sess}=await sb.auth.getSession();
@@ -759,7 +762,13 @@ async function callEdge(name,payload){
       }catch(e){console.warn('refreshSession',e);}
     }
     if(r.status===401){
-      return {success:false,error:'Сессия истекла — обновите страницу (Cmd+Shift+R) и войдите заново'};
+      // НЕ прячем настоящий текст: 401 бывает не только от протухшего токена, и подменять
+      // его советом «обновите страницу» — значит отправить человека по ложному следу.
+      // (Сам на это наступил 27.09.2026: сообщение было одно и то же при любой причине.)
+      const srv=r.out.error||r.out.message||(r.raw||'').slice(0,200)||'Unauthorized';
+      console.error('callEdge 401',name,r.status,r.raw);
+      return {success:false,error:`Доступ не принят (401): ${srv}. Если после обновления страницы `
+        +`и повторного входа то же самое — дело не в сессии, покажите это сообщение разработчику`};
     }
     if(!r.ok&&!r.out.error)return {success:false,error:'Ошибка '+r.status};
     return r.out;
