@@ -728,86 +728,59 @@ async function loadPhoneChat(phone,boxId){
     const box3=$(boxId);if(box3)box3.innerHTML='<div class="hint" style="color:var(--rust)">Не удалось загрузить переписку — возможно, таблица kelesu_messages ещё не создана</div>';
   }
 }
-// подтягивает историю переписки из Kelesu (Edge Function kelesu-sync-history) — нужно для
-// сообщений, которые были ДО подключения вебхука и поэтому отсутствуют в нашей базе
-async function callKelesuSyncHistory(payload){
-  const {data:sess}=await sb.auth.getSession();
-  const token=sess&&sess.session?sess.session.access_token:'';
-  try{
-    const res=await fetch(`${SUPABASE_URL}/functions/v1/kelesu-sync-history`,{
+// ВЫЗОВ EDGE-ФУНКЦИИ ОТ ИМЕНИ ВОШЕДШЕГО.
+//
+// Функции проверяют вход по токену сессии. Токен живёт около часа и обновляется сам, но
+// у вкладки, открытой со вчера (или после сна ноутбука), обновление могло не случиться —
+// и функция отвечает «Unauthorized». Человеку из этого слова ничего не понятно.
+//
+// Поэтому здесь: один раз пробуем обновить сессию и повторяем запрос, а если и это не
+// помогло — говорим прямым текстом, что нужно войти заново, а не «Unauthorized».
+async function callEdge(name,payload){
+  const send=async token=>{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/${name}`,{
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_ANON},
       body:JSON.stringify(payload),
     });
     const out=await res.json().catch(()=>({}));
-    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
-    return out;
+    return {status:res.status,ok:res.ok,out};
+  };
+  try{
+    const {data:sess}=await sb.auth.getSession();
+    let token=sess&&sess.session?sess.session.access_token:'';
+    let r=await send(token);
+    // 401 — дело в токене, а не в самой функции: пробуем обновить сессию и повторить
+    if(r.status===401){
+      try{
+        const {data:fresh}=await sb.auth.refreshSession();
+        const t2=fresh&&fresh.session?fresh.session.access_token:'';
+        if(t2&&t2!==token)r=await send(t2);
+      }catch(e){console.warn('refreshSession',e);}
+    }
+    if(r.status===401){
+      return {success:false,error:'Сессия истекла — обновите страницу (Cmd+Shift+R) и войдите заново'};
+    }
+    if(!r.ok&&!r.out.error)return {success:false,error:'Ошибка '+r.status};
+    return r.out;
   }catch(e){return {success:false,error:String(e&&e.message||e)};}
 }
+// подтягивает историю переписки из Kelesu (Edge Function kelesu-sync-history) — нужно для
+// сообщений, которые были ДО подключения вебхука и поэтому отсутствуют в нашей базе
+const callKelesuSyncHistory=payload=>callEdge('kelesu-sync-history',payload);
 // получение реального трек-номера у Казпочты (Edge Function kazpost-get-barcode) — по одному
 // заказу; функция сама сохраняет полученный трек-код прямо в заказ, тут только вызов
-async function callKazpostGetBarcode(orderId){
-  const {data:sess}=await sb.auth.getSession();
-  const token=sess&&sess.session?sess.session.access_token:'';
-  try{
-    const res=await fetch(`${SUPABASE_URL}/functions/v1/kazpost-get-barcode`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
-      body:JSON.stringify({order_id:orderId}),
-    });
-    const out=await res.json().catch(()=>({}));
-    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
-    return out;
-  }catch(e){return {success:false,error:String(e&&e.message||e)};}
-}
+const callKazpostGetBarcode=orderId=>callEdge('kazpost-get-barcode',{order_id:orderId});
 // то же самое ПАЧКОЙ: один вызов функции на список заказов. Внутри функции вход
 // проверяется один раз на всю пачку, а не на каждый заказ отдельно, и сама функция
 // запускается один раз вместо N — Казпочта быстрее не стала, но накладные расходы ушли.
 // Ответ: {success:true, results:[{order_id,success,barcode?,warning?,error?}]}
 // mode='pool' — это не заказы, а номера из пула бланков (track_pool): поле в теле
 // запроса другое, и функция кладёт трек в пул, а не в заказ.
-async function callKazpostGetBarcodeBatch(ids,mode){
-  const {data:sess}=await sb.auth.getSession();
-  const token=sess&&sess.session?sess.session.access_token:'';
-  try{
-    const res=await fetch(`${SUPABASE_URL}/functions/v1/kazpost-get-barcode`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
-      body:JSON.stringify(mode==='pool'?{pool_ids:ids}:{order_ids:ids}),
-    });
-    const out=await res.json().catch(()=>({}));
-    if(!res.ok&&!out.error){return {success:false,error:'Ошибка '+res.status};}
-    return out;
-  }catch(e){return {success:false,error:String(e&&e.message||e)};}
-}
+const callKazpostGetBarcodeBatch=(ids,mode)=>
+  callEdge('kazpost-get-barcode',mode==='pool'?{pool_ids:ids}:{order_ids:ids});
 // смена пароля сотрудника через Edge Function set-password (только для админа)
-async function callSetPassword(payload){
-  const {data:sess}=await sb.auth.getSession();
-  const token=sess&&sess.session?sess.session.access_token:'';
-  try{
-    const res=await fetch(`${SUPABASE_URL}/functions/v1/set-password`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
-      body:JSON.stringify(payload),
-    });
-    const out=await res.json().catch(()=>({}));
-    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
-    return out;
-  }catch(e){return {error:String(e&&e.message||e)};}
-}
+const callSetPassword=payload=>callEdge('set-password',payload);
 
 // смена телефона/email (логина) сотрудника через Edge Function update-user (только для админа)
-async function callUpdateUser(payload){
-  const {data:sess}=await sb.auth.getSession();
-  const token=sess&&sess.session?sess.session.access_token:'';
-  try{
-    const res=await fetch(`${SUPABASE_URL}/functions/v1/update-user`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_ANON},
-      body:JSON.stringify(payload),
-    });
-    const out=await res.json().catch(()=>({}));
-    if(!res.ok){return {error:out.error||('Ошибка '+res.status)};}
-    return out;
-  }catch(e){return {error:String(e&&e.message||e)};}
-}
+const callUpdateUser=payload=>callEdge('update-user',payload);
