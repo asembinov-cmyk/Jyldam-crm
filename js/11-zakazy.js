@@ -2214,7 +2214,21 @@ function orderModal(id,readonly){
       // и в отказе: по нему сверяют состав полей с эталоном Казпочты, а ключ в этом тексте
       // вырезан на её стороне — для сверки есть отпечаток. Префикс номера Казпочта выбирает
       // сама, и когда он меняется (QS → AP → AT), по одному номеру причину не понять.
-      if(res&&res.debug_sent_request)console.log('Казпочта → отправили:',res.debug_sent_request);
+      if(res&&res.debug_sent_request){
+        console.log('Казпочта → отправили:',res.debug_sent_request);
+        // И ТАБЛИЦЕЙ, поле за полем. Консоль Safari обрезает длинную строку, а XML целиком
+        // из неё ещё и неудобно копировать — сверять состав полей с эталоном Казпочты по
+        // такому «хвосту с многоточием» нельзя. Таблицу видно целиком и хватает скриншота.
+        try{
+          const src=res.debug_sent_request;
+          const rows=[];
+          const re=/<sch:(\w+)\s*\/>|<sch:(\w+)>([^<]*)<\/sch:\2>/g;
+          let m;while((m=re.exec(src))!==null){
+            rows.push(m[1]?{поле:m[1],значение:'(пусто)'}:{поле:m[2],значение:m[3]});
+          }
+          if(rows.length&&console.table)console.table(rows);
+        }catch(e){console.warn('разбор запроса для таблицы',e);}
+      }
       if(res&&res.debug_raw_response)console.log('Казпочта ← ответ целиком:',res.debug_raw_response);
       if(res&&res.success){
         o.track=res.barcode;
