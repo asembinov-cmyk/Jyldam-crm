@@ -13,6 +13,34 @@ const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON,{
 let _partnerQR=''; // текущий QR-код партнёра (кабинет по ?p=)
 
 const $=id=>document.getElementById(id);
+/* ── ЧАСЫ КОМПЬЮТЕРА МОГУТ ВРАТЬ ──
+   «Сегодня» во всей системе считается от часов того компьютера, за которым сидят:
+   очередь «Заполнения», статистика за день, даты по умолчанию в заявках и заказах.
+   27.09.2026 у сотрудницы ноутбук показывал 28-е — и она видела пустую очередь и ноль
+   заполненных, пока у всех остальных было нормально. Понять это по экрану невозможно.
+
+   Поэтому при входе спрашиваем время у сервера (заголовок Date любого ответа) и дальше
+   считаем «сейчас» с поправкой. Не получилось спросить — работаем как раньше, по местным. */
+let _serverSkewMs=0;
+const nowMs=()=>Date.now()+_serverSkewMs;
+async function syncServerTime(){
+  try{
+    const res=await fetch(`${SUPABASE_URL}/rest/v1/`,{method:'HEAD',headers:{apikey:SUPABASE_ANON}});
+    const h=res.headers.get('date');
+    if(!h)return;
+    const server=new Date(h).getTime();
+    if(!server||isNaN(server))return;
+    _serverSkewMs=server-Date.now();
+    // Расхождение в минуты никому не мешает — важно, когда разъезжается сама ДАТА.
+    const dayOf=ms=>{const d=new Date(ms);const o=d.getTimezoneOffset();
+      return new Date(d.getTime()-o*60000).toISOString().slice(0,10);};
+    if(dayOf(Date.now())!==dayOf(server)){
+      console.warn('Часы компьютера:',dayOf(Date.now()),'сервер:',dayOf(server));
+      setTimeout(()=>{try{toast(`Часы этого компьютера показывают ${dayOf(Date.now())}, а на сервере `
+        +`${dayOf(server)}. Система работает по серверной дате — поправьте дату и время в настройках компьютера.`,15000);}catch(e){}},1500);
+    }
+  }catch(e){console.warn('syncServerTime',e);}
+}
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 /* ---------- ДОСТУП В КАБИНЕТ ПАРТНЁРА ---------- */

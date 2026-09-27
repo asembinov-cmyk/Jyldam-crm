@@ -344,6 +344,7 @@ if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeSidebar;
 
 /* ---------- ENTER APP: load all reference data ---------- */
 async function loadAll(){
+  if(typeof syncServerTime==='function')syncServerTime(); // не ждём: поправка нужна не мгновенно
   // ЛЁГКОЕ ЯДРО: справочники (мелкие таблицы) — грузятся быстро, интерфейс сразу готов
   const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips]=await Promise.all([
     dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),dbList('couriers',{order:'fio'}),

@@ -1,7 +1,10 @@
 
 /* ================= МОДУЛЬ: ЗАЯВКИ НА ЗАБОР ================= */
 // локальная сегодняшняя дата YYYY-MM-DD (с учётом часового пояса, без сдвига в UTC)
-function localToday(){const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
+// «Сегодня» — по времени СЕРВЕРА, а не по часам компьютера: сбитая дата на ноутбуке
+// делала очередь «Заполнения» пустой, а статистику нулевой (см. syncServerTime).
+function localToday(){const d=new Date(typeof nowMs==='function'?nowMs():Date.now());
+  const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
 // дата по умолчанию для новой заявки на забор: после 18:00 предлагаем уже завтрашний день
 function defaultPickupDate(){
   const d=new Date();
