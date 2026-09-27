@@ -28,6 +28,12 @@ let fillBusy = false;            // защита от двойного нажа�
 // Колонки могли ещё не появиться в базе (SQL из db/11 не выполнен). Понять это можно
 // бесплатно: заказы грузятся через select('*'), и если колонка есть, она есть и в строке.
 const fillReady = () => !!(S.orders && S.orders.length && ('filled_at' in S.orders[0]));
+// ...но пока заказы ещё грузятся, строк нет ВООБЩЕ, и отличить «колонок нет» от «данные
+// не приехали» по ним нельзя. Раньше в эти первые секунды раздел пугал надписью «Раздел
+// ещё не включён» с требованием выполнить SQL — при том что всё давно включено.
+// После входа сначала приходит быстрый запрос за сегодня, следом вся история
+// (S._heavyLoaded, js/02-ket.js); до этого честно говорим «загружаем».
+const fillLoading = () => !(S.orders && S.orders.length) && !S._heavyLoaded;
 
 // Местная дата отметки времени. Брать slice(0,10) от ISO нельзя: там UTC, и заказ,
 // заполненный в половине первого ночи, попадал бы во вчерашний день (Астана +5).
@@ -72,6 +78,20 @@ function fillInQueue(o){
   return !!d && d >= fillQueueFrom() && d <= localToday();
 }
 const fillPrevDay = d => new Date(new Date(d).getTime() - 86400000).toISOString().slice(0, 10);
+// ПОЧЕМУ БРАТЬ НЕЧЕГО. «Взять следующий» неактивен по пяти разным причинам, и со стороны
+// они выглядят одинаково — «кнопка не работает». Причин, по сути, две группы: заказы есть,
+// но заняты (вами же, отложены, у коллег), или их правда нет за выбранные дни.
+function fillWhyEmpty(queue, free, mine, held){
+  if(free.length) return '';
+  if(mine.length) return 'заказ уже у вас в работе';
+  const others = queue.filter(o => fillClaimAlive(o) && !fillIsMine(o)).length;
+  if(held.length && !others) return `у вас отложено ${held.length}, верните в работу выше`;
+  if(others) return `все ${others} сейчас у коллег`;
+  const from = fillQueueFrom();
+  return from < localToday()
+    ? `с ${fmtDate(from)} заказов с фото, ждущих заполнения, нет`
+    : 'за сегодня заказов с фото, ждущих заполнения, пока нет';
+}
 // Сколько незаполненного осталось за день ПЕРЕД окном очереди — тот самый «хвост»,
 // ради которого и приходится двигать фильтр. Считаем один день, а не всё прошлое:
 // «добрать 400 заказов за месяц» — это не про работу, а про старые брошенные болванки.
@@ -367,8 +387,11 @@ function renderFilling(){
   if(!fillReady()){
     $('main').innerHTML = `
       <div class="page-head"><div><h1>Заполнение</h1></div></div>
-      <div class="empty"><div class="big">Раздел ещё не включён</div>
-      <p>В таблице заказов нет полей для учёта. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`;
+      ${fillLoading()
+        ? `<div class="empty"><div class="big">Загружаем заказы…</div>
+           <p>Секунду — список появится сам, обновлять страницу не нужно.</p></div>`
+        : `<div class="empty"><div class="big">Раздел ещё не включён</div>
+           <p>В таблице заказов нет полей для учёта. Выполните <b>db/11-ЗАБИВКА-распределение-заказов.sql</b> и обновите страницу.</p></div>`}`;
     return;
   }
   const queue=fillQueue(), free=fillFree(), mine=fillMine(), held=fillHeld();
@@ -536,7 +559,9 @@ function renderFilling(){
     </div>`:''}
     <div class="fill-take">
       <button class="btn" id="fillNextBottom" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
-      <span>${free.length?`свободных заказов: ${free.length}`:'свободных заказов нет'}${qWide?` · с ${esc(fmtDate(qFrom))}`:''}</span>
+      <span>${free.length
+        ? `свободных заказов: ${free.length}${qWide?` · с ${esc(fmtDate(qFrom))}`:''}`
+        : `свободных заказов нет — ${esc(fillWhyEmpty(queue,free,mine,held))}`}</span>
       ${tail?`<button class="btn sm ghost" id="fillTail">Добрать за ${esc(fmtDate(tailDay))} (${tail})</button>`:''}
       ${admin?'':reload}
     </div>`;
