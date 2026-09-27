@@ -1063,8 +1063,15 @@ function renderCalcSummary(){
     admin_courier:'ЗП администратора курьеров',fund_logist:'Фонд ЗП менеджера заказов',
     fund_pickers:'Фонд ЗП заборщиков',salary_processor:'ЗП обработчиков',sales_manager:'ЗП менеджеров по продажам',
   };
+  // БАРАХОЛКА В ЭТУ РАЗБИВКУ НЕ ВХОДИТ (решение владельца 28.09.2026). У неё свой набор
+  // статей — пять за заказ и четыре фонда (CALC_BAR_FIELDS/CALC_BAR_FUNDS, раздел 5a), —
+  // и в общей таблице они сливались с одноимёнными обычными: строка «Пакеты» складывала
+  // два разных норматива, а курьера и межгорода у Барахолки нет вовсе. Смотреть на такую
+  // сумму нельзя ни как на общую, ни как на чью-то конкретную.
+  // Итог и доли считаются от расходов БЕЗ Барахолки — иначе проценты не сошлись бы в 100.
+  const expenseCost=totCost-barSum.cost;
   const byExpense={};
-  calcs.forEach(({c})=>c.items.forEach(it=>{
+  calcs.filter(x=>!x.c.isBar).forEach(({c})=>c.items.forEach(it=>{
     const label=EXPENSE_LABELS[it.key]||it.label;
     if(!byExpense[label])byExpense[label]={label,amount:0};
     byExpense[label].amount+=(it.amount||0);
@@ -1200,10 +1207,11 @@ function renderCalcSummary(){
     </div>`:''}
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по статьям расходов</h3>
-      <p class="calc-note">Сколько всего потрачено за месяц по каждой статье — курьерские и почтовые заказы вместе.</p>
+      <p class="calc-note">Сколько всего потрачено за месяц по каждой статье — курьерские и почтовые заказы вместе.${
+        barSum.cnt?` Барахолка сюда не входит: у неё свой набор статей — её расходы (${esc(fmtMoney(barSum.cost))}) отдельной строкой в таблице выше.`:''}</p>
       ${expenseRows.length?`<div class="table-scroll"><table class="calc-courier-tbl"><thead><tr><th>Статья</th><th>Сумма</th><th>Доля</th></tr></thead>
-        <tbody>${expenseRows.map(r=>`<tr><td>${esc(r.label)}</td><td><b>${fmtMoney(r.amount)}</b></td><td>${totCost>0?(r.amount/totCost*100).toFixed(1):'0'}%</td></tr>`).join('')}
-        <tr style="border-top:2px solid var(--line)"><td><b>Итого расходы</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b>100%</b></td></tr></tbody></table></div>`
+        <tbody>${expenseRows.map(r=>`<tr><td>${esc(r.label)}</td><td><b>${fmtMoney(r.amount)}</b></td><td>${expenseCost>0?(r.amount/expenseCost*100).toFixed(1):'0'}%</td></tr>`).join('')}
+        <tr style="border-top:2px solid var(--line)"><td><b>Итого расходы${barSum.cnt?' (без Барахолки)':''}</b></td><td><b>${fmtMoney(expenseCost)}</b></td><td><b>100%</b></td></tr></tbody></table></div>`
         :'<div class="empty"><div class="big">Нет данных</div>За этот месяц нет заказов.</div>'}
     </div>
     <div class="panel calc-panel">
