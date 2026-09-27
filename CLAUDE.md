@@ -1236,6 +1236,32 @@ URL `http://rates.kazpost.kz/postratesprod/endpoints`).
 полученном треке. Если там `postratesprod`, значит выложена не та версия функции либо
 появился секрет `KAZPOST_ENDPOINT`.
 
+**Эталонный запрос, который выдал QS** (скриншот SoapUI от программиста Казпочты,
+21.09.2026, разобран 27.09.2026). Адрес `…:80/postratesws/endpoints`, ответ
+`QS000000014KZ`. Состав запроса:
+
+```
+Key bbfc5094ab7c45688f967634bcd02dbd
+RcpnName получатель · RcpnPhone 777777777 · RcpnCountry Казахстан
+RcpnIndex 050002 · RcpnCity Алматы · RcpnStreet улица · RcpnHouse 5
+SndrBIN 190140028589 · SndrName ТОО «QP Service» · SndrPhone 777777777
+SndrCountry Казахстан · SndrIndex 010000 · SndrCity Астана
+SndrStreet Пушкина 28 · SndrHouse 2 · SndrCtg 2
+Weight 1 · ProductCode P103 · Marks (пусто) · SendMethod 1 · MailCtg 3
+OrderNum 2514200 · DEA_NUMBER 10004943-2024-191272
+```
+
+**Три отличия от того, что слали мы:**
+
+1. **`Key`** — у него `bbfc5094…`. Диапазон QS, по словам Казпочты, привязан к КЛЮЧУ,
+   так что это главный подозреваемый: если в секрете лежит другой ключ, остальное неважно.
+2. **`EnvelopeSize` он не отправляет вовсе**, а мы всегда слали `M`. Поле необязательное —
+   с 27.09.2026 не отправляем и мы, вернуть можно секретом `KAZPOST_ENVELOPE_SIZE`.
+3. **`SndrIndex`** — у него `010000`, у нас `010009`.
+
+У него `MailCtg=3` без сумм, то есть его запрос — это ровно наш **бланк с нулевой суммой**.
+После правки набор и порядок полей у такого бланка совпадают с эталоном поле в поле.
+
 **Схема сервиса: `http://rates.kazpost.kz/postratesprod/postratesws.wsdl`.** Разбор её
 27.09.2026 дал то, чего нет в документации KET и Казпочты:
 
