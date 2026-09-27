@@ -80,12 +80,16 @@ async function fillTakeNext(){
     const now = new Date().toISOString();
     // Идём по списку, пока захват не удастся: пока мы думали, заказ мог забрать сосед.
     for(const o of free.slice(0, 20)){
-      const { data, error } = await sb.from('orders')
+      let q = sb.from('orders')
         .update({ claimed_by: (S.me && S.me.id) || null, claimed_by_name: fillMeName(), claimed_at: now })
         .eq('id', o.id)
         .is('filled_at', null)
-        .or(`claimed_at.is.null,claimed_at.lt.${fillCutoff()}`)
-        .select();
+        .or(`claimed_at.is.null,claimed_at.lt.${fillCutoff()}`);
+      // Отложенный заказ не отбираем и на стороне базы. Локальный список его и так не
+      // предлагает, но он мог устареть: сосед отложил заказ секунду назад, а у нас в памяти
+      // он ещё «просроченный». Проверка в самом запросе такую гонку закрывает.
+      if(fillHoldReady()) q = q.not('claim_hold', 'is', true);
+      const { data, error } = await q.select();
       if(error){ console.error('fill claim', error); toast('Ошибка: ' + error.message); return; }
       if(data && data.length){
         Object.assign(o, data[0]);
@@ -96,6 +100,35 @@ async function fillTakeNext(){
     }
     toast('Свободные заказы разобрали — попробуйте ещё раз');
   } finally { fillBusy = false; }
+}
+
+// ПРОДЛЕНИЕ ЗАХВАТА, ПОКА ЧЕЛОВЕК РАБОТАЕТ.
+//
+// Захват живёт FILL_CLAIM_MIN минут от момента «Взять следующий» и раньше никак не
+// обновлялся. Норма — минута, но на деле заказ занимает больше: разобрать почерк на фото,
+// уточнить адрес, позвонить партнёру. Через десять минут заказ тихо возвращался в общую
+// очередь, и тот же самый доставался соседу — ровно на это и жаловались заполняльщики.
+//
+// Теперь любое изменение в карточке продлевает захват, но не чаще раза в FILL_TOUCH_MIN
+// минут: лишние запросы на каждую букву не нужны. Ушёл и не трогает — захват истекает
+// как раньше, и заказ честно возвращается в очередь.
+const FILL_TOUCH_MIN = 3;
+const _fillTouched = {};   // id заказа → когда в последний раз продлевали
+async function fillTouchClaim(id){
+  const o = (S.orders || []).find(x => x.id === id);
+  if(!o || o.filled_at) return;
+  if(o.claimed_by !== (S.me && S.me.id)) return;      // не мой — продлевать нечего
+  const last = _fillTouched[id] || 0;
+  if(Date.now() - last < FILL_TOUCH_MIN * 60000) return;
+  _fillTouched[id] = Date.now();
+  const now = new Date().toISOString();
+  try{
+    // Без dbUpdate: это служебная отметка, и в журнале изменений ей делать нечего —
+    // иначе история заказа утонет в записях «продлили захват».
+    const { error } = await sb.from('orders').update({ claimed_at: now })
+      .eq('id', id).eq('claimed_by', (S.me && S.me.id) || null).is('filled_at', null);
+    if(!error) o.claimed_at = now;
+  }catch(e){ console.warn('fillTouchClaim', e); }
 }
 
 // Отложить за собой: заказ не уходит в общую очередь и ждёт своего часа.

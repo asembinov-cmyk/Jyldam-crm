@@ -2117,6 +2117,17 @@ function orderModal(id,readonly){
       return true;
     }),{readonly:ro,wide:true});
   attachPhone('o_phone',d.phone);
+  // Пока менеджер правит карточку, захват заказа в «Заполнении» продлевается: иначе
+  // через десять минут работы заказ возвращается в общую очередь и достаётся соседу.
+  // Слушаем сам модальный блок — он же и умрёт вместе с карточкой, снимать нечего.
+  if(o&&o.id&&typeof fillTouchClaim==='function'){
+    const box=document.querySelector('.modal-body');
+    if(box){
+      const touch=()=>fillTouchClaim(o.id);
+      box.addEventListener('input',touch);
+      box.addEventListener('change',touch);
+    }
+  }
   // кнопка «Отправить в KET»
   if(o&&o.id){const kb=document.querySelector(`[data-ketsend="${o.id}"]`);if(kb)kb.onclick=async()=>{
     kb.disabled=true;
