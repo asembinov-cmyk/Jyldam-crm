@@ -1263,7 +1263,13 @@ function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.
   }
   try{
     const {data}=await sb.auth.getSession();
-    if(data&&data.session){await loadMe(data.session);await enterApp();}
+    if(data&&data.session){
+      await loadMe(data.session);
+      // Карточку могли удалить, пока человек оставался со старой сессией: без этой
+      // проверки он просто продолжал бы работать до истечения токена.
+      if(S.meMissing){await signOutNoProfile();showLogin();const e2=$('loginErr');if(e2)e2.textContent=NO_PROFILE_MSG;}
+      else await enterApp();
+    }
     else showLogin();
   }catch(e){console.error('init',e);showLogin();}
 })();

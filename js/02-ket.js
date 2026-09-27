@@ -251,11 +251,26 @@ function computeMyPerms(){
 }
 
 async function loadMe(session){
-  const {data}=await sb.from('profiles').select('*').eq('id',session.user.id).single();
+  const {data,error}=await sb.from('profiles').select('*').eq('id',session.user.id).single();
+  // КАРТОЧКИ СОТРУДНИКА НЕТ — ЭТО НЕ «ВХОД С ОБЫЧНЫМИ ПРАВАМИ».
+  //
+  // Запасной вариант ниже выдаёт role:'manager', а это defaultPerms('staff'): полный доступ
+  // к заявкам и заказам, включая удаление. То есть уволенный сотрудник, у которого удалили
+  // карточку, но не удалили учётную запись входа, продолжал спокойно входить и работать.
+  // Проверено на выгрузке 28.09.2026: из одиннадцати таких записей одна входила 21.09.
+  // Теперь при ЯВНОМ отсутствии строки (PGRST116 — «нет строк») ставим отметку, и вызывающий
+  // код прекращает вход. Прочие ошибки (сеть, правила доступа) под это не попадают: по ним
+  // вход оставляем, иначе сбой чтения запер бы снаружи всю компанию разом.
+  S.meMissing = !data && !!(error && error.code === 'PGRST116');
   S.me=data||{id:session.user.id,email:session.user.email,role:'manager',full_name:session.user.email};
   // справочник ролей нужен для вычисления прав
   S.roles=await dbList('roles',{order:'created_at',asc:true});
   computeMyPerms();
+}
+// Общий текст отказа: показывается и при входе, и при восстановлении сессии.
+const NO_PROFILE_MSG='Учётная запись не привязана к сотруднику. Обратитесь к администратору — карточку удалили, а вход остался.';
+async function signOutNoProfile(){
+  try{await sb.auth.signOut();}catch(e){console.error('signOut',e);}
 }
 
 async function doLogin(){
@@ -279,6 +294,11 @@ async function doLogin(){
     return;
   }
   await loadMe(data.session);
+  if(S.meMissing){
+    await signOutNoProfile();
+    errEl.textContent=NO_PROFILE_MSG;
+    return;
+  }
   await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
