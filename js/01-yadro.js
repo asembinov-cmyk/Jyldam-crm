@@ -23,21 +23,43 @@ const $=id=>document.getElementById(id);
    считаем «сейчас» с поправкой. Не получилось спросить — работаем как раньше, по местным. */
 let _serverSkewMs=0;
 const nowMs=()=>Date.now()+_serverSkewMs;
+// Время сервера берём из ТОКЕНА СЕССИИ, а не из заголовка Date ответа.
+//
+// Сначала я читал `res.headers.get('date')` — и это не работало молча: браузер не отдаёт
+// заголовок Date при запросе на другой домен (он не входит в список разрешённых, а Supabase
+// его не открывает). Проверка показала ровно два видимых заголовка: content-length и
+// content-type. Поправка всегда выходила нулевой, и сбитые часы так и оставались сбитыми.
+//
+// Токен же выдаёт сам сервер и кладёт внутрь `iat` — момент выдачи по ЕГО часам. Обновляем
+// сессию (её всё равно обновляет библиотека) и сравниваем со своими.
+function jwtIssuedAt(token){
+  try{
+    const p=JSON.parse(atob(String(token).split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    return (p&&p.iat)?p.iat*1000:0;
+  }catch(e){return 0;}
+}
 async function syncServerTime(){
   try{
-    const res=await fetch(`${SUPABASE_URL}/rest/v1/`,{method:'HEAD',headers:{apikey:SUPABASE_ANON}});
-    const h=res.headers.get('date');
-    if(!h)return;
-    const server=new Date(h).getTime();
-    if(!server||isNaN(server))return;
-    _serverSkewMs=server-Date.now();
-    // Расхождение в минуты никому не мешает — важно, когда разъезжается сама ДАТА.
+    let iat=0,fromFresh=false;
+    try{
+      const {data:fresh}=await sb.auth.refreshSession();
+      if(fresh&&fresh.session&&fresh.session.access_token){iat=jwtIssuedAt(fresh.session.access_token);fromFresh=!!iat;}
+    }catch(e){console.warn('refreshSession',e);}
+    if(!iat){
+      const {data:cur}=await sb.auth.getSession();
+      if(cur&&cur.session)iat=jwtIssuedAt(cur.session.access_token);
+    }
+    if(!iat)return;
+    const skew=iat-Date.now();
+    // Свежий токен выдан секунду назад — поправке можно верить целиком. Старый мог пролежать
+    // почти час, поэтому берём его, только если расхождение заведомо больше этой погрешности.
+    if(fromFresh||Math.abs(skew)>6*3600000)_serverSkewMs=skew;
     const dayOf=ms=>{const d=new Date(ms);const o=d.getTimezoneOffset();
       return new Date(d.getTime()-o*60000).toISOString().slice(0,10);};
-    if(dayOf(Date.now())!==dayOf(server)){
-      console.warn('Часы компьютера:',dayOf(Date.now()),'сервер:',dayOf(server));
+    if(dayOf(Date.now())!==dayOf(Date.now()+_serverSkewMs)){
+      console.warn('Часы компьютера:',dayOf(Date.now()),'сервер:',dayOf(Date.now()+_serverSkewMs));
       setTimeout(()=>{try{toast(`Часы этого компьютера показывают ${dayOf(Date.now())}, а на сервере `
-        +`${dayOf(server)}. Система работает по серверной дате — поправьте дату и время в настройках компьютера.`,15000);}catch(e){}},1500);
+        +`${dayOf(Date.now()+_serverSkewMs)}. Система считает по серверной дате — поправьте дату и время в настройках компьютера.`,15000);}catch(e){}},1500);
     }
   }catch(e){console.warn('syncServerTime',e);}
 }
