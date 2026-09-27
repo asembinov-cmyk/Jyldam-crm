@@ -1026,8 +1026,6 @@ function renderCalcSummary(){
   const totRevenue=calcs.reduce((s,x)=>s+x.c.revenue,0);
   const totCost=calcs.reduce((s,x)=>s+x.c.totalCost,0)+freightAdjust;
   const totProfit=totRevenue-totCost;
-  const avgMargin=totRevenue>0?(totProfit/totRevenue*100):0;
-  const avgRoi=totCost>0?(totProfit/totCost*100):0;
   // разбивка курьерские / почтовые — межгород (freight) относится только к курьерским, поэтому
   // корректировку по дате отправки применяем именно к курьерской сумме, почтовую не трогаем
   // Барахолку считаем отдельной строкой, а не внутри «Почтовой»: набор расходов у неё
@@ -1039,13 +1037,26 @@ function renderCalcSummary(){
   const courSum=sumBlock(cour);courSum.cost+=freightAdjust;courSum.profit-=freightAdjust;
   const postSum=sumBlock(post);
   const barSum=sumBlock(bar);
+  // ГЛАВНЫЕ ЦИФРЫ СВОДКИ — БЕЗ БАРАХОЛКИ (решение владельца 28.09.2026).
+  // У неё свой набор статей и свои фонды, общие к ней не применяются (раздел 5a). Пока
+  // оба учёта лежали в одних карточках, «Итого расходы» наверху не сходились ни с одной
+  // таблицей под ними, а прибыль двух разных бизнесов складывалась в одно число, по
+  // которому нельзя понять ни один из них. Теперь наверху — обычные заказы, у Барахолки
+  // свой блок, а общий котёл остался строкой «Всего» в разбивке по типу доставки.
+  const mainCalcs=calcs.filter(x=>!x.c.isBar);
+  const mainRevenue=courSum.rev+postSum.rev;
+  const mainCost=courSum.cost+postSum.cost;
+  const mainProfit=mainRevenue-mainCost;
+  const avgMargin=mainRevenue>0?(mainProfit/mainRevenue*100):0;
+  const avgRoi=mainCost>0?(mainProfit/mainCost*100):0;
+  const barMarginSum=bar.reduce((sum,x)=>sum+((x.c.items.find(i=>i.key==='sales_margin')||{}).amount||0),0);
   // заказы «Оплачено отправителем» — их выручка (условная, по сохранённой исходной сумме) уже
   // учтена в totRevenue/totProfit выше; здесь просто выделяем её отдельно для прозрачности
-  const paidBySenderCalcs=calcs.filter(x=>x.c.isPaidBySender);
+  const paidBySenderCalcs=mainCalcs.filter(x=>x.c.isPaidBySender);
   const paidBySenderSum={cnt:paidBySenderCalcs.length,rev:paidBySenderCalcs.reduce((s,x)=>s+x.c.notionalRevenue,0),cost:paidBySenderCalcs.reduce((s,x)=>s+x.c.totalCost,0)};
   // заработок курьеров доставки: courier-норматив города заказа, по order_courier_id
   const byCourier={};
-  calcs.forEach(({o,c})=>{
+  mainCalcs.forEach(({o,c})=>{
     const cid=o.order_courier_id;if(!cid)return;
     const courierCost=(c.items.find(i=>i.key==='courier')||{}).amount||0;
     if(!byCourier[cid])byCourier[cid]={count:0,earn:0};
@@ -1069,7 +1080,7 @@ function renderCalcSummary(){
   // два разных норматива, а курьера и межгорода у Барахолки нет вовсе. Смотреть на такую
   // сумму нельзя ни как на общую, ни как на чью-то конкретную.
   // Итог и доли считаются от расходов БЕЗ Барахолки — иначе проценты не сошлись бы в 100.
-  const expenseCost=totCost-barSum.cost;
+  const expenseCost=mainCost;
   const byExpense={};
   calcs.filter(x=>!x.c.isBar).forEach(({c})=>c.items.forEach(it=>{
     const label=EXPENSE_LABELS[it.key]||it.label;
@@ -1084,7 +1095,7 @@ function renderCalcSummary(){
   // ставка за заказ и оклад. Собираем по sales_id заказов.
   const salesRows=(()=>{
     const by={};
-    calcs.forEach(({o,c})=>{
+    mainCalcs.forEach(({o,c})=>{
       if(!o.sales_id)return;
       const r=by[o.sales_id]||(by[o.sales_id]={id:o.sales_id,cnt:0,margin:0,per:0});
       r.cnt++;
@@ -1106,7 +1117,7 @@ function renderCalcSummary(){
   // обработал, сколько набежало по ставке за заказ и какой у него оклад.
   const procRowsSum=(()=>{
     const by={};
-    calcs.forEach(({o})=>{
+    mainCalcs.forEach(({o})=>{
       if(!o.processor_id)return;
       const r=by[o.processor_id]||(by[o.processor_id]={id:o.processor_id,cnt:0,per:0});
       r.cnt++;r.per+=calcProcessorPerOrder(o,sel);
@@ -1126,30 +1137,42 @@ function renderCalcSummary(){
   // Заказы, у которых человек не указан вовсе. В таблицах их нет, и итог по ним не сходится
   // с числом заказов за месяц — 28.09.2026 владелец как раз и спросил, где остальные 361.
   // Молчать об этом нельзя: по таким заказам ставка за заказ не начисляется НИКОМУ.
-  const procNone=calcs.filter(({o})=>!o.processor_id).length;
-  const salesNone=calcs.filter(({o})=>!o.sales_id).length;
+  const procNone=mainCalcs.filter(({o})=>!o.processor_id).length;
+  const salesNone=mainCalcs.filter(({o})=>!o.sales_id).length;
   const salesTotals=salesRows.reduce((a,r)=>({cnt:a.cnt+r.cnt,margin:a.margin+r.margin,per:a.per+r.per,
     salary:a.salary+r.salary,total:a.total+r.total}),{cnt:0,margin:0,per:0,salary:0,total:0});
   const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
-  const profitColor=totProfit<0?'#c0392b':(totProfit<calcMinProfit()*monthOrders.length?'#c08a2d':'#2e7d32');
+  const profitColor=mainProfit<0?'#c0392b':(mainProfit<calcMinProfit()*mainCalcs.length?'#c08a2d':'#2e7d32');
   $('calcContent').innerHTML=`
     <div class="calc-sum-bar">
       <select id="calcSumMonth">${months.map((m,i)=>`<option value="${i}" ${calcSummaryMonth.month===i?'selected':''}>${m}</option>`).join('')}</select>
       <select id="calcSumYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${calcSummaryMonth.year===y?'selected':''}>${y}</option>`;return o;})()}</select>
-      <span class="calc-sum-cnt">Заказов: <b>${monthOrders.length}</b></span>
+      <span class="calc-sum-cnt">Заказов: <b>${mainCalcs.length}</b>${
+        barSum.cnt?` · Барахолка <b>${barSum.cnt}</b>`:''}</span>
     </div>
+    ${barSum.cnt?'<h3 class="calc-h" style="margin:0 0 10px">Обычные заказы</h3>':''}
     <div class="calc-totals">
-      <div class="ct-card"><div class="ct-k">Выручка</div><div class="ct-v">${fmtMoney(totRevenue)}</div></div>
-      <div class="ct-card"><div class="ct-k">Итого расходы</div><div class="ct-v">${fmtMoney(totCost)}</div>${
-        barSum.cnt?`<div class="ct-s">из них Барахолка ${esc(fmtMoney(barSum.cost))}</div>`:''}</div>
-      <div class="ct-card"><div class="ct-k">Чистая прибыль</div><div class="ct-v" style="color:${profitColor}">${fmtMoney(totProfit)}</div></div>
+      <div class="ct-card"><div class="ct-k">Выручка</div><div class="ct-v">${fmtMoney(mainRevenue)}</div></div>
+      <div class="ct-card"><div class="ct-k">Итого расходы</div><div class="ct-v">${fmtMoney(mainCost)}</div></div>
+      <div class="ct-card"><div class="ct-k">Чистая прибыль</div><div class="ct-v" style="color:${profitColor}">${fmtMoney(mainProfit)}</div></div>
       <div class="ct-card"><div class="ct-k">Маржинальность</div><div class="ct-v">${avgMargin.toFixed(1)}%</div></div>
       <div class="ct-card"><div class="ct-k">ROI</div><div class="ct-v">${avgRoi.toFixed(1)}%</div></div>
     </div>
+    ${barSum.cnt?`
+    <h3 class="calc-h" style="margin:18px 0 10px">Барахолка <span style="font-weight:400;color:var(--muted);font-size:13px">— свои нормативы, общие фонды не применяются</span></h3>
+    <div class="calc-totals">
+      <div class="ct-card"><div class="ct-k">Заказов</div><div class="ct-v">${barSum.cnt}</div></div>
+      <div class="ct-card"><div class="ct-k">Выручка</div><div class="ct-v">${fmtMoney(barSum.rev)}</div></div>
+      <div class="ct-card"><div class="ct-k">Итого расходы</div><div class="ct-v">${fmtMoney(barSum.cost)}</div>${
+        barMarginSum?`<div class="ct-s">в т.ч. надбавка менеджеров ${esc(fmtMoney(barMarginSum))}</div>`:''}</div>
+      <div class="ct-card"><div class="ct-k">Чистая прибыль</div><div class="ct-v" style="color:${barSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(barSum.profit)}</div></div>
+      <div class="ct-card"><div class="ct-k">Маржинальность</div><div class="ct-v">${(barSum.rev>0?(barSum.profit/barSum.rev*100):0).toFixed(1)}%</div></div>
+    </div>`:''}
     ${salesRows.length?`<div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Заработок менеджеров по продажам</h3>
       <p class="calc-note">«Надбавка» — разница между тарифом партнёра и базовым тарифом компании,
-        по заказам этого менеджера. Оклад показан целиком за месяц, он не зависит от числа заказов.</p>
+        по заказам этого менеджера. Оклад показан целиком за месяц, он не зависит от числа заказов.${
+        barSum.cnt?' Заказы Барахолки сюда не входят: ставка за заказ на них не начисляется, у неё свой месячный фонд.':''}</p>
       <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
         <th>Менеджер</th><th>Заказов</th><th>Надбавка</th><th>За заказ</th><th>Оклад</th><th>Итого</th>
       </tr></thead><tbody>
@@ -1172,7 +1195,8 @@ function renderCalcSummary(){
     ${procRowsSum.length?`<div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Заработок менеджеров обработчиков</h3>
       <p class="calc-note">Заказы считаются по обработчику, указанному в самом заказе.
-        Оклад показан целиком за месяц, он не зависит от числа заказов.</p>
+        Оклад показан целиком за месяц, он не зависит от числа заказов.${
+        barSum.cnt?' Заказы Барахолки сюда не входят: ставка за заказ на них не начисляется, у неё свой месячный фонд.':''}</p>
       <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
         <th>Обработчик</th><th>Заказов</th><th>За заказ</th><th>Оклад</th><th>Итого</th>
       </tr></thead><tbody>
@@ -1197,7 +1221,7 @@ function renderCalcSummary(){
           <tr><td>Курьерская</td><td>${courSum.cnt}</td><td>${fmtMoney(courSum.rev)}</td><td>${fmtMoney(courSum.cost)}</td><td><b style="color:${courSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(courSum.profit)}</b></td></tr>
           <tr><td>Почтовая</td><td>${postSum.cnt}</td><td>${fmtMoney(postSum.rev)}</td><td>${fmtMoney(postSum.cost)}</td><td><b style="color:${postSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(postSum.profit)}</b></td></tr>
           ${barSum.cnt?`<tr><td>Барахолка<span class="cn-hint" style="display:block">свои нормативы, общие фонды не применяются</span></td><td>${barSum.cnt}</td><td>${fmtMoney(barSum.rev)}</td><td>${fmtMoney(barSum.cost)}</td><td><b style="color:${barSum.profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(barSum.profit)}</b></td></tr>`:''}
-          <tr style="border-top:2px solid var(--line)"><td><b>Всего (общий котёл)</b></td><td><b>${courSum.cnt+postSum.cnt+barSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
+          <tr style="border-top:2px solid var(--line)"><td><b>Всего по компании</b><span class="cn-hint" style="display:block">оба учёта вместе — единственное место, где они сложены</span></td><td><b>${courSum.cnt+postSum.cnt+barSum.cnt}</b></td><td><b>${fmtMoney(totRevenue)}</b></td><td><b>${fmtMoney(totCost)}</b></td><td><b style="color:${profitColor}">${fmtMoney(totProfit)}</b></td></tr>
         </tbody></table></div>
     </div>
     ${paidBySenderSum.cnt?`<div class="panel calc-panel" style="margin-bottom:18px">
