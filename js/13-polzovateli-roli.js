@@ -66,7 +66,16 @@ const STAFF_AVA={admin:'#b06a28',pickup:'#2f7d54',courier:'#2546c9',staff:'#5b57
 function renderStaff(){
   const f=staffFilters;
   const all=[...S.profiles].sort((a,b)=>(a.full_name||a.email||'').localeCompare(b.full_name||b.email||''));
-  const loginOf=u=>u.phone?phoneDisplay(u.phone):((u.email&&!u.email.endsWith('@jyldam.local'))?u.email:'');
+  // Логин мог остаться ТОЛЬКО в адресе: поле «Телефон» в карточке пустое, а входит человек
+  // именно по этому номеру (адрес входа — это `<10 цифр>@jyldam.local`). Раньше в колонке
+  // стоял прочерк, и такой сотрудник не находился ни глазами, ни поиском — зато занять его
+  // номер было нельзя, и заведение нового упиралось в «номер уже зарегистрирован».
+  const loginOf=u=>{
+    if(u.phone)return phoneDisplay(u.phone);
+    const m=/^(\d{10})@jyldam\.local$/i.exec(String(u.email||''));
+    if(m)return phoneDisplay(m[1]);
+    return u.email||'';
+  };
   const roleOf=u=>u.role_id?roleName(u.role_id):(ROLE_LABEL[u.role]||u.role||'');
   // Роль, названная именем самого сотрудника, — это не роль, а чья-то ошибка при
   // заведении: права тогда достаются одному человеку, и выдать их второму нечем.
@@ -78,13 +87,22 @@ function renderStaff(){
     return !!r && r===n && n.split(' ').length>=2;
   };
   const q=normName(f.q);
+  // Отдельно — поиск ЦИФРАМИ. В строке телефон отформатирован («+7 (707) 962-80-21»), и
+  // набранное подряд «7079628021» его не находило: человек есть, а поиск говорит «ничего».
+  const qDigits=String(f.q||'').replace(/\D/g,'');
   const rows=all.filter(u=>{
     if(f.city&&(u.city_id?cityName(u.city_id):'')!==f.city)return false;
     if(f.role&&roleOf(u)!==f.role)return false;
     if(!q)return true;
     // Один поиск по всей строке: искать телефон отдельным полем — лишнее движение,
     // а пять фильтров занимали в таблице целую строку.
-    return normName([u.full_name,loginOf(u),u.position,roleOf(u)].join(' ')).includes(q);
+    if(normName([u.full_name,loginOf(u),u.position,roleOf(u)].join(' ')).includes(q))return true;
+    // Четыре цифры — уже осмысленный кусок номера; меньше даёт шум на весь список.
+    if(qDigits.length>=4){
+      const d=String(u.phone||'').replace(/\D/g,'')+' '+String(u.email||'').replace(/\D/g,'');
+      if(d.includes(qDigits))return true;
+    }
+    return false;
   });
   const cityVals=[...new Set(all.map(u=>u.city_id?cityName(u.city_id):'').filter(Boolean))].sort();
   const roleVals=[...new Set(all.map(roleOf).filter(Boolean))].sort();
@@ -114,7 +132,7 @@ function renderStaff(){
           <span class="ft-ava" style="background:${bad||none?STAFF_AVA.bad:STAFF_AVA[grp]}">${esc(fillInitials(nm))}</span>
           <b>${esc(nm)}</b>${isOnline(u.id)?'<i class="ft-dot" title="Сейчас в системе"></i>':''}
         </div></td>
-        <td data-label="Логин">${u.phone?phoneLink(u.phone):(u.email&&!u.email.endsWith('@jyldam.local')?esc(u.email):'—')}</td>
+        <td data-label="Логин">${u.phone?phoneLink(u.phone):(loginOf(u)?esc(loginOf(u)):'—')}</td>
         <td data-label="Город">${u.city_id?`<span class="st-city">${esc(cityName(u.city_id))}</span>`:'<span class="st-dim">—</span>'}</td>
         <td data-label="Должность">${u.position?esc(u.position):'<span class="st-dim">—</span>'}</td>
         <td data-label="Роль">${none
