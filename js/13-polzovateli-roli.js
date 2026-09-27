@@ -129,9 +129,9 @@ function renderStaff(){
           </div></div></td></tr>`;}).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:26px">Ничего не найдено</td></tr>`}</tbody></table></div>
     </div>`;
 
-  $('usersContent').querySelectorAll('[data-uedit]').forEach(b=>b.onclick=()=>staffModal(b.dataset.uedit));
-  $('usersContent').querySelectorAll('[data-upass]').forEach(b=>b.onclick=()=>changePassModal(b.dataset.upass));
-  $('usersContent').querySelectorAll('[data-udel]').forEach(b=>b.onclick=()=>delStaff(b.dataset.udel));
+  $('usersContent').querySelectorAll('[data-uedit]').forEach(b=>b.onclick=()=>{closeStaffMenus();staffModal(b.dataset.uedit);});
+  $('usersContent').querySelectorAll('[data-upass]').forEach(b=>b.onclick=()=>{closeStaffMenus();changePassModal(b.dataset.upass);});
+  $('usersContent').querySelectorAll('[data-udel]').forEach(b=>b.onclick=()=>{closeStaffMenus();delStaff(b.dataset.udel);});
   if($('addStaff'))$('addStaff').onclick=()=>createStaffModal();
   // Двойное нажатие по строке открывает карточку — как в «Сортировке». Одиночное не
   // годится: по строке кликают, чтобы выделить телефон.
@@ -142,10 +142,11 @@ function renderStaff(){
   // красная «Удалить» рядом с «Пароль» однажды сработает не по тому ряду.
   $('usersContent').querySelectorAll('[data-umore]').forEach(b=>b.onclick=e=>{
     e.stopPropagation();
-    const box=b.parentElement, open=box.classList.contains('open');
-    document.querySelectorAll('.st-more.open').forEach(x=>x.classList.remove('open'));
-    if(!open)box.classList.add('open');
+    const box=b.parentElement, was=box.classList.contains('open');
+    closeStaffMenus();
+    if(!was){box.classList.add('open');placeStaffMenu(b,box.querySelector('.st-menu'));}
   });
+  bindStaffMenuClose();
 
   const redraw=()=>{
     const act=document.activeElement, wasQ=act&&act.id==='stq', pos=wasQ?act.selectionStart:0;
@@ -156,6 +157,40 @@ function renderStaff(){
   if($('stcity'))$('stcity').onchange=e=>{staffFilters.city=e.target.value;renderStaff();};
   if($('strole'))$('strole').onchange=e=>{staffFilters.role=e.target.value;renderStaff();};
   if($('streset'))$('streset').onclick=()=>{staffFilters={q:'',city:'',role:''};renderStaff();};
+}
+// Меню строки открывается ПОВЕРХ страницы, а не внутри таблицы. У «.table-scroll»
+// стоит overflow-x:auto, и по правилам CSS это делает прокручиваемой и вертикаль:
+// обычное абсолютное меню у ПОСЛЕДНЕЙ строки срезалось нижним краем таблицы, и
+// «Сменить пароль» было просто не достать. Видно это только когда строка одна или
+// список отфильтрован до нескольких — оттого и не замечали.
+function closeStaffMenus(){
+  document.querySelectorAll('.st-more.open').forEach(x=>{
+    x.classList.remove('open');
+    const m=x.querySelector('.st-menu');
+    if(m)m.removeAttribute('style');
+  });
+}
+function placeStaffMenu(btn,menu){
+  if(!menu)return;
+  const r=btn.getBoundingClientRect();
+  menu.style.position='fixed';
+  menu.style.right='auto';
+  menu.style.left='0px';                       // чтобы померить ширину на своём месте
+  const w=menu.offsetWidth, h=menu.offsetHeight;
+  menu.style.left=Math.max(8,Math.min(r.right-w,window.innerWidth-w-8))+'px';
+  // Внизу не помещается — открываем вверх от кнопки.
+  const down=r.bottom+4, up=r.top-4-h;
+  menu.style.top=(down+h>window.innerHeight-8&&up>8?up:down)+'px';
+}
+// Меню висит поверх страницы, поэтому при прокрутке или щелчке мимо его надо
+// убрать — иначе оно останется стоять на прежнем месте экрана. Слушатели вешаем
+// ОДИН раз: renderStaff вызывается на каждый поиск, и они бы копились.
+function bindStaffMenuClose(){
+  if(window._stMenuBound)return;
+  window._stMenuBound=true;
+  document.addEventListener('click',closeStaffMenus);
+  window.addEventListener('scroll',closeStaffMenus,true);
+  window.addEventListener('resize',closeStaffMenus);
 }
 function createStaffModal(){
   // не-админ с правом «Сотрудники» может создавать только курьеров — на выбор только курьерские роли
