@@ -1222,26 +1222,85 @@ function renderCalcSummary(){
 /* ---------- MODAL ENGINE ---------- */
 // «А где остальные?» — вопрос, который сводка раньше оставляла без ответа: в таблицах
 // считаются только заказы с указанным человеком, а в гриде заказов колонки «Обработчик»
-// нет вовсе, и найти их было нечем. Теперь число открывает список.
+// нет вовсе, и найти их было нечем. Теперь число открывает список — и из него же можно
+// проставить, не обходя заказы по одному.
 function calcNoOneList(field,period,title){
+  const human=field==='processor_id'?'обработчика':'менеджера';
+  const nameOf=id=>field==='processor_id'
+    ? (((S.processors||[]).find(x=>x.id===id)||{}).fio||'—')
+    : (typeof salesName==='function'?salesName(id):'—');
   const rows=(S.orders||[]).filter(o=>((o.pickup_date||o.created_at||'').slice(0,7))===period&&!o[field]);
-  const partnerOf=o=>o.sender||partnerName(o.partner_id)||'—';
+  const senderOf=o=>o.sender||partnerName(o.partner_id)||'—';
   // Группируем по отправителю: почти всегда это «у партнёра в карточке не заполнено поле»,
   // и список из трёхсот строк этого не покажет, а десяток партнёров — покажет сразу.
   const by={};
-  rows.forEach(o=>{const k=partnerOf(o);(by[k]=by[k]||[]).push(o);});
-  const groups=Object.entries(by).sort((a,b)=>b[1].length-a[1].length);
+  rows.forEach(o=>{const k=senderOf(o);(by[k]=by[k]||[]).push(o);});
+  // Партнёр заказа: своим полем, а если пусто — по названию отправителя. У заказов,
+  // созданных пачкой из заявки, partner_id часто не заполнен (см. salesMarginFor).
+  const partnerOfGroup=list=>{
+    const withId=list.find(o=>o.partner_id);
+    if(withId){const p=(S.partners||[]).find(x=>x.id===withId.partner_id);if(p)return p;}
+    return (typeof findPartnerByNameLoose==='function')?findPartnerByNameLoose(senderOf(list[0])):null;
+  };
+  const groups=Object.entries(by).map(([nm,list])=>{
+    const p=partnerOfGroup(list);
+    return {nm,list,partner:p,val:p?(p[field]||null):null};
+  }).sort((a,b)=>b.list.length-a.list.length);
+  const ready=groups.filter(g=>g.val);
+  const readyCnt=ready.reduce((n,g)=>n+g.list.length,0);
   showModal(title,`
     <p class="calc-note">Всего таких заказов за месяц: <b>${rows.length}</b>. Поле подставляется
       из карточки партнёра в момент создания заказа — если там пусто или партнёр у заказа
-      не определился, заказ остаётся без него. Заполните поле в карточке партнёра: оно
-      проставится и во все его существующие заказы.</p>
+      не определился, заказ остаётся без него.</p>
+    ${readyCnt?`<div style="margin:0 0 12px"><button class="btn primary" id="calcFixAll">
+      Проставить ${esc(human)} по карточкам партнёров (${readyCnt})</button>
+      <span class="cn-hint" style="display:block;margin-top:6px">Берётся из карточки партнёра.
+        Там, где в карточке пусто, заказы останутся как есть — сначала заполните её.</span></div>`:''}
     <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
-      <th>Отправитель</th><th>Заказов</th><th>Номера</th></tr></thead><tbody>
-      ${groups.map(([nm,list])=>`<tr><td>${esc(nm)}</td><td><b>${list.length}</b></td>
-        <td style="font-size:12px;color:var(--muted)">${list.slice(0,12).map(o=>esc(o.code||'')).join(', ')}${
-          list.length>12?` … и ещё ${list.length-12}`:''}</td></tr>`).join('')}
+      <th>Отправитель</th><th>Заказов</th><th>В карточке партнёра</th><th>Номера</th></tr></thead><tbody>
+      ${groups.map((g,i)=>`<tr><td>${esc(g.nm)}</td><td><b>${g.list.length}</b></td>
+        <td>${g.val
+          ? `${esc(nameOf(g.val))} <button class="btn sm ghost" data-calcfix="${i}">Проставить</button>`
+          : `<span style="color:var(--rust)">${g.partner?'в карточке не задан':'партнёр не найден'}</span>`}</td>
+        <td style="font-size:12px;color:var(--muted)">${g.list.slice(0,10).map(o=>esc(o.code||'')).join(', ')}${
+          g.list.length>10?` … и ещё ${g.list.length-10}`:''}</td></tr>`).join('')}
     </tbody></table></div>`,null,{readonly:true,wide:true});
+
+  const ov=[...document.querySelectorAll('.overlay')].pop();
+  if(!ov)return;
+  const apply=async list=>{
+    // Пишем ПАЧКАМИ, мимо dbUpdate: он делает по два обращения на заказ плюс запись
+    // в журнал на каждое — на трёхстах заказах это больше тысячи запросов подряд, и
+    // кнопка выглядит мёртвой (те же грабли, что были в разборе межгорода).
+    const byVal={};
+    list.forEach(({o,val})=>{(byVal[val]=byVal[val]||[]).push(o);});
+    let done=0;
+    for(const [val,orders] of Object.entries(byVal)){
+      for(let i=0;i<orders.length;i+=100){
+        const chunk=orders.slice(i,i+100);
+        const {error}=await sb.from('orders').update({[field]:val}).in('id',chunk.map(o=>o.id));
+        if(error){console.error('calc fix '+field,error);toast('Ошибка: '+error.message);return done;}
+        chunk.forEach(o=>{o[field]=val;});
+        done+=chunk.length;
+      }
+    }
+    return done;
+  };
+  const finish=async(list,btn)=>{
+    if(!list.length)return;
+    if(!confirm(`Проставить ${human} в ${list.length} заказ(ах)?\n\nЭто меняет расчёт за месяц: по этим заказам появится ставка за заказ.`))return;
+    btn.disabled=true;btn.textContent='Проставляем…';
+    const n=await apply(list);
+    toast(n?`Проставлено в ${n} заказах`:'Ничего не изменилось');
+    const x=ov.querySelector('.x');if(x)x.click();
+    renderCalcSummary();
+  };
+  if(ov.querySelector('#calcFixAll'))ov.querySelector('#calcFixAll').onclick=e=>
+    finish(ready.flatMap(g=>g.list.map(o=>({o,val:g.val}))),e.target);
+  ov.querySelectorAll('[data-calcfix]').forEach(b=>b.onclick=e=>{
+    const g=groups[+b.dataset.calcfix];
+    finish(g.list.map(o=>({o,val:g.val})),e.target);
+  });
 }
 
 function showModal(title,bodyHtml,onSave,opts={}){
