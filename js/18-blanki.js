@@ -145,7 +145,9 @@ function blanksNewBatchModal(){
         <span class="hint">Его реквизиты печатаются на бланке.</span></div>
       <div class="field"><label>Сумма заказа (₸) <span style="color:var(--rust)">*</span></label>
         <input type="number" min="0" id="bl_amount" placeholder="1500">
-        <span class="hint">Она же наложенный платёж. Печатается на бланке прописью и потом не меняется.</span></div>
+        <span class="hint">Она же наложенный платёж. Печатается на бланке прописью и потом не меняется.
+          <b>0</b> — если по этим заказам денег с получателя не берут: Казпочта примет их как
+          обыкновенные, без наложенного платежа.</span></div>
       <div class="field"><label>Сколько бланков <span style="color:var(--rust)">*</span></label>
         <input type="number" min="1" max="5000" id="bl_qty" placeholder="100">
         <span class="hint">Не больше 5000 за партию. Треки запрашиваются отдельно, после создания.</span></div>
@@ -156,7 +158,10 @@ function blanksNewBatchModal(){
     async()=>{
       const ip=val('bl_ip'),amount=parseFloat(val('bl_amount')),qty=parseInt(val('bl_qty'),10);
       if(!ip){toast('Выберите ИП');return false;}
-      if(!(amount>0)){toast('Укажите сумму — она печатается на бланке');return false;}
+      // Ноль — допустимая сумма, а не «не заполнено»: часть заказов идёт без наложенного
+      // платежа (оплачены заранее), и у Казпочты это отдельная категория отправления.
+      // Поэтому проверяем именно «введено число», а не «больше нуля».
+      if(!(amount>=0)){toast('Укажите сумму: число, можно 0');return false;}
       if(!(qty>0&&qty<=5000)){toast('Количество — от 1 до 5000');return false;}
       toast('Готовлю номера…');
       const taken=await blanksTakenCodes();
