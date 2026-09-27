@@ -656,6 +656,10 @@
   .filters-btn-danger.is-armed{border-color:#c0392b;color:#c0392b;background:#fdeceb}
   .filters-btn-danger.is-armed:hover{background:#f9dcd9}
 
+  /* Переключатель периода у менеджера — тот же, что в админской таблице, но своей строкой:
+     без него он видел только сегодняшние цифры и не мог посмотреть вчерашние. */
+  .fill-period-own{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px}
+
   /* «Заполнение»: отложенный заказ, забытый на полсуток и дольше, подсвечиваем —
      со стороны это выглядело как «у сотрудника ноль заказов» без объяснения. */
   .ft-stale{color:#c0392b;font-weight:600}

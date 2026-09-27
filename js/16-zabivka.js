@@ -279,6 +279,10 @@ async function fillRefresh(){
 /* ---------- экран ---------- */
 // Быстрые периоды. Диапазон дат рядом остаётся — им задают любой отрезок.
 const FILL_TABS=[['today','Сегодня'],['yest','Вчера'],['week','Неделя'],['month','Месяц']];
+// Подпись карточки под выбранный период: «Заполнено мной сегодня» при выборе «Вчера»
+// было бы прямым враньём — цифра-то уже за вчера.
+const FILL_PERIOD_WORD={today:'сегодня',yest:'вчера',week:'за неделю',month:'за месяц'};
+const fillPeriodWord=tab=>FILL_PERIOD_WORD[tab]||'за период';
 function fillSetTab(k){
   const d=n=>new Date(new Date(localToday()).getTime()-n*86400000).toISOString().slice(0,10);
   if(k==='today'){fillFrom='';fillTo='';}
@@ -350,6 +354,12 @@ function renderFilling(){
       </div>
     </div>
     <div id="fillFindBox"></div>
+    ${!admin?`<div class="ft-period fill-period-own">
+      ${FILL_TABS.map(([k,l])=>`<button data-filltab="${k}" class="${tab===k?'active':''}">${l}</button>`).join('')}
+      <input type="date" id="fillFromInp" value="${esc(from)}" max="${esc(localToday())}" title="С какого дня">
+      <input type="date" id="fillToInp" value="${esc(to)}" max="${esc(localToday())}" title="По какой день">
+      ${reload}
+    </div>`:''}
     <div class="fill-kpi">
       <div class="fk fk-main">
         <div class="fk-k">Ждут заполнения</div>
@@ -358,10 +368,11 @@ function renderFilling(){
       </div>
       ${!admin?`
       <div class="fk">
-        <div class="fk-k">Заполнено мной сегодня</div>
+        <div class="fk-k">Заполнено мной ${esc(fillPeriodWord(tab))}</div>
         <div class="fk-v">${my.count}</div>
         <div class="fk-s">${delta===null?'не с чем сравнить':
-          `<span class="${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta)}%</span> ко вчерашнему дню`}</div>
+          `<span class="${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta)}%</span> ${
+            tab==='today'?'ко вчерашнему дню':'к прошлому такому же периоду'}`}</div>
       </div>
       <div class="fk">
         <div class="fk-k">Моё среднее время</div>
@@ -369,7 +380,7 @@ function renderFilling(){
         <div class="fk-s">${my.normPct===null?'замеров пока нет':`${my.normPct}% заказов в норме`}</div>
       </div>
       <div class="fk">
-        <div class="fk-k">Моё время за день</div>
+        <div class="fk-k">Моё время ${esc(fillPeriodWord(tab))}</div>
         <div class="fk-v">${esc(fillFmtDur(my.totalSec))}</div>
         <div class="fk-s">простои не считаются</div>
       </div>`:''}
