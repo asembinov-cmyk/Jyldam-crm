@@ -192,6 +192,30 @@ function bindStaffMenuClose(){
   window.addEventListener('scroll',closeStaffMenus,true);
   window.addEventListener('resize',closeStaffMenus);
 }
+// НОМЕР УЖЕ ЗАНЯТ.
+//
+// Логин сотрудника — это его телефон, превращённый в адрес `<10 цифр>@jyldam.local`.
+// Если такой уже зарегистрирован, Auth отвечает по-английски: «A user with this email
+// address has already been registered». Из этого не понять ни чей это номер, ни что делать,
+// а бывает два разных случая, и лечатся они по-разному.
+const staffDigits10 = v => String(v || '').replace(/\D/g, '').slice(-10);
+// Случай первый: номер у живого сотрудника — он есть в списке, надо просто его найти.
+const staffWithPhone = phone => (S.profiles || []).find(p =>
+  staffDigits10(p.phone) === phone || staffDigits10(p.email) === phone);
+// Случай второй: карточки нет, а учётная запись входа осталась — от неполного удаления
+// или от оборвавшегося создания (запись входа заводится первой). Снаружи номер выглядит
+// свободным: в списке сотрудников его нет, а занять нельзя.
+const staffPhoneTaken = err => /already.*(registered|exists)|already been registered/i.test(String(err || ''));
+function staffTakenMessage(phone){
+  const who = staffWithPhone(phone);
+  if(who) return `Этот номер уже у сотрудника «${who.full_name || who.email || '—'}». Найдите его в списке — заводить второго с тем же номером нельзя, войти по нему сможет только один.`;
+  return `Номер ${phoneDisplay(phone)} занят учётной записью входа, но карточки сотрудника с ним в списке нет.\n\n`
+    + `Так остаётся, когда сотрудника удалили не полностью или создание оборвалось на полпути.\n\n`
+    + (isAdmin()
+        ? `Освободить: Supabase → Authentication → Users → найти ${phone}@jyldam.local → Delete user. После этого номер снова можно занять.`
+        : `Передайте это администратору — освободить номер может только он.`);
+}
+
 function createStaffModal(){
   // не-админ с правом «Сотрудники» может создавать только курьеров — на выбор только курьерские роли
   const roleOptions=isAdmin()?S.roles:S.roles.filter(r=>r.base_type==='courier');
@@ -217,12 +241,19 @@ function createStaffModal(){
       const roleId=val('n_role');
       const baseType=(S.roles.find(r=>r.id===roleId)||{}).base_type||'';
       if(!isAdmin()&&baseType!=='courier'){toast('Можно создавать только курьеров');return false;}
+      // Проверяем до вызова функции: она заведёт запись входа и упадёт уже на ней,
+      // и номер после такой попытки останется занятым.
+      const busy=staffWithPhone(phone);
+      if(busy){alert(staffTakenMessage(phone));return false;}
       const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
       const courier_kind=baseType==='courier'?val('n_kind'):null;
       toast('Создаём сотрудника…');
       const out=await callCreateUser({phone,password:pass,full_name:name,
         position:val('n_pos').trim(),role_id:roleId||null,role:legacy,courier_kind});
-      if(out.error){toast('Ошибка: '+out.error);return false;}
+      if(out.error){
+        if(staffPhoneTaken(out.error)){alert(staffTakenMessage(phone));return false;}
+        toast('Ошибка: '+out.error);return false;
+      }
       await logAction('create','profiles',{entity_label:name||phone,meta:{phone}});
       S.profiles=await dbList('profiles',{order:'created_at',asc:true});
       toast('Сотрудник создан');renderUsers();return true;
@@ -304,7 +335,10 @@ function staffModal(id){
         if(phoneChanged&&newPhone)payload.phone=newPhone;
         if(emailChanged)payload.email=newEmail;
         const out=await callUpdateUser(payload);
-        if(out.error){alert('Не удалось изменить логин:\n\n'+out.error);return false;}
+        if(out.error){
+          if(staffPhoneTaken(out.error)&&phoneChanged){alert(staffTakenMessage(newPhone));return false;}
+          alert('Не удалось изменить логин:\n\n'+out.error);return false;
+        }
         // подхватываем новый email из ответа
         if(out.email)u.email=out.email;
       }
