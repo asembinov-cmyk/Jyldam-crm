@@ -542,7 +542,7 @@ function renderOrders(mode){
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
-      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isAdmin()&&ketSelected.size)?`<button class="btn danger" id="ordersDelSel">✕ Удалить выбранные (${ketSelected.size})</button>`:''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
+      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -580,6 +580,7 @@ function renderOrders(mode){
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
+        ${can('orders','delete')?'<button type="button" class="filters-btn filters-btn-danger" id="ordersDelSel" title="Удалить заказы, отмеченные галочками">🗑 Удалить выделенные</button>':''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
           <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
@@ -613,22 +614,30 @@ function renderOrders(mode){
     catch(e){console.error(e);toast('Не удалось сформировать бланки: '+(e&&e.message||e));}
     finally{btn.disabled=false;btn.textContent=origLabel;}
   };
-  // массовая отправка отмеченных заказов в KET
+  // удаление отмеченных галочками заказов
   if($('ordersDelSel'))$('ordersDelSel').onclick=async()=>{
     const ids=[...ketSelected];
-    if(!ids.length)return;
-    if(!confirm(`Удалить выбранные заказы (${ids.length} шт.)?\n\nЭто действие нельзя отменить.`))return;
-    const btn=$('ordersDelSel');btn.disabled=true;btn.textContent='Удаляем…';
-    let ok=0,fail=0;
+    if(!ids.length){toast('Сначала отметьте заказы галочками');return;}
+    // Заказ, уже уехавший в коробке, удалять опаснее прочих: в отправке останется его id,
+    // и стоимость коробки продолжит делиться с учётом несуществующего заказа. Предупреждаем,
+    // но не запрещаем — бывает, что удалить нужно именно такой.
+    const inShip=(S.shipments||[]).reduce((n,sh)=>n+((sh.order_ids||[]).filter(x=>ids.includes(x)).length),0);
+    const warn=inShip?`\n\n${inShip} из них уже в отправках межгород — пересоберите эти коробки после удаления, иначе доля за заказ в них посчитается неверно.`:'';
+    if(!confirm(`Удалить отмеченные заказы (${ids.length} шт.)?\n\nПолная копия каждого попадёт в «Центр контроля» → «Корзина» и будет храниться 30 дней.${warn}`))return;
+    const btn=$('ordersDelSel');btn.disabled=true;
+    let ok=0,fail=0,n=0;
     for(const id of ids){
-      const o=S.orders.find(x=>x.id===id);if(!o)continue;
+      const o=S.orders.find(x=>x.id===id);if(!o){ketSelected.delete(id);continue;}
+      btn.textContent=`Удаляем… ${++n} из ${ids.length}`;
+      // dbDelete сам кладёт снимок строки в deleted_items — только через него, иначе
+      // восстанавливать будет нечего (см. CLAUDE.md про корзину).
       const done=await dbDelete('orders',id);
       if(done){await logAction('delete','orders',{entity_id:id,entity_label:orderLabel(o)});S.orders=S.orders.filter(x=>x.id!==id);ok++;}
       else fail++;
       ketSelected.delete(id);
     }
     ketSelectAll=false;
-    toast(`Удалено заказов: ${ok}${fail?(', с ошибкой: '+fail):''}`);
+    toast(fail?`Удалено ${ok}, не удалось ${fail} — проверьте права на удаление`:`Удалено заказов: ${ok}`,6000);
     renderOrders(ordersMode);
   };
   if($('kazpostAssignSel'))$('kazpostAssignSel').onclick=async()=>{
@@ -828,6 +837,7 @@ function renderOrders(mode){
   if(impBtn)impBtn.onclick=()=>importOrdersFromExcel();
   const exclBtn=$('ordersExclPartners');
   if(exclBtn)exclBtn.onclick=()=>ordersExcludePartnersModal();
+
   drawOrders();
 }
 // число заказов с заполненным телефоном клиента
@@ -1716,6 +1726,16 @@ function updateKetAllChk(allRows){
   const selected=allRows.filter(o=>ketSelected.has(o.id)).length;
   chk.checked=total>0&&selected===total;
   chk.indeterminate=selected>0&&selected<total;
+  updateDelSelBtn();
+}
+// Счётчик на кнопке «Удалить выделенные». Галочки меняются без перерисовки страницы,
+// поэтому число на кнопке обновляем отдельно — иначе оно отставало бы от выбора.
+function updateDelSelBtn(){
+  const b=$('ordersDelSel');if(!b)return;
+  const n=ketSelected.size;
+  b.textContent=n?`🗑 Удалить выделенные (${n})`:'🗑 Удалить выделенные';
+  b.disabled=!n;
+  b.classList.toggle('is-armed',!!n);
 }
 // плавающая (закреплённая снизу) панель навигации по страницам заказов
 function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();const m=$('main');if(m&&!$('pickupsPager')&&!$('inboundPager')&&!$('whProdPager'))m.classList.remove('has-pager');}

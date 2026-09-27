@@ -650,6 +650,12 @@
   .fill-find-box tr.ff-wait td{background:#fbfbfc}
   @media(max-width:760px){.fh-find{width:100%}.fh-find input{min-width:0;flex:1}}
 
+  /* «Удалить выделенные» в фильтрах заказов: пока ничего не отмечено — обычная серая
+     и неактивная, с галочками становится красной. Кнопка опасная, и это должно быть видно. */
+  .filters-btn-danger:disabled{opacity:.5;cursor:default}
+  .filters-btn-danger.is-armed{border-color:#c0392b;color:#c0392b;background:#fdeceb}
+  .filters-btn-danger.is-armed:hover{background:#f9dcd9}
+
   /* СТАТИСТИКА: таблицы по дням сворачиваются. При входе обе закрыты — они длинные,
      и из-за них не видно карточек наверху, ради которых в раздел и заходят. */
   .dash-fold-head{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
