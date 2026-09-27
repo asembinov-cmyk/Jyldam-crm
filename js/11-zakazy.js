@@ -2174,7 +2174,9 @@ function orderModal(id,readonly){
       if(res&&res.success){
         o.track=res.barcode;
         const trackEl=$('o_track');if(trackEl)trackEl.value=res.barcode;
-        toast(`Трек-номер получен: ${res.barcode}`);
+        // Контур пишем рядом с номером: префикс зависит от него (postratesws → QS,
+        // postratesprod → AP), и «почему вдруг AP» иначе выясняется по секретам вручную.
+        toast(`Трек-номер получен: ${res.barcode}`+(res.contour?` · контур ${res.contour}`:''),7000);
         // трек могли выдать и без индекса получателя — но по индексу Казпочта
         // маршрутизирует посылку, поэтому такое молча пропускать нельзя
         if(res.warning)toast(res.warning,7000);
