@@ -53,10 +53,32 @@ function fillNeedsWork(o){
 // Дата заказа: по забору, а если её нет — по созданию.
 const fillOrderDate = o => o.pickup_date ? String(o.pickup_date).slice(0, 10)
   : (o.created_at ? localDateOf(o.created_at) : '');
-// Выдаём только сегодняшние заказы. Вчерашние и более старые пустые «болванки» —
-// это почти всегда то, что партнёр заявил, но не отдал; заполнять там нечего, а
-// менеджер потратит время. Их число показываем отдельно, чтобы не пропали из виду.
-function fillIsToday(o){ return fillOrderDate(o) === localToday(); }
+// С КАКОГО ДНЯ ВЫДАЁМ ЗАКАЗЫ.
+//
+// Раньше выдавались строго сегодняшние, и в полночь незаполненные заказы вчерашнего дня
+// молча уходили из очереди: «Взять следующий» отвечал «свободных заказов нет», хотя работа
+// осталась. Фильтр периода на очередь не влиял вовсе — по нему считалась только статистика,
+// поэтому нажатие «Вчера» выглядело как «ничего не происходит».
+//
+// Теперь период задаёт и очередь: «Вчера» — это вчера И сегодня. Верхняя граница всегда
+// сегодняшний день, даже когда в фильтре стоит «по вчера»: иначе выбранный вечером «Вчера»
+// прятал бы новые заказы, и человек весь день не видел бы свежей работы.
+function fillQueueFrom(){
+  const f = fillPeriod().from, t = localToday();
+  return (f && f < t) ? f : t;
+}
+function fillInQueue(o){
+  const d = fillOrderDate(o);
+  return !!d && d >= fillQueueFrom() && d <= localToday();
+}
+const fillPrevDay = d => new Date(new Date(d).getTime() - 86400000).toISOString().slice(0, 10);
+// Сколько незаполненного осталось за день ПЕРЕД окном очереди — тот самый «хвост»,
+// ради которого и приходится двигать фильтр. Считаем один день, а не всё прошлое:
+// «добрать 400 заказов за месяц» — это не про работу, а про старые брошенные болванки.
+function fillTailCount(){
+  const d = fillPrevDay(fillQueueFrom());
+  return (S.orders || []).filter(o => fillNeedsWork(o) && fillOrderDate(o) === d).length;
+}
 // Захват живой? Отложенный заказ не протухает: менеджер ждёт данных от партнёра,
 // и отдавать заказ соседу через десять минут — значит потерять то, чего он ждал.
 const fillHoldReady = () => !!(S.orders && S.orders.length && ('claim_hold' in S.orders[0]));
@@ -64,7 +86,7 @@ function fillIsHeld(o){ return !!o.claim_hold; }
 function fillClaimAlive(o){ return fillIsHeld(o) || !!(o.claimed_at && o.claimed_at > fillCutoff()); }
 function fillIsMine(o){ return fillClaimAlive(o) && o.claimed_by === (S.me && S.me.id); }
 
-function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillIsToday(o)); }
+function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillInQueue(o)); }
 function fillFree(){ return fillQueue().filter(o => !fillClaimAlive(o)); }
 function fillMine(){ return fillQueue().filter(o => fillIsMine(o) && !fillIsHeld(o)); }
 function fillHeld(){ return fillQueue().filter(o => fillIsMine(o) && fillIsHeld(o)); }
@@ -263,10 +285,21 @@ async function fillRefresh(){
   const b = $('fillReload');
   if(b){ b.disabled = true; b.textContent = 'Обновляем…'; }
   try{
-    const today = localToday();
-    const { data, error } = await sb.from('orders').select('*')
-      .or(`pickup_date.eq.${today},created_at.gte.${today}T00:00:00`);
-    if(error) throw error;
+    const from = fillQueueFrom();
+    // Страницами: Supabase отдаёт максимум 1000 строк за запрос. За один день столько не
+    // набирается, а вот за месяц — запросто, и список оборвался бы молча, без ошибки.
+    const PAGE = 1000;
+    let off = 0, data = [];
+    for(;;){
+      const r = await sb.from('orders').select('*')
+        .or(`pickup_date.gte.${from},created_at.gte.${from}T00:00:00`)
+        .order('created_at', { ascending: false }).range(off, off + PAGE - 1);
+      if(r.error) throw r.error;
+      data = data.concat(r.data || []);
+      if(!r.data || r.data.length < PAGE) break;
+      off += PAGE;
+    }
+    fillLoadedFrom = from;
     const byId = {}; (S.orders || []).forEach((o, i) => { byId[o.id] = i; });
     (data || []).forEach(row => {
       if(byId[row.id] != null) Object.assign(S.orders[byId[row.id]], row);
@@ -274,6 +307,20 @@ async function fillRefresh(){
     });
   }catch(e){ console.error('fillRefresh', e); toast('Не удалось обновить'); }
   renderFilling();
+}
+
+// Заказы за прошлые дни могут ещё не лежать в памяти: сразу после входа там только
+// сегодняшние, вся история подъезжает следом (S._heavyLoading в js/02-ket.js). Поэтому
+// при расширении окна очереди дотягиваем недостающее — иначе человек сдвинул фильтр,
+// а очередь осталась пустой и снова «ничего не происходит».
+let fillLoadedFrom = '';
+function fillEnsureLoaded(){
+  const from = fillQueueFrom();
+  if(from >= localToday()) return false;                 // сегодняшние есть всегда
+  if(S._heavyLoaded) return false;                       // вся история уже в памяти
+  if(fillLoadedFrom && fillLoadedFrom <= from) return false;
+  fillRefresh();                                         // она сама перерисует экран
+  return true;
 }
 
 /* ---------- экран ---------- */
@@ -289,7 +336,13 @@ function fillSetTab(k){
   else if(k==='yest'){fillFrom=d(1);fillTo=d(1);}
   else if(k==='week'){fillFrom=d(6);fillTo=localToday();}
   else if(k==='month'){fillFrom=localToday().slice(0,8)+'01';fillTo=localToday();}
-  renderFilling();
+  renderFilling();fillEnsureLoaded();
+}
+// «Добрать вчерашние»: сдвигает окно очереди на день назад. Ставим и «по», чтобы кнопка
+// «Вчера» подсветилась — человек нажал именно её смысл, пусть видит это в фильтре.
+function fillExtendQueue(){
+  fillFrom = fillTo = fillPrevDay(fillQueueFrom());
+  renderFilling();fillEnsureLoaded();
 }
 function fillActiveTab(){
   const {from,to}=fillPeriod(), t=localToday();
@@ -319,6 +372,10 @@ function renderFilling(){
     return;
   }
   const queue=fillQueue(), free=fillFree(), mine=fillMine(), held=fillHeld();
+  // Окно очереди и «хвост» предыдущего дня — чтобы было видно, за какие дни выдаются
+  // заказы и сколько осталось за день до этого.
+  const qFrom=fillQueueFrom(), qWide=qFrom<localToday();
+  const tail=fillTailCount(), tailDay=fillPrevDay(qFrom);
   const canHold=fillHoldReady();
   const admin=isAdmin();
   // Статистику считаем всегда: администратору — по всем, менеджеру — только его строку.
@@ -364,7 +421,8 @@ function renderFilling(){
       <div class="fk fk-main">
         <div class="fk-k">Ждут заполнения</div>
         <div class="fk-v">${queue.length}</div>
-        <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}${held.length?` · отложено ${held.length}`:''}</div>
+        <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}${held.length?` · отложено ${held.length}`:''}${
+          qWide?` · с ${esc(fmtDate(qFrom))}`:''}</div>
       </div>
       ${!admin?`
       <div class="fk">
@@ -478,7 +536,8 @@ function renderFilling(){
     </div>`:''}
     <div class="fill-take">
       <button class="btn" id="fillNextBottom" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
-      <span>${free.length?`свободных заказов: ${free.length}`:'свободных заказов нет'}</span>
+      <span>${free.length?`свободных заказов: ${free.length}`:'свободных заказов нет'}${qWide?` · с ${esc(fmtDate(qFrom))}`:''}</span>
+      ${tail?`<button class="btn sm ghost" id="fillTail">Добрать за ${esc(fmtDate(tailDay))} (${tail})</button>`:''}
       ${admin?'':reload}
     </div>`;
 
@@ -493,6 +552,7 @@ function renderFilling(){
   }
   if(fillFindRes!==null)fillFindDraw();
   const rl=$('fillReload'); if(rl) rl.onclick=()=>fillRefresh();
+  if($('fillTail'))$('fillTail').onclick=()=>fillExtendQueue();
   $('main').querySelectorAll('[data-fillopen]').forEach(b=>b.onclick=()=>orderModal(b.dataset.fillopen));
   $('main').querySelectorAll('[data-fillrel]').forEach(b=>b.onclick=()=>fillRelease(b.dataset.fillrel));
   $('main').querySelectorAll('[data-fillhold]').forEach(b=>b.onclick=()=>fillHold(b.dataset.fillhold,true));
@@ -501,12 +561,12 @@ function renderFilling(){
   const fi=$('fillFromInp'); if(fi) fi.onchange=()=>{
     fillFrom=fi.value||'';
     if(fillTo&&fillFrom&&fillTo<fillFrom)fillTo=fillFrom; // период наизнанку — таблица молча пустела бы
-    renderFilling();
+    renderFilling();fillEnsureLoaded();
   };
   const ti=$('fillToInp'); if(ti) ti.onchange=()=>{
     fillTo=ti.value||'';
     if(fillTo&&fillFrom&&fillTo<fillFrom)fillFrom=fillTo;
-    renderFilling();
+    renderFilling();fillEnsureLoaded();
   };
 }
 
