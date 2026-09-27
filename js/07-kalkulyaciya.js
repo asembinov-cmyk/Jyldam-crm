@@ -1140,7 +1140,8 @@ function renderCalcSummary(){
     </div>
     <div class="calc-totals">
       <div class="ct-card"><div class="ct-k">Выручка</div><div class="ct-v">${fmtMoney(totRevenue)}</div></div>
-      <div class="ct-card"><div class="ct-k">Итого расходы</div><div class="ct-v">${fmtMoney(totCost)}</div></div>
+      <div class="ct-card"><div class="ct-k">Итого расходы</div><div class="ct-v">${fmtMoney(totCost)}</div>${
+        barSum.cnt?`<div class="ct-s">из них Барахолка ${esc(fmtMoney(barSum.cost))}</div>`:''}</div>
       <div class="ct-card"><div class="ct-k">Чистая прибыль</div><div class="ct-v" style="color:${profitColor}">${fmtMoney(totProfit)}</div></div>
       <div class="ct-card"><div class="ct-k">Маржинальность</div><div class="ct-v">${avgMargin.toFixed(1)}%</div></div>
       <div class="ct-card"><div class="ct-k">ROI</div><div class="ct-v">${avgRoi.toFixed(1)}%</div></div>
