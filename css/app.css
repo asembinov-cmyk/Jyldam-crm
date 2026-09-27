@@ -656,6 +656,10 @@
   .filters-btn-danger.is-armed{border-color:#c0392b;color:#c0392b;background:#fdeceb}
   .filters-btn-danger.is-armed:hover{background:#f9dcd9}
 
+  /* «Заполнение»: отложенный заказ, забытый на полсуток и дольше, подсвечиваем —
+     со стороны это выглядело как «у сотрудника ноль заказов» без объяснения. */
+  .ft-stale{color:#c0392b;font-weight:600}
+
   /* СТАТИСТИКА: таблицы по дням сворачиваются. При входе обе закрыты — они длинные,
      и из-за них не видно карточек наверху, ради которых в раздел и заходят. */
   .dash-fold-head{display:flex;align-items:center;gap:10px;width:100%;text-align:left;

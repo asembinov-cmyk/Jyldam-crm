@@ -196,11 +196,17 @@ function fillStatsRows(){
       if(sec <= FILL_NORM_SEC) r.inNorm++;
     }
   });
-  const inWork = {}, onHold = {};
+  const inWork = {}, onHold = {}, holdSince = {};
   fillQueue().filter(fillClaimAlive).forEach(o => {
     const nm = o.claimed_by_name || '—';
     const box = fillIsHeld(o) ? onHold : inWork;
     box[nm] = (box[nm] || 0) + 1;
+    // Самый давний отложенный заказ человека. Отложенный не протухает — в этом и смысл,
+    // менеджер ждёт данных от партнёра. Но ждать он может и третьи сутки, а со стороны это
+    // выглядит как «у сотрудника ноль заказов», и никто не понимает почему.
+    if(fillIsHeld(o) && o.claimed_at && (!holdSince[nm] || o.claimed_at < holdSince[nm])){
+      holdSince[nm] = o.claimed_at;
+    }
     add(nm, o.claimed_by);
   });
   return Object.values(by).map(r => ({
@@ -209,8 +215,12 @@ function fillStatsRows(){
     normPct: r.secs.length ? Math.round(r.inNorm / r.secs.length * 100) : null,
     inWork: inWork[r.name] || 0,
     onHold: onHold[r.name] || 0,
+    holdSince: holdSince[r.name] || null,
   })).sort((a,b) => b.count - a.count);
 }
+// Отложен слишком давно? Полсуток — уже не «жду ответа партнёра», а «забыли».
+const FILL_HOLD_STALE_H = 12;
+const fillHoldStale = iso => !!iso && (Date.now() - new Date(iso)) > FILL_HOLD_STALE_H * 3600000;
 // Тот же период, сдвинутый назад на свою длину, — для «▲ 12% к прошлому периоду».
 function fillPrevCount(byId){
   const { from, to } = fillPeriod();
@@ -436,7 +446,9 @@ function renderFilling(){
           <td data-label="В норме">${r.normPct===null?'—':`${r.normPct}%
             <span class="ft-bar"><i class="${r.normPct>=80?'ok':(r.normPct>=60?'warn':'bad')}" style="width:${r.normPct}%"></i></span>`}</td>
           <td data-label="За день"><b>${esc(fillFmtDur(r.totalSec))}</b></td>
-          <td data-label="Сейчас">${r.inWork?`<span class="ft-busy">${r.inWork} в работе</span>`:(r.onHold?'':'свободен')}${r.onHold?`<span class="ft-sub">отложено ${r.onHold}</span>`:''}</td>
+          <td data-label="Сейчас">${r.inWork?`<span class="ft-busy">${r.inWork} в работе</span>`:(r.onHold?'':'свободен')}${
+            r.onHold?`<span class="ft-sub${fillHoldStale(r.holdSince)?' ft-stale':''}">отложено ${r.onHold}${
+              r.holdSince?' · '+esc(fillAgo(r.holdSince)):''}</span>`:''}</td>
         </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">За этот период никто ничего не заполнил</td></tr>'}
       </tbody>
       ${rows.length?`<tfoot><tr class="ft-total">
