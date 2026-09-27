@@ -234,10 +234,19 @@ function staffTakenMessage(phone){
         : `Передайте это администратору — освободить номер может только он.`);
 }
 
+// Тип курьера («заборщик» или «по заказам») живёт в карточке сотрудника, а не в роли —
+// в справочнике курьеров по нему решают, куда этот аккаунт предлагать для привязки.
+// Роль же названа человеком, и её название — единственное, что связывает одно с другим.
+// Поэтому тип подставляем ПО НАЗВАНИЮ РОЛИ, а не оставляем «по заказам» по умолчанию:
+// выбрали «Курьер Заборщик» — значит заборщик.
+const COURIER_PICKUP_RE=/заборщ/i;
+const courierKindByRole=r=>COURIER_PICKUP_RE.test((r&&r.name)||'')?'pickup':'order';
+
 function createStaffModal(){
-  // не-админ с правом «Сотрудники» может создавать только курьеров — на выбор только курьерские роли
-  const roleOptions=isAdmin()?S.roles:S.roles.filter(r=>r.base_type==='courier');
-  if(!isAdmin()&&!roleOptions.length){toast('Нет ни одной роли с типом «Курьер» — создайте её в Роли и права');return;}
+  // Не-админ с правом «Сотрудники» заводит только ЗАБОРЩИКОВ: остальные роли ему не видны,
+  // и тип курьера он не выбирает вовсе — нечего выбирать, нечего и перепутать.
+  const roleOptions=isAdmin()?S.roles:S.roles.filter(r=>r.base_type==='courier'&&COURIER_PICKUP_RE.test(r.name||''));
+  if(!isAdmin()&&!roleOptions.length){toast('Нет роли «Курьер Заборщик» — создайте её в «Роли и права»');return;}
   showModal('Новый сотрудник',`
     <div class="grid2">
       <div class="field"><label>ФИО</label><input id="n_name" placeholder="Фамилия Имя"></div>
@@ -246,7 +255,7 @@ function createStaffModal(){
       <div class="field"><label>Пароль</label><input id="n_pass" type="text" autocomplete="off" placeholder="мин. 6 символов"></div>
       <div class="field"><label>Роль</label><select id="n_role">${isAdmin()?'<option value="">— не назначена —</option>':''}${roleOptions.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select>
         ${!isAdmin()?'<span class="hint">Доступны только курьерские роли</span>':''}</div>
-      <div class="field" id="n_kind_field" style="display:none"><label>Тип курьера</label><select id="n_kind">
+      <div class="field" id="n_kind_field" style="display:none"><label>Тип курьера</label><select id="n_kind"${isAdmin()?'':' disabled'}>
         <option value="pickup">Курьер заборщик</option>
         <option value="order">Курьер по заказам</option></select>
         <span class="hint">Определяет, в каком справочнике курьеров появится этот аккаунт для привязки.</span></div>
@@ -264,7 +273,9 @@ function createStaffModal(){
       const busy=staffWithPhone(phone);
       if(busy){alert(staffTakenMessage(phone));return false;}
       const legacy=baseType==='admin'?'admin':baseType==='courier'?'courier':'manager';
-      const courier_kind=baseType==='courier'?val('n_kind'):null;
+      const roleRow=S.roles.find(r=>r.id===roleId)||null;
+      // У не-админа поля выбора нет — тип берём из названия роли, оно там всегда «заборщик».
+      const courier_kind=baseType==='courier'?(isAdmin()?val('n_kind'):courierKindByRole(roleRow)):null;
       toast('Создаём сотрудника…');
       const out=await callCreateUser({phone,password:pass,full_name:name,
         position:val('n_pos').trim(),role_id:roleId||null,role:legacy,courier_kind});
@@ -274,12 +285,26 @@ function createStaffModal(){
       }
       await logAction('create','profiles',{entity_label:name||phone,meta:{phone}});
       S.profiles=await dbList('profiles',{order:'created_at',asc:true});
+      // Карточку создаёт Edge Function, и тип курьера она может не записать — поле молча
+      // остаётся пустым. Пустой тип и ведёт себя как «по заказам»: в справочнике заборщиков
+      // такой аккаунт не предлагается, а в карточке показывается «Курьер по заказам».
+      // Поэтому после создания проверяем и дописываем сами.
+      if(courier_kind){
+        const made=S.profiles.find(x=>staffDigits10(x.phone)===phone||staffDigits10(x.email)===phone);
+        if(made&&made.courier_kind!==courier_kind){
+          const fixed=await dbUpdate('profiles',made.id,{courier_kind});
+          if(fixed)Object.assign(made,fixed);
+        }
+      }
       toast('Сотрудник создан');renderUsers();return true;
     });
   attachPhone('n_phone','');
   // показываем «Тип курьера» только когда выбрана роль с базовым типом «Курьер»
-  const nr=$('n_role');const toggleKind=()=>{const bt=(S.roles.find(r=>r.id===nr.value)||{}).base_type;
-    $('n_kind_field').style.display=bt==='courier'?'':'none';};
+  const nr=$('n_role');const toggleKind=()=>{
+    const r=S.roles.find(x=>x.id===nr.value)||{};
+    $('n_kind_field').style.display=(r.base_type==='courier'&&isAdmin())?'':'none';
+    if(r.base_type==='courier'&&$('n_kind'))$('n_kind').value=courierKindByRole(r);
+  };
   nr.onchange=toggleKind;toggleKind();
 }
 // модалка смены пароля сотрудника
@@ -343,8 +368,14 @@ function staffModal(id){
         ${S.roles.map(r=>`<option value="${r.id}" ${u.role_id===r.id?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
         <span class="hint">Для курьеров: назначьте роль с базовым типом «Курьер», затем привяжите этот аккаунт в справочнике курьеров.</span></div>
       <div class="field full" id="u_kind_field" style="display:none"><label>Тип курьера</label><select id="u_kind">
-        <option value="pickup" ${u.courier_kind==='pickup'?'selected':''}>Курьер заборщик</option>
-        <option value="order" ${u.courier_kind==='order'||!u.courier_kind?'selected':''}>Курьер по заказам</option></select>
+        ${(()=>{
+          // Пустой тип раньше показывался как «Курьер по заказам», и первое же сохранение
+          // карточки записывало заборщику чужой тип — он пропадал из своего справочника.
+          // Теперь при пустом берём тип из названия роли.
+          const k=u.courier_kind||courierKindByRole(S.roles.find(r=>r.id===u.role_id));
+          return `<option value="pickup" ${k==='pickup'?'selected':''}>Курьер заборщик</option>
+        <option value="order" ${k==='order'?'selected':''}>Курьер по заказам</option>`;
+        })()}</select>
         <span class="hint">Определяет, в каком справочнике курьеров появится этот аккаунт для привязки.</span></div>
     </div>`,
     async()=>{
