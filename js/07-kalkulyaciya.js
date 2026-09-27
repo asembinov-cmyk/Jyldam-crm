@@ -1116,6 +1116,11 @@ function renderCalcSummary(){
   })();
   const procTotals=procRowsSum.reduce((a,r)=>({cnt:a.cnt+r.cnt,per:a.per+r.per,salary:a.salary+r.salary,
     total:a.total+r.total}),{cnt:0,per:0,salary:0,total:0});
+  // Заказы, у которых человек не указан вовсе. В таблицах их нет, и итог по ним не сходится
+  // с числом заказов за месяц — 28.09.2026 владелец как раз и спросил, где остальные 361.
+  // Молчать об этом нельзя: по таким заказам ставка за заказ не начисляется НИКОМУ.
+  const procNone=calcs.filter(({o})=>!o.processor_id).length;
+  const salesNone=calcs.filter(({o})=>!o.sales_id).length;
   const salesTotals=salesRows.reduce((a,r)=>({cnt:a.cnt+r.cnt,margin:a.margin+r.margin,per:a.per+r.per,
     salary:a.salary+r.salary,total:a.total+r.total}),{cnt:0,margin:0,per:0,salary:0,total:0});
   const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
@@ -1145,10 +1150,16 @@ function renderCalcSummary(){
           <td>${fmtMoney(r.margin)}${r.cnt?`<small class="cell-time">${fmtMoney(r.margin/r.cnt)} на заказ</small>`:''}</td>
           <td>${fmtMoney(r.per)}</td><td>${fmtMoney(r.salary)}</td>
           <td><b>${fmtMoney(r.total)}</b></td></tr>`).join('')}
+        ${salesNone?`<tr><td style="color:var(--muted)">Менеджер не указан
+          <span class="cn-hint" style="display:block">надбавка по ним остаётся прибылью компании</span></td>
+          <td><a href="#" id="calcNoSales" style="color:var(--rust)"><b>${salesNone}</b></a></td>
+          <td>—</td><td>—</td><td>—</td><td>—</td></tr>`:''}
       </tbody><tfoot><tr style="border-top:2px solid var(--line)">
         <td><b>Итого</b></td><td><b>${salesTotals.cnt}</b></td><td><b>${fmtMoney(salesTotals.margin)}</b></td>
         <td><b>${fmtMoney(salesTotals.per)}</b></td><td><b>${fmtMoney(salesTotals.salary)}</b></td>
-        <td><b>${fmtMoney(salesTotals.total)}</b></td></tr></tfoot></table></div>
+        <td><b>${fmtMoney(salesTotals.total)}</b></td></tr>
+        <tr><td style="color:var(--muted)">Всего заказов за месяц</td>
+        <td style="color:var(--muted)"><b>${salesTotals.cnt+salesNone}</b></td><td colspan="4"></td></tr></tfoot></table></div>
     </div>`:''}
     ${procRowsSum.length?`<div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Заработок менеджеров обработчиков</h3>
@@ -1161,9 +1172,15 @@ function renderCalcSummary(){
           <td>${esc(r.name)}</td><td>${r.cnt}</td>
           <td>${fmtMoney(r.per)}${r.cnt?`<small class="cell-time">${fmtMoney(r.per/r.cnt)} на заказ</small>`:''}</td>
           <td>${fmtMoney(r.salary)}</td><td><b>${fmtMoney(r.total)}</b></td></tr>`).join('')}
+        ${procNone?`<tr><td style="color:var(--muted)">Обработчик не указан
+          <span class="cn-hint" style="display:block">ставка за заказ по ним не начисляется никому</span></td>
+          <td><a href="#" id="calcNoProc" style="color:var(--rust)"><b>${procNone}</b></a></td>
+          <td>—</td><td>—</td><td>—</td></tr>`:''}
       </tbody><tfoot><tr style="border-top:2px solid var(--line)">
         <td><b>Итого</b></td><td><b>${procTotals.cnt}</b></td><td><b>${fmtMoney(procTotals.per)}</b></td>
-        <td><b>${fmtMoney(procTotals.salary)}</b></td><td><b>${fmtMoney(procTotals.total)}</b></td></tr></tfoot></table></div>
+        <td><b>${fmtMoney(procTotals.salary)}</b></td><td><b>${fmtMoney(procTotals.total)}</b></td></tr>
+        <tr><td style="color:var(--muted)">Всего заказов за месяц</td>
+        <td style="color:var(--muted)"><b>${procTotals.cnt+procNone}</b></td><td colspan="3"></td></tr></tfoot></table></div>
     </div>`:''}
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по типу доставки</h3>
@@ -1196,11 +1213,37 @@ function renderCalcSummary(){
         <tbody>${courierRows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.count}</td><td><b>${fmtMoney(r.earn)}</b></td></tr>`).join('')}</tbody></table></div>`
         :'<div class="empty"><div class="big">Нет данных</div>За этот месяц нет заказов с назначенным курьером.</div>'}
     </div>`;
+  if($('calcNoProc'))$('calcNoProc').onclick=e=>{e.preventDefault();calcNoOneList('processor_id',sel,'Заказы без обработчика');};
+  if($('calcNoSales'))$('calcNoSales').onclick=e=>{e.preventDefault();calcNoOneList('sales_id',sel,'Заказы без менеджера по продажам');};
   $('calcSumMonth').onchange=e=>{calcSummaryMonth.month=parseInt(e.target.value,10);renderCalcSummary();};
   $('calcSumYear').onchange=e=>{calcSummaryMonth.year=parseInt(e.target.value,10);renderCalcSummary();};
 }
 
 /* ---------- MODAL ENGINE ---------- */
+// «А где остальные?» — вопрос, который сводка раньше оставляла без ответа: в таблицах
+// считаются только заказы с указанным человеком, а в гриде заказов колонки «Обработчик»
+// нет вовсе, и найти их было нечем. Теперь число открывает список.
+function calcNoOneList(field,period,title){
+  const rows=(S.orders||[]).filter(o=>((o.pickup_date||o.created_at||'').slice(0,7))===period&&!o[field]);
+  const partnerOf=o=>o.sender||partnerName(o.partner_id)||'—';
+  // Группируем по отправителю: почти всегда это «у партнёра в карточке не заполнено поле»,
+  // и список из трёхсот строк этого не покажет, а десяток партнёров — покажет сразу.
+  const by={};
+  rows.forEach(o=>{const k=partnerOf(o);(by[k]=by[k]||[]).push(o);});
+  const groups=Object.entries(by).sort((a,b)=>b[1].length-a[1].length);
+  showModal(title,`
+    <p class="calc-note">Всего таких заказов за месяц: <b>${rows.length}</b>. Поле подставляется
+      из карточки партнёра в момент создания заказа — если там пусто или партнёр у заказа
+      не определился, заказ остаётся без него. Заполните поле в карточке партнёра: оно
+      проставится и во все его существующие заказы.</p>
+    <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
+      <th>Отправитель</th><th>Заказов</th><th>Номера</th></tr></thead><tbody>
+      ${groups.map(([nm,list])=>`<tr><td>${esc(nm)}</td><td><b>${list.length}</b></td>
+        <td style="font-size:12px;color:var(--muted)">${list.slice(0,12).map(o=>esc(o.code||'')).join(', ')}${
+          list.length>12?` … и ещё ${list.length-12}`:''}</td></tr>`).join('')}
+    </tbody></table></div>`,null,{readonly:true,wide:true});
+}
+
 function showModal(title,bodyHtml,onSave,opts={}){
   const ov=document.createElement('div');ov.className='overlay';
   const foot=opts.readonly
