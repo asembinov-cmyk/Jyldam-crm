@@ -323,12 +323,20 @@ function dirPartners(onlyBar){
 function partnerModal(id){
   const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:'',tariff_post:'',tariff_courier:''};
   const dOpts=cid=>S.districts.filter(d=>!cid||d.city_id===cid);
+  // «Физ лицо Алматы» и «Физ лицо Астана» — не магазины, а разовые клиенты: адрес и район
+  // у каждого заказа свои (для этого в карточке заказа есть отдельное поле
+  // «Адрес откуда забрали»). Держать их в карточке партнёра нечем — она одна на всех.
+  // А карточка не сохранялась без адреса и района, и из-за этого у этих двух партнёров
+  // нельзя было задать даже обработчика: форма упиралась в поля, которых у них не бывает.
+  const fizCard=isFizlicoName(p.name);
+  const star=need=>need?' <span style="color:var(--rust)">*</span>':'';
+  const fizHint='<span class="hint">У физ. лица адрес свой в каждом заказе — здесь можно оставить пустым</span>';
   showModal(id?'Партнёр':'Новый партнёр',`
     <div class="field"><label>Наименование <span style="color:var(--rust)">*</span></label><input id="p_name" value="${esc(p.name)}"></div>
     <div class="field"><label>Город <span style="color:var(--rust)">*</span></label><select id="p_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${p.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
-    <div class="field"><label>Район <span style="color:var(--rust)">*</span></label><select id="p_district"><option value="">—</option>${dOpts(p.city_id).map(d=>`<option value="${d.id}" ${p.district_id===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
-    <div class="field"><label>Адрес <span style="color:var(--rust)">*</span></label><input id="p_addr" value="${esc(p.address)}"></div>
-    <div class="field"><label>Телефон <span style="color:var(--rust)">*</span></label><input id="p_phone" inputmode="numeric"></div>
+    <div class="field"><label>Район${star(!fizCard)}</label><select id="p_district"><option value="">—</option>${dOpts(p.city_id).map(d=>`<option value="${d.id}" ${p.district_id===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select>${fizCard?fizHint:''}</div>
+    <div class="field"><label>Адрес${star(!fizCard)}</label><input id="p_addr" value="${esc(p.address)}">${fizCard?fizHint:''}</div>
+    <div class="field"><label>Телефон${star(!fizCard)}</label><input id="p_phone" inputmode="numeric">${fizCard?fizHint:''}</div>
     <div class="field"><label>Менеджер по продажам <span style="color:var(--rust)">*</span></label><select id="p_sales"><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${p.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
     <div class="field"><label>Обработчик <span style="color:var(--rust)">*</span></label><select id="p_proc"><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${p.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
     <div class="grid2">
@@ -359,12 +367,19 @@ function partnerModal(id){
     </div>`:''}`,
     async()=>{
       // проверка обязательных полей (кроме QR-кода)
+      // Имя берём из ПОЛЯ, а не из p: партнёра могли только что переименовать в физ. лицо
+      // или обратно, и проверка должна идти по тому, что сохраняется.
+      const fiz=isFizlicoName(val('p_name'));
       const req=[
         ['p_name','Укажите наименование',()=>val('p_name').trim()],
         ['p_city','Выберите город',()=>val('p_city')],
-        ['p_district','Выберите район',()=>val('p_district')],
-        ['p_addr','Укажите адрес',()=>val('p_addr').trim()],
-        ['p_phone','Укажите телефон',()=>phoneVal('p_phone').length>=10],
+        // Телефон здесь той же природы, что адрес: у «физ лица» он свой в каждом заказе,
+        // а в карточке партнёра используется только для показа в кабинете партнёра.
+        ...(fiz?[]:[
+          ['p_district','Выберите район',()=>val('p_district')],
+          ['p_addr','Укажите адрес',()=>val('p_addr').trim()],
+          ['p_phone','Укажите телефон',()=>phoneVal('p_phone').length>=10],
+        ]),
         ['p_sales','Выберите менеджера по продажам',()=>val('p_sales')],
         ['p_proc','Выберите обработчика',()=>val('p_proc')],
         ['p_tpost','Укажите тариф почтовой доставки',()=>val('p_tpost')!==''],
