@@ -2205,6 +2205,9 @@ function orderModal(id,readonly){
       if(res&&res.success){
         o.track=res.barcode;
         const trackEl=$('o_track');if(trackEl)trackEl.value=res.barcode;
+        // Полный ответ Казпочты — в консоль: префикс номера выбирает она сама, и когда он
+        // вдруг меняется (QS → AP → AT), по одному номеру причину не понять.
+        if(res.debug_raw_response)console.log('Казпочта ← ответ целиком:',res.debug_raw_response);
         // Контур пишем рядом с номером: префикс зависит от него (postratesws → QS,
         // postratesprod → AP), и «почему вдруг AP» иначе выясняется по секретам вручную.
         toast(`Трек-номер получен: ${res.barcode}`+(res.contour?` · контур ${res.contour}`:''),7000);
