@@ -1700,6 +1700,10 @@ function drawOrders(){
     if(e.target.checked){ketSelectAll=true;allRows.forEach(o=>ketSelected.add(o.id));}
     else{ketSelectAll=false;allRows.forEach(o=>ketSelected.delete(o.id));}
     el.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);
+    // Кнопка «Удалить выделенные» живёт вне таблицы и сама о галочках не знает. Отметки
+    // строк её обновляют (через updateKetAllChk), а этот путь — «выбрать все» — не обновлял:
+    // заказы отмечены, а кнопка серая и не нажимается. Ровно на это и жаловались.
+    updateDelSelBtn();
   };
   updateKetAllChk(allRows);
   if(mobile){
