@@ -20,7 +20,12 @@
    обновление вернёт ноль строк.
    ============================================================ */
 
-const FILL_CLAIM_MIN = 10;   // сколько минут заказ держится за менеджером
+const FILL_CLAIM_MIN = 30;   // сколько минут заказ держится за менеджером
+// Предел для ИЗМЕРЕНИЯ времени оставлен прежним, 10 минут, и это не описка. Раньше он был
+// одним числом с захватом, и подъём захвата до 30 минут молча испортил бы «среднее время»:
+// заказ, который человек делал 25 минут (отошёл, звонил партнёру), попал бы в среднее и
+// утянул бы его в разы — при норме 60 секунд. Дольше десяти минут — это не работа, а пауза.
+const FILL_MEASURE_MAX_MIN = 10;
 const FILL_NORM_SEC  = 60;   // норма времени на один заказ
 let fillFrom = '', fillTo = '';  // период статистики, пусто = сегодня
 let fillBusy = false;            // защита от двойного нажатия «Взять следующий»
@@ -42,7 +47,11 @@ const localDateOf = ts => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 const fillMeName = () => (S.me && (S.me.full_name || S.me.email)) || '';
-const fillCutoff = () => new Date(Date.now() - FILL_CLAIM_MIN * 60000).toISOString();
+// ЧАСЫ БЕРЁМ СЕРВЕРНЫЕ (nowMs), а не ноутбука. Иначе всё разъезжается: менеджер с часами,
+// убежавшими вперёд, считает ЧУЖИЕ свежие захваты просроченными и отбирает заказы, над
+// которыми уже работают, — ровно то, на что жаловались 27.09 («падают одни и те же»).
+// А его собственный claimed_at, записанный вперёд, для остальных не истекает никогда.
+const fillCutoff = () => new Date(nowMs() - FILL_CLAIM_MIN * 60000).toISOString();
 
 // Заказ ждёт заполнения: фото бланка есть, данных клиента нет.
 //
@@ -112,36 +121,101 @@ function fillMine(){ return fillQueue().filter(o => fillIsMine(o) && !fillIsHeld
 function fillHeld(){ return fillQueue().filter(o => fillIsMine(o) && fillIsHeld(o)); }
 
 /* ---------- выдача следующего заказа ---------- */
+// Попытка захватить один из переданных заказов. Возвращает захваченный или null.
+// Условия стоят В САМОМ ЗАПРОСЕ, и это главное: два менеджера жмут кнопку одновременно,
+// и решает база, а не наши списки. Отложенный заказ не отбираем и на стороне базы —
+// локальный список его и так не предлагает, но он мог устареть.
+async function fillTryClaim(list){
+  const now = new Date(nowMs()).toISOString();
+  for(const o of list){
+    let q = sb.from('orders')
+      .update({ claimed_by: (S.me && S.me.id) || null, claimed_by_name: fillMeName(), claimed_at: now })
+      .eq('id', o.id)
+      .is('filled_at', null)
+      .or(`claimed_at.is.null,claimed_at.lt.${fillCutoff()}`);
+    if(fillHoldReady()) q = q.not('claim_hold', 'is', true);
+    const { data, error } = await q.select();
+    if(error){ console.error('fill claim', error); toast('Ошибка: ' + error.message); return null; }
+    if(data && data.length){
+      const row = data[0];
+      const mine = (S.orders || []).find(x => x.id === row.id);
+      if(mine) Object.assign(mine, row); else S.orders.unshift(row);
+      return mine || row;
+    }
+  }
+  return null;
+}
+// СВЕЖИЕ КАНДИДАТЫ ИЗ БАЗЫ, а не из памяти вкладки.
+//
+// Память устаревает: заказы разбирают и заполняют пятеро одновременно, а Realtime может
+// не донести часть изменений (вкладка в фоне, сеть мигнула). Тогда в списке висят заказы,
+// давно заполненные или взятые, все попытки захвата возвращают ноль строк — и человек
+// видел «свободных заказов: 97» и тост «разобрали». Именно на это жаловались 28.09.
+//
+// Условия здесь ТЕ ЖЕ, что в очереди, только выраженные запросом: не заполнен, без ФИО,
+// в окне дат. «Есть фото» запросом не выразить (поле — массив), поэтому досеиваем
+// на месте через fillNeedsWork.
+async function fillFreshCandidates(){
+  const { data, error } = await sb.from('orders')
+    .select('*')
+    .is('filled_at', null)
+    .gte('pickup_date', fillQueueFrom())
+    .lte('pickup_date', localToday())
+    .or(`claimed_at.is.null,claimed_at.lt.${fillCutoff()}`)
+    .order('created_at', { ascending: true })
+    .limit(200);
+  if(error){ console.error('fill fresh', error); return []; }
+  const rows = (data || []).filter(o => fillNeedsWork(o) && !fillIsHeld(o));
+  // Заодно освежаем память вкладки: счётчики на экране перестанут врать.
+  const byId = {}; (S.orders || []).forEach((o, i) => { byId[o.id] = i; });
+  (data || []).forEach(row => {
+    if(byId[row.id] != null) Object.assign(S.orders[byId[row.id]], row);
+    else S.orders.push(row);
+  });
+  return rows;
+}
+// Порядок кандидатов: самые старые вперёд — заказ, пролежавший дольше, и уйти должен
+// раньше. Но брать строго первый нельзя: все менеджеры жмут кнопку и дерутся за ОДИН И
+// ТОТ ЖЕ заказ, а остальные девяносто ждут. Поэтому перемешиваем внутри старейших сорока:
+// очередь соблюдается, а лобовых столкновений почти нет.
+function fillCandidateOrder(list){
+  const sorted = [...list].sort((a,b) => String(a.created_at||'').localeCompare(String(b.created_at||'')));
+  const head = sorted.slice(0, 40);
+  for(let i = head.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [head[i], head[j]] = [head[j], head[i]];
+  }
+  return head.concat(sorted.slice(40));
+}
 async function fillTakeNext(){
   if(fillBusy) return;
   fillBusy = true;
+  const btn = $('fillNextBottom');
+  const label = btn ? btn.textContent : '';
   try{
-    // Самые старые вперёд: заказ, пролежавший дольше, и уйти должен раньше.
-    const free = fillFree().sort((a,b) => String(a.created_at||'').localeCompare(String(b.created_at||'')));
-    if(!free.length){ toast('Свободных заказов нет'); return; }
-    const now = new Date().toISOString();
-    // Идём по списку, пока захват не удастся: пока мы думали, заказ мог забрать сосед.
-    for(const o of free.slice(0, 20)){
-      let q = sb.from('orders')
-        .update({ claimed_by: (S.me && S.me.id) || null, claimed_by_name: fillMeName(), claimed_at: now })
-        .eq('id', o.id)
-        .is('filled_at', null)
-        .or(`claimed_at.is.null,claimed_at.lt.${fillCutoff()}`);
-      // Отложенный заказ не отбираем и на стороне базы. Локальный список его и так не
-      // предлагает, но он мог устареть: сосед отложил заказ секунду назад, а у нас в памяти
-      // он ещё «просроченный». Проверка в самом запросе такую гонку закрывает.
-      if(fillHoldReady()) q = q.not('claim_hold', 'is', true);
-      const { data, error } = await q.select();
-      if(error){ console.error('fill claim', error); toast('Ошибка: ' + error.message); return; }
-      if(data && data.length){
-        Object.assign(o, data[0]);
+    // Сначала то, что уже в памяти — это без лишнего запроса и срабатывает почти всегда.
+    let got = await fillTryClaim(fillCandidateOrder(fillFree()).slice(0, 20));
+    if(!got){
+      // Не вышло — значит память вкладки устарела. Спрашиваем базу заново, а не отправляем
+      // человека «попробовать ещё раз»: пробовать должна система, у неё это быстрее.
+      if(btn){ btn.disabled = true; btn.textContent = 'Ищем свободный…'; }
+      const fresh = await fillFreshCandidates();
+      got = await fillTryClaim(fillCandidateOrder(fresh).slice(0, 20));
+      if(!got){
         renderFilling();
-        orderModal(o.id);
+        toast(fresh.length
+          ? 'Свободные заказы разобрали прямо сейчас — нажмите ещё раз'
+          : 'Свободных заказов нет — всё заполнено или взято коллегами', 6000);
         return;
       }
     }
-    toast('Свободные заказы разобрали — попробуйте ещё раз');
-  } finally { fillBusy = false; }
+    renderFilling();
+    orderModal(got.id);
+  } finally {
+    fillBusy = false;
+    const b = $('fillNextBottom');
+    if(b){ b.disabled = false; if(label) b.textContent = label; }
+  }
 }
 
 // ПРОДЛЕНИЕ ЗАХВАТА, ПОКА ЧЕЛОВЕК РАБОТАЕТ.
@@ -161,9 +235,9 @@ async function fillTouchClaim(id){
   if(!o || o.filled_at) return;
   if(o.claimed_by !== (S.me && S.me.id)) return;      // не мой — продлевать нечего
   const last = _fillTouched[id] || 0;
-  if(Date.now() - last < FILL_TOUCH_MIN * 60000) return;
-  _fillTouched[id] = Date.now();
-  const now = new Date().toISOString();
+  if(nowMs() - last < FILL_TOUCH_MIN * 60000) return;
+  _fillTouched[id] = nowMs();
+  const now = new Date(nowMs()).toISOString();
   try{
     // Без dbUpdate: это служебная отметка, и в журнале изменений ей делать нечего —
     // иначе история заказа утонет в записях «продлили захват».
@@ -209,7 +283,7 @@ function fillOrderSecs(o){
   const sec = (new Date(o.filled_at) - new Date(o.claimed_at)) / 1000;
   // Дольше окна захвата — человек отошёл, а не работал. Такое не берём ни в
   // среднее, ни в общее время за день: один обед превратил бы цифры в бессмыслицу.
-  return (sec >= 0 && sec <= FILL_CLAIM_MIN * 60) ? sec : null;
+  return (sec >= 0 && sec <= FILL_MEASURE_MAX_MIN * 60) ? sec : null;
 }
 function fillDoneIn(from, to){
   return (S.orders || []).filter(o => {
@@ -302,8 +376,8 @@ const fillAvaColor = nm => FILL_AVA[[...nm].reduce((a,c) => a + c.charCodeAt(0),
 // а вкладка висит открытой с утра. Тянем только то, что относится к сегодняшнему дню:
 // вся таблица заказов — это десятки тысяч строк, ради очереди их качать незачем.
 async function fillRefresh(){
-  const b = $('fillReload');
-  if(b){ b.disabled = true; b.textContent = 'Обновляем…'; }
+  const btns = [...document.querySelectorAll('.fill-reload')];
+  btns.forEach(b => { b.disabled = true; b.textContent = 'Обновляем…'; });
   try{
     const from = fillQueueFrom();
     // Страницами: Supabase отдаёт максимум 1000 строк за запрос. За один день столько не
@@ -419,7 +493,11 @@ function renderFilling(){
   const maxCount=rows.reduce((m,r)=>Math.max(m,r.count),0)||1;
   const {from,to}=fillPeriod();
   const tab=fillActiveTab();
-  const reload='<button class="btn sm ghost" id="fillReload" title="Подтянуть свежие заказы — фото могли приложить только что">🔄 Обновить</button>';
+  // Кнопка «Обновить» у менеджера рисуется ДВАЖДЫ — в строке периода и рядом со «Взять
+  // следующий». С одним id браузер отдаёт только первую, и вторая была мёртвой: менеджеры
+  // так и говорили — «обновить не работает». У админа она одна, поэтому у него работало.
+  // Поэтому ищем по КЛАССУ и вешаем обработчик на все.
+  const reload='<button class="btn sm ghost fill-reload" title="Подтянуть свежие заказы — фото могли приложить только что">🔄 Обновить</button>';
 
   $('main').innerHTML=`
     <div class="fill-head">
@@ -576,7 +654,7 @@ function renderFilling(){
     inp.onkeypress=e=>e.stopPropagation();
   }
   if(fillFindRes!==null)fillFindDraw();
-  const rl=$('fillReload'); if(rl) rl.onclick=()=>fillRefresh();
+  $('main').querySelectorAll('.fill-reload').forEach(b=>b.onclick=()=>fillRefresh());
   if($('fillTail'))$('fillTail').onclick=()=>fillExtendQueue();
   $('main').querySelectorAll('[data-fillopen]').forEach(b=>b.onclick=()=>orderModal(b.dataset.fillopen));
   $('main').querySelectorAll('[data-fillrel]').forEach(b=>b.onclick=()=>fillRelease(b.dataset.fillrel));
