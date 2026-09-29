@@ -2146,6 +2146,29 @@ function orderModal(id,readonly){
         const inf=$('o_index');if(inf){inf.focus();inf.style.borderColor='var(--rust)';}
         return false;
       }
+      // ТРЕК — ОДИН НА ОДНУ ПОСЫЛКУ.
+      //
+      // Два заказа с одним треком — это две посылки, которые Казпочта считает одной:
+      // статус, доставка и претензия достанутся одной из них, а вторая исчезнет из
+      // отслеживания. Причин задвоения хватает: ручной ввод с бланка, копирование
+      // строки из реестра, повторный запрос трека до сохранения карточки.
+      //
+      // Проверяем ЗАПРОСОМ К БАЗЕ, а не по S.orders: в памяти вкладки после входа лежат
+      // только сегодняшние заказы, а трек мог уйти на вчерашний. В базе стоит ещё и
+      // уникальный индекс (db/20) — он ловит все остальные пути, включая кабинет
+      // партнёра и загрузку из Excel; здесь же просто понятное сообщение заранее.
+      const trackVal=val('o_track').trim();
+      if(trackVal){
+        let q=sb.from('orders').select('id,code').eq('track',trackVal).limit(1);
+        if(id)q=q.neq('id',id);
+        const {data:dup,error:dupErr}=await q;
+        if(dupErr)console.error('track dup check',dupErr);
+        if(dup&&dup.length){
+          toast(`Этот трек уже стоит у заказа № ${dup[0].code||''} — один трек на одну посылку`,8000);
+          const tf=$('o_track');if(tf){tf.focus();tf.style.borderColor='var(--rust)';}
+          return false;
+        }
+      }
       const row={code,sender:val('o_sender').trim(),pickup_date:val('o_pickup')||null,
         weight:weightVal,client:val('o_client').trim(),phone:phoneDigits,
         courier_city_id:isCourierDelivery(val('o_delivery'))?(val('o_city')||null):null,address:val('o_address').trim(),

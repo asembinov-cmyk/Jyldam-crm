@@ -382,9 +382,31 @@ function recLabel(rec){
   return rec.name||rec.fio||rec.full_name||rec.code||rec.email||('#'+rec.id);
 }
 function findCached(table,id){const k=TABLE_ARRKEY[table];const arr=k&&S[k];return Array.isArray(arr)?arr.find(x=>x&&x.id===id):null;}
+// ОТКАЗ БАЗЫ ПО-РУССКИ.
+//
+// На уникальные индексы Postgres отвечает «duplicate key value violates unique constraint
+// "orders_track_uniq"» — по такому тексту человек не поймёт ни что случилось, ни что делать.
+// А индексы эти стоят там, где ошибка стоит денег: один трек на две посылки, один внешний
+// номер партнёра на два заказа. Переводим в понятное, остальное показываем как есть.
+const DB_UNIQUE_MSG={
+  orders_track_uniq:'Этот трек-номер уже стоит у другого заказа. Один трек — одна посылка: '
+    +'найдите заказ по этому треку через поиск и проверьте, который из них правильный.',
+  orders_code_uniq:'Такой номер заказа уже есть. Обновите страницу и создайте заказ заново — '
+    +'номер подставится новый.',
+  orders_partner_ext_uniq:'Заказ с таким внешним номером от этого партнёра уже создан — '
+    +'повторно он не заводится.',
+};
+function dbErrText(error){
+  const m=String((error&&error.message)||'');
+  if(error&&(error.code==='23505'||/duplicate key/i.test(m))){
+    for(const key in DB_UNIQUE_MSG)if(m.includes(key))return DB_UNIQUE_MSG[key];
+    return 'Такая запись уже есть — повтор не создаётся.';
+  }
+  return 'Ошибка: '+(m||'не удалось сохранить');
+}
 async function dbInsert(table,row){
   const {data,error}=await sb.from(table).insert(row).select().single();
-  if(error){console.error('insert',table,error);toast('Ошибка: '+error.message);return null;}
+  if(error){console.error('insert',table,error);toast(dbErrText(error));return null;}
   if(AUTO_LOG_TABLES.has(table))logAction('create',table,{entity_id:data.id,entity_label:recLabel(data)});
   return data;
 }
@@ -392,7 +414,7 @@ async function dbUpdate(table,id,row){
   const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
   const beforeCopy=before?Object.assign({},before):null;
   const {data,error}=await sb.from(table).update(row).eq('id',id).select().single();
-  if(error){console.error('update',table,error);toast('Ошибка: '+error.message);return null;}
+  if(error){console.error('update',table,error);toast(dbErrText(error));return null;}
   if(AUTO_LOG_TABLES.has(table)){const ch=buildChanges(beforeCopy,data);if(ch.length)logAction('update',table,{entity_id:id,entity_label:recLabel(data),changes:ch});}
   return data;
 }
