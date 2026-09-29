@@ -539,8 +539,11 @@
   .dir-filter{width:100%;font:inherit;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;
     padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink)}
   .dir-filter:focus{outline:2px solid rgba(37,70,201,.25);border-color:var(--rust)}
-  /* фильтры в таблице «Сотрудники» — широкие, во всю ширину колонки */
+  /* фильтры в таблице «Сотрудники» — широкие, во всю ширину колонки.
+     30.09.2026: здесь был потерян селектор — декларации висели в воздухе после
+     закрывающей скобки, и браузер молча выбрасывал их вместе с оформлением полей. */
   .filter-row.staff-fr th{padding:10px 12px}
+  .filter-row.staff-fr .dir-filter{width:100%;font:inherit;font-size:13px;
     text-transform:none;letter-spacing:0;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
     background:var(--card);color:var(--ink);box-shadow:inset 0 1px 2px rgba(20,30,60,.04)}
   /* Последняя колонка держала 17% и таблицу шириной 1180px — столько занимали три
@@ -1545,3 +1548,87 @@ td .ft-dot{margin:0 0 0 8px}
 .calc-kpi b{display:block;margin-top:6px;font-family:'Fraunces',serif;font-weight:900;font-size:22px;line-height:1.1}
 .calc-kpi small{display:block;margin-top:4px;font-size:11px;color:var(--muted)}
 @media(max-width:900px){.calc-kpi{grid-template-columns:repeat(2,1fr)}}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ТЕЛЕФОН: РАЗМЕРЫ ПОД ПАЛЕЦ И БЕЗ ЗУМА ПРИ КАСАНИИ (30.09.2026)
+
+   Замеры на 375 px до этой правки: поиск 33 px, селекты и даты 35, кнопки
+   в строке 31, кнопки пагинации 28, галочка 13. Норма для пальца — 44.
+   Плюс все поля ввода были 13–14 px, а Safari на iPhone ЗУМИТ страницу при
+   касании поля со шрифтом меньше 16 px: человек тапает в поиск, вёрстка
+   прыгает, и её приходится отщипывать назад. Отсюда и «неудобно
+   пользоваться» — не одна поломка, а размеры во всём.
+
+   Блок идёт последним в файле и поэтому перекрывает прежние значения.
+   Условие двойное: узкий экран ИЛИ грубый указатель. Второе ловит планшеты
+   и ноутбуки с тачскрином, где ширина большая, а палец тот же.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width:760px), (pointer:coarse){
+  /* 16 px — не «крупнее для красоты», а порог, ниже которого iOS зумит. */
+  .filters input,.filters select,.filters .search,
+  .field input,.field select,.field textarea,
+  .dir-filter,.search,.ai-input-row input,.fh-find input,.staff-head .search{font-size:16px}
+  /* Поля и кнопки — не ниже 44. min-height, а не height: содержимое в две
+     строки (адрес, длинное название) должно свободно растягивать элемент. */
+  .filters input,.filters select,.filters .search,.filters-btn,.filters-toggle,
+  .field input,.field select,.field textarea,.dir-filter,
+  /* .search встречается и вне фильтров — в шапке «Заполнения», «Сотрудников»
+     и в поле вопроса помощнику; там он тоже должен быть под палец. */
+  .search,.fh-find input,.ai-input-row input{min-height:44px}
+  .btn{min-height:44px}
+  .btn.sm{min-height:40px;font-size:13.5px}
+  /* «Фильтры ▾» — единственный способ раскрыть фильтры на телефоне, ему 44.
+     Селектор с двумя классами: иначе .btn.sm выше по весу и оставляет 40. */
+  .btn.sm.filters-toggle{min-height:44px}
+  .row-actions .btn,.cell-actions .btn{min-height:44px}
+  /* Галочки: 13 px в таблице заказов — это меньше подушечки пальца втрое.
+     Растягиваем сам квадрат и добавляем вокруг него зону промаха. */
+  .resp-table input[type=checkbox],.filters input[type=checkbox],
+  .chk-line input,#ketChkAll{width:26px;height:26px}
+  /* Ячейка с галочкой — не ниже 44 и по центру: сама галочка 26, но промах
+     по вертикали ловится ячейкой. Растянуть хит-зону самого чекбокса одним CSS
+     нельзя, а переделывать разметку во всех модулях ради шести пикселей — нет. */
+  .resp-table td[data-label=""]{min-height:44px;align-items:center}
+  .resp-table td[data-label=""] input[type=checkbox]{margin:9px 6px}
+  /* Подпись в карточке-строке занимала 42 % ширины, и на длинный адрес
+     оставалось меньше половины экрана. Отдаём содержимому больше. */
+  .resp-table td::before{flex:0 0 36%}
+  .resp-table td{padding:11px 14px;font-size:14px}
+  /* Пагинация была столбиком: три этажа кнопок, 110 px экрана и 150 px
+     отступа под ними. Возвращаем в строку с нормальными кнопками. */
+  .orders-pager{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:8px}
+  .orders-pager .op-btn{min-height:44px;padding:0 14px;font-size:14px}
+  .orders-pager .op-info{flex:1 1 100%;text-align:center;font-size:12.5px}
+  .orders-pager .op-perpage,.orders-pager .op-perpage select{font-size:14px}
+  .content.has-pager{padding-bottom:116px}
+  .content.has-pager .panel:last-of-type{margin-bottom:96px}
+  /* Тост вылезал ровно под плавающей панелью — поднимаем над ней. */
+  body.has-pager-panel .toast,.content.has-pager ~ .toast{bottom:104px}
+  /* Кнопки модалки: в один ряд они жмутся, «Сохранить» — главное действие. */
+  .modal-foot{flex-wrap:wrap}
+  .modal-foot .btn{flex:1 1 auto;justify-content:center}
+  .modal-foot .btn.primary{flex:1 1 100%;order:-1}
+  /* Карточка на телефоне — почти во весь экран: 20 px отступа с каждой стороны
+     от 375 съедали десятую часть ширины, а карточка заказа и без того плотная.
+     И 90vh в мобильном Safari считается вместе с адресной строкой, из-за чего
+     низ карточки с кнопкой «Сохранить» уходил под край. */
+  .overlay{padding:10px}
+  .modal{max-height:92vh;max-height:92dvh}
+  .modal-head{padding:16px 16px}
+  .modal-body{padding:16px}
+  .modal-foot{padding:14px 16px}
+  /* Прилипшие кнопки: в длинной карточке до «Сохранить» приходилось скроллить
+     весь экран данных, и люди закрывали окно, не сохранив. */
+  .modal-foot{position:sticky;bottom:0;z-index:2}
+  /* Крестик закрытия — 30 px и в самом углу, то есть мимо него промахиваешься
+     чаще, чем попадаешь. На телефоне это основной способ закрыть карточку. */
+  .modal-head .x{min-width:44px;min-height:44px;font-size:26px;margin-right:-6px}
+}
+
+/* Полная высота экрана на телефоне: 100vh в мобильном Safari считается вместе
+   с адресной строкой, поэтому низ выдвижного меню уезжал под край и последние
+   пункты были недоступны. dvh считает видимую часть; vh оставлен запасом для
+   браузеров без dvh. */
+@media (max-width:760px){
+  .sidebar{height:100vh;height:100dvh}
+}
