@@ -581,7 +581,6 @@ function renderOrders(mode){
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
         ${can('orders','delete')?'<button type="button" class="filters-btn filters-btn-danger" id="ordersDelSel" title="Удалить заказы, отмеченные галочками">🗑 Удалить выделенные</button>':''}
-        ${can('orders','edit')?'<button type="button" class="filters-btn" id="ordersSetPartner" title="Сменить партнёра сразу у списка заказов — по номерам">🏷 Сменить партнёра…</button>':''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
           <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
@@ -641,7 +640,6 @@ function renderOrders(mode){
     toast(fail?`Удалено ${ok}, не удалось ${fail} — проверьте права на удаление`:`Удалено заказов: ${ok}`,6000);
     renderOrders(ordersMode);
   };
-  if($('ordersSetPartner'))$('ordersSetPartner').onclick=()=>setPartnerBulkModal();
   if($('kazpostAssignSel'))$('kazpostAssignSel').onclick=async()=>{
     let list,source;
     if(ketSelected.size){
@@ -1924,6 +1922,13 @@ const PACKAGE_SIZES=packageSizesFor(null);
 // Заказы физ. лиц регулярно оказываются заказами обычного партнёра: их завели под
 // «Физ лицо Алматы/Астана», а потом выясняется, чьи они. Руками это сорок открытых
 // карточек, поэтому здесь: вставил номера — увидел, что изменится — применил.
+//
+// ЖИВЁТ В «ЦЕНТРЕ КОНТРОЛЯ» И ТОЛЬКО У АДМИНИСТРАТОРА (решение владельца 30.09.2026).
+// Сначала кнопка стояла в строке фильтров «Заказов заборов» — то есть была доступна
+// любому с правом на редактирование заказов, включая курьеров. Инструмент правит
+// партнёра сразу у десятков заказов, а партнёр определяет и выручку, и раздел учёта:
+// такому месту в общей строке фильтров не место. Вызов — из renderNotify (js/03),
+// под isAdmin().
 //
 // Ищем ЗАПРОСОМ К БАЗЕ, а не по S.orders: в памяти вкладки лежат только сегодняшние
 // заказы, а списки приносят за неделю (те же грабли, что в поиске «Заполнения»).

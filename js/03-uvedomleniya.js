@@ -186,7 +186,18 @@ function renderNotify(){
       </div>
     </div>`:''}
 
+    ${isAdmin()?`
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>🏷 Сменить партнёра у списка заказов</h2></div>
+      <div class="hint" style="margin:0 20px 14px;color:var(--muted)">Заказы завели под «Физ лицо»,
+        а оказались партнёрскими — вставьте их номера списком и выберите нового партнёра.
+        Партнёр определяет выручку и раздел учёта, поэтому инструмент доступен только
+        администратору.</div>
+      <div style="padding:0 20px 18px"><button class="btn" id="nfSetPartner">Открыть</button></div>
+    </div>`:''}
+
     ${isStaff()?duplicatesPanelHtml():''}`;
+  if($('nfSetPartner'))$('nfSetPartner').onclick=()=>setPartnerBulkModal();
   if($('nfAiRun'))$('nfAiRun').onclick=()=>loadAiInsights();
   bindDuplicatesPanel();
   // переходы по клику на задачу
