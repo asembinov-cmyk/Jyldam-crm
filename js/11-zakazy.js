@@ -581,6 +581,7 @@ function renderOrders(mode){
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
         ${can('orders','delete')?'<button type="button" class="filters-btn filters-btn-danger" id="ordersDelSel" title="Удалить заказы, отмеченные галочками">🗑 Удалить выделенные</button>':''}
+        ${can('orders','edit')?'<button type="button" class="filters-btn" id="ordersSetPartner" title="Сменить партнёра сразу у списка заказов — по номерам">🏷 Сменить партнёра…</button>':''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
           <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
@@ -640,6 +641,7 @@ function renderOrders(mode){
     toast(fail?`Удалено ${ok}, не удалось ${fail} — проверьте права на удаление`:`Удалено заказов: ${ok}`,6000);
     renderOrders(ordersMode);
   };
+  if($('ordersSetPartner'))$('ordersSetPartner').onclick=()=>setPartnerBulkModal();
   if($('kazpostAssignSel'))$('kazpostAssignSel').onclick=async()=>{
     let list,source;
     if(ketSelected.size){
@@ -1917,6 +1919,107 @@ function repriceForWeight(order, newWeight){
 function isExplicitNum(v){return v!=null&&v!==''&&!isNaN(+v);}
 // вариант без привязки к партнёру — на случай, если партнёр ещё не определён/не выбран (базовые значения)
 const PACKAGE_SIZES=packageSizesFor(null);
+// СМЕНА ПАРТНЁРА СРАЗУ У СПИСКА ЗАКАЗОВ — по номерам, вставленным списком.
+//
+// Заказы физ. лиц регулярно оказываются заказами обычного партнёра: их завели под
+// «Физ лицо Алматы/Астана», а потом выясняется, чьи они. Руками это сорок открытых
+// карточек, поэтому здесь: вставил номера — увидел, что изменится — применил.
+//
+// Ищем ЗАПРОСОМ К БАЗЕ, а не по S.orders: в памяти вкладки лежат только сегодняшние
+// заказы, а списки приносят за неделю (те же грабли, что в поиске «Заполнения»).
+async function setPartnerBulkModal(){
+  const partners=[...(S.partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  showModal('Сменить партнёра у списка заказов',`
+    <div class="field full"><label>Номера заказов</label>
+      <textarea id="spCodes" rows="6" placeholder="По одному в строке или через запятую"></textarea>
+      <span class="hint">Повторы в списке не страшны — один заказ правится один раз.</span></div>
+    <div class="field full"><label>Новый партнёр</label>
+      <select id="spPartner"><option value="">— выберите —</option>${partners.map(p=>
+        `<option value="${p.id}">${esc(p.name||'без названия')}</option>`).join('')}</select></div>
+    <div class="field full">
+      <label><input type="checkbox" id="spFollow"> Заодно проставить менеджера и обработчика из карточки нового партнёра</label>
+      <span class="hint">По умолчанию ВЫКЛЮЧЕНО, и это важно: менеджер и обработчик участвуют
+        в расчёте зарплат, и правка задним числом меняет уже посчитанные деньги за месяц.
+        Сумма заказа и надбавка менеджера не пересчитываются никогда — они сняты по тарифу
+        того партнёра, при котором заказ создавался.</span></div>
+    <div class="field full"><button class="btn" id="spCheck">Проверить список</button></div>
+    <div id="spResult"></div>`,null,{readonly:true,closeLabel:'Закрыть',wide:true});
+
+  const ov=[...document.querySelectorAll('.overlay')].pop();
+  if(!ov)return;
+  const box=()=>ov.querySelector('#spResult');
+  let found=[];
+  ov.querySelector('#spCheck').onclick=async()=>{
+    const codes=[...new Set(String(ov.querySelector('#spCodes').value||'')
+      .split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))];
+    const pid=ov.querySelector('#spPartner').value;
+    if(!codes.length){toast('Вставьте номера заказов');return;}
+    if(!pid){toast('Выберите нового партнёра');return;}
+    const pt=(S.partners||[]).find(x=>x.id===pid);
+    box().innerHTML='<p class="calc-note">Ищем заказы…</p>';
+    // Пачками по 100: список номеров уходит в один запрос через in(...), а адрес запроса
+    // не резиновый — на длинном списке он бы просто не собрался.
+    let rows=[];
+    for(let i=0;i<codes.length;i+=100){
+      const {data,error}=await sb.from('orders')
+        .select('id,code,sender,partner_id,sales_id,processor_id,pickup_date')
+        .in('code',codes.slice(i,i+100));
+      if(error){box().innerHTML='<p class="calc-note">Ошибка: '+esc(error.message)+'</p>';return;}
+      rows=rows.concat(data||[]);
+    }
+    found=rows;
+    const missing=codes.filter(c=>!rows.some(r=>String(r.code)===c));
+    const already=rows.filter(r=>r.partner_id===pid).length;
+    box().innerHTML=`
+      <p class="calc-note">Найдено заказов: <b>${rows.length}</b> из ${codes.length}.
+        ${missing.length?`Не найдено: <b>${missing.length}</b> — ${esc(missing.slice(0,15).join(', '))}${missing.length>15?' …':''}.`:''}
+        ${already?`Уже с этим партнёром: ${already} — их не трогаем.`:''}</p>
+      ${rows.length?`<div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
+        <th>Заказ</th><th>Забор</th><th>Было</th><th>Станет</th></tr></thead><tbody>
+        ${rows.slice(0,200).map(r=>`<tr><td>${esc(r.code||'')}</td>
+          <td>${esc(String(r.pickup_date||'').slice(0,10))}</td>
+          <td>${esc(r.sender||partnerName(r.partner_id)||'—')}</td>
+          <td><b>${esc(pt?pt.name:'')}</b></td></tr>`).join('')}
+      </tbody></table></div>${rows.length>200?`<p class="calc-note">Показаны первые 200, применится ко всем ${rows.length}.</p>`:''}
+      <div class="field full" style="margin-top:12px"><button class="btn primary" id="spApply">Применить${
+        (()=>{const n=rows.filter(r=>r.partner_id!==pid).length;
+          // На кнопке — число, которое РЕАЛЬНО изменится: заказы, уже сидящие на этом
+          // партнёре, мы не трогаем, и обещать их в счёте было бы враньём.
+          return n===rows.length?` к ${n} заказам`:` к ${n} заказам из ${rows.length}`;})()
+      }</button></div>`
+      :''}`;
+    const ab=ov.querySelector('#spApply');
+    if(ab)ab.onclick=async()=>{
+      const todo=found.filter(r=>r.partner_id!==pid);
+      if(!todo.length){toast('Менять нечего');return;}
+      if(!confirm(`Сменить партнёра на «${pt.name}» у ${todo.length} заказ(ов)?`))return;
+      ab.disabled=true;
+      // Пишем пачками мимо dbUpdate: он делает по два обращения на заказ плюс запись
+      // в журнал на каждое — на сорока заказах это сотня запросов подряд (те же грабли,
+      // что в разборе межгорода и в проставлении обработчика).
+      const row={partner_id:pid,sender:pt.name||''};
+      if(ov.querySelector('#spFollow').checked){
+        row.sales_id=pt.sales_id||null;row.processor_id=pt.processor_id||null;
+      }
+      let done=0;
+      for(let i=0;i<todo.length;i+=100){
+        const chunk=todo.slice(i,i+100);
+        ab.textContent=`Применяем… ${done} из ${todo.length}`;
+        const {error}=await sb.from('orders').update(row).in('id',chunk.map(r=>r.id));
+        if(error){toast('Ошибка: '+error.message);ab.disabled=false;return;}
+        chunk.forEach(r=>{const o=(S.orders||[]).find(x=>x.id===r.id);if(o)Object.assign(o,row);});
+        done+=chunk.length;
+      }
+      await logAction('update','orders',{entity_label:`смена партнёра на «${pt.name}»`,
+        changes:[{field:'partner_id',label:'Партнёр',old:'разные',new:pt.name||''}],
+        meta:{count:done}});
+      toast(`Партнёр сменён у ${done} заказов`,6000);
+      const x=ov.querySelector('.x');if(x)x.click();
+      renderOrders(ordersMode);
+    };
+  };
+}
+
 function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=localToday();
