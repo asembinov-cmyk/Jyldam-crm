@@ -544,8 +544,179 @@ function calcPartnerWeightsFromCol(meta,col){
   }
   return weights;
 }
+// ==================== АРХИВ ПРОГОНОВ ====================
+// Прогнали файл — расчёт остался. До этого он жил ровно до обновления страницы: закрыл
+// вкладку — и нечем ни свериться с партнёром, ни объяснить, откуда взялась сумма в счёте.
+// Таблица calc_partner_runs (db/21).
+//
+// В архив ложится РАЗБИВКА ПО КГ, а не сами веса. Для этой модели она полная: плата
+// зависит только от округлённого веса, поэтому по разбивке восстанавливаются и итоги, и
+// выгрузка в Excel. Список из тысяч чисел хранить незачем.
+//
+// СТАВКИ ПИШУТСЯ СНИМКОМ (base_price, base_margin, per_kg_margin, per_kg_charge). Их
+// правят: подняли надбавку за кг — и прошлый прогон, пересчитанный по карточке, дал бы
+// другую сумму, чем та, что уже ушла партнёру. Та же причина, по которой снимок берётся
+// у orders.sales_margin (раздел 5b).
+//
+// ВНЕШНЕГО КЛЮЧА НА ПАРТНЁРА НЕТ, вместо него имя снимком: партнёра из списка расчёта
+// удаляют кнопкой тут же, а архив это обязан переживать — иначе удаление одной карточки
+// молча уносило бы историю расчётов по ней.
+let calcPartnerRuns=null;   // строки архива; null = ещё не загружали или таблицы нет
+let calcPartnerRunsErr='';  // отказ базы. Архива нет — сам расчёт на экране работает как раньше
+let _cpRunIds={};           // 'партнёр|файл' → id строки: правка столбца не плодит записи
+let _cpRunSig='';           // отпечаток сохранённого прогона — защита от повтора при перерисовке
+const CALC_RUNS_LIMIT=200;  // в гриде последние N: архив растёт, а листают всегда свежее
+async function calcPartnerRunsLoad(){
+  try{
+    const {data,error}=await sb.from('calc_partner_runs').select('*')
+      .order('created_at',{ascending:false}).limit(CALC_RUNS_LIMIT);
+    // dbList на отсутствующую таблицу отвечает пустым массивом, а не ошибкой, — по нему
+    // «таблицы нет» не отличить от «прогонов не было». Поэтому спрашиваем напрямую.
+    if(error){calcPartnerRuns=null;calcPartnerRunsErr=error.message||'не удалось прочитать';return;}
+    calcPartnerRuns=data||[];calcPartnerRunsErr='';
+  }catch(e){calcPartnerRuns=null;calcPartnerRunsErr=(e&&e.message)||'не удалось прочитать';}
+}
+// отпечаток прогона: по нему видно, изменился ли расчёт с прошлого сохранения. Без него
+// каждая перерисовка (а их много — Realtime, смена периода, возврат во вкладку) писала бы
+// в архив ещё одну копию того же самого.
+function calcPartnerRunSig(partner,breakdown){
+  return [partner.id,calcPartnerFileName,_calcGlobalPerKg,partner.base_price,partner.base_margin,
+    partner.per_kg_margin,breakdown.map(r=>r.kg+':'+r.count).join(',')].join('|');
+}
+// Сохраняет прогон: ОДНА строка на «партнёр + загруженный файл». Поправили столбец с весом
+// или надбавку — та же строка обновляется, а не появляется вторая: иначе в архиве осели бы
+// промежуточные, заведомо неверные попытки, и найти среди них настоящий расчёт было бы
+// нельзя. Выбрали заново файл — это новый прогон, ключи сбрасываются.
+async function calcPartnerSaveRun(partner,breakdown,totals){
+  if(calcPartnerRuns==null)return; // архива нет — молча, расчёт важнее
+  const key=partner.id+'|'+calcPartnerFileName;
+  const num=v=>v!=null&&v!==''?parseFloat(v):null;
+  const row={
+    partner_id:String(partner.id),
+    partner_name:partner.name||'',
+    file_name:calcPartnerFileName||'',
+    orders:totals.orders,
+    total_charge:Math.round(totals.charge),
+    total_margin:Math.round(totals.margin),
+    per_kg_charge:num(_calcGlobalPerKg),
+    base_price:num(partner.base_price),
+    base_margin:num(partner.base_margin),
+    per_kg_margin:num(partner.per_kg_margin),
+    weight_col:calcPartnerFileMeta?(calcPartnerFileMeta.usedHeaderName||('Столбец '+(calcPartnerFileMeta.weightCol+1))):'',
+    breakdown:breakdown.map(r=>({kg:r.kg,count:r.count,charge:Math.round(r.charge),margin:Math.round(r.margin)})),
+    author:(S.me&&(S.me.full_name||S.me.email))||'',
+  };
+  if(_cpRunIds[key]){
+    const u=await dbUpdate('calc_partner_runs',_cpRunIds[key],row);
+    if(!u)return;
+    calcPartnerRuns=(calcPartnerRuns||[]).map(r=>r.id===u.id?u:r);
+  }else{
+    const u=await dbInsert('calc_partner_runs',row);
+    if(!u)return;
+    _cpRunIds[key]=u.id;
+    calcPartnerRuns=[u,...(calcPartnerRuns||[])];
+  }
+  calcPartnerRunsRender();
+}
+// грид рисуется ОТДЕЛЬНО от всей вкладки: сохранение вызывается из перерисовки, и полная
+// перерисовка отсюда закрутила бы бесконечный круг «сохранил → нарисовал → сохранил».
+function calcPartnerRunsRender(){
+  const box=$('cpRunsBox');if(!box)return;
+  box.innerHTML=calcPartnerRunsHtml();
+  // список грузится один раз за сеанс, а расчёты прогоняют и коллеги — иначе свежие чужие
+  // прогоны появлялись бы только после перезагрузки страницы
+  box.querySelectorAll('.cp-runs-reload').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;b.textContent='Обновляю…';
+    calcPartnerRuns=null;calcPartnerRunsErr='';await calcPartnerRunsLoad();calcPartnerRunsRender();
+  });
+  box.querySelectorAll('[data-cprun]').forEach(tr=>tr.onclick=()=>calcPartnerRunOpen(tr.dataset.cprun));
+  box.querySelectorAll('[data-cprunxls]').forEach(b=>b.onclick=e=>{e.stopPropagation();calcPartnerRunExcel(b.dataset.cprunxls);});
+  box.querySelectorAll('[data-cprundel]').forEach(b=>b.onclick=e=>{e.stopPropagation();calcPartnerRunDelete(b.dataset.cprundel);});
+}
+function calcPartnerRunsHtml(){
+  const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  if(calcPartnerRuns==null){
+    return `<div class="panel calc-panel" style="margin-top:18px">
+      <h3 class="calc-h">Архив расчётов</h3>
+      <p class="calc-note">Складывать прогоны пока некуда: ${esc(calcPartnerRunsErr||'таблица недоступна')}.
+      Архив заработает, когда в базе появится таблица <b>calc_partner_runs</b> — файл <b>db/21</b>.
+      Сам расчёт выше от этого не зависит и считает как раньше.</p></div>`;
+  }
+  const rows=calcPartnerRuns;
+  return `<div class="panel calc-panel" style="margin-top:18px">
+    <h3 class="calc-h">Архив расчётов${rows.length?` (${rows.length})`:''} <button class="btn ghost sm cp-runs-reload" style="margin-left:8px">🔄 Обновить</button></h3>
+    <p class="calc-note">Каждый прогнанный файл ложится сюда сам — со ставками, которые действовали
+    в тот момент. Нажмите на строку, чтобы открыть разбивку по весу.${rows.length>=CALC_RUNS_LIMIT?` Показаны последние ${CALC_RUNS_LIMIT}.`:''}</p>
+    ${!rows.length?'<div class="hint">Пока ни одного прогона. Выберите партнёра и файл — расчёт сохранится сюда сам.</div>':`
+    <div class="table-scroll"><table class="resp-table calc-courier-tbl"><thead><tr>
+      <th>Когда</th><th>Партнёр</th><th>Файл</th><th>Заказов</th><th>К оплате партнёром</th><th>Наша прибыль</th><th>Кто считал</th><th></th>
+    </tr></thead><tbody>
+      ${rows.map(r=>`<tr data-cprun="${esc(r.id)}" style="cursor:pointer">
+        <td data-label="Когда">${esc(fmtDateTime(r.created_at))}</td>
+        <td data-label="Партнёр">${esc(r.partner_name||'—')}</td>
+        <td data-label="Файл">${esc(r.file_name||'—')}</td>
+        <td data-label="Заказов">${r.orders||0}</td>
+        <td data-label="К оплате партнёром">${fmtMoney(r.total_charge)}</td>
+        <td data-label="Наша прибыль" style="color:#2e7d32">${fmtMoney(r.total_margin)}</td>
+        <td data-label="Кто считал">${esc(r.author||'—')}</td>
+        <td data-label=""><button class="btn ghost sm" data-cprunxls="${esc(r.id)}">⬇ Excel</button>
+          ${can('calc','delete')?` <button class="btn danger sm" data-cprundel="${esc(r.id)}">🗑</button>`:''}</td>
+      </tr>`).join('')}
+    </tbody></table></div>`}
+  </div>`;
+}
+function calcPartnerRunOpen(id){
+  const r=(calcPartnerRuns||[]).find(x=>String(x.id)===String(id));if(!r)return;
+  const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  const bd=Array.isArray(r.breakdown)?r.breakdown:[];
+  showInfo(`Расчёт · ${r.partner_name||'партнёр'} · ${fmtDateTime(r.created_at)}`,`
+    <div class="hint" style="margin-bottom:12px">
+      Файл: <b>${esc(r.file_name||'—')}</b>${r.weight_col?` · столбец с весом: <b>${esc(r.weight_col)}</b>`:''}<br>
+      Ставки на момент расчёта: база <b>${fmtMoney(r.base_price)}</b> за первые ${CALC_PARTNER_BASE_WEIGHT} кг ·
+      наше с базы <b>${fmtMoney(r.base_margin)}</b> · надбавка партнёру за доп. кг <b>${fmtMoney(r.per_kg_charge)}</b> ·
+      наше с доп. кг <b>${fmtMoney(r.per_kg_margin)}</b><br>
+      <span style="color:var(--muted)">Ставки записаны снимком: если их с тех пор меняли, расчёт
+      всё равно показывает те, по которым считали и выставляли счёт.</span>
+    </div>
+    <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr><th>Вес (округлённо)</th><th>Заказов</th><th>К оплате партнёром</th><th>Наша прибыль</th></tr></thead>
+      <tbody>${bd.map(x=>`<tr><td>${x.kg} кг</td><td>${x.count}</td><td>${fmtMoney(x.charge)}</td><td style="color:#2e7d32">${fmtMoney(x.margin)}</td></tr>`).join('')}
+      <tr style="border-top:2px solid var(--line)"><td><b>Итого</b></td><td><b>${r.orders||0}</b></td><td><b>${fmtMoney(r.total_charge)}</b></td><td><b style="color:#2e7d32">${fmtMoney(r.total_margin)}</b></td></tr>
+      </tbody></table></div>`,{wide:true});
+}
+function calcPartnerRunExcel(id){
+  const r=(calcPartnerRuns||[]).find(x=>String(x.id)===String(id));if(!r)return;
+  // дата в имени файла — дата ПРОГОНА, а не сегодняшняя: выгрузка августовского расчёта,
+  // подписанная сегодняшним числом, потом никому ничего не докажет
+  calcPartnerExcel(r.partner_name,Array.isArray(r.breakdown)?r.breakdown:[],
+    {orders:r.orders||0,charge:r.total_charge||0,margin:r.total_margin||0},
+    String(r.created_at||'').slice(0,10)||localToday());
+}
+async function calcPartnerRunDelete(id){
+  const r=(calcPartnerRuns||[]).find(x=>String(x.id)===String(id));if(!r)return;
+  if(!confirm(`Удалить из архива расчёт «${r.partner_name||''}» от ${fmtDateTime(r.created_at)}?`))return;
+  if(!await dbDelete('calc_partner_runs',id))return;
+  calcPartnerRuns=(calcPartnerRuns||[]).filter(x=>String(x.id)!==String(id));
+  // ключ убираем, а отпечаток НЕ сбрасываем: со сброшенным следующая же перерисовка сочла бы
+  // текущий прогон новым и записала бы удалённое обратно
+  Object.keys(_cpRunIds).forEach(k=>{if(String(_cpRunIds[k])===String(id))delete _cpRunIds[k];});
+  toast('Удалено');calcPartnerRunsRender();
+}
+// одна выгрузка на два места — экран и архив: расходись они, в счёте партнёру и в архивной
+// копии стояли бы разные столбцы
+function calcPartnerExcel(name,rows,totals,stamp){
+  if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
+  const data=rows.map(r=>({'Вес (кг)':r.kg,'Заказов':r.count,'К оплате партнёром':Math.round(r.charge),'Наша прибыль':Math.round(r.margin)}));
+  data.push({'Вес (кг)':'Итого','Заказов':totals.orders,'К оплате партнёром':Math.round(totals.charge),'Наша прибыль':Math.round(totals.margin)});
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:14},{wch:12},{wch:20},{wch:16}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Расчёт');
+  XLSX.writeFile(wb,`Расчёт_${String(name||'партнёр').replace(/[^\wа-яА-ЯёЁ]+/g,'_')}_${stamp||localToday()}.xlsx`);
+}
 async function renderCalcPartner(){
   if(_calcGlobalPerKg==null)await loadCalcGlobalPerKg();
+  // повторно не спрашиваем, если таблицы нет: иначе запрос уходил бы на каждую перерисовку
+  if(calcPartnerRuns==null&&!calcPartnerRunsErr)await calcPartnerRunsLoad();
   let calcPartnersLoadError='';
   if(!S.calc_partners){
     $('calcContent').innerHTML='<div class="empty"><div class="big">Загрузка…</div></div>';
@@ -635,7 +806,8 @@ async function renderCalcPartner(){
         <tr style="border-top:2px solid var(--line)"><td><b>Итого</b></td><td><b>${totalOrders}</b></td><td><b>${fmtMoney(totalCharge)}</b></td><td><b style="color:#2e7d32">${fmtMoney(totalMargin)}</b></td></tr>
         </tbody></table></div>
       <div style="margin-top:12px"><button class="btn btn-excel sm" id="cpExport">⬇ Выгрузить в Excel</button></div>
-    </div>`:''}`;
+    </div>`:''}
+    <div id="cpRunsBox"></div>`;
   if($('cpPartner'))$('cpPartner').onchange=e=>{calcPartnerId=e.target.value;renderCalcPartner();};
   if($('cpPerKg'))$('cpPerKg').onchange=async e=>{
     const ok2=await saveCalcGlobalPerKg(e.target.value);
@@ -655,6 +827,9 @@ async function renderCalcPartner(){
   if($('cpFile'))$('cpFile').onchange=e=>{
     const file=e.target.files&&e.target.files[0];if(!file)return;
     calcPartnerFileError='';calcPartnerFileMeta=null;
+    // выбрали файл заново — это НОВЫЙ прогон, даже если файл тот же: прошлый в архиве
+    // остаётся как был, а не затирается свежими числами
+    _cpRunIds={};_cpRunSig='';
     calcPartnerParseFile(file,(weights,error,meta)=>{
       if(error){calcPartnerFileError=error;calcPartnerWeights=null;calcPartnerFileName='';calcPartnerFileMeta=null;}
       else{calcPartnerWeights=weights;calcPartnerFileName=file.name;calcPartnerFileMeta=meta;}
@@ -675,16 +850,14 @@ async function renderCalcPartner(){
     };
     renderCalcPartner();
   };
-  if($('cpExport'))$('cpExport').onclick=()=>{
-    if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
-    const data=breakdown.map(r=>({'Вес (кг)':r.kg,'Заказов':r.count,'К оплате партнёром':Math.round(r.charge),'Наша прибыль':Math.round(r.margin)}));
-    data.push({'Вес (кг)':'Итого','Заказов':totalOrders,'К оплате партнёром':Math.round(totalCharge),'Наша прибыль':Math.round(totalMargin)});
-    const ws=XLSX.utils.json_to_sheet(data);
-    ws['!cols']=[{wch:14},{wch:12},{wch:20},{wch:16}];
-    const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,'Расчёт');
-    XLSX.writeFile(wb,`Расчёт_${(partner.name||'партнёр').replace(/[^\wа-яА-ЯёЁ]+/g,'_')}_${localToday()}.xlsx`);
-  };
+  if($('cpExport'))$('cpExport').onclick=()=>
+    calcPartnerExcel(partner.name,breakdown,{orders:totalOrders,charge:totalCharge,margin:totalMargin});
+  // грид архива и автосохранение — в самом конце, когда разметка уже на месте
+  calcPartnerRunsRender();
+  if(partner&&breakdown.length){
+    const sig=calcPartnerRunSig(partner,breakdown);
+    if(sig!==_cpRunSig){_cpRunSig=sig;calcPartnerSaveRun(partner,breakdown,{orders:totalOrders,charge:totalCharge,margin:totalMargin});}
+  }
 }
 // форма партнёра ИМЕННО для «Расчёта партнёра» — свой отдельный список (calc_partners),
 // никак не связанный с обычными партнёрами CRM
