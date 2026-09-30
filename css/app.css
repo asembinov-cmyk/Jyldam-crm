@@ -1594,6 +1594,11 @@ td .ft-dot{margin:0 0 0 8px}
      оставалось меньше половины экрана. Отдаём содержимому больше. */
   .resp-table td::before{flex:0 0 36%}
   .resp-table td{padding:11px 14px;font-size:14px}
+  /* Выпадающий список ВНУТРИ строки таблицы: в «Расчёте партнёра» пачкой файлов
+     партнёр и столбец веса выбираются прямо в строке, а правила выше ловят только
+     .field и .filters — такой select оставался 19 px с 13-м шрифтом, то есть и мимо
+     пальца, и с зумом от iOS при касании. */
+  .resp-table td select{font-size:16px;min-height:44px;max-width:100%}
   /* Пагинация была столбиком: три этажа кнопок, 110 px экрана и 150 px
      отступа под ними. Возвращаем в строку с нормальными кнопками. */
   .orders-pager{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:8px}

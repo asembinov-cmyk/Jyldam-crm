@@ -450,6 +450,19 @@ function calcPartnerOrderCharge(weight,partner,perKgCharge){
   const margin=(parseFloat(partner.base_margin)||0)+extraKg*(parseFloat(partner.per_kg_margin)||0);
   return {totalKg,extraKg,charge,margin};
 }
+// Сводит веса одного файла в разбивку по килограммам. ОДНА функция на оба режима —
+// одиночный файл и пачку: разойдись они, в счёте партнёру и в сводке по пачке стояли бы
+// разные числа по одному и тому же файлу.
+function calcPartnerTotals(weights,partner){
+  const byKg={};let orders=0,charge=0,margin=0;
+  (weights||[]).forEach(w=>{
+    const r=calcPartnerOrderCharge(w,partner,_calcGlobalPerKg);
+    if(!byKg[r.totalKg])byKg[r.totalKg]={kg:r.totalKg,count:0,charge:0,margin:0};
+    byKg[r.totalKg].count++;byKg[r.totalKg].charge+=r.charge;byKg[r.totalKg].margin+=r.margin;
+    orders++;charge+=r.charge;margin+=r.margin;
+  });
+  return {breakdown:Object.values(byKg).sort((a,b)=>a.kg-b.kg),orders,charge,margin};
+}
 // читает файл (xlsx/csv/xls) — ищет столбец с весом по названию заголовка (вес/kg/weight),
 // если не нашли по названию — берёт столбец, где большинство значений похожи на числа В
 // РАЗУМНЫХ ДЛЯ ВЕСА ГРАНИЦАХ (0.05–200 кг) — чтобы случайно не схватить № заказа/телефон/сумму.
@@ -544,6 +557,195 @@ function calcPartnerWeightsFromCol(meta,col){
   }
   return weights;
 }
+// ==================== ПАЧКА ФАЙЛОВ ====================
+// Реестры приходят за месяц пачкой, и по одному их прогонять — тридцать заходов в одну и
+// ту же вкладку. Теперь файлы выбираются все сразу: каждый считается отдельно (сводить их
+// в одну сумму нельзя — у партнёров разные ставки, да и счёт выставляется по файлу), а на
+// экране сводка строкой на файл и кнопка «сохранить всё в архив».
+//
+// ПАРТНЁР УГАДЫВАЕТСЯ ПО ИМЕНИ ФАЙЛА и его можно поправить в самой строке. Так же сделано
+// в загрузке заказов из Excel (js/17): реестры называют по партнёру — «Казпочта 25.09.xls».
+// Не угадался — берётся тот, что выбран сверху: тридцать файлов ОДНОГО партнёра тогда
+// разбираются одним выбором, ничего не тыкая по строкам.
+//
+// ПАЧКА В АРХИВ САМА НЕ УХОДИТ, в отличие от одиночного файла, и это не забывчивость:
+// там партнёра выбрал человек, а здесь его угадала программа по имени файла. Тридцать
+// записей с чужим партнёром потом разгребать руками, поэтому сначала таблица на проверку,
+// потом кнопка.
+let calcPartnerBatch=null;      // [{name,weights,meta,error,partnerId,runId,savedSig}]
+let calcPartnerBatchBusy='';    // текст прогресса: чтение и сохранение идут по одному файлу
+const calcPartnerParseOne=file=>new Promise(res=>
+  calcPartnerParseFile(file,(weights,error,meta)=>res({weights,error,meta})));
+// партнёр по имени файла; из совпавших берём САМОЕ ДЛИННОЕ название — иначе «Казпочта»
+// перебивала бы «Казпочта Астана» и счёт ушёл бы по чужим ставкам
+function calcPartnerBatchGuess(fileName){
+  const f=normName(fileName);
+  const hit=(S.calc_partners||[]).filter(p=>p.name&&f.includes(normName(p.name)))
+    .sort((a,b)=>normName(b.name).length-normName(a.name).length)[0];
+  return hit?hit.id:(calcPartnerId||'');
+}
+async function calcPartnerReadBatch(files){
+  calcPartnerBatch=[];
+  // одиночный режим и пачка — разные экраны: иначе под сводкой висел бы итог от прошлого файла
+  calcPartnerWeights=null;calcPartnerFileName='';calcPartnerFileMeta=null;calcPartnerFileError='';
+  for(let i=0;i<files.length;i++){
+    calcPartnerBatchBusy=`Читаю файл ${i+1} из ${files.length}: ${files[i].name}`;
+    calcPartnerBatchRender();
+    // отдаём кадр браузеру: без этого тридцать файлов читаются с наглухо замершим экраном
+    await new Promise(r=>setTimeout(r,0));
+    const {weights,error,meta}=await calcPartnerParseOne(files[i]);
+    calcPartnerBatch.push({name:files[i].name,weights:error?null:weights,meta:meta||null,
+      error:error||'',partnerId:calcPartnerBatchGuess(files[i].name),runId:null,savedSig:''});
+  }
+  calcPartnerBatchBusy='';
+  calcPartnerBatchRender();
+}
+// расчёт одной строки пачки; null — считать нечем (нет партнёра или файл не прочитался)
+function calcPartnerBatchCalc(row){
+  const p=(S.calc_partners||[]).find(x=>x.id===row.partnerId);
+  if(!p||!row.weights||!row.weights.length)return null;
+  const t=calcPartnerTotals(row.weights,p);
+  return {partner:p,breakdown:t.breakdown,orders:t.orders,charge:t.charge,margin:t.margin};
+}
+// что ещё не в архиве ИЛИ изменилось после сохранения (поправили партнёра, столбец, надбавку).
+// Отпечаток тот же, что в одиночном режиме, — повторное нажатие кнопки дублей не делает.
+function calcPartnerBatchPending(){
+  return (calcPartnerBatch||[]).filter(r=>{
+    const c=calcPartnerBatchCalc(r);
+    return c&&calcPartnerRunSig(c.partner,c.breakdown,r.name)!==r.savedSig;
+  });
+}
+async function calcPartnerSaveBatch(){
+  if(calcPartnerRuns==null){toast('Архив недоступен — сначала выполните db/21');return;}
+  const todo=calcPartnerBatchPending();
+  if(!todo.length)return;
+  let done=0,fail=0;
+  for(let i=0;i<todo.length;i++){
+    const row=todo[i],c=calcPartnerBatchCalc(row);
+    if(!c)continue;
+    calcPartnerBatchBusy=`Сохраняю в архив: ${i+1} из ${todo.length}`;
+    calcPartnerBatchRender();
+    await new Promise(r=>setTimeout(r,0));
+    const saved=await calcPartnerSaveRun(c.partner,c.breakdown,{orders:c.orders,charge:c.charge,margin:c.margin},
+      {fileName:row.name,meta:row.meta,runId:row.runId||null});
+    if(saved){row.runId=saved.id;row.savedSig=calcPartnerRunSig(c.partner,c.breakdown,row.name);done++;}
+    else fail++;
+  }
+  calcPartnerBatchBusy='';
+  calcPartnerBatchRender();
+  toast(fail?`В архив ушло ${done}, не удалось ${fail}`:`В архив сохранено расчётов: ${done}`);
+}
+// свод по пачке — строка на файл. Ради него пачку и делают: по нему выставляют счёта,
+// а не по тридцати открытым по очереди карточкам
+function calcPartnerBatchExcel(){
+  const data=(calcPartnerBatch||[]).map(r=>{
+    const c=calcPartnerBatchCalc(r);
+    return {'Файл':r.name,'Партнёр':c?c.partner.name:'—','Заказов':c?c.orders:0,
+      'К оплате партнёром':c?Math.round(c.charge):0,'Наша прибыль':c?Math.round(c.margin):0,
+      'Примечание':r.error?r.error:(c?'':'не выбран партнёр')};
+  });
+  const t=calcPartnerBatchSum();
+  data.push({'Файл':'Итого','Партнёр':'','Заказов':t.orders,'К оплате партнёром':Math.round(t.charge),
+    'Наша прибыль':Math.round(t.margin),'Примечание':''});
+  if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:38},{wch:20},{wch:10},{wch:20},{wch:16},{wch:28}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Свод по файлам');
+  XLSX.writeFile(wb,`Свод_расчётов_${localToday()}.xlsx`);
+}
+function calcPartnerBatchSum(calcs){
+  calcs=calcs||(calcPartnerBatch||[]).map(calcPartnerBatchCalc);
+  let orders=0,charge=0,margin=0,ready=0;
+  calcs.forEach(c=>{if(c){orders+=c.orders;charge+=c.charge;margin+=c.margin;ready++;}});
+  return {orders,charge,margin,ready};
+}
+// как и грид архива, рисуется ОТДЕЛЬНО: иначе перерисовка при каждом прочитанном файле
+// сбрасывала бы выбор в <input type=file> и прогресс некуда было бы показывать
+function calcPartnerBatchRender(){
+  const box=$('cpBatchBox');if(!box)return;
+  box.innerHTML=calcPartnerBatchHtml();
+  box.querySelectorAll('[data-cpbpartner]').forEach(sel=>sel.onchange=e=>{
+    calcPartnerBatch[+sel.dataset.cpbpartner].partnerId=e.target.value;calcPartnerBatchRender();});
+  box.querySelectorAll('[data-cpbcol]').forEach(sel=>sel.onchange=e=>{
+    const row=calcPartnerBatch[+sel.dataset.cpbcol],col=parseInt(e.target.value,10);
+    const w=calcPartnerWeightsFromCol(row.meta,col);
+    if(!w.length){toast('В этом столбце не нашлось весов больше 0');calcPartnerBatchRender();return;}
+    row.weights=w;
+    row.meta=Object.assign({},row.meta,{weightCol:col,autoDetected:true,
+      usedHeaderName:row.meta.headerRow[col]||('Столбец '+(col+1)),
+      avgWeight:w.reduce((a,b)=>a+b,0)/w.length,maxWeight:Math.max(...w),sample:w.slice(0,5)});
+    calcPartnerBatchRender();
+  });
+  if(box.querySelector('#cpbSave'))box.querySelector('#cpbSave').onclick=()=>calcPartnerSaveBatch();
+  if(box.querySelector('#cpbExcel'))box.querySelector('#cpbExcel').onclick=()=>calcPartnerBatchExcel();
+  if(box.querySelector('#cpbClear'))box.querySelector('#cpbClear').onclick=()=>{
+    calcPartnerBatch=null;calcPartnerBatchBusy='';renderCalcPartner();};
+}
+function calcPartnerBatchHtml(){
+  if(!calcPartnerBatch)return '';
+  const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  // расчёт по каждому файлу — РОВНО ОДИН раз на отрисовку: считать его заново в каждой
+  // строке значит тридцать раз пройти по всем весам всех файлов
+  const calcs=calcPartnerBatch.map(calcPartnerBatchCalc);
+  const t=calcPartnerBatchSum(calcs);
+  const fresh=calcPartnerBatch.map((r,i)=>!!calcs[i]&&calcPartnerRunSig(calcs[i].partner,calcs[i].breakdown,r.name)===r.savedSig);
+  const pending=calcs.filter((c,i)=>c&&!fresh[i]).length;
+  const partnersSorted=[...(S.calc_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const busy=!!calcPartnerBatchBusy;
+  const rowHtml=(r,i)=>{
+    const c=calcs[i];
+    const inArchive=!!r.runId&&fresh[i];
+    const heavy=r.meta&&r.meta.avgWeight>50;
+    let status='';
+    if(r.error)status=`<span style="color:var(--rust)">${esc(r.error)}</span>`;
+    else if(!r.partnerId)status='<span style="color:var(--rust)">выберите партнёра</span>';
+    else if(inArchive)status='<span style="color:#2e7d32">в архиве ✓</span>';
+    else status='<span style="color:var(--muted)">готов к сохранению</span>';
+    if(heavy)status+=`<br><span style="color:var(--rust)" title="Похоже, распознан не тот столбец">⚠️ средний вес ${r.meta.avgWeight.toFixed(0)} кг</span>`;
+    return `<tr>
+      <td data-label="Файл">${esc(r.name)}</td>
+      <td data-label="Партнёр"><select data-cpbpartner="${i}"${busy?' disabled':''}>
+        <option value="">— не выбран —</option>
+        ${partnersSorted.map(p=>`<option value="${p.id}" ${r.partnerId===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
+      </select></td>
+      <td data-label="Столбец веса">${r.meta?`<select data-cpbcol="${i}"${busy?' disabled':''}>
+        ${r.meta.headerRow.map((h,ci)=>`<option value="${ci}" ${ci===r.meta.weightCol?'selected':''}>${esc(h||('Столбец '+(ci+1)))}</option>`).join('')}
+      </select>`:'—'}</td>
+      <td data-label="Заказов">${c?c.orders:'—'}</td>
+      <td data-label="Средний вес">${r.meta?r.meta.avgWeight.toFixed(2)+' кг':'—'}</td>
+      <td data-label="К оплате партнёром">${c?fmtMoney(c.charge):'—'}</td>
+      <td data-label="Наша прибыль" style="color:#2e7d32">${c?fmtMoney(c.margin):'—'}</td>
+      <td data-label="Состояние">${status}</td>
+    </tr>`;
+  };
+  return `<div class="panel calc-panel" style="margin-bottom:18px">
+    <h3 class="calc-h">Пачка файлов (${calcPartnerBatch.length})</h3>
+    <p class="calc-note">Каждый файл считается ОТДЕЛЬНО и попадает в архив своей строкой: ставки у
+    партнёров разные, да и счёт выставляется по файлу — складывать их в одну сумму нельзя.
+    Партнёр подставлен по имени файла, а где не угадался — взят выбранный сверху; поправьте прямо в строке.</p>
+    ${busy?`<div class="hint" style="margin-bottom:10px">⏳ ${esc(calcPartnerBatchBusy)}</div>`:''}
+    <div class="stats stats-4" style="margin:10px 0">
+      <div class="stat"><div class="k">Файлов посчитано</div><div class="v">${t.ready} из ${calcPartnerBatch.length}</div></div>
+      <div class="stat"><div class="k">Заказов всего</div><div class="v">${t.orders}</div></div>
+      <div class="stat"><div class="k">К оплате всего</div><div class="v">${fmtMoney(t.charge)}</div></div>
+      <div class="stat"><div class="k">Наша прибыль всего</div><div class="v" style="color:#2e7d32">${fmtMoney(t.margin)}</div></div>
+    </div>
+    <div class="table-scroll"><table class="resp-table calc-courier-tbl"><thead><tr>
+      <th>Файл</th><th>Партнёр</th><th>Столбец веса</th><th>Заказов</th><th>Средний вес</th><th>К оплате партнёром</th><th>Наша прибыль</th><th>Состояние</th>
+    </tr></thead><tbody>${calcPartnerBatch.map(rowHtml).join('')}
+      <tr style="border-top:2px solid var(--line)"><td data-label=""><b>Итого</b></td><td data-label=""></td><td data-label=""></td>
+        <td data-label="Заказов"><b>${t.orders}</b></td><td data-label=""></td>
+        <td data-label="К оплате партнёром"><b>${fmtMoney(t.charge)}</b></td>
+        <td data-label="Наша прибыль"><b style="color:#2e7d32">${fmtMoney(t.margin)}</b></td><td data-label=""></td></tr>
+    </tbody></table></div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn" id="cpbSave"${busy||!pending?' disabled':''}>${pending?`💾 Сохранить в архив (${pending})`:'💾 Всё в архиве'}</button>
+      <button class="btn btn-excel sm" id="cpbExcel"${busy?' disabled':''}>⬇ Свод в Excel</button>
+      <button class="btn ghost sm" id="cpbClear"${busy?' disabled':''}>✕ Убрать пачку</button>
+    </div>
+  </div>`;
+}
 // ==================== АРХИВ ПРОГОНОВ ====================
 // Прогнали файл — расчёт остался. До этого он жил ровно до обновления страницы: закрыл
 // вкладку — и нечем ни свериться с партнёром, ни объяснить, откуда взялась сумма в счёте.
@@ -579,22 +781,29 @@ async function calcPartnerRunsLoad(){
 // отпечаток прогона: по нему видно, изменился ли расчёт с прошлого сохранения. Без него
 // каждая перерисовка (а их много — Realtime, смена периода, возврат во вкладку) писала бы
 // в архив ещё одну копию того же самого.
-function calcPartnerRunSig(partner,breakdown){
-  return [partner.id,calcPartnerFileName,_calcGlobalPerKg,partner.base_price,partner.base_margin,
+function calcPartnerRunSig(partner,breakdown,fileName){
+  return [partner.id,fileName!=null?fileName:calcPartnerFileName,_calcGlobalPerKg,partner.base_price,partner.base_margin,
     partner.per_kg_margin,breakdown.map(r=>r.kg+':'+r.count).join(',')].join('|');
 }
 // Сохраняет прогон: ОДНА строка на «партнёр + загруженный файл». Поправили столбец с весом
 // или надбавку — та же строка обновляется, а не появляется вторая: иначе в архиве осели бы
 // промежуточные, заведомо неверные попытки, и найти среди них настоящий расчёт было бы
 // нельзя. Выбрали заново файл — это новый прогон, ключи сбрасываются.
-async function calcPartnerSaveRun(partner,breakdown,totals){
-  if(calcPartnerRuns==null)return; // архива нет — молча, расчёт важнее
-  const key=partner.id+'|'+calcPartnerFileName;
+// opts.runId — правим КОНКРЕТНУЮ строку архива: пачка ведёт id по каждому файлу сама.
+// Без opts строка ищется в _cpRunIds по «партнёр|файл» — это одиночный режим.
+async function calcPartnerSaveRun(partner,breakdown,totals,opts){
+  if(calcPartnerRuns==null)return null; // архива нет — молча, расчёт важнее
+  opts=opts||{};
+  const keyed=opts.runId===undefined;
+  const fileName=opts.fileName!=null?opts.fileName:calcPartnerFileName;
+  const meta=opts.meta!==undefined?opts.meta:calcPartnerFileMeta;
+  const key=partner.id+'|'+fileName;
+  const runId=keyed?_cpRunIds[key]:opts.runId;
   const num=v=>v!=null&&v!==''?parseFloat(v):null;
   const row={
     partner_id:String(partner.id),
     partner_name:partner.name||'',
-    file_name:calcPartnerFileName||'',
+    file_name:fileName||'',
     orders:totals.orders,
     total_charge:Math.round(totals.charge),
     total_margin:Math.round(totals.margin),
@@ -602,21 +811,23 @@ async function calcPartnerSaveRun(partner,breakdown,totals){
     base_price:num(partner.base_price),
     base_margin:num(partner.base_margin),
     per_kg_margin:num(partner.per_kg_margin),
-    weight_col:calcPartnerFileMeta?(calcPartnerFileMeta.usedHeaderName||('Столбец '+(calcPartnerFileMeta.weightCol+1))):'',
+    weight_col:meta?(meta.usedHeaderName||('Столбец '+(meta.weightCol+1))):'',
     breakdown:breakdown.map(r=>({kg:r.kg,count:r.count,charge:Math.round(r.charge),margin:Math.round(r.margin)})),
     author:(S.me&&(S.me.full_name||S.me.email))||'',
   };
-  if(_cpRunIds[key]){
-    const u=await dbUpdate('calc_partner_runs',_cpRunIds[key],row);
-    if(!u)return;
-    calcPartnerRuns=(calcPartnerRuns||[]).map(r=>r.id===u.id?u:r);
+  let saved;
+  if(runId){
+    saved=await dbUpdate('calc_partner_runs',runId,row);
+    if(!saved)return null;
+    calcPartnerRuns=(calcPartnerRuns||[]).map(r=>r.id===saved.id?saved:r);
   }else{
-    const u=await dbInsert('calc_partner_runs',row);
-    if(!u)return;
-    _cpRunIds[key]=u.id;
-    calcPartnerRuns=[u,...(calcPartnerRuns||[])];
+    saved=await dbInsert('calc_partner_runs',row);
+    if(!saved)return null;
+    calcPartnerRuns=[saved,...(calcPartnerRuns||[])];
   }
+  if(keyed)_cpRunIds[key]=saved.id;
   calcPartnerRunsRender();
+  return saved;
 }
 // грид рисуется ОТДЕЛЬНО от всей вкладки: сохранение вызывается из перерисовки, и полная
 // перерисовка отсюда закрутила бы бесконечный круг «сохранил → нарисовал → сохранил».
@@ -733,14 +944,8 @@ async function renderCalcPartner(){
   // сам расчёт — если партнёр выбран и файл загружен
   let breakdown=[],totalOrders=0,totalCharge=0,totalMargin=0;
   if(partner&&calcPartnerWeights&&calcPartnerWeights.length){
-    const byKg={};
-    calcPartnerWeights.forEach(w=>{
-      const r=calcPartnerOrderCharge(w,partner,_calcGlobalPerKg);
-      if(!byKg[r.totalKg])byKg[r.totalKg]={kg:r.totalKg,count:0,charge:0,margin:0};
-      byKg[r.totalKg].count++;byKg[r.totalKg].charge+=r.charge;byKg[r.totalKg].margin+=r.margin;
-      totalOrders++;totalCharge+=r.charge;totalMargin+=r.margin;
-    });
-    breakdown=Object.values(byKg).sort((a,b)=>a.kg-b.kg);
+    const t=calcPartnerTotals(calcPartnerWeights,partner);
+    breakdown=t.breakdown;totalOrders=t.orders;totalCharge=t.charge;totalMargin=t.margin;
   }
   $('calcContent').innerHTML=`
     <div class="panel calc-panel" style="margin-bottom:18px">
@@ -768,8 +973,8 @@ async function renderCalcPartner(){
       <h3 class="calc-h">Файл с заказами</h3>
       <p class="calc-note">Excel/CSV с одной строкой на заказ — нужен хотя бы один столбец с весом в кг (в идеале с заголовком «Вес»).</p>
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <input type="file" id="cpFile" accept=".xlsx,.xls,.csv">
-        <span class="hint" style="font-size:12px">(можно выбрать файл заранее, партнёр нужен только для самого расчёта)</span>
+        <input type="file" id="cpFile" accept=".xlsx,.xls,.csv" multiple>
+        <span class="hint" style="font-size:12px">(можно выбрать СРАЗУ НЕСКОЛЬКО файлов — каждый посчитается отдельной строкой; партнёр нужен только для самого расчёта)</span>
         ${calcPartnerFileName?`<span class="wh-cat">${esc(calcPartnerFileName)} — ${calcPartnerWeights?calcPartnerWeights.length+' заказов':''}</span>`:''}
       </div>
       ${!partner?'<div class="hint" style="margin-top:8px;color:var(--rust)">Сначала выберите или добавьте партнёра</div>':''}
@@ -786,6 +991,7 @@ async function renderCalcPartner(){
         </div>
       </div>`:''}
     </div>
+    <div id="cpBatchBox"></div>
     ${(calcPartnerFileMeta&&calcPartnerFileMeta.avgWeight>50)?`<div class="panel calc-panel" style="margin-bottom:18px;border-color:var(--rust)">
       <p class="calc-note" style="color:var(--rust)">⚠️ Средний вес получился ${calcPartnerFileMeta.avgWeight.toFixed(0)} кг — это очень много для обычных посылок. Похоже, распознан не тот столбец (например, номер заказа или сумма вместо веса). Проверьте выбор столбца выше.</p>
     </div>`:''}
@@ -825,7 +1031,11 @@ async function renderCalcPartner(){
     toast('Удалено');renderCalcPartner();
   };
   if($('cpFile'))$('cpFile').onchange=e=>{
-    const file=e.target.files&&e.target.files[0];if(!file)return;
+    const files=e.target.files?[...e.target.files]:[];
+    if(!files.length)return;
+    if(files.length>1){calcPartnerReadBatch(files);return;}
+    const file=files[0];
+    calcPartnerBatch=null; // вернулись к одному файлу — сводка по пачке не про него
     calcPartnerFileError='';calcPartnerFileMeta=null;
     // выбрали файл заново — это НОВЫЙ прогон, даже если файл тот же: прошлый в архиве
     // остаётся как был, а не затирается свежими числами
@@ -852,7 +1062,8 @@ async function renderCalcPartner(){
   };
   if($('cpExport'))$('cpExport').onclick=()=>
     calcPartnerExcel(partner.name,breakdown,{orders:totalOrders,charge:totalCharge,margin:totalMargin});
-  // грид архива и автосохранение — в самом конце, когда разметка уже на месте
+  // пачка и грид архива — в самом конце, когда разметка уже на месте
+  calcPartnerBatchRender();
   calcPartnerRunsRender();
   if(partner&&breakdown.length){
     const sig=calcPartnerRunSig(partner,breakdown);
