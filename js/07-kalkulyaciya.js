@@ -1570,6 +1570,7 @@ function renderCalcSummary(){
       <select id="calcSumYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${calcSummaryMonth.year===y?'selected':''}>${y}</option>`;return o;})()}</select>
       <span class="calc-sum-cnt">Заказов: <b>${mainCalcs.length}</b>${
         barSum.cnt?` · Барахолка <b>${barSum.cnt}</b>`:''}</span>
+      <span class="calc-sum-cnt" style="opacity:.7">месяц — по дате забора</span>
     </div>
     ${barSum.cnt?'<h3 class="calc-h" style="margin:0 0 10px">Обычные заказы</h3>':''}
     <div class="calc-totals">
