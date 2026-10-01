@@ -566,19 +566,19 @@ function renderOrders(mode){
   // разделитель «· за период».
   const subText=isCourier()?'Отправления: курьерская и почтовая доставка'
     :(bar?'':[subs[ordersMode]||'',dayNote].filter(Boolean).join(' · '));
+  // Шапка — общая `moduleHead` (js/01-yadro.js), такая же в «Заявках на забор»:
+  // главное число — сумма доставки, остальные справа. В «Курьерской» и «Почтовой» разбивки
+  // по типу доставки нет: там он один и тот же у всех строк, цифра была бы бессмысленной.
+  const oneType=ordersMode==='courier'||ordersMode==='mail';
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>${head}</h1>${subText?`<p>${subText}</p>`:''}</div>
-      <div class="head-actions">${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
-    ${(ordersMode==='courier'||ordersMode==='mail')?`
-    <div class="stats stats-1">
-      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
-    </div>`:`
-    <div class="stats stats-4">
-      <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
-      <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
-      <div class="stat"><div class="k">Почтовых</div><div class="v">${list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length}</div></div>
-      <div class="stat"><div class="k">Сумма доставки</div><div class="v">${totalCost.toLocaleString('ru-RU')}<small> ₸</small></div></div>
-    </div>`}
+    ${moduleHead({title:head,sub:subText,
+      actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
+      hero:{k:'Сумма доставки',v:totalCost.toLocaleString('ru-RU'),unit:'₸'},
+      stats:[
+        {v:`${list.length}<small> / ${ordersWithPhone(list)}</small>`,k:'всего · сохранено'},
+        oneType?null:{v:list.filter(o=>isCourierDelivery(o.delivery_id)).length,k:'курьерских'},
+        oneType?null:{v:list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length,k:'почтовых'},
+      ]})}
     <div class="panel">
       <div class="panel-head"><h2>Список заказов</h2><span class="count" id="ordersCount">${list.length}</span></div>
       <div class="filters">

@@ -42,19 +42,17 @@ function renderPickups(){
   const collectedCount=list.filter(p=>isCollectedStatus(p.status_id)).length;
   const head=isCourier()?'Мои заборы':'Заявки на забор';
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>${head}</h1><p>Карточки забора посылок из магазинов-партнёров</p></div>
-      <div class="head-actions">
-        ${(typeof Notification!=='undefined'&&Notification.permission==='default')?'<button class="btn ghost" id="pkNotifyEnable">🔔 Включить уведомления</button>':''}
-        
-        ${(can('pickups','create')&&!isCourier())?`<button class="btn primary" id="newPickup">＋ Создать карточку забора</button>`:''}
-      </div>
-    </div>
-    <div class="stats">
-      <div class="stat"><div class="stat-ic">${ICONS.pickups}</div><div class="stat-body"><div class="k">Собрано заявок</div><div class="v">${collectedCount}<small> / ${list.length}</small></div></div></div>
-      <div class="stat"><div class="stat-ic">${ICONS.orders}</div><div class="stat-body"><div class="k">Собрано заказов</div><div class="v">${totalOrders}</div></div></div>
-      <div class="stat"><div class="stat-ic">${ICONS.today}</div><div class="stat-body"><div class="k">Сегодня</div><div class="v">${list.filter(p=>p.pickup_date===today).length}</div></div></div>
-      ${!isCourier()?`<div class="stat ${pf.qr?'stat-active':''}" id="pkQrStat" style="cursor:pointer" title="Показать только заявки, пришедшие от партнёров"><div class="stat-ic">${ICONS.handshake}</div><div class="stat-body"><div class="k">Заявки по QR</div><div class="v">${list.filter(p=>p.partner_id).length}</div></div></div>`:''}
-    </div>
+    ${moduleHead({title:head,sub:'Карточки забора посылок из магазинов-партнёров',
+      actions:`${(typeof Notification!=='undefined'&&Notification.permission==='default')?'<button class="btn ghost" id="pkNotifyEnable">🔔 Включить уведомления</button>':''}${(can('pickups','create')&&!isCourier())?`<button class="btn primary" id="newPickup">＋ Создать карточку забора</button>`:''}`,
+      // Главное число — заказы: заявка это обещание «у меня N заказов», и объём работы
+      // считается в них, а не в карточках.
+      hero:{k:'Собрано заказов',v:totalOrders},
+      stats:[
+        {v:`${collectedCount}<small> / ${list.length}</small>`,k:'заявок собрано',id:'pkCollected'},
+        {v:list.filter(p=>p.pickup_date===today).length,k:'сегодня'},
+        isCourier()?null:{v:list.filter(p=>p.partner_id).length,k:'по QR',id:'pkQrStat',click:true,
+          active:!!pf.qr,title:'Показать только заявки, пришедшие от партнёров'},
+      ]})}
     <div class="panel">
       <div class="panel-head"><h2>Карточки забора</h2><span class="count" id="pickupsCount">${list.length}</span></div>
       <div class="filters">
@@ -378,12 +376,14 @@ async function setPickupStatus(id,statusId){
     logAction('status','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:[{field:'status_id',label:'Статус',old:logFieldValue('status_id',oldS),new:logFieldValue('status_id',statusId)}]});
     toast('Статус обновлён');drawPickups();updateCollectedStat();}
 }
-// точечно обновляет число в плашке «Собрано заявок» без полной перерисовки
+// точечно обновляет число в плашке «заявок собрано» без полной перерисовки.
+// Ищем по id, а не «первую плашку по порядку»: порядок меняется от правки вёрстки, и
+// молча обновлялась бы чужая цифра.
 function updateCollectedStat(){
   const list=filteredPickups();
   const collected=list.filter(p=>isCollectedStatus(p.status_id)).length;
-  const stats=document.querySelectorAll('.stats .stat');
-  if(stats[0]){const v=stats[0].querySelector('.v');if(v)v.innerHTML=`${collected}<small> / ${list.length}</small>`;}
+  const box=$('pkCollected');const v=box&&box.querySelector('b');
+  if(v)v.innerHTML=`${collected}<small> / ${list.length}</small>`;
 }
 
 /* ---------- ФОТО ЗАЯВКИ: рендер блока и обработчики ---------- */

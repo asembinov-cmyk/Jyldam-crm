@@ -887,3 +887,35 @@ const callSetPassword=payload=>callEdge('set-password',payload);
 
 // смена телефона/email (логина) сотрудника через Edge Function update-user (только для админа)
 const callUpdateUser=payload=>callEdge('update-user',payload);
+
+/* ================= ШАПКА МОДУЛЯ ================= */
+// Одна шапка на «Заказы заборов», «Курьерскую», «Почтовую», «Барахолку» и «Заявки на забор»:
+// название и кнопки в белой карточке, под ними синяя плашка с ГЛАВНЫМ числом слева и
+// остальными справа через разделители. Вид нарисовал владелец 02.10.2026 и попросил
+// одинаковый во всех пяти разделах — поэтому собирается ОДНОЙ функцией, а не копией
+// разметки в каждом модуле: разойдутся они на первой же правке.
+//
+// hero  — {k:подпись, v:число/строка, unit:'₸'}, главное число слева.
+// stats — [{v, k, id?, click?, active?, title?}], мелкие справа. id — просто якорь (по нему
+//         модуль потом точечно обновляет число), а вид кнопки даёт ОТДЕЛЬНЫЙ флаг click:
+//         иначе любая плашка с id выглядела бы нажимаемой, хотя нажимать нечего.
+function moduleHead(o){
+  const hero=o.hero||null;
+  const stats=(o.stats||[]).filter(Boolean);
+  return `<div class="mhead">
+    <div class="mhead-top">
+      <div><h1>${o.title||''}</h1>${o.sub?`<p>${o.sub}</p>`:''}</div>
+      <div class="head-actions">${o.actions||''}</div>
+    </div>
+    ${(hero||stats.length)?`<div class="mhero">
+      ${hero?`<div class="mhero-main">
+        <div class="mhero-k">${hero.k||''}</div>
+        <div class="mhero-v">${hero.v}${hero.unit?`<span>${hero.unit}</span>`:''}</div>
+      </div>`:''}
+      ${stats.length?`<div class="mhero-stats">${stats.map(st=>
+        `<div class="mhs${st.active?' mhs-on':''}${st.click?' mhs-click':''}"${st.id?` id="${st.id}"`:''}${st.title?` title="${esc(st.title)}"`:''}>
+          <b>${st.v}</b><span>${st.k||''}</span>
+        </div>`).join('')}</div>`:''}
+    </div>`:''}
+  </div>`;
+}
