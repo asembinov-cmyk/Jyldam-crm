@@ -959,3 +959,49 @@ document.addEventListener('click',e=>{
   e.stopPropagation();e.preventDefault();
   copyText(btn.dataset.copy);
 },true);
+
+/* ---------- «ВЫШЛА НОВАЯ ВЕРСИЯ» ---------- */
+// У index.html нет и не может быть метки версии: адрес фиксирован, а GitHub Pages отдаёт
+// его с cache-control на 10 минут. Поэтому после выкладки браузер может сколько угодно
+// показывать СТАРУЮ страницу со ссылками на старые скрипты — обычное обновление не помогает,
+// нужен Cmd+Shift+R. Понять это по экрану невозможно: правка просто «не применилась», и мы
+// на этом потеряли время уже трижды (раздел 4 и 9 в CLAUDE.md).
+//
+// Поэтому CRM сама спрашивает сервер, не поменялись ли отпечатки файлов, и говорит об этом.
+const APP_VER_CHECK_MS=10*60*1000;
+let _appVerShown=false;
+// отпечатки всех подключённых файлов в том виде, в каком их загрузил браузер
+function appLoadedVersions(){
+  return [...document.querySelectorAll('script[src*="?v="],link[href*="?v="]')]
+    .map(el=>(el.src||el.href||'').split('?v=')[1]||'').filter(Boolean).join(',');
+}
+async function checkAppVersion(){
+  if(_appVerShown)return;
+  try{
+    // no-store обязателен: иначе спросим у того же кеша, который и показывает старое
+    const res=await fetch('index.html?ts='+Date.now(),{cache:'no-store'});
+    if(!res.ok)return;
+    const html=await res.text();
+    const fresh=(html.match(/\?v=([0-9a-f]+)/g)||[]).map(x=>x.slice(3)).join(',');
+    const mine=appLoadedVersions();
+    if(!fresh||!mine||fresh===mine)return;
+    _appVerShown=true;
+    showAppUpdateBar();
+  }catch(e){/* нет сети — не беда, просто промолчим */}
+}
+function showAppUpdateBar(){
+  if($('appUpdateBar'))return;
+  const bar=document.createElement('div');
+  bar.id='appUpdateBar';bar.className='app-update';
+  bar.innerHTML='<span>Вышла новая версия CRM — страница у вас старая.</span>'
+    +'<button type="button" class="btn sm" id="appUpdateBtn">Обновить</button>';
+  document.body.appendChild(bar);
+  const btn=$('appUpdateBtn');
+  if(btn)btn.onclick=()=>{
+    // Перезагружаем с другим адресом: простая перезагрузка может снова взять index.html
+    // из кеша, а с меткой времени браузеру придётся спросить сервер.
+    location.replace(location.pathname+'?r='+Date.now()+location.hash);
+  };
+}
+setTimeout(checkAppVersion,8000);                 // первый раз — вскоре после входа
+setInterval(checkAppVersion,APP_VER_CHECK_MS);    // дальше раз в десять минут
