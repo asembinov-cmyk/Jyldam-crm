@@ -412,6 +412,43 @@ function openSidebar(){const s=$('sidebar'),b=$('sidebarBackdrop');if(s)s.classL
 function closeSidebar(){const s=$('sidebar'),b=$('sidebarBackdrop');if(s)s.classList.remove('open');if(b)b.classList.remove('show');}
 if($('menuToggle'))$('menuToggle').onclick=()=>{const s=$('sidebar');if(s&&s.classList.contains('open'))closeSidebar();else openSidebar();};
 if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeSidebar;
+// ── СВАЙП ПАЛЬЦЕМ: открыть и закрыть меню ──
+// Меню выезжает СЛЕВА, поэтому открывает его движение от левого края ВПРАВО, а закрывает
+// движение ВЛЕВО по открытому меню. Жест от края — чтобы не спорить с горизонтальной
+// прокруткой таблиц: их в CRM почти в каждом разделе, и свайп посреди экрана должен
+// листать таблицу, а не выдёргивать меню.
+(function bindSidebarSwipe(){
+  const EDGE=32;   // от какой полосы у левого края считаем жест «открыть»
+  const DIST=60;   // сколько пройти пальцем, чтобы это считалось свайпом
+  const SLOP=45;   // насколько можно отклониться по вертикали (иначе это прокрутка)
+  let x0=0,y0=0,tracking=false,toOpen=false;
+  // не перехватываем жест внутри того, что само прокручивается вбок
+  const inScroller=el=>{
+    for(let n=el;n&&n!==document.body;n=n.parentElement){
+      const ox=getComputedStyle(n).overflowX;
+      if((ox==='auto'||ox==='scroll')&&n.scrollWidth>n.clientWidth+4)return true;
+    }
+    return false;
+  };
+  const isOpen=()=>{const s=$('sidebar');return !!(s&&s.classList.contains('open'));};
+  document.addEventListener('touchstart',e=>{
+    tracking=false;
+    if(e.touches.length!==1)return;
+    if(typeof isMobileView==='function'&&!isMobileView())return; // на компьютере меню и так на месте
+    const t=e.touches[0],open=isOpen();
+    if(!open&&t.clientX>EDGE)return;          // открываем только от самого края
+    if(!open&&inScroller(e.target))return;
+    x0=t.clientX;y0=t.clientY;tracking=true;toOpen=!open;
+  },{passive:true});
+  document.addEventListener('touchend',e=>{
+    if(!tracking)return;tracking=false;
+    const t=e.changedTouches&&e.changedTouches[0];if(!t)return;
+    const dx=t.clientX-x0,dy=t.clientY-y0;
+    if(Math.abs(dy)>SLOP||Math.abs(dx)<DIST)return;
+    if(toOpen&&dx>0)openSidebar();
+    else if(!toOpen&&dx<0)closeSidebar();
+  },{passive:true});
+})();
 
 /* ---------- ENTER APP: load all reference data ---------- */
 async function loadAll(){

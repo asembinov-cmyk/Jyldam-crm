@@ -1126,8 +1126,16 @@
     .stats .stat .v{font-size:24px}
     .page-head h1{font-size:24px}
     .mhead{padding:12px;border-radius:14px}
-    .mhead-top{padding:4px 4px 12px}
+    /* На телефоне название и кнопки идут В СТОЛБИК. Раньше они делили строку, и блоку
+       кнопок доставалось около 150 px — месяц, год, «Помощник» и «Текущий» вставали друг
+       под другом в четыре этажа и утапливали синюю плашку далеко вниз. */
+    .mhead-top{padding:2px 2px 12px;flex-direction:column;align-items:stretch;gap:10px}
     .mhead-top h1{font-size:24px}
+    .mhead-top .head-actions{width:100%;display:flex;flex-wrap:wrap;gap:8px}
+    .mhead-top .head-actions>*{flex:1 1 auto}
+    .dash-period-filter{width:100%}
+    .dash-period-filter select{flex:1 1 110px;min-width:0}
+    .dash-period-filter .btn{flex:1 1 auto}
     .mhero{padding:16px;gap:16px;align-items:flex-start;flex-direction:column}
     .mhero-v{font-size:32px}
     .mhero-stats{width:100%;justify-content:space-between}

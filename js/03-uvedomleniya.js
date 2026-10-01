@@ -223,9 +223,18 @@ function renderHistory(){
   const all=S.activityLog||[];
   const users=[...new Set(all.map(r=>r.user_name).filter(Boolean))].sort();
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>История изменений</h1><p>Журнал всех действий пользователей в системе</p></div>
-      <div class="head-actions"><button class="btn ghost" id="histReload">↻ Обновить</button></div>
-    </div>
+    ${(()=>{
+      // Главное число — записей в журнале, рядом за сегодня, людей и объектов: по ним сразу
+      // видно, живой ли журнал и кто в нём есть, не листая таблицу.
+      const today=localToday();
+      const todayCnt=all.filter(r=>(r.created_at||'').slice(0,10)===today).length;
+      const ents=new Set(all.map(r=>r.entity).filter(Boolean));
+      return moduleHead({title:'История изменений',sub:'Журнал всех действий пользователей в системе',
+        actions:'<button class="btn ghost" id="histReload">↻ Обновить</button>',
+        hero:{k:'Записей в журнале',v:all.length.toLocaleString('ru-RU')},
+        stats:[{v:todayCnt.toLocaleString('ru-RU'),k:'за сегодня'},
+          {v:users.length,k:'сотрудников'},{v:ents.size,k:'типов объектов'}]});
+    })()}
     <div class="panel">
       <div class="panel-head"><h2>Журнал действий</h2><span class="count" id="histCount">0</span></div>
       <div class="filters">
