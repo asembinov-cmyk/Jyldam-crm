@@ -442,6 +442,20 @@
   .mhs-click:last-child{padding-right:18px;margin-right:-6px}
   .mhs-click:hover{background:rgba(255,255,255,.12)}
   .mhs-on{background:rgba(255,255,255,.18)}
+  /* История заказа в карточке: кто завёл, кто заполнил, кто принял на складе */
+  .ohist{border:1px solid var(--line);border-radius:10px;background:var(--card);overflow:hidden}
+  .ohist-row{display:flex;align-items:baseline;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
+  .ohist-row:last-child{border-bottom:0}
+  .ohist-ic{flex:none;width:20px;text-align:center;opacity:.65}
+  .ohist-k{flex:none;width:150px;color:var(--muted)}
+  .ohist-v{flex:1;min-width:0}
+  .ohist-v b{font-weight:700}
+  .ohist-v small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+  @media (max-width:560px){
+    .ohist-row{flex-wrap:wrap;gap:4px 10px}
+    .ohist-k{width:auto}
+    .ohist-v{flex-basis:100%;padding-left:30px}
+  }
   .dash-head{justify-content:space-between}
   .ai-btn{background:linear-gradient(135deg,#6d3bd4,#2546c9);color:#fff;border:none}
   .ai-btn:hover{filter:brightness(1.08)}

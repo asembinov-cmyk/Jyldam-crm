@@ -431,7 +431,7 @@ function orderPeriodStr(o){return (o.pickup_date||o.created_at||'').slice(0,7);}
 function renderCalc(){
   if(!canMod('calc')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Калькуляция</h1><p>Себестоимость, прибыль и заработок по заказам</p></div></div>
+    ${moduleHead({title:'Калькуляция',sub:'Себестоимость, прибыль и заработок по заказам'})}
     <div class="subtabs">
       <button data-calcsub="norms" class="${calcSub==='norms'?'active':''}">Расходы компании</button>
       ${baraholkaReady()?`<button data-calcsub="bar" class="${calcSub==='bar'?'active':''}">Барахолка</button>`:''}

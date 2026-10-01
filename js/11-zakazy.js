@@ -2058,6 +2058,91 @@ async function setPartnerBulkModal(){
   };
 }
 
+/* ---------- ИСТОРИЯ ЗАКАЗА В КАРТОЧКЕ ---------- */
+// Три события, которые спрашивают чаще всего: кто завёл заказ, кто его заполнил и кто
+// принял товар на складе. Отметки о заполнении и приёмке лежат прямо в заказе
+// (`filled_*`, `sorted_*`), а вот «кто завёл» нигде не хранится — его приходится искать
+// в журнале действий, поэтому блок догружается после открытия карточки.
+//
+// Окно поиска реестра: запись об импорте пишется ПОСЛЕ создания заказов, то есть позже
+// их `created_at`. Берём от минуты до события и до пятнадцати после — загрузка сотни
+// заказов занимает секунды, а в полчаса уже может уложиться соседний файл.
+const OHIST_IMPORT_BEFORE_MS=60*1000;
+const OHIST_IMPORT_AFTER_MS=15*60*1000;
+function ohistRow(ico,k,v,note){
+  return `<div class="ohist-row"><span class="ohist-ic">${ico}</span>
+    <span class="ohist-k">${k}</span>
+    <span class="ohist-v">${v}${note?`<small>${note}</small>`:''}</span></div>`;
+}
+function ohistWhen(t){return t?esc(fmtDate(t)):'';}
+function orderHistoryInner(o){
+  const rows=[];
+  // 1. Кто завёл заказ
+  const cr=o._histCreate,imp=o._histImport;
+  if(cr)rows.push(ohistRow('＋','Создан',`<b>${esc(cr.user_name||'—')}</b> · ${ohistWhen(cr.created_at)}`));
+  else if(imp)rows.push(ohistRow('⬆','Загружен',
+    `<b>${esc(imp.user_name||'—')}</b> · ${ohistWhen(o.created_at)}`,
+    `реестр «${esc(imp.entity_label||'Excel')}»`));
+  else if(o.pickup_id)rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'по заявке на забор, пачкой'));
+  else if(o._histLoaded)rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'кто — не записано'));
+  else rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'ищем в журнале…'));
+  // 2. Кто заполнил. Настоящая отметка — из модуля «Заполнение»; у заказов до её появления
+  //    имя восстанавливается по журналу правок, и это подписано отдельно (раздел 8c).
+  // У заказов из реестра отметка о заполнении ставится при создании, и имени в ней нет:
+  // ФИО, адрес и телефон пришли готовыми, менеджеру там делать нечего (раздел 5f).
+  // Писать «—» в таком случае значило бы намекать на потерянные данные.
+  if(o.filled_at&&o.filled_by_name)rows.push(ohistRow('✎','Заполнен',
+    `<b>${esc(o.filled_by_name)}</b> · ${ohistWhen(o.filled_at)}`));
+  else if(o.filled_at)rows.push(ohistRow('✎','Заполнен',ohistWhen(o.filled_at),
+    o._histImport?'данные пришли готовыми в реестре':'имя не записано'));
+  else if(o._histFill)rows.push(ohistRow('✎','Заполнен',
+    `<b>${esc(o._histFill.user_name||'—')}</b> · ${ohistWhen(o._histFill.created_at)}`,'по журналу правок'));
+  else if(o._histLoaded)rows.push(ohistRow('✎','Заполнен','—','отметки нет'));
+  // 3. Кто принял на складе («Сортировка»)
+  if(o.sorted_at)rows.push(ohistRow('📦','Принят на складе',
+    `<b>${esc(o.sorted_by_name||'—')}</b> · ${ohistWhen(o.sorted_at)}`));
+  else rows.push(ohistRow('📦','Принят на складе','—','ещё не принят'));
+  return rows.join('');
+}
+function orderHistoryHtml(o){
+  if(!o||!o.id)return '';
+  return `<div class="field full"><label>История</label>
+    <div class="ohist" id="o_hist">${orderHistoryInner(o)}</div></div>`;
+}
+// Догружает то, чего нет в самом заказе. Два запроса максимум, и только при открытии
+// карточки: журнал большой, держать его в памяти вкладки незачем.
+async function orderHistoryLoad(o){
+  try{
+    const {data,error}=await sb.from('activity_log')
+      .select('user_name,created_at,action,entity_label,changes')
+      .eq('entity','orders').eq('entity_id',String(o.id))
+      .order('created_at',{ascending:true}).limit(50);
+    if(error)throw error;
+    const rows=data||[];
+    o._histCreate=rows.find(r=>r.action==='create')||null;
+    if(!o.filled_at){
+      o._histFill=rows.find(r=>Array.isArray(r.changes)&&r.changes.some(c=>
+          c&&c.field==='client'&&!String(c.old||'').trim()&&String(c.new||'').trim()))
+        ||rows.find(r=>r.action==='update')||null;
+    }
+    // Заказы из реестра создаются пачкой, записи на каждый нет — ищем саму загрузку
+    // по времени. Это сопоставление, а не точная ссылка, поэтому в строке прямо написано,
+    // какой файл имеется в виду.
+    if(!o._histCreate&&o.created_at){
+      const t=new Date(o.created_at).getTime();
+      const {data:imp}=await sb.from('activity_log')
+        .select('user_name,created_at,entity_label')
+        .eq('entity','orders').eq('action','import')
+        .gte('created_at',new Date(t-OHIST_IMPORT_BEFORE_MS).toISOString())
+        .lte('created_at',new Date(t+OHIST_IMPORT_AFTER_MS).toISOString())
+        .order('created_at',{ascending:true}).limit(1);
+      if(imp&&imp.length)o._histImport=imp[0];
+    }
+  }catch(e){console.error('orderHistoryLoad',e);} // журнал мог быть закрыт правами — не беда
+  o._histLoaded=true;
+  const box=$('o_hist');if(box)box.innerHTML=orderHistoryInner(o);
+}
+
 function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=localToday();
@@ -2142,6 +2227,7 @@ function orderModal(id,readonly){
       <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Дата доставки</label><input type="date" id="o_deliver" min="${localToday()}" value="${esc(d.deliver_date||'')}" ${dis}></div>
       <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      ${orderHistoryHtml(o)}
     </div>
       </div>
     </div>`,
@@ -2502,6 +2588,7 @@ function orderModal(id,readonly){
     };
     const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=orderBigPhotoInner(o,!ro);bindBig();};
     bindBig();
+    orderHistoryLoad(o); // «кто завёл заказ» лежит в журнале, а не в самом заказе
   }
   if(!ro){
     const fillCouriers=cityId=>{

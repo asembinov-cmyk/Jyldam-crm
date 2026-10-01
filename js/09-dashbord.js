@@ -386,14 +386,20 @@ function renderDashboard(){
   const pickerNames=Object.keys(pickerTotals).sort((a,b)=>pickerTotals[b].parcels-pickerTotals[a].parcels);
 
   $('main').innerHTML=`
-    <div class="page-head dash-head"><div><h1>${bar?'Статистика · Барахолка':'Добро пожаловать'}</h1><p>${bar?'Отдельная ветка: заказы из реестров Казпочты':esc(dateStr)}</p></div>
-      <div class="dash-period-filter">
+    ${moduleHead({title:bar?'Статистика · Барахолка':'Добро пожаловать',
+      sub:bar?'Отдельная ветка: заказы из реестров Казпочты':esc(dateStr),
+      actions:`<div class="dash-period-filter">
         ${isStaff()?'<button class="btn ai-btn sm" id="dashAI">🤖 Помощник</button>':''}
         <select id="dashMonth">${months.map((m,i)=>`<option value="${i}" ${dashPeriod.month===i?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)}</option>`).join('')}</select>
         <select id="dashYear">${(()=>{const ny=new Date().getFullYear();let o='';for(let y=2025;y<=ny+1;y++)o+=`<option value="${y}" ${dashPeriod.year===y?'selected':''}>${y}</option>`;return o;})()}</select>
         <button class="btn ghost sm" id="dashThisMonth">Текущий</button>
-      </div>
-    </div>
+      </div>`,
+      // Главное число — выручка за выбранный месяц: за ней в раздел и заходят. Остальные
+      // цифры ниже, в карточках, повторять их в плашке незачем.
+      hero:{k:`Выручка · ${esc(periodLabel)}`,v:fmtMoney(revMonth),unit:'₸'},
+      stats:[{v:ordersMonth,k:'заказов за месяц'},
+        bar?null:{v:pkCollectedMonth,k:'заявок собрано'},
+        {v:todayCount,k:'сегодня'}]})}
     ${canMod('baraholka')?`<div class="subtabs" style="margin-bottom:14px">
       <button data-dashsub="main" class="${bar?'':'active'}">Обычные заказы</button>
       <button data-dashsub="bar" class="${bar?'active':''}">Барахолка</button>
