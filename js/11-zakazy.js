@@ -598,6 +598,7 @@ function renderOrders(mode){
           <option value="track" ${of.missing==='track'?'selected':''}>Нет трек-кода</option>
           <option value="index" ${of.missing==='index'?'selected':''}>Нет индекса</option>
           <option value="weight" ${of.missing==='weight'?'selected':''}>Нет веса</option>
+          <option value="unsorted" ${of.missing==='unsorted'?'selected':''}>Не принятые складом</option>
         </select>
         <select id="ofpaid" title="Фильтр по оплате отправителем">
           <option value="">Оплата: все</option>
@@ -880,7 +881,10 @@ function ordersExcludePartnersModal(){
   if(!rows.length){toast('Сначала отметьте заказы');return;}
   const by={};
   rows.forEach(o=>{const n=orderPartnerLabel(o);by[n]=(by[n]||0)+1;});
-  const names=Object.keys(by).sort((a,b)=>by[b]-by[a]||a.localeCompare(b)); // сначала у кого больше заказов
+  // По алфавиту (просьба владельца 02.10.2026): нужного партнёра ищут глазами по названию,
+  // а порядок «у кого больше заказов» менялся от выборки к выборке, и список каждый раз
+  // приходилось перечитывать заново.
+  const names=Object.keys(by).sort((a,b)=>a.localeCompare(b,'ru'));
   showModal('Исключить партнёров из выбора',`
     <p style="color:var(--muted);font-size:13px;margin:0 0 10px">
       Отмечено заказов: <b>${ketSelected.size}</b>. Отметьте партнёров, чьи заказы не нужны —
@@ -1039,6 +1043,11 @@ function filteredOrders(){
         if(isCourierDelivery(o.delivery_id))return false;
         const w=parseFloat(o.weight);
         if(!isNaN(w)&&w>0)return false;
+      }else if(of.missing==='unsorted'){
+        // Склад отмечает приёмку в «Сортировке» — это `sorted_at`. Показываем ВСЕ заказы
+        // без отметки, включая ещё не обработанные: кладовщику их пока не предлагают, но
+        // посылка физически не принята, и прятать её из этого списка нельзя.
+        if(o.sorted_at)return false;
       }else{
         const val=(o[of.missing]||'').toString().trim();
         if(val!=='')return false;
