@@ -425,13 +425,33 @@ const CALC_PARTNER_BASE_WEIGHT=2; // базовый вес в кг — фикс�
 let _calcGlobalPerKg=null; // надбавка партнёру за доп. кг — общая для всех, из базы
 // выбранный период нормативов (год-месяц). По умолчанию текущий.
 let calcNormPeriod={year:new Date().getFullYear(),month:new Date().getMonth()};
+// Названия месяцев нужны и шапке раздела, и панелям нормативов. Внутри тех функций есть
+// свои такие же массивы (`monthsRU`), но они объявлены локально и наружу не видны —
+// отсюда отдельная константа на уровне файла, а не ссылка на них.
+const CALC_MONTHS_RU=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август',
+  'Сентябрь','Октябрь','Ноябрь','Декабрь'];
 function calcPeriodStr(p){p=p||calcNormPeriod;return `${p.year}-${String(p.month+1).padStart(2,'0')}`;}
 // период месяца заказа (по дате забора) в формате YYYY-MM
 function orderPeriodStr(o){return (o.pickup_date||o.created_at||'').slice(0,7);}
 function renderCalc(){
   if(!canMod('calc')){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   $('main').innerHTML=`
-    ${moduleHead({title:'Калькуляция',sub:'Себестоимость, прибыль и заработок по заказам'})}
+    ${(()=>{
+      // Синяя плашка у «Калькуляции» показывает ЗАКАЗЫ выбранного месяца, а не деньги.
+      // Деньги здесь считаются по-разному на каждой вкладке (нормативы, сводка, Барахолка,
+      // расчёт партнёра), и одно число наверху неизбежно спорило бы с таблицей под ним.
+      // А число заказов — общий знаменатель всего раздела: на него делятся месячные фонды
+      // (`ordersInOrderMonth`), и считается оно по тому же правилу — месяц по дате забора,
+      // а при её отсутствии по дате создания.
+      const per=calcPeriodStr();
+      const inMonth=(S.orders||[]).filter(o=>(o.pickup_date||o.created_at||'').slice(0,7)===per);
+      const barCnt=inMonth.filter(isBaraholkaOrder).length;
+      return moduleHead({title:'Калькуляция',sub:'Себестоимость, прибыль и заработок по заказам',
+        hero:{k:`Заказов · ${esc(CALC_MONTHS_RU[calcNormPeriod.month])} ${calcNormPeriod.year}`,
+          v:inMonth.length.toLocaleString('ru-RU')},
+        stats:[{v:(inMonth.length-barCnt).toLocaleString('ru-RU'),k:'обычных'},
+          baraholkaReady()?{v:barCnt.toLocaleString('ru-RU'),k:'Барахолки'}:null]});
+    })()}
     <div class="subtabs">
       <button data-calcsub="norms" class="${calcSub==='norms'?'active':''}">Расходы компании</button>
       ${baraholkaReady()?`<button data-calcsub="bar" class="${calcSub==='bar'?'active':''}">Барахолка</button>`:''}
