@@ -166,6 +166,31 @@ function impResultModal(fileName, made, skipped){
   };
 }
 
+// ДАТА ЗАБОРА ОПРЕДЕЛЯЕТ МЕСЯЦ РАСЧЁТА. Калькуляция берёт месяц по pickup_date
+// (ordersInOrderMonth), поэтому реестр, загруженный в октябре с сентябрьской датой,
+// уходит в СЕНТЯБРЬ — в месяц, который может быть уже закрыт и выплачен.
+//
+// Так и вышло 02.10.2026: 51 заказ, загруженный в октябре, лёг в сентябрь, и владелец
+// заметил это только по запросу к базе. В окне загрузки дата подставляется сегодняшняя,
+// но её меняют руками, и ничего об этом не предупреждало.
+//
+// Жёстко не запрещаем: бывает, что заказ правда нужно отнести к прошлому месяцу.
+// Названия в ИМЕНИТЕЛЬНОМ: подставляются в «попадут в сентябрь 2026». С родительным
+// («сентября») выходило «попадут в сентября» — подстрочник.
+const IMP_MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август',
+  'сентябрь','октябрь','ноябрь','декабрь'];
+function impMonthLabel(d){
+  const p = String(d || '').slice(0, 10).split('-');
+  if(p.length < 3) return '';
+  return `${IMP_MONTHS[+p[1] - 1] || p[1]} ${p[0]}`;
+}
+// Пусто — дата из текущего месяца, предупреждать не о чем.
+function impOtherMonth(d){
+  const cur = localToday().slice(0, 7);
+  const got = String(d || '').slice(0, 7);
+  return (got && got !== cur) ? impMonthLabel(d) : '';
+}
+
 function impPreviewModal(fileName, rows, dbTracks){
   // Партнёра подставляем по имени файла, если совпал: «ИП Азилжан 25.09.26.xls».
   const guess = (S.partners || []).find(p => normName(fileName).includes(normName(p.name))) || null;
@@ -195,6 +220,10 @@ function impPreviewModal(fileName, rows, dbTracks){
         создам: <b>${ok.length}</b>${bad.length ? ` · пропущу: <b>${bad.length}</b>` : ''}
         ${pt ? `<br>Тип доставки — почтовая. Менеджер продаж и обработчик возьмутся из карточки партнёра${pt.is_baraholka ? ', раздел — Барахолка' : ''}.` : ''}
       </p>
+      ${impOtherMonth(date) ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
+        ⚠️ Дата забора — <b>${esc(fmtDate(date))}</b>, а это не текущий месяц. В Калькуляции и в
+        отчёте эти заказы лягут в <b>${esc(impOtherMonth(date))}</b>, а не в текущий месяц.
+        Если тот месяц уже закрыт и выплачен, цифры по нему изменятся.</div>` : ''}
       ${pt && !pt.is_baraholka ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
         ⚠️ У партнёра «${esc(pt.name)}» не стоит галочка «Барахолка», поэтому заказы попадут
         не сюда, а в «Заказы заборов» — и смешаются с обычными. Если это реестр Барахолки,
@@ -219,6 +248,11 @@ function impPreviewModal(fileName, rows, dbTracks){
     if(busy) return false;
     const pt = (S.partners || []).find(p => p.id === partnerId);
     if(!pt){ toast('Выберите партнёра'); return false; }
+    // Дата не из текущего месяца — спрашиваем отдельно и называем месяц прямо.
+    const otherMonth = impOtherMonth(date);
+    if(otherMonth && !confirm(`Дата забора ${fmtDate(date)} — заказы попадут в ${otherMonth},\n`
+      + `а не в текущий месяц.\n\nЕсли этот месяц уже закрыт и выплачен, его цифры в Калькуляции\n`
+      + `и в отчёте изменятся.\n\nСоздать заказы с этой датой?`)) return false;
     // Причину пропуска запоминаем по каждой строке — в конце она попадёт в итог.
     // Раньше тут считалась только разница чисел, и четыре разные причины складывались
     // в одно «пропущено: 14».
@@ -316,7 +350,13 @@ function impPreviewModal(fileName, rows, dbTracks){
       if(box){ box.innerHTML = body(); bindImp(); }
     };
     const d2 = $('impDate');
-    if(d2) d2.onchange = () => { date = d2.value || localToday(); };
+    // Перерисовываем тело: предупреждение о чужом месяце должно появиться сразу, а не
+    // всплыть только при нажатии «Создать заказы».
+    if(d2) d2.onchange = () => {
+      date = d2.value || localToday();
+      const box = document.querySelector('.modal-body');
+      if(box){ box.innerHTML = body(); bindImp(); }
+    };
   };
   bindImp();
 }
