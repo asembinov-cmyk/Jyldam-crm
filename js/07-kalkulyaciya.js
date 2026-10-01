@@ -1461,16 +1461,17 @@ function renderCalcSummary(){
   const avgMargin=mainRevenue>0?(mainProfit/mainRevenue*100):0;
   const avgRoi=mainCost>0?(mainProfit/mainCost*100):0;
   const barMarginSum=bar.reduce((sum,x)=>sum+((x.c.items.find(i=>i.key==='sales_margin')||{}).amount||0),0);
-  // СКОЛЬКО ЗАКАЗОВ БАРАХОЛКИ НЕ ВОШЛО В ТАБЛИЦЫ ПО ЛЮДЯМ, по каждому человеку.
-  // Владелец сверил «Заказов» у менеджера по продажам с гридом «Заказы заборов» по тому же
-  // фильтру и получил 5685 против 5731 — разница и есть Барахолка: ставка за заказ на ней
-  // не начисляется вовсе, у неё свой фонд (раздел 5a). Пока это было написано только
-  // словами в примечании, разница выглядела ошибкой счёта. Теперь видно число.
-  const barBySales={},barByProc={};
-  bar.forEach(({o})=>{
-    if(o.sales_id)barBySales[o.sales_id]=(barBySales[o.sales_id]||0)+1;
-    if(o.processor_id)barByProc[o.processor_id]=(barByProc[o.processor_id]||0)+1;
-  });
+  // СКОЛЬКО ЗАКАЗОВ БАРАХОЛКИ НЕ ВОШЛО В СТАВКУ ЗА ЗАКАЗ У ОБРАБОТЧИКА.
+  // Владелец сверил «Заказов» у менеджера по продажам с гридом «Заказы заборов» и получил
+  // 5685 против 5731 — разница и есть Барахолка (86) плюс месяц по забору против создания
+  // (40). Пока это было написано только словами в примечании, разница выглядела ошибкой
+  // счёта. Теперь видно число.
+  //
+  // У менеджеров по продажам счётчик свой (salesRows.barCnt): им надбавка по Барахолке
+  // начисляется, и строка считается по обоим разделам. У обработчиков — нет: их доля
+  // Барахолки идёт месячным фондом, а не ставкой за заказ.
+  const barByProc={};
+  bar.forEach(({o})=>{if(o.processor_id)barByProc[o.processor_id]=(barByProc[o.processor_id]||0)+1;});
   // заказы «Оплачено отправителем» — их выручка (условная, по сохранённой исходной сумме) уже
   // учтена в totRevenue/totProfit выше; здесь просто выделяем её отдельно для прозрачности
   const paidBySenderCalcs=mainCalcs.filter(x=>x.c.isPaidBySender);
@@ -1514,24 +1515,44 @@ function renderCalcSummary(){
   const expenseRows=Object.values(byExpense).sort((a,b)=>b.amount-a.amount);
   // Заработок менеджеров по продажам за месяц: надбавка сверх базового тарифа,
   // ставка за заказ и оклад. Собираем по sales_id заказов.
+  // НАДБАВКА НАЧИСЛЯЕТСЯ И ПО БАРАХОЛКЕ, а ставка за заказ — нет.
+  //
+  // Надбавка менеджера — единственная общая статья, которая к Барахолке применяется
+  // (раздел 5a): в calcOrder у ветки Барахолки есть item 'sales_margin'. То есть деньги
+  // менеджер по этим заказам реально зарабатывает. А в этой таблице их не было вовсе —
+  // она строилась по mainCalcs, — и «Итого» показывало МЕНЬШЕ, чем менеджеру причитается.
+  // Платить по такой цифре значит недоплатить. Исправлено 01.10.2026 по вопросу владельца
+  // «можешь сразу считать их и выводить актуальную сумму».
+  //
+  // Ставка за заказ по Барахолке не начисляется и начисляться не должна: у неё свои пять
+  // статей и четыре фонда, ставки продавца среди них нет. Поэтому считаем раздельно:
+  // надбавку по обоим разделам, ставку — только по обычным.
   const salesRows=(()=>{
     const by={};
+    const row=id=>by[id]||(by[id]={id,cnt:0,barCnt:0,margin:0,barMargin:0,per:0});
+    const marginOf=c=>((c.items.find(i=>i.key==='sales_margin')||{}).amount||0);
     mainCalcs.forEach(({o,c})=>{
       if(!o.sales_id)return;
-      const r=by[o.sales_id]||(by[o.sales_id]={id:o.sales_id,cnt:0,margin:0,per:0});
+      const r=row(o.sales_id);
       r.cnt++;
-      r.margin+=((c.items.find(i=>i.key==='sales_margin')||{}).amount||0);
+      r.margin+=marginOf(c);
       r.per+=calcSalesNorm(o.sales_id,'per_order',sel);
+    });
+    bar.forEach(({o,c})=>{
+      if(!o.sales_id)return;
+      const r=row(o.sales_id);
+      r.barCnt++;
+      r.barMargin+=marginOf(c);
     });
     // Менеджеров с окладом показываем, даже если заказов за месяц не было:
     // оклад им всё равно начислен, и в сводке он должен быть виден.
     (S.sales||[]).forEach(sm=>{
       const sal=calcSalesNorm(sm.id,'salary',sel);
-      if(sal&&!by[sm.id])by[sm.id]={id:sm.id,cnt:0,margin:0,per:0};
+      if(sal&&!by[sm.id])row(sm.id);
     });
     return Object.values(by).map(r=>{
       const salary=calcSalesNorm(r.id,'salary',sel);
-      return {...r,salary,total:r.margin+r.per+salary,name:salesName(r.id)};
+      return {...r,salary,total:r.margin+r.barMargin+r.per+salary,name:salesName(r.id)};
     }).sort((a,b)=>b.total-a.total);
   })();
   // Обработчиков двое, платят им по-разному — считаем каждому: сколько заказов он
@@ -1560,8 +1581,9 @@ function renderCalcSummary(){
   // Молчать об этом нельзя: по таким заказам ставка за заказ не начисляется НИКОМУ.
   const procNone=mainCalcs.filter(({o})=>!o.processor_id).length;
   const salesNone=mainCalcs.filter(({o})=>!o.sales_id).length;
-  const salesTotals=salesRows.reduce((a,r)=>({cnt:a.cnt+r.cnt,margin:a.margin+r.margin,per:a.per+r.per,
-    salary:a.salary+r.salary,total:a.total+r.total}),{cnt:0,margin:0,per:0,salary:0,total:0});
+  const salesTotals=salesRows.reduce((a,r)=>({cnt:a.cnt+r.cnt,barCnt:a.barCnt+r.barCnt,
+    margin:a.margin+r.margin+r.barMargin,barMargin:a.barMargin+r.barMargin,per:a.per+r.per,
+    salary:a.salary+r.salary,total:a.total+r.total}),{cnt:0,barCnt:0,margin:0,barMargin:0,per:0,salary:0,total:0});
   const fmtMoney=n=>Math.round(n).toLocaleString('ru-RU')+' ₸';
   const profitColor=mainProfit<0?'#c0392b':(mainProfit<calcMinProfit()*mainCalcs.length?'#c08a2d':'#2e7d32');
   $('calcContent').innerHTML=`
@@ -1592,16 +1614,18 @@ function renderCalcSummary(){
     </div>`:''}
     ${salesRows.length?`<div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Заработок менеджеров по продажам</h3>
-      <p class="calc-note">«Надбавка» — разница между тарифом партнёра и базовым тарифом компании,
-        по заказам этого менеджера. Оклад показан целиком за месяц, он не зависит от числа заказов.${
-        barSum.cnt?' Заказы Барахолки сюда не входят: ставка за заказ на них не начисляется, у неё свой месячный фонд.':''}</p>
+      <p class="calc-note">«Надбавка» — доля менеджера с заказа: фиксированная из карточки партнёра,
+        а если не задана — разница между тарифом партнёра и базовым тарифом компании.
+        Оклад показан целиком за месяц, он не зависит от числа заказов.${
+        barSum.cnt?' <b>Заказы Барахолки в надбавку ВХОДЯТ</b> — это единственная общая статья, которая к ней применяется, и менеджер эти деньги реально зарабатывает. А ставка за заказ по ним не начисляется: у Барахолки свои статьи и свой месячный фонд. Поэтому в «Заказов» они стоят отдельной строкой.':''}</p>
       <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
         <th>Менеджер</th><th>Заказов</th><th>Надбавка</th><th>За заказ</th><th>Оклад</th><th>Итого</th>
       </tr></thead><tbody>
         ${salesRows.map(r=>`<tr>
           <td>${esc(r.name)}</td>
-          <td>${r.cnt}${barBySales[r.id]?`<small class="cell-time">+${barBySales[r.id]} Барахолки не в счёт</small>`:''}</td>
-          <td>${fmtMoney(r.margin)}${r.cnt?`<small class="cell-time">${fmtMoney(r.margin/r.cnt)} на заказ</small>`:''}</td>
+          <td>${r.cnt}${r.barCnt?`<small class="cell-time">+${r.barCnt} Барахолки</small>`:''}</td>
+          <td>${fmtMoney(r.margin+r.barMargin)}${r.barMargin?`<small class="cell-time">из них ${fmtMoney(r.barMargin)} по Барахолке</small>`:''}${
+            (r.cnt+r.barCnt)?`<small class="cell-time">${fmtMoney((r.margin+r.barMargin)/(r.cnt+r.barCnt))} на заказ</small>`:''}</td>
           <td>${fmtMoney(r.per)}</td><td>${fmtMoney(r.salary)}</td>
           <td><b>${fmtMoney(r.total)}</b></td></tr>`).join('')}
         ${salesNone?`<tr><td style="color:var(--muted)">Менеджер не указан
@@ -1609,13 +1633,15 @@ function renderCalcSummary(){
           <td><a href="#" id="calcNoSales" style="color:var(--rust)"><b>${salesNone}</b></a></td>
           <td>—</td><td>—</td><td>—</td><td>—</td></tr>`:''}
       </tbody><tfoot><tr style="border-top:2px solid var(--line)">
-        <td><b>Итого</b></td><td><b>${salesTotals.cnt}</b></td><td><b>${fmtMoney(salesTotals.margin)}</b></td>
+        <td><b>Итого</b></td>
+        <td><b>${salesTotals.cnt}</b>${salesTotals.barCnt?`<small class="cell-time">+${salesTotals.barCnt} Барахолки</small>`:''}</td>
+        <td><b>${fmtMoney(salesTotals.margin)}</b>${salesTotals.barMargin?`<small class="cell-time">из них ${fmtMoney(salesTotals.barMargin)} по Барахолке</small>`:''}</td>
         <td><b>${fmtMoney(salesTotals.per)}</b></td><td><b>${fmtMoney(salesTotals.salary)}</b></td>
         <td><b>${fmtMoney(salesTotals.total)}</b></td></tr>
         <tr><td style="color:var(--muted)">Всего обычных заказов за месяц</td>
         <td style="color:var(--muted)"><b>${salesTotals.cnt+salesNone}</b></td><td colspan="4"></td></tr>
-        ${bar.length?`<tr><td style="color:var(--muted)">+ Барахолка, в расчёт по людям не входит
-          <span class="cn-hint" style="display:block">с этой строкой сходится фильтр в «Заказах заборов»</span></td>
+        ${bar.length?`<tr><td style="color:var(--muted)">+ Барахолка
+          <span class="cn-hint" style="display:block">надбавка по ним начислена выше, ставка за заказ — нет · с этой строкой сходится фильтр в «Заказах заборов»</span></td>
         <td style="color:var(--muted)"><b>${bar.length}</b></td><td colspan="4"></td></tr>`:''}</tfoot></table></div>
     </div>`:''}
     ${procRowsSum.length?`<div class="panel calc-panel" style="margin-bottom:18px">
