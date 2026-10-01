@@ -500,7 +500,23 @@ async function pickupOrdersModal(pickupId){
     bind();
   },30);
 }
-let ordersMode=''; // ''=все, 'courier', 'mail', 'today'
+let ordersMode=''; // ''=все, 'courier', 'mail', 'today', 'baraholka'
+// Режим грида задаётся ВКЛАДКОЙ, а не только аргументом renderOrders.
+//
+// Грабли, из-за которых «Барахолка» выкидывала в «Заказы заборов» на любом действии:
+// перерисовок у грида много — сохранение карточки, удаление, отправка в KET, массовые
+// операции, загрузка из Excel, — и часть из них звала renderOrders() БЕЗ аргумента.
+// А `ordersMode=mode||''` на пустом аргументе означало «режим по умолчанию», то есть
+// «Заказы заборов». Экран оставался тот же (вкладка не менялась), но содержимое
+// подменялось на чужое, и выглядело это как перескок в другой раздел.
+//
+// Поэтому пустой вызов берёт режим из S.tab, а не обнуляет его. Незнакомая вкладка
+// (карточку открывают и из «Заполнения») оставляет режим как был.
+const ORDERS_TAB_MODE={orders:'',baraholka:'baraholka',courier:'courier',mail:'mail',today:'today'};
+function ordersModeForTab(){
+  const m=ORDERS_TAB_MODE[S.tab];
+  return m===undefined?ordersMode:m;
+}
 // Сколько фильтров сейчас реально что-то ограничивают — показываем числом на кнопке,
 // иначе свёрнутые фильтры легко забыть и потом не понять, почему список короткий.
 function activeOrdersFilterCount(){
@@ -525,7 +541,7 @@ function applyOrdersFiltersToggle(){
   btn.classList.toggle('has-active',!!n);
 }
 function renderOrders(mode){
-  ordersMode=mode||'';
+  ordersMode=mode===undefined?ordersModeForTab():(mode||'');
   // по умолчанию показываем заказы, созданные СЕГОДНЯ (до первой ручной правки дат)
   // localToday(), а не UTC: раньше здесь стояла дата по Гринвичу, и с полуночи до 5–6 утра
   // по Казахстану раздел открывался на ВЧЕРАШНЕМ дне — список выглядел пустым.
@@ -2070,10 +2086,15 @@ function orderModal(id,readonly){
   // ИЗ БАЗЫ, поэтому перед ними карточку надо сохранить — иначе всё, что человек только
   // что набрал, для них не существует.
   let saveOrderCard=null;
+  // У заказов Барахолки фото бланка не бывает вовсе — их заводят реестром из Excel.
+  // Пустая колонка под фото забирала половину ширины карточки, поэтому без фото карточка
+  // становится одноколоночной: форма во всю ширину, KET и переписка под ней (класс
+  // nophoto, правила в CSS рядом с мобильными — там та же перестановка).
+  const cardNoPhoto=isBaraholkaOrder(o);
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
-    <div class="order-split">
+    <div class="order-split${cardNoPhoto?' nophoto':''}">
       <div class="ophoto-col">
-        ${orderBigPhotoHtml(o,!ro)}
+        ${cardNoPhoto?'':orderBigPhotoHtml(o,!ro)}
         ${(o&&o.id&&!ro)?`<div class="field full" style="margin-top:14px"><label>KET</label>
           <div style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)">
             ${o.ket_id?`<div style="margin-bottom:8px"><span class="ket-badge" style="font-size:12px;padding:3px 10px">✓ Отправлен в KET</span><div style="font-size:12px;color:var(--muted);margin-top:6px">ID <strong>${esc(o.ket_id)}</strong>${o.ket_track?(' · трек '+esc(o.ket_track)):''}${o.ket_synced_at?(' · '+esc(fmtDate(o.ket_synced_at))):''}</div></div>`:'<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Ещё не отправлен в KET</div>'}

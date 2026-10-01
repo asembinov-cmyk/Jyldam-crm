@@ -782,6 +782,10 @@
   .order-split .ophoto-col{position:sticky;top:0}
   .order-split .ophoto-col .field{margin:0}
   .order-split .oform-col{min-width:0}
+  /* Карточка без фото (Барахолка): одна колонка, форма первой, KET и переписка под ней */
+  .order-split.nophoto{grid-template-columns:1fr}
+  .order-split.nophoto .oform-col{order:1}
+  .order-split.nophoto .ophoto-col{order:2;position:static;top:auto}
   /* крупное превью фото в карточке заказа */
   .obig-wrap{width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--paper)}
   .obig-rotate{display:flex;gap:8px;margin-top:8px}

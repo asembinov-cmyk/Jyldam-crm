@@ -192,8 +192,19 @@ function impOtherMonth(d){
 }
 
 function impPreviewModal(fileName, rows, dbTracks){
+  // В списке — ТОЛЬКО партнёры Барахолки: загрузка реестра живёт в её модуле, и заказы
+  // здесь создаются с её меткой. Партнёр без галочки увёл бы их в «Заказы заборов», то
+  // есть ровно в ту мешанину, из-за которой модуль и делали (раздел 5f).
+  //
+  // Если галочек нет НИ У КОГО — показываем всех, как раньше: это значит, что db/13 не
+  // выполнен и раздела Барахолки в базе нет вовсе. Пустой список был бы тупиком: ни
+  // загрузить, ни понять почему.
+  const barPartners = (S.partners || []).filter(p => p.is_baraholka);
+  const onlyBar = barPartners.length > 0;
+  const pool = onlyBar ? barPartners : (S.partners || []);
   // Партнёра подставляем по имени файла, если совпал: «ИП Азилжан 25.09.26.xls».
-  const guess = (S.partners || []).find(p => normName(fileName).includes(normName(p.name))) || null;
+  // Ищем в том же списке, что показываем, — иначе угадали бы того, кого в списке нет.
+  const guess = pool.find(p => normName(fileName).includes(normName(p.name))) || null;
   let partnerId = guess ? guess.id : '';
   let date = localToday();
   let busy = false;
@@ -202,7 +213,7 @@ function impPreviewModal(fileName, rows, dbTracks){
   const seen = dbTracks || new Set((S.orders || []).map(o => String(o.track || '').trim()).filter(Boolean));
 
   const body = () => {
-    const pt = (S.partners || []).find(p => p.id === partnerId) || null;
+    const pt = pool.find(p => p.id === partnerId) || null;
     const marked = rows.map(r => ({ ...r, problem: impProblem(r, seen) }));
     const ok = marked.filter(r => !r.problem);
     const bad = marked.filter(r => r.problem);
@@ -210,9 +221,12 @@ function impPreviewModal(fileName, rows, dbTracks){
       <div class="imp-head">
         <div class="field"><label>Партнёр <span style="color:var(--rust)">*</span></label>
           <select id="impPartner"><option value="">— выберите —</option>
-            ${(S.partners || []).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''))
-              .map(p => `<option value="${p.id}" ${partnerId === p.id ? 'selected' : ''}>${esc(p.name)}${p.is_baraholka ? ' · Барахолка' : ''}</option>`).join('')}
-          </select></div>
+            ${pool.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''))
+              .map(p => `<option value="${p.id}" ${partnerId === p.id ? 'selected' : ''}>${esc(p.name)}${(!onlyBar && p.is_baraholka) ? ' · Барахолка' : ''}</option>`).join('')}
+          </select>
+          <small style="color:var(--muted);font-size:12px">${onlyBar
+            ? 'Только партнёры Барахолки. Нет нужного — поставьте галочку «Барахолка» в его карточке.'
+            : 'Галочка «Барахолка» не стоит ни у одного партнёра — показаны все.'}</small></div>
         <div class="field"><label>Дата забора</label><input type="date" id="impDate" value="${esc(date)}"></div>
       </div>
       <p class="imp-note">
@@ -246,7 +260,7 @@ function impPreviewModal(fileName, rows, dbTracks){
 
   showModal('Загрузка заказов из Excel', body(), async () => {
     if(busy) return false;
-    const pt = (S.partners || []).find(p => p.id === partnerId);
+    const pt = pool.find(p => p.id === partnerId);
     if(!pt){ toast('Выберите партнёра'); return false; }
     // Дата не из текущего месяца — спрашиваем отдельно и называем месяц прямо.
     const otherMonth = impOtherMonth(date);
