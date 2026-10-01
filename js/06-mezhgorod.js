@@ -276,7 +276,9 @@ async function syncOrderFreightBulk(orderIds,lastShipByOrder,onProgress){
 // имя склада отправки из справочника
 function warehouseName(id){return ((S.warehouses||[]).find(w=>w.id===id)||{}).name||'—';}
 
-let icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:''};
+let icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:'',sender:''};
+let icPage=1;                 // текущая страница списка отправок
+const IC_PER_PAGE=50;         // отправок на странице
 // заказы, которые должны ехать межгородом (город получения ≠ город забора), но ещё не привязаны
 // ни к одной отправке (intercity_cost пуст) — «висят в воздухе». Группируем по городу
 // забора+получения+дате, чтобы сразу было видно, где и что копится, а не листать по одному.
@@ -358,11 +360,12 @@ function renderIntercity(){
     if(icFilter.wh&&s.warehouse_id!==icFilter.wh)return false;
     if(icFilter.dest&&s.dest_city_id!==icFilter.dest)return false;
     if(icFilter.transport&&(s.transport||'')!==icFilter.transport)return false;
+    if(icFilter.sender&&(s.sender_name||'')!==icFilter.sender)return false;
     return true;
   });
   // верхний блок: если выбран хоть один фильтр — считаем по нему (по тем же строкам, что и таблица
   // снизу); если фильтров нет — по умолчанию за сегодня, как и раньше
-  const hasFilter=!!(icFilter.dateFrom||icFilter.dateTo||icFilter.wh||icFilter.dest||icFilter.transport);
+  const hasFilter=!!(icFilter.dateFrom||icFilter.dateTo||icFilter.wh||icFilter.dest||icFilter.transport||icFilter.sender);
   const todayISO=localToday();
   const summaryRows=hasFilter?rows:all.filter(s=>(s.ship_date||'').slice(0,10)===todayISO);
   const todayBoxes=summaryRows.reduce((sum,s)=>sum+(parseInt(s.weight,10)||0),0); // weight в базе теперь хранит кол-во коробок
@@ -377,12 +380,15 @@ function renderIntercity(){
   const usedWh=[...new Set(all.map(s=>s.warehouse_id).filter(Boolean))];
   const usedDest=[...new Set(all.map(s=>s.dest_city_id).filter(Boolean))];
   const usedTr=[...new Set(all.map(s=>s.transport).filter(Boolean))];
-  const totalsBar=`<div class="ic-totals">
-    <div class="ic-total-item"><span>Коробок</span><b>${todayBoxes}</b></div>
-    <div class="ic-total-item"><span>Заказов в них</span><b>${todayOrders}</b></div>
-    <div class="ic-total-item ic-total-money"><span>Потрачено на отправку</span><b>${fmtMoney(todayCost)}</b></div>
-    <div class="ic-total-item"><span>За период</span><b>${esc(summaryPeriodLabel)}</b></div>
-  </div>`;
+  const usedSenders=[...new Set(all.map(s=>s.sender_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
+  // Те же числа, что были в полосе `ic-totals`, теперь живут в синей плашке общей шапки —
+  // иначе одни и те же цифры стояли бы на экране дважды.
+  const headHtml=moduleHead({title:'Отправки межгород',sub:'Учёт коробок, отправленных в другие города',
+    actions:`<button class="btn ghost" id="icUnassigned">🔍 Непривязанные заказы</button>`
+      +(can('intercity','create')?'<button class="btn primary" id="newShipment">＋ Создать отправку</button>':''),
+    hero:{k:`Потрачено на отправку · ${esc(summaryPeriodLabel)}`,
+      v:Math.round(todayCost).toLocaleString('ru-RU'),unit:'₸'},
+    stats:[{v:summaryRows.length,k:'отправок'},{v:todayBoxes,k:'коробок'},{v:todayOrders,k:'заказов в них'}]});
   // сводка «потрачено по городам за месяц» — считаем по ТЕКУЩЕМУ календарному месяцу, отдельно
   // от применённых фильтров (это просто общая картина за месяц, а не завязано на фильтр)
   const nowMonth=localToday().slice(0,7);
@@ -395,6 +401,13 @@ function renderIntercity(){
   const cityCostRows=Object.entries(byCityCost).sort((a,b)=>b[1]-a[1]);
   const monthNamesIC=['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   const nowMonthLabel=`${monthNamesIC[parseInt(nowMonth.slice(5,7),10)-1]} ${nowMonth.slice(0,4)}`;
+  // Пагинация: отправок за месяц набирается много, а листать удобнее, чем прокручивать.
+  // Страницу приводим в границы ПОСЛЕ фильтрации — иначе после сужения фильтра человек
+  // оставался бы на странице, которой уже нет, и видел пустую таблицу.
+  const icPages=Math.max(1,Math.ceil(rows.length/IC_PER_PAGE));
+  if(icPage>icPages)icPage=icPages;
+  const icFrom=(icPage-1)*IC_PER_PAGE;
+  const pageRows=rows.slice(icFrom,icFrom+IC_PER_PAGE);
   const cityCostBar=cityCostRows.length?`<div class="panel" style="margin-bottom:14px">
     <div class="panel-head"><h2>Потрачено по городам за ${esc(nowMonthLabel)}</h2><span class="count">${fmtMoney(cityCostRows.reduce((s,r)=>s+r[1],0))}</span></div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 16px 14px">
@@ -402,13 +415,7 @@ function renderIntercity(){
     </div>
   </div>`:'';
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Отправки межгород</h1><p>Учёт коробок, отправленных в другие города</p></div>
-      <div class="head-actions">
-        <button class="btn ghost" id="icUnassigned">🔍 Непривязанные заказы</button>
-        ${can('intercity','create')?'<button class="btn primary" id="newShipment">＋ Создать отправку</button>':''}
-      </div>
-    </div>
-    ${totalsBar}
+    ${headHtml}
     ${cityCostBar}
     <div class="ic-filters">
       <input type="date" id="icfDateFrom" value="${esc(icFilter.dateFrom)}" title="С даты">
@@ -416,7 +423,10 @@ function renderIntercity(){
       <select id="icfWh"><option value="">Склад: все</option>${usedWh.map(id=>`<option value="${id}" ${icFilter.wh===id?'selected':''}>${esc(warehouseName(id))}</option>`).join('')}</select>
       <select id="icfDest"><option value="">Город получения: все</option>${usedDest.map(id=>`<option value="${id}" ${icFilter.dest===id?'selected':''}>${esc(courierCityName(id))}</option>`).join('')}</select>
       <select id="icfTr"><option value="">Транспорт: все</option>${usedTr.map(t=>`<option value="${esc(t)}" ${icFilter.transport===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
-      ${(icFilter.dateFrom||icFilter.dateTo||icFilter.wh||icFilter.dest||icFilter.transport)?'<button class="btn ghost sm" id="icfClear">Сбросить</button>':''}
+      <select id="icfSender"><option value="">Отправитель: все</option>${usedSenders.map(n=>`<option value="${esc(n)}" ${icFilter.sender===n?'selected':''}>${esc(n)}</option>`).join('')}</select>
+      <button class="btn sm" id="icfToday">Сегодня</button>
+      <button class="btn ghost sm" id="icfAllDates">Все даты</button>
+      ${hasFilter?'<button class="btn ghost sm" id="icfClear">Сбросить</button>':''}
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Отправки</h2><span class="count">${rows.length}</span></div>
@@ -425,7 +435,7 @@ function renderIntercity(){
         <th>Дата</th><th>Склад отправки</th><th>Город получения</th><th>Транспорт</th>
         <th>Кол-во коробок</th><th>Общая сумма</th><th>За 1 коробку</th><th>Заказов</th><th>За 1 заказ</th><th>Отправитель</th><th></th>
       </tr></thead><tbody>
-      ${rows.length?rows.map(s=>{
+      ${pageRows.length?pageRows.map(s=>{
         const cnt=(s.order_ids||[]).length;
         const per=cnt?Math.round((s.box_cost||0)/cnt):0;
         const perBox=s.weight?Math.round((s.box_cost||0)/s.weight):0; // весь тут — кол-во коробок (поле в базе исторически называется weight)
@@ -446,20 +456,38 @@ function renderIntercity(){
             ${can('intercity','delete')?`<button class="btn sm danger" data-icdel="${s.id}">Удалить</button>`:''}
           </div></td>
         </tr>`;
-      }).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет отправок</div>${(icFilter.dateFrom||icFilter.dateTo||icFilter.wh||icFilter.dest||icFilter.transport)
+      }).join(''):`<tr><td colspan="11"><div class="empty"><div class="big">Нет отправок</div>${hasFilter
         ?`Ни одна из ${all.length} отправок не подходит под фильтры. <button class="btn ghost sm" id="icEmptyClear">✕ Сбросить фильтры</button>`
         :'Нажмите «Создать отправку».'}</div></td></tr>`}
       </tbody></table></div>
+      ${icPages>1?`<div class="hist-pager">
+        <span class="hp-info">Показаны ${icFrom+1}–${Math.min(icFrom+IC_PER_PAGE,rows.length)} из ${rows.length}</span>
+        <div class="hp-btns">
+          <button class="btn sm ghost" id="icPrev" ${icPage<=1?'disabled':''}>‹ Назад</button>
+          <span class="hp-page">Стр. ${icPage} / ${icPages}</span>
+          <button class="btn sm ghost" id="icNext" ${icPage>=icPages?'disabled':''}>Вперёд ›</button>
+        </div>
+      </div>`:''}
     </div>`;
   if($('newShipment'))$('newShipment').onclick=()=>shipmentModal();
   if($('icUnassigned'))$('icUnassigned').onclick=()=>unassignedIntercityOrdersModal();
   // фильтры
-  if($('icfDateFrom'))$('icfDateFrom').onchange=e=>{icFilter.dateFrom=e.target.value;renderIntercity();};
-  if($('icfDateTo'))$('icfDateTo').onchange=e=>{icFilter.dateTo=e.target.value;renderIntercity();};
-  if($('icfWh'))$('icfWh').onchange=e=>{icFilter.wh=e.target.value;renderIntercity();};
-  if($('icfDest'))$('icfDest').onchange=e=>{icFilter.dest=e.target.value;renderIntercity();};
-  if($('icfTr'))$('icfTr').onchange=e=>{icFilter.transport=e.target.value;renderIntercity();};
-  const clearF=()=>{icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:''};renderIntercity();};
+  // Любая правка фильтра возвращает на первую страницу: иначе после сужения выборки
+  // человек остаётся на пятой странице, а строк там уже нет.
+  const icRe=()=>{icPage=1;renderIntercity();};
+  if($('icfDateFrom'))$('icfDateFrom').onchange=e=>{icFilter.dateFrom=e.target.value;icRe();};
+  if($('icfDateTo'))$('icfDateTo').onchange=e=>{icFilter.dateTo=e.target.value;icRe();};
+  if($('icfWh'))$('icfWh').onchange=e=>{icFilter.wh=e.target.value;icRe();};
+  if($('icfDest'))$('icfDest').onchange=e=>{icFilter.dest=e.target.value;icRe();};
+  if($('icfTr'))$('icfTr').onchange=e=>{icFilter.transport=e.target.value;icRe();};
+  if($('icfSender'))$('icfSender').onchange=e=>{icFilter.sender=e.target.value;icRe();};
+  // «Сегодня» ставит обе границы на сегодняшний день, «Все даты» снимает только даты —
+  // склад, город, транспорт и отправитель при этом остаются выбранными.
+  if($('icfToday'))$('icfToday').onclick=()=>{const t=localToday();icFilter.dateFrom=t;icFilter.dateTo=t;icRe();};
+  if($('icfAllDates'))$('icfAllDates').onclick=()=>{icFilter.dateFrom='';icFilter.dateTo='';icRe();};
+  if($('icPrev'))$('icPrev').onclick=()=>{if(icPage>1){icPage--;renderIntercity();}};
+  if($('icNext'))$('icNext').onclick=()=>{if(icPage<icPages){icPage++;renderIntercity();}};
+  const clearF=()=>{icFilter={dateFrom:'',dateTo:'',wh:'',dest:'',transport:'',sender:''};icRe();};
   if($('icfClear'))$('icfClear').onclick=clearF;
   if($('icEmptyClear'))$('icEmptyClear').onclick=clearF;
   $('main').querySelectorAll('[data-icview]').forEach(b=>b.onclick=()=>shipmentOrdersModal(b.dataset.icview));
