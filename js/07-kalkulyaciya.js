@@ -114,14 +114,18 @@ function salesMarginFor(o,P){
   if(o.sales_margin!=null&&o.sales_margin!=='')return parseFloat(o.sales_margin)||0;
   if(!o.sales_id)return 0;
   const pt=orderPartnerObj(o);if(!pt)return 0;
-  // ФИКСИРОВАННАЯ ДОЛЯ в карточке партнёра — она сильнее разницы с базовым тарифом.
-  // Партнёру могут поставить 2000 при базовых 1690, а менеджеру по договорённости идут
-  // те же 110: лишние 200 — это цена, которую держит компания, а не заработок менеджера.
-  // Без этого поля разница уходила менеджеру целиком, и прибыль по таким партнёрам
-  // занижалась на 200 ₸ с каждого заказа.
-  if(pt.sales_margin_fixed!=null&&pt.sales_margin_fixed!=='')
-    return Math.max(0,parseFloat(pt.sales_margin_fixed)||0);
   const courier=isCourierDelivery(o.delivery_id);
+  // ФИКСИРОВАННАЯ ДОЛЯ из карточки партнёра — ТОЛЬКО ПО ПОЧТОВЫМ заказам (решение
+  // владельца 01.10.2026). По курьеру менеджеру не идёт ничего: базовый курьерский
+  // тариф 3000 совпадает с тарифом почти всех партнёров, и разница там и так нулевая —
+  // одно поле на оба типа начало бы платить по курьеру то, чего там никогда не было.
+  //
+  // Сильнее разницы с базовым тарифом, потому что она врёт сразу в двух случаях:
+  // партнёру ставят 2000 при базовых 1690, а менеджеру по договорённости те же 110
+  // (лишние 200 держит компания); и партнёр с тарифом 0 — такие платят раз в месяц
+  // по счёту, а менеджеру с них всё равно идут свои 110.
+  if(!courier&&pt.sales_margin_fixed!=null&&pt.sales_margin_fixed!=='')
+    return Math.max(0,parseFloat(pt.sales_margin_fixed)||0);
   const tariff=courier?pt.tariff_courier:pt.tariff_post;
   if(tariff==null||tariff==='')return 0;
   const base=calcNorm(courier?'base_courier':'base_post',P);

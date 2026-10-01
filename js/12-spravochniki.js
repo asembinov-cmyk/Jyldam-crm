@@ -324,9 +324,14 @@ function dirPartners(onlyBar){
     ]});
 }
 // Пересчёт снимка доли менеджера в уже созданных заказах партнёра. Отдельной функцией
-// и с вопросом: деньги за прошлые месяцы уже посчитаны, и менять их молча нельзя.
+// и с вопросом: деньги уже посчитаны, и менять их молча нельзя.
 //
-// Поставили число — пишем его во все заказы партнёра, где указан менеджер.
+// ТОЛЬКО ТЕКУЩИЙ МЕСЯЦ — требование владельца от 01.10.2026: «старые за прошлые месяцы
+// не менять, считать с октября». Прошлые месяцы закрыты и по ним выплачено, а заказы
+// текущего месяца, созданные ДО того как поле заполнили, иначе остались бы со старым
+// снимком — и месяц посчитался бы наполовину по-старому.
+//
+// Поставили число — пишем его в заказы партнёра ЗА ЭТОТ МЕСЯЦ, где указан менеджер.
 // Очистили поле — СТИРАЕМ снимок, и доля снова считается на лету разницей с базовым
 // тарифом: записать «правильное» число пачкой нельзя, оно у каждого заказа своё
 // (тип доставки и базовый тариф того месяца).
@@ -335,25 +340,31 @@ function dirPartners(onlyBar){
 // (там партнёр определяется по названию отправителя), и до них это не дотянется.
 async function syncPartnerSalesMargin(partnerId,fixed){
   const setTo=fixed==null||fixed===''?null:+fixed;
+  // ТОЛЬКО ТЕКУЩИЙ МЕСЯЦ. Месяц берётся по дате забора, а если её нет — по дате создания:
+  // ровно так определяет период сама Калькуляция (ordersInOrderMonth).
+  const from=localToday().slice(0,7)+'-01';
+  const monthCond=`pickup_date.gte.${from},and(pickup_date.is.null,created_at.gte.${from})`;
   const {count}=await sb.from('orders').select('id',{count:'exact',head:true})
-    .eq('partner_id',partnerId).not('sales_id','is',null);
+    .eq('partner_id',partnerId).not('sales_id','is',null).or(monthCond);
   if(!count)return '';
+  // «2 заказов» в сообщении про деньги читается как небрежность — склоняем
+  const zakaz=n=>{const a=n%10,b=n%100;
+    return (a===1&&b!==11)?'заказ':(a>=2&&a<=4&&(b<12||b>14))?'заказа':'заказов';};
+  const word=zakaz(count);
+  const mon=['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'][+from.slice(5,7)-1];
   const what=setTo==null
     ? `вернуть расчёт по разнице с базовым тарифом`
     : `проставить ${setTo.toLocaleString('ru-RU')} ₸`;
-  // «2 заказов» в вопросе про деньги читается как небрежность — склоняем
-  const n10=count%10,n100=count%100;
-  const word=(n10===1&&n100!==11)?'заказ':(n10>=2&&n10<=4&&(n100<12||n100>14))?'заказа':'заказов';
-  if(!confirm(`У партнёра ${count} ${word} с указанным менеджером.\n\n`
+  if(!confirm(`За ${mon} у партнёра ${count} ${word} с указанным менеджером.\n\n`
     +`Пересчитать долю менеджера и в них — ${what}?\n\n`
-    +`Это меняет уже посчитанную зарплату за прошлые месяцы. `
-    +`Откажетесь — новое значение подействует только на новые заказы.`))return '';
+    +`Прошлые месяцы не трогаем. Откажетесь — новое значение подействует только на заказы, созданные дальше.`))return '';
   const {data,error}=await sb.from('orders').update({sales_margin:setTo})
-    .eq('partner_id',partnerId).not('sales_id','is',null).select('id');
+    .eq('partner_id',partnerId).not('sales_id','is',null).or(monthCond).select('id');
   if(error){console.error('sync sales margin',error);return ' (но долю в заказах обновить не удалось: '+error.message+')';}
   const ids=new Set((data||[]).map(x=>x.id));
   (S.orders||[]).forEach(o=>{if(ids.has(o.id))o.sales_margin=setTo;});
-  return ` · доля менеджера пересчитана в ${(data||[]).length} заказах`;
+  const n=(data||[]).length;
+  return ` · доля менеджера пересчитана в ${n} ${n%10===1&&n%100!==11?'заказе':'заказах'} за ${mon}`;
 }
 function partnerModal(id){
   const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:'',tariff_post:'',tariff_courier:''};
@@ -378,11 +389,13 @@ function partnerModal(id){
       <div class="field"><label>Тариф · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
       <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
     </div>
-    ${salesFixedReady()?`<div class="field"><label>Доля менеджера по продажам с заказа (₸)</label>
+    ${salesFixedReady()?`<div class="field"><label>Доля менеджера с ПОЧТОВОГО заказа (₸)</label>
       <input type="number" min="0" id="p_smargin" value="${esc(p.sales_margin_fixed)}" placeholder="пусто — считать разницей с базовым тарифом">
-      <small style="color:var(--muted);font-size:12px">Пусто — менеджеру идёт вся разница между тарифом партнёра и базовым тарифом компании.
-      Заполнено — ровно эта сумма, а остаток остаётся прибылью компании: тариф 2000 при базовых 1690 и долей 110 означает,
-      что 200 ₸ с заказа компания держит себе. Действует на оба типа доставки.</small></div>`:''}
+      <small style="color:var(--muted);font-size:12px">Сколько с одного почтового заказа идёт менеджеру по продажам.
+      Пусто — считается как раньше, разницей между тарифом партнёра и базовым тарифом компании.
+      Заполнено — ровно эта сумма, остаток остаётся прибылью компании: тариф 2000 и доля 110 означают, что 200 ₸ компания держит себе.
+      Поле нужно и партнёрам с тарифом 0, которые платят раз в месяц по счёту.
+      <b>На курьерские заказы не действует</b> — там доля считается только разницей с базовым курьерским тарифом.</small></div>`:''}
     ${baraholkaReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_bar" ${p.is_baraholka?'checked':''}> Барахолка <span class="pom-paidhint">(заказы считаются по своим нормативам; на уже созданные не влияет)</span></label>`:''}
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
