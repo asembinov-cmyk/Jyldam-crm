@@ -78,6 +78,24 @@
     position:sticky;top:0;z-index:60}
   .topbar-inner{padding:12px 22px;display:flex;align-items:center;gap:16px}
   .menu-toggle{display:none;font-size:22px;background:none;border:none;cursor:pointer;color:var(--ink);padding:2px 6px}
+  /* Ракета справа в шапке. Отрисована в SVG, а не картинкой: резкая на любом экране,
+     весит пару строк и не грузится отдельным запросом. */
+  .topbar-rocket{margin-left:auto;display:flex;align-items:center;pointer-events:none;
+    animation:rocketFloat 3.6s ease-in-out infinite}
+  .topbar-rocket svg{display:block}
+  .tr-trail line{animation:rocketTrail 1.6s ease-in-out infinite}
+  .tr-trail line:nth-child(2){animation-delay:.25s}
+  .tr-trail line:nth-child(3){animation-delay:.5s}
+  .tr-flame{transform-origin:62px 22px;animation:rocketFlame .5s ease-in-out infinite alternate}
+  @keyframes rocketFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  @keyframes rocketTrail{0%,100%{opacity:.08}50%{opacity:.3}}
+  @keyframes rocketFlame{from{transform:scaleX(.82)}to{transform:scaleX(1.12)}}
+  /* Человеку, который просил систему не анимировать, ничего не дёргается. */
+  @media (prefers-reduced-motion:reduce){
+    .topbar-rocket,.tr-trail line,.tr-flame{animation:none}
+  }
+  /* На телефоне в шапке и так тесно: бургер, логотип и имя. Ракету прячем. */
+  @media (max-width:760px){.topbar-rocket{display:none}}
   .calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
   @media (max-width:760px){.calc-grid{grid-template-columns:1fr}}
   .calc-panel{padding:18px 20px}
