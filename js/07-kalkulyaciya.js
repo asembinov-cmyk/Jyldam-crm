@@ -1177,73 +1177,95 @@ function barSummaryHtml(P){
   const fmtMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
   const list=(S.orders||[]).filter(o=>isBaraholkaOrder(o)&&String(o.pickup_date||o.created_at||'').slice(0,7)===P);
   if(!list.length)return `<div class="panel calc-panel" style="margin-top:18px">
-    <h3 class="calc-h">Итоги за ${esc(P)}</h3>
+    <h3 class="calc-h">Итоги Барахолки за ${esc(P)}</h3>
     <p class="calc-note">Заказов Барахолки за этот месяц пока нет — считать нечего.</p></div>`;
   const calcs=list.map(o=>calcOrder(o));
   const rev=calcs.reduce((a,c)=>a+c.revenue,0);
   const cost=calcs.reduce((a,c)=>a+c.totalCost,0);
   const profit=rev-cost;
   const margin=rev>0?(profit/rev*100):0;
+  const roi=cost>0?(profit/cost*100):0;
+  const avgSum=rev/list.length;
   // по статьям — чтобы было видно, какая из них съедает больше всего
   const byItem={};
   calcs.forEach(c=>c.items.forEach(it=>{byItem[it.label]=(byItem[it.label]||0)+(it.amount||0);}));
   const items=Object.entries(byItem).sort((a,b)=>b[1]-a[1]);
+  // МЕСЯЧНЫЕ ФОНДЫ — главная причина, по которой итоги в начале месяца выглядят странно:
+  // фонд за ВЕСЬ месяц делится на заказы, которые уже есть. 2 октября их полторы сотни,
+  // и на заказ ложится в разы больше, чем ляжет к 31-му. Пишем это прямо под карточками,
+  // иначе цифра выглядит ошибкой расчёта (вопрос владельца 02.10.2026).
+  const fundsSum=CALC_BAR_FUNDS.reduce((a,f)=>a+calcNorm(f.key,P),0);
+  const fundsPer=fundsSum/list.length;
   // НАДБАВКА ПО ЛЮДЯМ. В «Общей сводке» Барахолки больше нет вовсе (решение владельца
   // 02.10.2026), а надбавка по её заказам — настоящие деньги менеджера, и потеряться они
   // не должны: считаем их здесь, рядом с остальной Барахолкой.
   const bySales={};
-  list.forEach((o,i)=>{
+  list.forEach((o,i2)=>{
     if(!o.sales_id)return;
-    const m=(calcs[i].items.find(it=>it.key==='sales_margin')||{}).amount||0;
+    const m=(calcs[i2].items.find(it=>it.key==='sales_margin')||{}).amount||0;
     const r=bySales[o.sales_id]||(bySales[o.sales_id]={id:o.sales_id,cnt:0,margin:0});
     r.cnt++;r.margin+=m;
   });
   const salesRows=Object.values(bySales).map(r=>({...r,name:salesName(r.id)}))
     .sort((a,b)=>b.margin-a.margin);
+  const profitColor=profit<0?'#c0392b':'#2e7d32';
   return `
+    <h3 class="calc-h" style="margin:22px 0 10px">Итоги Барахолки за ${esc(P)}</h3>
+    <div class="calc-sum-bar">
+      <span class="calc-sum-cnt">Заказов: <b>${list.length}</b></span>
+      <span class="calc-sum-cnt">Средняя сумма заказа: <b>${fmtMoney(avgSum)}</b></span>
+      <span class="calc-sum-cnt" style="opacity:.7">месяц — по дате забора</span>
+    </div>
+    <div class="calc-totals">
+      <div class="ct-card"><div class="ct-k">Выручка</div><div class="ct-v">${fmtMoney(rev)}</div></div>
+      <div class="ct-card"><div class="ct-k">Итого расходы</div><div class="ct-v">${fmtMoney(cost)}</div>
+        <div class="ct-s">${fmtMoney(cost/list.length)} на заказ</div></div>
+      <div class="ct-card"><div class="ct-k">Чистая прибыль</div><div class="ct-v" style="color:${profitColor}">${fmtMoney(profit)}</div>
+        <div class="ct-s">${fmtMoney(profit/list.length)} на заказ</div></div>
+      <div class="ct-card"><div class="ct-k">Маржинальность</div><div class="ct-v">${margin.toFixed(1)}%</div></div>
+      <div class="ct-card"><div class="ct-k">ROI</div><div class="ct-v">${roi.toFixed(1)}%</div></div>
+    </div>
+    ${fundsSum?`<p class="calc-note" style="margin:10px 0 0">
+      ⚠️ <b>Месячные фонды считаются на весь месяц, а делятся на те заказы, что уже есть.</b>
+      Фонды Барахолки за ${esc(P)} — ${fmtMoney(fundsSum)}, заказов пока ${list.length},
+      значит на заказ ложится <b>${fmtMoney(fundsPer)}</b>. Это ${cost>0?Math.round(fundsPer/(cost/list.length)*100):0}% всей
+      себестоимости заказа. Чем ближе к концу месяца, тем больше заказов и тем меньше эта доля —
+      поэтому в первые дни прибыль занижена, и это не ошибка расчёта.</p>`:''}
     <div class="panel calc-panel" style="margin-top:18px">
-      <h3 class="calc-h">Итоги Барахолки за ${esc(P)}</h3>
-      <div class="calc-kpi">
-        <div><span>Заказов</span><b>${list.length}</b></div>
-        <div><span>Выручка</span><b>${fmtMoney(rev)}</b></div>
-        <div><span>Расходы</span><b>${fmtMoney(cost)}</b></div>
-        <div><span>Прибыль</span><b style="color:${profit<0?'#c0392b':'#2e7d32'}">${fmtMoney(profit)}</b>
-          <small>маржа ${margin.toFixed(1)}%</small></div>
-        <div><span>На один заказ</span><b>${fmtMoney(cost/list.length)}</b><small>себестоимость</small></div>
-      </div>
-      <div class="table-scroll" style="margin-top:14px"><table class="resp-table"><thead><tr>
-        <th>Статья</th><th class="num">Всего за месяц</th><th class="num">На заказ</th><th class="num">Доля</th>
+      <h3 class="calc-h">Разбивка по статьям расходов</h3>
+      <p class="calc-note">Свои пять статей за заказ и четыре месячных фонда. Курьера, межгорода и
+        общих фондов у Барахолки нет вовсе — за ней курьер не ездил.</p>
+      <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
+        <th>Статья</th><th>Сумма за месяц</th><th>На заказ</th><th>Доля</th>
       </tr></thead><tbody>
         ${items.map(([label,sum])=>`<tr>
-          <td data-label="Статья">${esc(label)}</td>
-          <td data-label="Всего за месяц" class="num">${fmtMoney(sum)}</td>
-          <td data-label="На заказ" class="num">${fmtMoney(sum/list.length)}</td>
-          <td data-label="Доля" class="num">${cost>0?Math.round(sum/cost*100):0}%</td>
+          <td>${esc(label)}</td>
+          <td><b>${fmtMoney(sum)}</b></td>
+          <td>${fmtMoney(sum/list.length)}</td>
+          <td>${cost>0?(sum/cost*100).toFixed(1):'0'}%</td>
         </tr>`).join('')}
-      </tbody><tfoot><tr class="dash-total">
-        <td>Итого расходов</td><td class="num">${fmtMoney(cost)}</td>
-        <td class="num">${fmtMoney(cost/list.length)}</td><td class="num">100%</td>
-      </tr></tfoot></table></div>
-      ${salesRows.length?`
-      <h3 class="calc-h" style="margin:18px 0 8px">Надбавка менеджеров по продажам</h3>
-      <p class="calc-note">Единственная общая статья, которая к Барахолке применяется: эти деньги
-        менеджер реально зарабатывает. Ставка за заказ по Барахолке не начисляется — у неё свои
-        статьи и свой месячный фонд. <b>К выплате менеджеру — эта надбавка ПЛЮС его строка
+        <tr style="border-top:2px solid var(--line)"><td><b>Итого расходы</b></td>
+          <td><b>${fmtMoney(cost)}</b></td><td><b>${fmtMoney(cost/list.length)}</b></td><td><b>100%</b></td></tr>
+      </tbody></table></div>
+    </div>
+    ${salesRows.length?`<div class="panel calc-panel" style="margin-top:18px">
+      <h3 class="calc-h">Заработок менеджеров по продажам</h3>
+      <p class="calc-note">Надбавка — единственная общая статья, которая к Барахолке применяется:
+        эти деньги менеджер реально зарабатывает. Ставка за заказ по Барахолке не начисляется — у неё
+        свои статьи и свой месячный фонд. <b>К выплате менеджеру — эта надбавка ПЛЮС его строка
         в «Общей сводке»</b>: там только заказы заборов.</p>
-      <div class="table-scroll"><table class="resp-table"><thead><tr>
-        <th>Менеджер</th><th class="num">Заказов</th><th class="num">Надбавка</th><th class="num">На заказ</th>
+      <div class="table-scroll"><table class="calc-courier-tbl"><thead><tr>
+        <th>Менеджер</th><th>Заказов</th><th>Надбавка</th><th>На заказ</th>
       </tr></thead><tbody>
         ${salesRows.map(r=>`<tr>
-          <td data-label="Менеджер">${esc(r.name)}</td>
-          <td data-label="Заказов" class="num">${r.cnt}</td>
-          <td data-label="Надбавка" class="num">${fmtMoney(r.margin)}</td>
-          <td data-label="На заказ" class="num">${fmtMoney(r.margin/r.cnt)}</td>
+          <td>${esc(r.name)}</td><td>${r.cnt}</td>
+          <td><b>${fmtMoney(r.margin)}</b></td><td>${fmtMoney(r.margin/r.cnt)}</td>
         </tr>`).join('')}
-      </tbody><tfoot><tr class="dash-total">
-        <td>Итого</td><td class="num">${salesRows.reduce((a,r)=>a+r.cnt,0)}</td>
-        <td class="num">${fmtMoney(salesRows.reduce((a,r)=>a+r.margin,0))}</td><td class="num"></td>
-      </tr></tfoot></table></div>`:''}
-    </div>`;
+        <tr style="border-top:2px solid var(--line)"><td><b>Итого</b></td>
+          <td><b>${salesRows.reduce((a,r)=>a+r.cnt,0)}</b></td>
+          <td><b>${fmtMoney(salesRows.reduce((a,r)=>a+r.margin,0))}</b></td><td></td></tr>
+      </tbody></table></div>
+    </div>`:''}`;
 }
 
 function renderCalcNorms(){
