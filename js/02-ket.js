@@ -30,7 +30,6 @@ async function callAI(payload){
     return out;
   }catch(e){return {error:String(e&&e.message||e)};}
 }
-// собрать данные заказа в формат KET
 // МЕНЕДЖЕР KET ДЛЯ ЗАКАЗОВ БАРАХОЛКИ — ПОКА НЕ РАБОТАЕТ, ПОЛЕ НЕ ОТПРАВЛЯЕТСЯ.
 //
 // Владелец дал id менеджера 19987924 (02.10.2026): заказы из модуля «Барахолка» должны
@@ -56,6 +55,7 @@ async function callAI(payload){
 // ИЛИ ключ API менеджера 19987924. Во втором случае поле не нужно вовсе.
 const KET_BAR_MANAGER_ID='19987924';
 const KET_BAR_MANAGER_FIELD='';   // 'client_id' проверен и не работает; 'web' не проверялся
+// собрать данные заказа в формат KET
 function orderToKet(o){
   const courier=isCourierDelivery(o.delivery_id);
   // город НАЗНАЧЕНИЯ: для курьерской — курьерский справочник, для почтовой — обычный
