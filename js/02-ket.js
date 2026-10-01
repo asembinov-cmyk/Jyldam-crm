@@ -223,8 +223,12 @@ async function sendOrderToKet(o){
     logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:ketId}});
     // Прямо говорим, ушёл ли трек. Иначе «в KET колонка Barcode пустая» невозможно
     // отличить от «мы его и не передавали».
+    // Что ПРОСИЛИ (acc) и чем прокси РЕАЛЬНО отправил (r.account/r.uid) — две разные вещи,
+    // и расходятся они ровно тогда, когда в ket-proxy ещё не выложен нужный аккаунт.
+    // Поэтому пишем обе: «просили baraholka, ушло под 75747498» — это сразу диагноз,
+    // а не загадка, которую выясняют у KET в панели.
     toast('Заказ отправлен в KET (ID '+(ketId||'?')+')'+(payload.barcode?' · трек '+payload.barcode+' передан':'')
-      +' · аккаунт '+acc,5000);
+      +' · '+ketSentAs(acc,r),7000);
     // Отправку не блокируем никогда. Но если это почтовый заказ без трека — говорим об этом
     // вслух: у KET нет метода обновления, дослать трек в этот заказ будет нечем.
     if(ketSendWarnNoTrack([o]))toast('Трек-номера не было — в KET он не ушёл, дослать нечем');
@@ -232,6 +236,16 @@ async function sendOrderToKet(o){
   }else{
     toast('KET отклонил: '+(result.message||'неизвестно'));return false;
   }
+}
+// Чем прокси реально отправил заказ: имя аккаунта и uid из его ответа. Если прокси старый
+// (аккаунт в нём ещё не выложен), он молча берёт аккаунт по умолчанию и uid в ответе не
+// возвращает вовсе — тогда так и пишем, вместо того чтобы повторять наше пожелание.
+function ketSentAs(asked,resp){
+  const got=resp&&resp.account?String(resp.account):'';
+  const uid=resp&&resp.uid?String(resp.uid):'';
+  if(!got)return 'аккаунт '+asked+' (прокси не сказал, чем отправил — выложите ket-proxy)';
+  if(got!==asked)return 'просили '+asked+', а ушло аккаунтом '+got+(uid?' (uid '+uid+')':'');
+  return 'аккаунт '+got+(uid?' · uid '+uid:' (прокси не вернул uid — выложите ket-proxy)');
 }
 // Последние отправки в KET: что ушло и что ответили. Держим в памяти вкладки (последние 20),
 // показываем по кнопке в карточке заказа — см. ketExchangeInfo.
@@ -249,7 +263,7 @@ function ketExchangeInfo(orderId){
   const track=ex.payload&&ex.payload.barcode?esc(ex.payload.barcode):'';
   showInfo('Отправка в KET · '+esc(ex.code),`
     <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${esc(fmtDate(ex.at))}
-      · аккаунт KET <strong>${esc(ex.account||'?')}</strong></div>
+      · ${esc(ketSentAs(ex.account||'?',ex.resp))}</div>
     <div style="margin-bottom:10px;font-size:15px">
       ${track?`Трек <strong>${track}</strong> передан в полях <code>kz_code</code> и <code>barcode</code>.`
              :'<span style="color:var(--rust)">Трек не передавался — в заказе он был пустой.</span>'}
