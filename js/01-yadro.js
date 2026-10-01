@@ -919,3 +919,40 @@ function moduleHead(o){
     </div>`:''}
   </div>`;
 }
+
+/* ---------- КОПИРОВАНИЕ НОМЕРА ---------- */
+// Маленькая кнопка рядом с номером заказа: в гриде и в карточке. Номер диктуют партнёру
+// и ищут им в чужих системах, а выделять его мышью в ячейке таблицы неудобно — на
+// телефоне практически невозможно.
+function copyBtn(text,title){
+  if(!text)return '';
+  return `<button type="button" class="copy-btn" data-copy="${esc(text)}" title="${esc(title||('Скопировать '+text))}" aria-label="Скопировать">`
+    +`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">`
+    +`<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></button>`;
+}
+async function copyText(t){
+  t=String(t==null?'':t);
+  if(!t)return false;
+  try{await navigator.clipboard.writeText(t);toast('Скопировано: '+t);return true;}
+  catch(e){
+    // clipboard есть не везде: без https и в старых браузерах его просто нет, и обещание
+    // отклоняется. Запасной путь — скрытое поле и execCommand, он работает и там.
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=t;ta.setAttribute('readonly','');
+      ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta);ta.select();
+      const ok=document.execCommand('copy');ta.remove();
+      toast(ok?('Скопировано: '+t):'Не удалось скопировать');return ok;
+    }catch(e2){toast('Не удалось скопировать');return false;}
+  }
+}
+// Слушатель ОДИН на всю страницу и в фазе ПЕРЕХВАТА: кнопка живёт внутри строки таблицы,
+// у которой свой обработчик (раскрытие, двойное нажатие), и без остановки всплытия нажатие
+// на копирование заодно открывало бы карточку.
+document.addEventListener('click',e=>{
+  const btn=e.target.closest&&e.target.closest('[data-copy]');
+  if(!btn)return;
+  e.stopPropagation();e.preventDefault();
+  copyText(btn.dataset.copy);
+},true);

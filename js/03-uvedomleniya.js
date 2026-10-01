@@ -320,6 +320,10 @@ function render(){
   if(typeof removeInboundPager==='function')removeInboundPager();
   if(typeof removeWhProductsPager==='function')removeWhProductsPager();
   if(typeof removeSortListPager==='function')removeSortListPager();
+  // Печать бланков в «Сортировке» при каждом заходе свёрнута: внутри самого раздела
+  // сворачивать нельзя — перерисовка там случается от фото и от Realtime, и панель
+  // закрывалась бы под руками. Стоит ДО цепочки if/else ниже, чтобы её не разорвать.
+  if(S.tab==='sorting'&&_lastTab!=='sorting'&&typeof sortPrintOpen!=='undefined')sortPrintOpen=false;
   if(S.tab==='dashboard'){
     // Таблицы по дням при входе всегда свёрнуты: они длинные, и из-за них не видно
     // карточек наверху. Раскрывает их человек сам, и только на время этого захода.

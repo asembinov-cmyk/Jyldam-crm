@@ -1674,7 +1674,7 @@ function drawOrders(){
       return `<tr data-orow="${o.id}" style="cursor:pointer" class="${o.via_integration?'order-row-api':''}" title="${o.via_integration?'Пришёл от партнёра напрямую через API-интеграцию':''}">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       ${noPhoto?'':`<td data-label="Фото">${photoCell}</td>`}
-      <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
+      <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${copyBtn(o.code)}${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?(()=>{
         // время создания показываем всегда: по нему видно, когда заказ реально завели.
         // Если создан не в день забора — дату тоже, иначе одно время вводит в заблуждение.
@@ -2211,7 +2211,7 @@ function orderModal(id,readonly){
       </div>
       <div class="oform-col">
     <div class="grid2">
-      <div class="field"><label>ID заказа</label><input value="${esc(code)}" readonly style="font-family:'Fraunces',serif;font-weight:900;letter-spacing:1px"></div>
+      <div class="field"><label>ID заказа ${copyBtn(code)}</label><input value="${esc(code)}" readonly style="font-family:'Fraunces',serif;font-weight:900;letter-spacing:1px"></div>
       <div class="field"><label>Дата забора</label><input type="date" id="o_pickup" value="${esc(d.pickup_date||'')}" ${dis}></div>
       <div class="field"><label>Отправитель</label><input id="o_sender" list="partnersList" autocomplete="off" value="${esc(d.sender)}" ${dis}><datalist id="partnersList">${S.partners.map(p=>`<option value="${esc(p.name)}"></option>`).join('')}</datalist></div>
       <div class="field"><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>

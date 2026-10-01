@@ -8,6 +8,14 @@
 // вносить данные, и без отдельного реестра-выгрузки в Excel.
 let sortingDate=null; // выбранная дата для просмотра/сортировки — по умолчанию сегодня
 let sortingListFilter='all'; // 'all'|'sorted'|'unsorted' — фильтр статуса в списке заказов
+let sortingListDelivery=''; // ''|'courier'|'mail' — фильтр типа доставки в списке заказов
+// Панель печати бланков свёрнута при каждом заходе в раздел: нужна она не всем и не всегда,
+// а занимает место над списком, ради которого в раздел и приходят. Состояние живёт в памяти
+// вкладки — раскрыли на время, ушли и вернулись, снова свёрнуто (как таблицы в «Статистике»,
+// раздел 8d). Сбрасывает его роутер по смене вкладки, а не сам раздел: внутри него
+// перерисовка случается от фото и от Realtime, и там сворачивать нельзя — панель закрывалась
+// бы прямо под руками.
+let sortPrintOpen=false;
 let sortingListSearch=''; // текст поиска по ФИО/телефону/номеру в списке заказов
 let sortListPage=1; // текущая страница (компьютерная пагинация)
 let sortListPerPage=50; // заказов на странице (компьютер)
@@ -17,6 +25,10 @@ function sortingListFiltered(processed){
   let rows=[...processed];
   if(sortingListFilter==='sorted')rows=rows.filter(o=>o.sorted_at);
   else if(sortingListFilter==='unsorted')rows=rows.filter(o=>!o.sorted_at);
+  // Тип доставки: курьерская развозится по городу, почтовая уходит в Казпочту — на складе
+  // это разные стопки, и список удобно сузить до одной.
+  if(sortingListDelivery==='courier')rows=rows.filter(o=>isCourierDelivery(o.delivery_id));
+  else if(sortingListDelivery==='mail')rows=rows.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id));
   const q=sortingListSearch.trim().toLowerCase();
   if(q){
     const qDigits=q.replace(/\D/g,'');
@@ -222,6 +234,11 @@ function renderSorting(){
           <option value="sorted" ${sortingListFilter==='sorted'?'selected':''}>✅ Принятые</option>
           <option value="unsorted" ${sortingListFilter==='unsorted'?'selected':''}>🔴 Непринятые</option>
         </select>
+        <select id="sortListDeliveryFilter" style="min-width:200px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);flex:1 1 200px">
+          <option value="" ${sortingListDelivery===''?'selected':''}>Все типы доставки</option>
+          <option value="courier" ${sortingListDelivery==='courier'?'selected':''}>🚚 Курьерская</option>
+          <option value="mail" ${sortingListDelivery==='mail'?'selected':''}>📮 Почтовая</option>
+        </select>
         <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:2 1 260px;min-width:260px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line)">
       </div>
       <div class="table-scroll"><table class="resp-table sorting-tbl"><thead><tr>
@@ -240,6 +257,8 @@ function renderSorting(){
   if(todayBtn)todayBtn.onclick=()=>{sortingDate=localToday();sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSorting();};
   const statusFilterEl=$('sortListStatusFilter');
   if(statusFilterEl)statusFilterEl.onchange=()=>{sortingListFilter=statusFilterEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
+  const delFilterEl=$('sortListDeliveryFilter');
+  if(delFilterEl)delFilterEl.onchange=()=>{sortingListDelivery=delFilterEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
   const searchEl=$('sortListSearch');
   if(searchEl){
     searchEl.oninput=()=>{sortingListSearch=searchEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
@@ -472,14 +491,17 @@ function labelNeedsPrint(o){
 }
 function labelPrintPanelHtml(queue,isToday){
   const auto=labelAutoPrintOn();
+  // <details> вместо своей механики: сворачивание работает без обработчиков, а состояние
+  // достаточно запомнить в переменной при переключении (см. sortPrintOpen).
   return `
-    <div class="sort-card sort-print">
-      <div class="sp-main">
+    <details class="sort-card sort-print" id="sortPrintBox" ${sortPrintOpen?'open':''}>
+      <summary class="sp-sum">
         <span class="sp-ic">🖨</span>
-        <div>
-          <div class="sp-t">Печать бланков</div>
-          <div class="sp-s">${queue.length?`${queue.length} готово к печати`:'нечего печатать'}</div>
-        </div>
+        <span class="sp-t">Печать бланков</span>
+        <span class="sp-s">${queue.length?`${queue.length} готово к печати`:'нечего печатать'}</span>
+        <span class="sp-ar">▾</span>
+      </summary>
+      <div class="sp-main">
         <button class="btn primary" id="labelPrintNow" ${queue.length?'':'disabled'}>Печатать все</button>
       </div>
       <label class="sp-auto">
@@ -493,9 +515,13 @@ function labelPrintPanelHtml(queue,isToday){
         <button class="btn ghost sm" id="labelOpenPdf" ${queue.length?'':'disabled'}>Открыть PDF</button>
         ${_lastLabelSheet?'<button class="btn ghost sm" id="labelReprint">↻ Перепечатать последний лист</button>':''}
       </div>
-    </div>`;
+    </details>`;
 }
 function bindLabelPrintPanel(queue,isToday){
+  // Запоминаем раскрытие на время этого захода: Realtime перерисовывает раздел, и без
+  // этого панель схлопывалась бы под руками у того, кто её только что открыл.
+  const box=$('sortPrintBox');
+  if(box)box.ontoggle=()=>{sortPrintOpen=box.open;};
   const chk=$('labelAutoPrint');
   if(chk)chk.onchange=()=>{
     setLabelAutoPrint(chk.checked);

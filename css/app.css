@@ -451,6 +451,17 @@
   .ohist-v{flex:1;min-width:0}
   .ohist-v b{font-weight:700}
   .ohist-v small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+  /* кнопка «скопировать номер» — в гриде под ID и в карточке рядом с полем */
+  .copy-btn{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;
+    width:26px;height:26px;padding:0;margin-left:6px;border:1px solid var(--line);border-radius:7px;
+    background:var(--card);color:var(--muted);cursor:pointer;transition:.12s}
+  .copy-btn svg{width:14px;height:14px}
+  .copy-btn:hover{color:var(--rust);border-color:var(--rust);background:rgba(37,70,201,.06)}
+  .copy-btn:active{transform:scale(.92)}
+  @media (max-width:760px),(pointer:coarse){
+    .copy-btn{width:34px;height:34px}
+    .copy-btn svg{width:17px;height:17px}
+  }
   @media (max-width:560px){
     .ohist-row{flex-wrap:wrap;gap:4px 10px}
     .ohist-k{width:auto}
@@ -1499,6 +1510,15 @@
 .sp-hint{margin:8px 0 0;font-size:12px;color:var(--muted);line-height:1.5}
 .sp-hint.sp-warn{color:var(--rust)}
 .sp-more{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+/* Панель печати сворачивается: нужна не всем и не всегда, а место над списком занимает.
+   Делает это сам <details>, поэтому обработчиков тут нет — только вид заголовка. */
+.sort-print summary{list-style:none;cursor:pointer}
+.sort-print summary::-webkit-details-marker{display:none}
+.sp-sum{display:flex;align-items:center;gap:12px}
+.sp-sum .sp-s{margin:0 0 0 auto}
+.sp-ar{flex:none;color:var(--muted);transition:transform .15s}
+.sort-print[open] .sp-ar{transform:rotate(180deg)}
+.sort-print[open] .sp-main{margin-top:14px}
 
 @media(max-width:900px){
   .sort-chips{grid-template-columns:repeat(2,1fr)}

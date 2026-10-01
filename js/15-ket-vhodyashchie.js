@@ -769,19 +769,17 @@ function drawInboundOrders(){
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
   const colCount=19+(admin?1:0);
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>SPA трафик</h1><p>Входящие заказы, полученные от KET и партнёров</p></div>
-      <div class="head-actions" style="margin-left:auto">
-        <button class="btn ghost sm" id="inbUnmatched" title="Показать, каких товаров не хватает">🔍 Непривязанные коды</button>
+    ${moduleHead({title:'SPA трафик',sub:'Входящие заказы, полученные от KET и партнёров',
+      actions:`<button class="btn ghost sm" id="inbUnmatched" title="Показать, каких товаров не хватает">🔍 Непривязанные коды</button>
         <button class="btn btn-excel" id="inbExportXlsx">⬇ Выгрузить Excel</button>
         <button class="btn ghost sm" id="inbPrintWaybills">🖨 Накладные (курьер)</button>
-        <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>
-      </div></div>
-    <div class="stats stats-4">
-      <div class="stat"><div class="k">Заказов сегодня</div><div class="v">${totalCount}</div></div>
-      <div class="stat"><div class="k">Курьерских заказов</div><div class="v">${courierCount}</div></div>
-      <div class="stat"><div class="k">Почтовых заказов</div><div class="v">${mailCount}</div></div>
-      <div class="stat"><div class="k">Всего в системе</div><div class="v">${_inboundAllTimeTotal!=null?_inboundAllTimeTotal:'…'}</div></div>
-    </div>
+        <button class="btn ghost sm" id="inbPrintLabels">🖨 Печать бланков (почта)</button>`,
+      // Главное число — сегодняшние заказы: раздел смотрят по ходу дня. «Всего в системе»
+      // приезжает отдельным запросом и до его ответа показывается многоточием.
+      hero:{k:'Заказов сегодня',v:(totalCount||0).toLocaleString('ru-RU')},
+      stats:[{v:(courierCount||0).toLocaleString('ru-RU'),k:'курьерских'},
+        {v:(mailCount||0).toLocaleString('ru-RU'),k:'почтовых'},
+        {v:_inboundAllTimeTotal!=null?_inboundAllTimeTotal.toLocaleString('ru-RU'):'…',k:'всего в системе'}]})}
     <div class="panel">
       <div class="panel-head"><h2>Список заказов КЕТ</h2><span class="count">${anyFilter?(allRows.length+' / '+totalCount):totalCount}</span>
         ${admin&&inbSelected.size?`<button class="btn danger sm" id="inbDelSel" style="margin-left:auto">✕ Удалить выбранные (${inbSelected.size})</button>`:''}</div>
