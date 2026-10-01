@@ -513,31 +513,161 @@ function ketDocsStatusTable(dict){
 }
 // диагностика: показать, каких именно тех.кодов не хватает среди товаров, и сколько заказов на них висит —
 // вместо того чтобы просто показывать общую цифру «N заказов не привязано»
-async function inboundUnmatchedModal(){
-  if(!S.inbound_full_loaded||!_inboundFullHistory){
-    toast('Загружаем весь список, чтобы проверить все заказы…');
-    try{await loadInbound({full:true});}catch(e){toast('Не удалось загрузить полный список');return;}
+// ── НЕПРИВЯЗАННЫЕ КОДЫ ──
+// Коды KET, под которыми приходит товар, но на складе такого товара нет. Пока код не
+// привязан, заказ нельзя собрать: состав берётся из позиций, а они не знают, что списывать.
+//
+// Было: окно сначала выкачивало ВСЮ историю KET (36 тысяч заказов и 87 тысяч позиций),
+// потом показывало список кодов и подпись «заведите товар в Складе». То есть минуту ждёшь,
+// а потом уходишь в другой раздел и ищешь там руками.
+//
+// Стало: один запрос по непривязанным позициям (их тысячи, а не десятки тысяч) и действия
+// прямо в строке — создать товар с этим кодом или привязать код к существующему. Привязка
+// идёт через `matchInboundItemsForCodes`, то есть ПО БАЗЕ, а не по тому, что загружено
+// в эту вкладку.
+const UNMATCHED_PAGE=1000;
+const UNMATCHED_MAX_PAGES=20;   // 20 тысяч позиций — дальше список всё равно нечитаем
+async function loadUnmatchedItems(){
+  const rows=[];
+  for(let page=0;page<UNMATCHED_MAX_PAGES;page++){
+    const from=page*UNMATCHED_PAGE;
+    const {data,error}=await sb.from('inbound_order_items')
+      .select('id,inbound_order_id,ket_sku,qty')
+      .is('product_id',null)
+      .range(from,from+UNMATCHED_PAGE-1);
+    if(error){console.error('непривязанные позиции',error);return {rows,error:true};}
+    rows.push(...(data||[]));
+    if(!data||data.length<UNMATCHED_PAGE)return {rows,more:false};
   }
-  const items=(S.inbound_items||[]).filter(it=>!it.matched||!it.product_id);
-  if(!items.length){showInfo('Непривязанные коды','<div class="empty">Все позиции по всем заказам КЕТ привязаны к товарам. 🎉</div>');return;}
-  const byCode=new Map(); // code -> {code, orders:Set, qty}
+  return {rows,more:true};
+}
+function unmatchedGroups(items){
+  const by=new Map();
   items.forEach(it=>{
-    const code=(it.ket_sku||'').trim()||'(пусто)';
-    if(!byCode.has(code))byCode.set(code,{code,orders:new Set(),qty:0});
-    const g=byCode.get(code);
+    const code=(it.ket_sku||'').trim();
+    const key=normKetSku(code)||'(пусто)';
+    if(!by.has(key))by.set(key,{code:code||'(пусто)',orders:new Set(),qty:0});
+    const g=by.get(key);
     g.orders.add(it.inbound_order_id);g.qty+=(it.qty||1);
   });
-  const rows=[...byCode.values()].sort((a,b)=>b.orders.size-a.orders.size);
-  const totalOrders=new Set(items.map(it=>it.inbound_order_id)).size;
-  const body=`
-    <div class="hint" style="margin-bottom:10px">Заказов, где есть хотя бы одна непривязанная позиция: <b>${totalOrders}</b>. Уникальных кодов, для которых нет товара: <b>${rows.length}</b>.</div>
-    <div class="table-scroll" style="max-height:60vh;overflow-y:auto"><table class="resp-table"><thead><tr>
-      <th>Код (ket_sku)</th><th>Заказов</th><th>Суммарно шт.</th>
-    </tr></thead><tbody>
-    ${rows.map(r=>`<tr><td><code>${esc(r.code)}</code></td><td>${r.orders.size}</td><td>${r.qty}</td></tr>`).join('')}
+  return [...by.values()].sort((a,b)=>b.orders.size-a.orders.size||b.qty-a.qty);
+}
+// Позиции, у которых товар УЖЕ выбран, но отметки «привязан» нет. Сборка их считает
+// непривязанными и не даёт собрать заказ, а в списке кодов их не видно: привязывать нечего,
+// товар и так известен. Поэтому считаем отдельно и чиним одной кнопкой.
+async function loadHalfMatched(){
+  try{
+    const {data,error}=await sb.from('inbound_order_items').select('id')
+      .not('product_id','is',null).or('matched.is.false,matched.is.null').limit(1000);
+    if(error){console.error('позиции без отметки',error);return [];}
+    return (data||[]).map(r=>r.id);
+  }catch(e){console.error('позиции без отметки',e);return [];}
+}
+async function inboundUnmatchedModal(){
+  toast('Смотрим непривязанные позиции…');
+  const res=await loadUnmatchedItems();
+  if(res.error){toast('Не удалось прочитать позиции заказов');return;}
+  const halfIds=await loadHalfMatched();
+  const rows=unmatchedGroups(res.rows);
+  const halfHtml=halfIds.length?`<div class="hint" style="color:var(--rust);margin-bottom:10px">
+    Позиций, где товар выбран, но нет отметки «привязан»: <b>${halfIds.length}</b>. Сборка
+    считает такие заказы непривязанными. <button type="button" class="btn sm" id="unmFixHalf">Проставить отметку</button></div>`:'';
+  const bindHalf=()=>{
+    const fx=$('unmFixHalf');
+    if(!fx)return;
+    fx.onclick=async()=>{
+      fx.disabled=true;fx.textContent='Проставляем…';
+      let done=0;
+      for(let i=0;i<halfIds.length;i+=200){
+        const part=halfIds.slice(i,i+200);
+        const {error}=await sb.from('inbound_order_items').update({matched:true}).in('id',part);
+        if(error){toast('Не удалось проставить отметку');break;}
+        done+=part.length;
+      }
+      toast(`Отметка проставлена у позиций: ${done}`,4000);
+      fx.textContent='Готово';
+    };
+  };
+  if(!rows.length){
+    showInfo('Непривязанные коды',halfHtml+'<div class="empty">Все позиции по заказам КЕТ привязаны к товарам. 🎉</div>');
+    bindHalf();return;
+  }
+  const totalOrders=new Set(res.rows.map(it=>it.inbound_order_id)).size;
+  const prods=[...(S.products||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru'));
+  const parts=(S.warehouse_partners||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru'));
+  const body=halfHtml+`
+    <div class="hint" style="margin-bottom:10px">
+      Заказов с непривязанными позициями: <b>${totalOrders}</b> · кодов без товара: <b>${rows.length}</b>.
+      ${res.more?'<br><span style="color:var(--rust)">Показаны не все: позиций больше '+(UNMATCHED_PAGE*UNMATCHED_MAX_PAGES).toLocaleString('ru-RU')+'.</span>':''}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <button type="button" class="btn ghost sm" id="unmCopy">📋 Скопировать коды</button>
+      <span class="hint" style="margin-left:auto">Партнёр для новых товаров:</span>
+      <select id="unmPartner" style="min-width:180px"><option value="">— не указан —</option>
+        ${parts.map(pt=>`<option value="${pt.id}">${esc(pt.name)}</option>`).join('')}</select>
+    </div>
+    <datalist id="unmProdList">${prods.map(p=>`<option value="${esc(p.name)}"></option>`).join('')}</datalist>
+    <div class="table-scroll" style="max-height:58vh;overflow-y:auto"><table class="resp-table"><thead><tr>
+      <th>Код KET</th><th>Заказов</th><th>Штук</th><th>Товар на складе</th><th></th>
+    </tr></thead><tbody id="unmBody">
+    ${rows.map((r,i)=>{
+      // Позиция без кода вообще: привязывать нечего — товар ищется именно по коду.
+      // Показываем её, чтобы было видно, что заказ собрать не дадут, но кнопки не рисуем:
+      // нажать было бы можно, а сработать не могло бы.
+      const noCode=r.code==='(пусто)';
+      return `<tr data-unmrow="${i}">
+      <td data-label="Код KET"><code>${esc(r.code)}</code></td>
+      <td data-label="Заказов">${r.orders.size}</td>
+      <td data-label="Штук">${r.qty}</td>
+      <td data-label="Товар на складе">${noCode
+        ?'<span class="hint">у позиции нет кода KET — привязать не к чему, вопрос к KET</span>'
+        :`<input list="unmProdList" data-unmname="${i}" placeholder="название товара" style="width:100%;min-width:200px">`}</td>
+      <td data-label="" class="cell-actions"><div class="row-actions">${noCode?'':
+        `<button type="button" class="btn sm" data-unmbind="${i}">Привязать</button>
+        <button type="button" class="btn sm ghost" data-unmnew="${i}">Создать товар</button>`}
+      </div></td>
+    </tr>`;}).join('')}
     </tbody></table></div>
-    <div class="hint" style="margin-top:10px">Это коды, которых нет ни у одного товара в «Склад → Товары» (поле «Коды KET»). Заведите товар с таким кодом (или добавьте код существующему товару) — привязка произойдёт автоматически при следующей загрузке/обновлении.</div>`;
+    <div class="hint" style="margin-top:10px">
+      <b>Привязать</b> — добавит код существующему товару (выберите его в поле слева).
+      <b>Создать товар</b> — заведёт новый товар с этим названием и кодом.
+      В обоих случаях все заказы с этим кодом привяжутся сразу, включая старые.
+    </div>`;
   showInfo('Непривязанные коды',body,{wide:true});
+  const nameOf=i=>{const el=document.querySelector(`[data-unmname="${i}"]`);return el?el.value.trim():'';};
+  const dropRow=i=>{const tr=document.querySelector(`[data-unmrow="${i}"]`);if(tr)tr.remove();};
+  // привязка кода к уже существующему товару
+  document.querySelectorAll('[data-unmbind]').forEach(btn=>btn.onclick=async()=>{
+    const i=btn.dataset.unmbind,r=rows[i],nm=nameOf(i);
+    if(!nm){toast('Впишите название товара или выберите из списка');return;}
+    const prod=(S.products||[]).find(p=>(p.name||'').trim().toLowerCase()===nm.toLowerCase());
+    if(!prod){toast('Такого товара нет — нажмите «Создать товар»');return;}
+    btn.disabled=true;
+    const merged=mergeKetSku(prod.ket_sku||'',r.code);
+    const upd=await dbUpdate('products',prod.id,{ket_sku:merged});
+    if(!upd){toast('Не удалось сохранить код у товара');btn.disabled=false;return;}
+    Object.assign(prod,upd);
+    const n=await matchInboundItemsForCodes(prod.id,[r.code]);
+    toast(`Код ${r.code} → «${prod.name}» · привязано позиций: ${n}`,4000);
+    dropRow(i);
+  });
+  // новый товар сразу с этим кодом
+  document.querySelectorAll('[data-unmnew]').forEach(btn=>btn.onclick=async()=>{
+    const i=btn.dataset.unmnew,r=rows[i],nm=nameOf(i);
+    if(!nm){toast('Впишите название товара — под ним он появится на складе');return;}
+    btn.disabled=true;
+    const payload={name:nm,partner_id:($('unmPartner')&&$('unmPartner').value)||null,
+      barcode:genBarcode(),sku:null,category:null,stock:{},ket_sku:r.code};
+    const saved=await dbInsert('products',payload);
+    if(!saved){toast('Не удалось создать товар');btn.disabled=false;return;}
+    if(!S.products)S.products=[];S.products.unshift(saved);
+    const n=await matchInboundItemsForCodes(saved.id,[r.code]);
+    toast(`Товар «${nm}» создан · привязано позиций: ${n}`,4000);
+    dropRow(i);
+  });
+  // список кодов — чтобы отправить его в KET и получить названия
+  if($('unmCopy'))$('unmCopy').onclick=()=>copyText(rows.filter(r=>r.code!=='(пусто)').map(r=>r.code).join('\n'));
+  bindHalf();
 }
 function partnerApiDocsModal(){
   const body=`
