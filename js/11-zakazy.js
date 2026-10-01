@@ -548,12 +548,10 @@ function renderOrders(mode){
   if(!ordersDateInit){const t=localToday();of.createFrom=t;of.createTo=t;ordersDateInit=true;}
   const list=ordersDateScopedList();
   const totalCost=list.reduce((s,o)=>s+orderSum(o),0);
-  const paid=list.filter(o=>o.pay_date).length;
   const titles={'':'Заказы заборов',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня',
     baraholka:'Барахолка'};
   const subs={'':'Отправления: курьерская и почтовая доставка',courier:'Заказы с курьерской доставкой',
-    mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня',
-    baraholka:'Готовые реестры Казпочты — загрузка из Excel. В заказы заборов не попадают'};
+    mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня'};
   let dayNote='';
   if(of.createFrom&&of.createFrom===of.createTo){const t=localToday();dayNote=of.createFrom===t?'за сегодня':('за '+fmtDate(of.createFrom));}
   else if(of.createFrom||of.createTo){dayNote='за период';}
@@ -562,18 +560,23 @@ function renderOrders(mode){
   // заборов», реестровые заказы наливали в общий список, и из этого выросла вся мешанина.
   const bar=ordersMode==='baraholka';
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
+  // У Барахолки подписи под заголовком нет вовсе (просьба владельца 02.10.2026): что это
+  // за раздел, видно по названию, а про «не попадают в заказы заборов» достаточно один раз
+  // прочитать. Склеиваем через filter+join, иначе при пустой подписи остался бы висячий
+  // разделитель «· за период».
+  const subText=isCourier()?'Отправления: курьерская и почтовая доставка'
+    :(bar?'':[subs[ordersMode]||'',dayNote].filter(Boolean).join(' · '));
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
-      <div class="head-actions">${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&(ordersMode==='mail'||bar))?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
+    <div class="page-head"><div><h1>${head}</h1>${subText?`<p>${subText}</p>`:''}</div>
+      <div class="head-actions">${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
     </div>`:`
-    <div class="stats stats-5">
+    <div class="stats stats-4">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
       <div class="stat"><div class="k">Курьерских</div><div class="v">${list.filter(o=>isCourierDelivery(o.delivery_id)).length}</div></div>
       <div class="stat"><div class="k">Почтовых</div><div class="v">${list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id)).length}</div></div>
-      <div class="stat"><div class="k">Оплачено</div><div class="v">${paid}<small> / ${list.length}</small></div></div>
       <div class="stat"><div class="k">Сумма доставки</div><div class="v">${totalCost.toLocaleString('ru-RU')}<small> ₸</small></div></div>
     </div>`}
     <div class="panel">
