@@ -30,29 +30,21 @@ async function callAI(payload){
     return out;
   }catch(e){return {error:String(e&&e.message||e)};}
 }
-// МЕНЕДЖЕР KET ДЛЯ ЗАКАЗОВ БАРАХОЛКИ — ПОКА НЕ РАБОТАЕТ, ПОЛЕ НЕ ОТПРАВЛЯЕТСЯ.
+// МЕНЕДЖЕР KET ДЛЯ ЗАКАЗОВ БАРАХОЛКИ — ПРИВЯЗКА ИДЁТ ПО КЛЮЧУ, А НЕ ПОЛЕМ В ЗАКАЗЕ.
 //
 // Владелец дал id менеджера 19987924 (02.10.2026): заказы из модуля «Барахолка» должны
-// уходить на него, а не в общий поток. Поля «менеджер» в документации KET
-// (ketkz.com/api/doc.txt) нет вовсе, кандидатов было два:
-//   client_id — «Служебное поле, его значение обсуждается отдельно с менеджером»;
-//   web       — «id веба, который залил заявку».
+// уходить на него, а не в общий поток. Сначала пробовали передать id полем — в
+// документации KET (ketkz.com/api/doc.txt) поля «менеджер» нет вовсе, кандидатов было
+// два: client_id («значение обсуждается отдельно с менеджером») и web («id веба»).
 //
-// ПРОВЕРЕНО ЖИВЫМ ЗАКАЗОМ: с client_id=19987924 заказ ушёл под 75747498 — то есть туда
-// же, куда уходил всегда. Значит client_id привязкой к менеджеру НЕ управляет.
+// ПРОВЕРЕНО ЖИВЫМ ЗАКАЗОМ: с client_id=19987924 заказ ушёл под 75747498 — туда же, куда
+// уходил всегда. 75747498 — тот самый номер, который KET называл «своей приёмкой» ещё
+// 21.09.2026, когда давал имя поля actual_weight, то есть это аккаунт НАШЕГО ключа.
+// Вывод: KET смотрит на ключ запроса, а не на поля заказа.
 //
-// И 75747498 — это тот самый номер, который KET называл «своей приёмкой» ещё 21.09.2026,
-// когда давал имя поля actual_weight. Похоже, это аккаунт, которому принадлежит наш
-// ключ API, а привязка идёт ПО КЛЮЧУ, а не по полю в заказе. Тогда никакое поле её не
-// сдвинет, и для менеджера 19987924 нужен ЕГО ключ — третий аккаунт в ket-proxy рядом
-// с astana и almaty (см. ketAccountForOrder).
-//
-// Поэтому поле сейчас НЕ ОТПРАВЛЯЕТСЯ: пускать с каждым заказом значение в служебное
-// поле, которое ничего не делает, — это мусор в чужой системе без метода обновления.
-// Id оставлен здесь, чтобы не искать его заново.
-//
-// Что закроет вопрос: ответ KET на «в какое поле send_order.php писать id менеджера»
-// ИЛИ ключ API менеджера 19987924. Во втором случае поле не нужно вовсе.
+// Поэтому поле НЕ ОТПРАВЛЯЕТСЯ (оно ничего не делало бы, а метода обновления у KET нет),
+// а менеджер выбирается ТРЕТЬИМ АККАУНТОМ в ket-proxy — см. ketAccountForOrder.
+// Id оставлен здесь справкой: в запрос он не уходит.
 const KET_BAR_MANAGER_ID='19987924';
 const KET_BAR_MANAGER_FIELD='';   // 'client_id' проверен и не работает; 'web' не проверялся
 // собрать данные заказа в формат KET
@@ -181,8 +173,15 @@ function ketDeliveryCode(cityName){
   for(const [re,code] of KET_DELIVERY_CODES){if(re.test(nm))return code;}
   return null; // город не в списке курьерских — код не найден
 }
-// выбор аккаунта KET по ГОРОДУ ЗАБОРА заказа: Алматы → отдельный аккаунт, иначе (Астана и пр.) → основной
+// Аккаунт KET, то есть КАКИМ КЛЮЧОМ уйдёт запрос. ket-proxy по этому имени достаёт
+// свой секрет, поэтому именно здесь решается, под каким менеджером заказ появится у KET
+// (полем в заказе это не управляется — проверено живым заказом, см. шапку файла).
+//
+// Барахолка идёт ПЕРВОЙ проверкой, до города: это отдельная ветка бизнеса со своим
+// менеджером (19987924, раздел 5f), и город забора к выбору аккаунта там отношения не
+// имеет. Поставь проверку города раньше — алматинская Барахолка утекла бы в общий поток.
 function ketAccountForOrder(o){
+  if(isBaraholkaOrder(o))return 'baraholka';
   const nm=(o&&o.pickup_city_id?cityName(o.pickup_city_id):'').toLowerCase();
   if(/алмат/.test(nm))return 'almaty';
   return 'astana'; // основной (старый) аккаунт по умолчанию
@@ -206,10 +205,15 @@ async function sendOrderToKet(o){
   // заказа. Разбирать «трек не дошёл» без этих двух вещей невозможно, а лазить в консоль
   // браузера на телефоне нереально. Метода обновления у KET нет — второй попытки на том
   // же заказе не будет, поэтому запись о каждой отправке дороже обычного.
-  console.log('KET → отправляем',payload);
-  const r=await callKet({action:'send',account:ketAccountForOrder(o),order:payload});
+  // Аккаунт = ключ запроса = менеджер, под которым заказ появится у KET. Пишем его и в
+  // консоль, и в сообщение об успехе: «ушёл не к тому менеджеру» иначе видно только у KET
+  // в их панели, а метода обновления у них нет — узнать надо сразу. Та же причина, по
+  // которой у Казпочты в сообщении печатается контур.
+  const acc=ketAccountForOrder(o);
+  console.log('KET → отправляем',payload,'аккаунт:',acc);
+  const r=await callKet({action:'send',account:acc,order:payload});
   console.log('KET ← ответ',r);
-  rememberKetExchange(o,payload,r);
+  rememberKetExchange(o,payload,r,acc);
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
   const result=(r.ket&&r.ket.result)||{};
   if((result.success||'').toUpperCase()==='TRUE'){
@@ -219,7 +223,8 @@ async function sendOrderToKet(o){
     logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:ketId}});
     // Прямо говорим, ушёл ли трек. Иначе «в KET колонка Barcode пустая» невозможно
     // отличить от «мы его и не передавали».
-    toast('Заказ отправлен в KET (ID '+(ketId||'?')+')'+(payload.barcode?' · трек '+payload.barcode+' передан':''),5000);
+    toast('Заказ отправлен в KET (ID '+(ketId||'?')+')'+(payload.barcode?' · трек '+payload.barcode+' передан':'')
+      +' · аккаунт '+acc,5000);
     // Отправку не блокируем никогда. Но если это почтовый заказ без трека — говорим об этом
     // вслух: у KET нет метода обновления, дослать трек в этот заказ будет нечем.
     if(ketSendWarnNoTrack([o]))toast('Трек-номера не было — в KET он не ушёл, дослать нечем');
@@ -231,8 +236,9 @@ async function sendOrderToKet(o){
 // Последние отправки в KET: что ушло и что ответили. Держим в памяти вкладки (последние 20),
 // показываем по кнопке в карточке заказа — см. ketExchangeInfo.
 let _ketExchanges=[];
-function rememberKetExchange(o,payload,resp){
-  _ketExchanges.unshift({order_id:o.id,code:o.code||o.id,at:new Date().toISOString(),payload,resp});
+function rememberKetExchange(o,payload,resp,account){
+  _ketExchanges.unshift({order_id:o.id,code:o.code||o.id,at:new Date().toISOString(),payload,resp,
+    account:account||ketAccountForOrder(o)});
   if(_ketExchanges.length>20)_ketExchanges.length=20;
 }
 function lastKetExchange(orderId){return _ketExchanges.find(x=>x.order_id===orderId)||null;}
@@ -242,7 +248,8 @@ function ketExchangeInfo(orderId){
   if(!ex){toast('В этой вкладке заказ ещё не отправляли — отправьте и нажмите снова');return;}
   const track=ex.payload&&ex.payload.barcode?esc(ex.payload.barcode):'';
   showInfo('Отправка в KET · '+esc(ex.code),`
-    <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${esc(fmtDate(ex.at))}</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${esc(fmtDate(ex.at))}
+      · аккаунт KET <strong>${esc(ex.account||'?')}</strong></div>
     <div style="margin-bottom:10px;font-size:15px">
       ${track?`Трек <strong>${track}</strong> передан в полях <code>kz_code</code> и <code>barcode</code>.`
              :'<span style="color:var(--rust)">Трек не передавался — в заказе он был пустой.</span>'}
