@@ -107,10 +107,20 @@ function orderPartnerObj(o){
 // партнёра в карточке один на всё время: без снимка подъём цены пересчитал бы
 // надбавку задним числом за все прошлые месяцы, уже после расчёта с менеджером.
 const salesMarginReady=()=>!!(S.orders&&S.orders.length&&('sales_margin' in S.orders[0]));
+// Поле «Доля менеджера» в карточке партнёра есть не всегда: пока не выполнен db/22,
+// колонки нет, и слать её в запрос нельзя — партнёр перестал бы сохраняться целиком.
+const salesFixedReady=()=>!!(S.partners&&S.partners.length&&('sales_margin_fixed' in S.partners[0]));
 function salesMarginFor(o,P){
   if(o.sales_margin!=null&&o.sales_margin!=='')return parseFloat(o.sales_margin)||0;
   if(!o.sales_id)return 0;
   const pt=orderPartnerObj(o);if(!pt)return 0;
+  // ФИКСИРОВАННАЯ ДОЛЯ в карточке партнёра — она сильнее разницы с базовым тарифом.
+  // Партнёру могут поставить 2000 при базовых 1690, а менеджеру по договорённости идут
+  // те же 110: лишние 200 — это цена, которую держит компания, а не заработок менеджера.
+  // Без этого поля разница уходила менеджеру целиком, и прибыль по таким партнёрам
+  // занижалась на 200 ₸ с каждого заказа.
+  if(pt.sales_margin_fixed!=null&&pt.sales_margin_fixed!=='')
+    return Math.max(0,parseFloat(pt.sales_margin_fixed)||0);
   const courier=isCourierDelivery(o.delivery_id);
   const tariff=courier?pt.tariff_courier:pt.tariff_post;
   if(tariff==null||tariff==='')return 0;
