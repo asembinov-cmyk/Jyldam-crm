@@ -1461,6 +1461,16 @@ function renderCalcSummary(){
   const avgMargin=mainRevenue>0?(mainProfit/mainRevenue*100):0;
   const avgRoi=mainCost>0?(mainProfit/mainCost*100):0;
   const barMarginSum=bar.reduce((sum,x)=>sum+((x.c.items.find(i=>i.key==='sales_margin')||{}).amount||0),0);
+  // СКОЛЬКО ЗАКАЗОВ БАРАХОЛКИ НЕ ВОШЛО В ТАБЛИЦЫ ПО ЛЮДЯМ, по каждому человеку.
+  // Владелец сверил «Заказов» у менеджера по продажам с гридом «Заказы заборов» по тому же
+  // фильтру и получил 5685 против 5731 — разница и есть Барахолка: ставка за заказ на ней
+  // не начисляется вовсе, у неё свой фонд (раздел 5a). Пока это было написано только
+  // словами в примечании, разница выглядела ошибкой счёта. Теперь видно число.
+  const barBySales={},barByProc={};
+  bar.forEach(({o})=>{
+    if(o.sales_id)barBySales[o.sales_id]=(barBySales[o.sales_id]||0)+1;
+    if(o.processor_id)barByProc[o.processor_id]=(barByProc[o.processor_id]||0)+1;
+  });
   // заказы «Оплачено отправителем» — их выручка (условная, по сохранённой исходной сумме) уже
   // учтена в totRevenue/totProfit выше; здесь просто выделяем её отдельно для прозрачности
   const paidBySenderCalcs=mainCalcs.filter(x=>x.c.isPaidBySender);
@@ -1588,7 +1598,8 @@ function renderCalcSummary(){
         <th>Менеджер</th><th>Заказов</th><th>Надбавка</th><th>За заказ</th><th>Оклад</th><th>Итого</th>
       </tr></thead><tbody>
         ${salesRows.map(r=>`<tr>
-          <td>${esc(r.name)}</td><td>${r.cnt}</td>
+          <td>${esc(r.name)}</td>
+          <td>${r.cnt}${barBySales[r.id]?`<small class="cell-time">+${barBySales[r.id]} Барахолки не в счёт</small>`:''}</td>
           <td>${fmtMoney(r.margin)}${r.cnt?`<small class="cell-time">${fmtMoney(r.margin/r.cnt)} на заказ</small>`:''}</td>
           <td>${fmtMoney(r.per)}</td><td>${fmtMoney(r.salary)}</td>
           <td><b>${fmtMoney(r.total)}</b></td></tr>`).join('')}
@@ -1600,8 +1611,11 @@ function renderCalcSummary(){
         <td><b>Итого</b></td><td><b>${salesTotals.cnt}</b></td><td><b>${fmtMoney(salesTotals.margin)}</b></td>
         <td><b>${fmtMoney(salesTotals.per)}</b></td><td><b>${fmtMoney(salesTotals.salary)}</b></td>
         <td><b>${fmtMoney(salesTotals.total)}</b></td></tr>
-        <tr><td style="color:var(--muted)">Всего заказов за месяц</td>
-        <td style="color:var(--muted)"><b>${salesTotals.cnt+salesNone}</b></td><td colspan="4"></td></tr></tfoot></table></div>
+        <tr><td style="color:var(--muted)">Всего обычных заказов за месяц</td>
+        <td style="color:var(--muted)"><b>${salesTotals.cnt+salesNone}</b></td><td colspan="4"></td></tr>
+        ${bar.length?`<tr><td style="color:var(--muted)">+ Барахолка, в расчёт по людям не входит
+          <span class="cn-hint" style="display:block">с этой строкой сходится фильтр в «Заказах заборов»</span></td>
+        <td style="color:var(--muted)"><b>${bar.length}</b></td><td colspan="4"></td></tr>`:''}</tfoot></table></div>
     </div>`:''}
     ${procRowsSum.length?`<div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Заработок менеджеров обработчиков</h3>
@@ -1612,7 +1626,8 @@ function renderCalcSummary(){
         <th>Обработчик</th><th>Заказов</th><th>За заказ</th><th>Оклад</th><th>Итого</th>
       </tr></thead><tbody>
         ${procRowsSum.map(r=>`<tr>
-          <td>${esc(r.name)}</td><td>${r.cnt}</td>
+          <td>${esc(r.name)}</td>
+          <td>${r.cnt}${barByProc[r.id]?`<small class="cell-time">+${barByProc[r.id]} Барахолки не в счёт</small>`:''}</td>
           <td>${fmtMoney(r.per)}${r.cnt?`<small class="cell-time">${fmtMoney(r.per/r.cnt)} на заказ</small>`:''}</td>
           <td>${fmtMoney(r.salary)}</td><td><b>${fmtMoney(r.total)}</b></td></tr>`).join('')}
         ${procNone?`<tr><td style="color:var(--muted)">Обработчик не указан
@@ -1622,8 +1637,11 @@ function renderCalcSummary(){
       </tbody><tfoot><tr style="border-top:2px solid var(--line)">
         <td><b>Итого</b></td><td><b>${procTotals.cnt}</b></td><td><b>${fmtMoney(procTotals.per)}</b></td>
         <td><b>${fmtMoney(procTotals.salary)}</b></td><td><b>${fmtMoney(procTotals.total)}</b></td></tr>
-        <tr><td style="color:var(--muted)">Всего заказов за месяц</td>
-        <td style="color:var(--muted)"><b>${procTotals.cnt+procNone}</b></td><td colspan="3"></td></tr></tfoot></table></div>
+        <tr><td style="color:var(--muted)">Всего обычных заказов за месяц</td>
+        <td style="color:var(--muted)"><b>${procTotals.cnt+procNone}</b></td><td colspan="3"></td></tr>
+        ${bar.length?`<tr><td style="color:var(--muted)">+ Барахолка, в расчёт по людям не входит
+          <span class="cn-hint" style="display:block">с этой строкой сходится фильтр в «Заказах заборов»</span></td>
+        <td style="color:var(--muted)"><b>${bar.length}</b></td><td colspan="3"></td></tr>`:''}</tfoot></table></div>
     </div>`:''}
     <div class="panel calc-panel" style="margin-bottom:18px">
       <h3 class="calc-h">Разбивка по типу доставки</h3>
