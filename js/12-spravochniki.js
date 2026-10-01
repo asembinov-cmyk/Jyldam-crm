@@ -319,8 +319,10 @@ function dirPartners(onlyBar){
       {key:'tpost',label:'Тариф почта',filter:'select',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
       {key:'tcour',label:'Тариф курьер',filter:'select',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
       // видно сразу, у кого доля менеджера зафиксирована, а у кого считается разницей
-      ...(salesFixedReady()?[{key:'smargin',label:'Доля менеджера',filter:'select',
+      ...(salesFixedReady()?[{key:'smpost',label:'Доля · почта',filter:'select',
         text:p=>p.sales_margin_fixed!=null&&p.sales_margin_fixed!==''?(+p.sales_margin_fixed).toLocaleString('ru-RU')+' ₸':'по разнице'}]:[]),
+      ...(salesCourierReady()?[{key:'smcour',label:'Доля · курьер',filter:'select',
+        text:p=>p.sales_margin_courier!=null&&p.sales_margin_courier!==''?(+p.sales_margin_courier).toLocaleString('ru-RU')+' ₸':'по разнице'}]:[]),
     ]});
 }
 // Пересчёт снимка доли менеджера в уже созданных заказах партнёра. Отдельной функцией
@@ -338,33 +340,49 @@ function dirPartners(onlyBar){
 //
 // Берутся только заказы с partner_id — у созданных пачкой из заявки он часто пуст
 // (там партнёр определяется по названию отправителя), и до них это не дотянется.
-async function syncPartnerSalesMargin(partnerId,fixed){
-  const setTo=fixed==null||fixed===''?null:+fixed;
+async function syncPartnerSalesMargin(partnerId,sides){
   // ТОЛЬКО ТЕКУЩИЙ МЕСЯЦ. Месяц берётся по дате забора, а если её нет — по дате создания:
   // ровно так определяет период сама Калькуляция (ordersInOrderMonth).
   const from=localToday().slice(0,7)+'-01';
   const monthCond=`pickup_date.gte.${from},and(pickup_date.is.null,created_at.gte.${from})`;
-  const {count}=await sb.from('orders').select('id',{count:'exact',head:true})
-    .eq('partner_id',partnerId).not('sales_id','is',null).or(monthCond);
-  if(!count)return '';
-  // «2 заказов» в сообщении про деньги читается как небрежность — склоняем
-  const zakaz=n=>{const a=n%10,b=n%100;
-    return (a===1&&b!==11)?'заказ':(a>=2&&a<=4&&(b<12||b>14))?'заказа':'заказов';};
-  const word=zakaz(count);
+  // Типы доставки перечисляем СПИСКОМ id, а не отрицанием: заказ без типа доставки не
+  // должен попасть ни в ту, ни в другую пачку — снимок ему проставят при сохранении
+  // карточки, когда тип наконец выберут.
+  const typeIds=cour=>(S.delivery||[]).filter(d=>cour===/курьер/i.test(d.name||'')).map(d=>d.id);
+  // «5 заказов почтовых» читается как подстрочник — склоняем и число, и прилагательное
+  const skl=(n,forms)=>{const a=n%10,b=n%100;
+    return forms[(a===1&&b!==11)?0:(a>=2&&a<=4&&(b<12||b>14))?1:2];};
   const mon=['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'][+from.slice(5,7)-1];
-  const what=setTo==null
-    ? `вернуть расчёт по разнице с базовым тарифом`
-    : `проставить ${setTo.toLocaleString('ru-RU')} ₸`;
-  if(!confirm(`За ${mon} у партнёра ${count} ${word} с указанным менеджером.\n\n`
-    +`Пересчитать долю менеджера и в них — ${what}?\n\n`
-    +`Прошлые месяцы не трогаем. Откажетесь — новое значение подействует только на заказы, созданные дальше.`))return '';
-  const {data,error}=await sb.from('orders').update({sales_margin:setTo})
-    .eq('partner_id',partnerId).not('sales_id','is',null).or(monthCond).select('id');
-  if(error){console.error('sync sales margin',error);return ' (но долю в заказах обновить не удалось: '+error.message+')';}
-  const ids=new Set((data||[]).map(x=>x.id));
-  (S.orders||[]).forEach(o=>{if(ids.has(o.id))o.sales_margin=setTo;});
-  const n=(data||[]).length;
-  return ` · доля менеджера пересчитана в ${n} ${n%10===1&&n%100!==11?'заказе':'заказах'} за ${mon}`;
+  // считаем ПЕРЕД вопросом: обещать пересчёт там, где считать нечего, незачем
+  const plan=[];
+  for(const s of sides){
+    const ids=typeIds(s.courier);
+    if(!ids.length)continue;
+    const {count}=await sb.from('orders').select('id',{count:'exact',head:true})
+      .eq('partner_id',partnerId).not('sales_id','is',null).or(monthCond).in('delivery_id',ids);
+    if(count)plan.push(Object.assign({},s,{count}));
+  }
+  if(!plan.length)return '';
+  const what=s=>s.val==null||s.val===''
+    ? 'вернуть расчёт по разнице с базовым тарифом'
+    : `проставить ${(+s.val).toLocaleString('ru-RU')} ₸`;
+  if(!confirm(`За ${mon} у партнёра `+plan.map(s=>`${s.count} ${skl(s.count,s.noun)}`).join(' и ')
+    +` с указанным менеджером.\n\n`
+    +plan.map(s=>`По ${s.label}: ${what(s)}`).join('\n')+`\n\n`
+    +`Прошлые месяцы не трогаем. Откажетесь — новые значения подействуют только на заказы, созданные дальше.`))return '';
+  let done=0,err='';
+  for(const s of plan){
+    const setTo=s.val==null||s.val===''?null:+s.val;
+    const {data,error}=await sb.from('orders').update({sales_margin:setTo})
+      .eq('partner_id',partnerId).not('sales_id','is',null).or(monthCond)
+      .in('delivery_id',typeIds(s.courier)).select('id');
+    if(error){console.error('sync sales margin',error);err=' (но долю в заказах обновить не удалось: '+error.message+')';continue;}
+    const ids=new Set((data||[]).map(x=>x.id));
+    (S.orders||[]).forEach(o=>{if(ids.has(o.id))o.sales_margin=setTo;});
+    done+=(data||[]).length;
+  }
+  if(err)return err;
+  return ` · доля менеджера пересчитана в ${done} ${skl(done,['заказе','заказах','заказах'])} за ${mon}`;
 }
 function partnerModal(id){
   const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:'',tariff_post:'',tariff_courier:''};
@@ -389,13 +407,16 @@ function partnerModal(id){
       <div class="field"><label>Тариф · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
       <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
     </div>
-    ${salesFixedReady()?`<div class="field"><label>Доля менеджера с ПОЧТОВОГО заказа (₸)</label>
-      <input type="number" min="0" id="p_smargin" value="${esc(p.sales_margin_fixed)}" placeholder="пусто — считать разницей с базовым тарифом">
-      <small style="color:var(--muted);font-size:12px">Сколько с одного почтового заказа идёт менеджеру по продажам.
+    ${salesFixedReady()?`<div class="grid2">
+      <div class="field"><label>Доля менеджера · почта (₸)</label>
+        <input type="number" min="0" id="p_smargin" value="${esc(p.sales_margin_fixed)}" placeholder="по разнице с базовым"></div>
+      ${salesCourierReady()?`<div class="field"><label>Доля менеджера · курьер (₸)</label>
+        <input type="number" min="0" id="p_smcour" value="${esc(p.sales_margin_courier)}" placeholder="по разнице с базовым"></div>`:''}
+    </div>
+    <small style="color:var(--muted);font-size:12px;display:block;margin:-6px 0 12px">Сколько с ОДНОГО заказа идёт менеджеру по продажам, отдельно по каждому типу доставки.
       Пусто — считается как раньше, разницей между тарифом партнёра и базовым тарифом компании.
       Заполнено — ровно эта сумма, остаток остаётся прибылью компании: тариф 2000 и доля 110 означают, что 200 ₸ компания держит себе.
-      Поле нужно и партнёрам с тарифом 0, которые платят раз в месяц по счёту.
-      <b>На курьерские заказы не действует</b> — там доля считается только разницей с базовым курьерским тарифом.</small></div>`:''}
+      Поля нужны и партнёрам с тарифом 0, которые платят раз в месяц по счёту: по ним разница не насчитает ничего никогда.</small>`:''}
     ${baraholkaReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_bar" ${p.is_baraholka?'checked':''}> Барахолка <span class="pom-paidhint">(заказы считаются по своим нормативам; на уже созданные не влияет)</span></label>`:''}
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
@@ -447,22 +468,28 @@ function partnerModal(id){
         direct_pay_amount:val('p_direct_pay')!==''?parseFloat(val('p_direct_pay')):null,
         is_protected:!!($('p_protected')&&$('p_protected').checked),
         ...($('p_bar')?{is_baraholka:!!$('p_bar').checked}:{}),
-        // поле шлём, только когда колонка в базе есть: иначе PostgREST отклонит ВЕСЬ
+        // поля шлём, только когда колонки в базе есть: иначе PostgREST отклонит ВЕСЬ
         // запрос, и карточка перестанет сохраняться вместе со всеми остальными полями
-        ...($('p_smargin')?{sales_margin_fixed:val('p_smargin')!==''?parseFloat(val('p_smargin')):null}:{})};
+        ...($('p_smargin')?{sales_margin_fixed:val('p_smargin')!==''?parseFloat(val('p_smargin')):null}:{}),
+        ...($('p_smcour')?{sales_margin_courier:val('p_smcour')!==''?parseFloat(val('p_smcour')):null}:{})};
       let syncMsg='';
       if(id){
         const before=S.partners.find(x=>x.id===id);
         const salesChanged=before&&before.sales_id!==row.sales_id;
         const procChanged=before&&before.processor_id!==row.processor_id;
         const norm=v=>v==null||v===''?'':String(+v);
-        const marginChanged=before&&('sales_margin_fixed' in row)
-          &&norm(before.sales_margin_fixed)!==norm(row.sales_margin_fixed);
+        const changedSides=[
+          {key:'sales_margin_fixed',  courier:false,label:'почте',
+           noun:['почтовый заказ','почтовых заказа','почтовых заказов']},
+          {key:'sales_margin_courier',courier:true, label:'курьеру',
+           noun:['курьерский заказ','курьерских заказа','курьерских заказов']},
+        ].filter(x=>before&&(x.key in row)&&norm(before[x.key])!==norm(row[x.key]));
         const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(before,u);
         // ДОЛЮ МЕНЕДЖЕРА В УЖЕ СОЗДАННЫХ ЗАКАЗАХ спрашиваем отдельно и только при явном
         // согласии: она записана снимком в самом заказе (иначе подъём тарифа пересчитал бы
         // прошлые месяцы), и правка задним числом меняет уже посчитанную зарплату.
-        if(marginChanged)syncMsg+=await syncPartnerSalesMargin(id,row.sales_margin_fixed);
+        if(changedSides.length)syncMsg+=await syncPartnerSalesMargin(id,changedSides.map(x=>
+          Object.assign({},x,{val:row[x.key]})));
         // менеджер/обработчик у партнёра сменился — подтягиваем это же на ВСЕ уже существующие
         // заказы этого партнёра, а не только на новые (иначе старые заказы «зависают» на прежнем
         // менеджере навсегда, и это приходится чинить руками)
