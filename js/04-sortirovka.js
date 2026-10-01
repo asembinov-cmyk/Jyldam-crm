@@ -49,7 +49,7 @@ function renderSortListOnly(){
   const tbody=document.querySelector('#sortListTbody');if(!tbody)return;
   const myCity=S.me&&S.me.city_id;
   const cityFilter=o=>sortingCityId(o)===myCity;
-  const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  const dayOrders=mainOrders().filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
   const processed=dayOrders.filter(orderIsProcessed);
   const filtered=sortingListFiltered(processed);
   const mobile=isMobileView();
@@ -143,7 +143,7 @@ function renderSorting(){
   // в этот город; если город не указан (админ, общий доступ) — видит все города, как раньше
   const myCity=S.me&&S.me.city_id;
   const cityFilter=o=>sortingCityId(o)===myCity;
-  const dayOrders=(S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  const dayOrders=mainOrders().filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
   // «обработан» — менеджер уже внёс данные получателя И определился с типом доставки (курьер/почта).
   // Заказы, которые только созданы «пустышкой» по заявке (ждут забивки), кладовщику пока не нужны —
   // тип доставки во время забивки ещё может поменяться, показывать их рано.
@@ -287,14 +287,17 @@ function sortingCityId(o){
 function sortingPool(){
   const day=sortingDate||localToday();
   const myCity=S.me&&S.me.city_id;
-  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity));
+  // БАРАХОЛКИ ЗДЕСЬ НЕТ. Её заказы приходят готовым реестром Казпочты: посылки уже
+  // сданы, курьер к партнёру не ездил, на склад они не привозились. Кладовщик искал их
+  // по фото и не находил — физически их на складе нет.
+  return mainOrders().filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity));
 }
 // необработанные (пустые) заказы за тот же день/город — чтобы отличить «правда нет такого заказа»
 // от «заказ есть, просто ещё не забили» и показать кладовщику понятное сообщение вместо путаницы
 function sortingUnprocessedCount(){
   const day=sortingDate||localToday();
   const myCity=S.me&&S.me.city_id;
-  return (S.orders||[]).filter(o=>(o.created_at||'').slice(0,10)===day&&!orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity)).length;
+  return mainOrders().filter(o=>(o.created_at||'').slice(0,10)===day&&!orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity)).length;
 }
 // сжимает фото перед отправкой на распознавание — полноразмерный снимок с телефона (часто
 // несколько МБ) не нужен для чтения текста на бланке, а сильно замедляет и отправку, и саму

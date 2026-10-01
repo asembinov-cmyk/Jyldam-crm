@@ -60,6 +60,10 @@ const fillCutoff = () => new Date(nowMs() - FILL_CLAIM_MIN * 60000).toISOString(
 // типа: системе он «не обработан», а менеджеру выдавался уже забитым. Таких много
 // среди старых заказов.
 function fillNeedsWork(o){
+  // Барахолка в очередь не попадает и не должна: заказы приходят готовым реестром, ФИО
+  // и адрес в них уже есть. Проверка явная, хотя импорт и так ставит filled_at: от этого
+  // условия зависит чужая ветка бизнеса, и держаться на побочном эффекте ей нельзя.
+  if(isBaraholkaOrder(o)) return false;
   if(o.filled_at) return false;
   if(String(o.client || '').trim()) return false;
   const photos = o.photos;

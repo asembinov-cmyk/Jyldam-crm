@@ -25,7 +25,9 @@ let _nfEventsOpen=false; // блок «Важные события» свёрн�
 
 // ── СБОР ЗАДАЧ И ПРОБЛЕМ (то, что требует действия) ──
 function notifyIssues(){
-  const orders=S.orders||[];const pickups=S.pickups||[];
+  // Барахолка — отдельная ветка: заказы приходят готовым реестром, менеджер их не
+  // заполняет и склад не сортирует. Их «проблемы» забивали бы список чужой работой.
+  const orders=mainOrders();const pickups=S.pickups||[];
   const today=localToday();
   const issues=[];
   const isMine=o=>{ // для курьера — только его заказы/заявки
@@ -60,7 +62,7 @@ function notifyIssues(){
 // ── СВОДКА ДНЯ (для руководителя/персонала) ──
 // ── НЕОБЫЧНЫЕ СОБЫТИЯ (аномалии, а не вся лента) ──
 function notifyHighlights(){
-  const orders=S.orders||[];const out=[];
+  const orders=mainOrders();const out=[];
   const today=localToday();
   const dayCount=d=>orders.filter(o=>(o.pickup_date||o.created_at||'').slice(0,10)===d).length;
   // считаем заказы по дням за последние 30 дней
@@ -326,6 +328,7 @@ function render(){
   }
   else if(S.tab==='pickups')renderPickups();
   else if(S.tab==='orders')renderOrders();
+  else if(S.tab==='baraholka')renderOrders('baraholka');
   else if(S.tab==='ket_orders')renderInboundOrders();
   else if(S.tab==='courier')renderOrders('courier');
   else if(S.tab==='mail')renderOrders('mail');

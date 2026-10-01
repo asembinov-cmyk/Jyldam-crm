@@ -100,21 +100,84 @@ async function importOrdersFromExcel(){
     const parsed = impReadSheet(wb);
     if(parsed.error){ toast(parsed.error, 6000); return; }
     if(!parsed.rows.length){ toast('В файле нет строк с ФИО'); return; }
-    impPreviewModal(file.name, parsed.rows);
+    const dbTracks = await impExistingTracks(parsed.rows.map(r => r.track));
+    impPreviewModal(file.name, parsed.rows, dbTracks);
   };
   inp.click();
 }
 
-function impPreviewModal(fileName, rows){
+// Какие из этих треков уже есть в базе. Запросом, а не по S.orders: сразу после входа
+// в памяти вкладки лежат только СЕГОДНЯШНИЕ заказы, и дубль за прошлую неделю в
+// предпросмотре не подсвечивался — он молча отваливался уже при сохранении, и человек
+// видел только «пропущено: 14» без объяснения.
+// Дробим по 100: адрес запроса не резиновый.
+async function impExistingTracks(tracks){
+  const out = new Set();
+  const list = [...new Set(tracks.filter(Boolean))];
+  for(let i = 0; i < list.length; i += 100){
+    const part = list.slice(i, i + 100);
+    try{
+      const { data, error } = await sb.from('orders').select('track,code').in('track', part);
+      if(error) throw error;
+      (data || []).forEach(x => out.add(String(x.track || '').trim()));
+    }catch(e){
+      console.error('import dup check', e);
+      // Проверку не выполнили — молчать нельзя: иначе предпросмотр покажет «создам все»,
+      // а половина отвалится на уникальном индексе трека (db/20).
+      toast('Не удалось проверить дубли по базе — показываю только по загруженным заказам', 7000);
+      return null;
+    }
+  }
+  return out;
+}
+// Итог загрузки: сколько создано и ЧТО ИМЕННО не загрузилось, с причиной и треком.
+// Просьба владельца 02.10.2026: «пиши какие заказы не загрузились, если есть дубли».
+// Раньше был один тост «пропущено: 14», в котором четыре разные причины складывались
+// в одно число, а сами строки нигде не перечислялись.
+function impResultModal(fileName, made, skipped){
+  const byReason = {};
+  skipped.forEach(r => { (byReason[r.problem] = byReason[r.problem] || []).push(r); });
+  const plain = skipped.map(r => `${r.track || 'без трека'}\t${r.client || ''}\t${r.problem}`).join('\n');
+  showInfo('Загрузка завершена', `
+    <p class="imp-note">Файл: <b>${esc(fileName)}</b> · создано заказов: <b>${made}</b>${
+      skipped.length ? ` · не загрузилось: <b style="color:var(--rust)">${skipped.length}</b>` : ''}</p>
+    ${!skipped.length ? '<div class="hint">Все строки загружены.</div>' : `
+      ${Object.entries(byReason).map(([why, list]) => `
+        <div class="panel" style="margin-bottom:12px">
+          <div class="panel-head"><h2 style="font-size:15px">${esc(why)}</h2><span class="count">${list.length}</span></div>
+          <div class="table-scroll"><table class="resp-table"><thead><tr>
+            <th>Стр.</th><th>Трек</th><th>ФИО</th><th>Телефон</th>
+          </tr></thead><tbody>
+            ${list.map(r => `<tr>
+              <td data-label="Стр.">${r.line}</td>
+              <td data-label="Трек">${esc(r.track || '—')}</td>
+              <td data-label="ФИО">${esc(r.client || '—')}</td>
+              <td data-label="Телефон">${esc(r.phone || r.rawPhone || '—')}</td>
+            </tr>`).join('')}
+          </tbody></table></div>
+        </div>`).join('')}
+      <button class="btn ghost sm" id="impCopySkipped">📋 Скопировать список</button>
+      <div class="hint" style="margin-top:8px">Список можно отправить партнёру: трек, ФИО и причина по каждой строке.</div>`}`,
+    { wide: true });
+  const btn = $('impCopySkipped');
+  if(btn) btn.onclick = async () => {
+    try{ await navigator.clipboard.writeText(plain); toast('Скопировано'); }
+    catch(e){ toast('Не удалось скопировать — выделите таблицу вручную'); }
+  };
+}
+
+function impPreviewModal(fileName, rows, dbTracks){
   // Партнёра подставляем по имени файла, если совпал: «ИП Азилжан 25.09.26.xls».
   const guess = (S.partners || []).find(p => normName(fileName).includes(normName(p.name))) || null;
   let partnerId = guess ? guess.id : '';
   let date = localToday();
   let busy = false;
+  // dbTracks — что уже есть в базе (null, если проверку не выполнили). Запасной вариант —
+  // по памяти вкладки, как было раньше: лучше неполная проверка, чем никакой.
+  const seen = dbTracks || new Set((S.orders || []).map(o => String(o.track || '').trim()).filter(Boolean));
 
   const body = () => {
     const pt = (S.partners || []).find(p => p.id === partnerId) || null;
-    const seen = new Set((S.orders || []).map(o => String(o.track || '').trim()).filter(Boolean));
     const marked = rows.map(r => ({ ...r, problem: impProblem(r, seen) }));
     const ok = marked.filter(r => !r.problem);
     const bad = marked.filter(r => r.problem);
@@ -132,6 +195,10 @@ function impPreviewModal(fileName, rows){
         создам: <b>${ok.length}</b>${bad.length ? ` · пропущу: <b>${bad.length}</b>` : ''}
         ${pt ? `<br>Тип доставки — почтовая. Менеджер продаж и обработчик возьмутся из карточки партнёра${pt.is_baraholka ? ', раздел — Барахолка' : ''}.` : ''}
       </p>
+      ${pt && !pt.is_baraholka ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
+        ⚠️ У партнёра «${esc(pt.name)}» не стоит галочка «Барахолка», поэтому заказы попадут
+        не сюда, а в «Заказы заборов» — и смешаются с обычными. Если это реестр Барахолки,
+        сначала поставьте галочку в карточке партнёра.</div>` : ''}
       <div class="table-scroll imp-table"><table class="resp-table"><thead><tr>
         <th>Стр.</th><th>ФИО</th><th>Телефон</th><th>Индекс</th><th>Трек</th><th>Вес</th><th>Сумма</th><th>Что будет</th>
       </tr></thead><tbody>
@@ -152,18 +219,20 @@ function impPreviewModal(fileName, rows){
     if(busy) return false;
     const pt = (S.partners || []).find(p => p.id === partnerId);
     if(!pt){ toast('Выберите партнёра'); return false; }
-    const seen = new Set((S.orders || []).map(o => String(o.track || '').trim()).filter(Boolean));
-    const ok = rows.filter(r => !impProblem(r, seen));
-    if(!ok.length){ toast('Создавать нечего — все строки пропущены'); return false; }
+    // Причину пропуска запоминаем по каждой строке — в конце она попадёт в итог.
+    // Раньше тут считалась только разница чисел, и четыре разные причины складывались
+    // в одно «пропущено: 14».
+    const marked = rows.map(r => ({ ...r, problem: impProblem(r, seen) }));
+    const ok = marked.filter(r => !r.problem);
+    const skipped = marked.filter(r => r.problem);
+    if(!ok.length){ toast('Создавать нечего — все строки пропущены'); impResultModal(fileName, 0, skipped); return false; }
     // Трек уникален, и это единственная защита от повторной загрузки того же файла.
-    // Проверяем ПО БАЗЕ, а не по памяти вкладки: заказы мог создать кто-то другой.
-    let exists = new Set();
-    try{
-      const { data } = await sb.from('orders').select('track').in('track', ok.map(r => r.track));
-      (data || []).forEach(x => exists.add(String(x.track || '').trim()));
-    }catch(e){ console.error('import dup check', e); }
+    // Проверяем ПО БАЗЕ ещё раз, уже перед записью: между открытием окна и нажатием
+    // кнопки реестр мог загрузить кто-то другой.
+    const exists = (await impExistingTracks(ok.map(r => r.track))) || new Set();
     const fresh = ok.filter(r => !exists.has(r.track));
-    if(!fresh.length){ toast('Все эти заказы уже загружены'); return false; }
+    ok.filter(r => exists.has(r.track)).forEach(r => skipped.push({ ...r, problem: 'такой трек уже есть в системе' }));
+    if(!fresh.length){ toast('Все эти заказы уже загружены'); impResultModal(fileName, 0, skipped); return false; }
     busy = true;
     // ЗАРАНЕЕ ВЫДАННЫЕ БЛАНКИ. Если этот трек мы сами выпустили и отдали партнёру
     // (db/17), заказ должен сесть НА ТОТ ЖЕ номер: Казпочта выдала ШПИ именно под него,
@@ -226,10 +295,14 @@ function impPreviewModal(fileName, rows){
       if(bound) toast(`Из них по выданным бланкам: ${bound}`, 5000);
       if(bound < poolByTrack.size) toast('Часть бланков не отметилась в пуле — заказы созданы, проверьте раздел «Бланки»', 7000);
     }
-    const skipped = rows.length - made.length;
-    toast(`Создано заказов: ${made.length}${skipped ? ` · пропущено: ${skipped}` : ''}`, 6000);
-    logAction('import', 'orders', { entity_label: fileName, meta: { created: made.length, skipped } });
+    // Строки, которые отвалились уже на записи (например уникальный индекс трека),
+    // тоже должны попасть в итог — иначе «создано 118 из 120» без объяснения.
+    const madeTracks = new Set(made.map(o => String(o.track || '').trim()));
+    fresh.filter(r => !madeTracks.has(r.track)).forEach(r =>
+      skipped.push({ ...r, problem: 'база отклонила запись — проверьте, нет ли такого трека' }));
+    logAction('import', 'orders', { entity_label: fileName, meta: { created: made.length, skipped: skipped.length } });
     renderOrders(ordersMode);
+    impResultModal(fileName, made.length, skipped);
     return true;
   }, { wide: true, saveLabel: 'Создать заказы' });
 

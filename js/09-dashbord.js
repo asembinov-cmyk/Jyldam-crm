@@ -53,7 +53,9 @@ async function aiRecognizeFromPhoto(o){
 // ── ИИ-АССИСТЕНТ: вопросы к данным словами ──
 // собираем КОМПАКТНУЮ сводку (агрегаты, не сырые заказы) — дёшево и быстро для ИИ
 function aiBuildDataSummary(){
-  const orders=S.orders||[];
+  // Без Барахолки: её цифр нет ни в карточках, ни в таблицах этого раздела, и помощник
+  // отвечал бы числами, которых на экране не найти.
+  const orders=mainOrders();
   const mon=o=>(o.pickup_date||o.created_at||'').slice(0,7);
   const by=(fn)=>{const m={};orders.forEach(o=>{const k=fn(o);if(k==null||k==='')return;m[k]=(m[k]||0)+1;});return m;};
   const byNested=(nameFn,filterFn)=>{
@@ -225,14 +227,26 @@ function aiAssistantModal(){
 // Какие таблицы раскрыты. Сбрасывается при каждом входе в раздел (см. render в js/03):
 // по умолчанию обе свёрнуты.
 const dashOpen={days:false,pickers:false};
+// ВКЛАДКА СТАТИСТИКИ: обычные заказы или Барахолка (решение владельца 02.10.2026).
+// Барахолка — отдельная ветка бизнеса, и смотреть её надо отдельно, а не вперемешку.
+// Видна только тому, кому выдано право на модуль «Барахолка», — то же право закрывает
+// и сам модуль. Живёт в памяти вкладки: ушёл и вернулся — снова «Обычные».
+let dashSub='main';
 function renderDashboard(){
   // заказы ещё догружаются в фоне — показываем аккуратный лоадер вместо нулей
   if((!S.orders||!S.orders.length)&&S._heavyLoading&&!S._heavyLoaded){
     $('main').innerHTML='<div class="page-head"><div><h1>Добро пожаловать 👋</h1></div></div><div class="loading" style="padding:60px">Загружаем заказы…</div>';
     return;
   }
-  const orders=S.orders||[];
-  const pickups=S.pickups||[];
+  // Право могли отобрать, пока человек стоял на вкладке Барахолки — иначе он остался бы
+  // смотреть закрытый раздел до перезагрузки страницы.
+  if(dashSub==='bar'&&!canMod('baraholka'))dashSub='main';
+  const bar=dashSub==='bar';
+  const orders=bar?barOnlyOrders():mainOrders();
+  // У Барахолки заявок на забор не бывает вовсе: заказы приходят готовым реестром,
+  // курьер к партнёру не ездит. Поэтому на её вкладке цифры по заборам — нули, а таблица
+  // «Заборщики по дням» прячется целиком: пустая таблица выглядит поломкой.
+  const pickups=bar?[]:(S.pickups||[]);
   // классификация по названию статуса
   const isNew=o=>{const s=orderStatusObj(o.status_id);return !s||/получено от отправ|нов|создан/i.test(s.name||'');};
   const inWay=o=>{const s=orderStatusObj(o.status_id);return s&&/прибыл|выехал|пути|курьер|отправл|передан/i.test(s.name||'');};
@@ -372,7 +386,7 @@ function renderDashboard(){
   const pickerNames=Object.keys(pickerTotals).sort((a,b)=>pickerTotals[b].parcels-pickerTotals[a].parcels);
 
   $('main').innerHTML=`
-    <div class="page-head dash-head"><div><h1>Добро пожаловать</h1><p>${esc(dateStr)}</p></div>
+    <div class="page-head dash-head"><div><h1>${bar?'Статистика · Барахолка':'Добро пожаловать'}</h1><p>${bar?'Отдельная ветка: заказы из реестров Казпочты':esc(dateStr)}</p></div>
       <div class="dash-period-filter">
         ${isStaff()?'<button class="btn ai-btn sm" id="dashAI">🤖 Помощник</button>':''}
         <select id="dashMonth">${months.map((m,i)=>`<option value="${i}" ${dashPeriod.month===i?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)}</option>`).join('')}</select>
@@ -380,6 +394,10 @@ function renderDashboard(){
         <button class="btn ghost sm" id="dashThisMonth">Текущий</button>
       </div>
     </div>
+    ${canMod('baraholka')?`<div class="subtabs" style="margin-bottom:14px">
+      <button data-dashsub="main" class="${bar?'':'active'}">Обычные заказы</button>
+      <button data-dashsub="bar" class="${bar?'active':''}">Барахолка</button>
+    </div>`:''}
     <div class="dash-cards">
       <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div>${trendHtml(trOrders)}<div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div>${trendHtml(trPickups)}<div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
@@ -427,7 +445,7 @@ function renderDashboard(){
       </table></div>
       </div>
     </div>
-    <div class="panel dash-fold${dashOpen.pickers?' open':''}">
+    ${bar?'':`<div class="panel dash-fold${dashOpen.pickers?' open':''}">
       <button type="button" class="panel-head dash-fold-head" data-fold="pickers">
         <h2>Заборщики по дням</h2><span class="count">${pickerNames.length}</span>
         <i class="dash-fold-ar">▾</i></button>
@@ -456,7 +474,7 @@ function renderDashboard(){
         </tr></tfoot>`:''}
       </table></div>
       </div>
-    </div>`;
+    </div>`}`;
   // Сворачивание больших таблиц. Открытое состояние держим в памяти вкладки, а не в
   // localStorage: при заходе в раздел обе таблицы должны быть закрыты — они длинные, и
   // из-за них не видно карточек наверху, ради которых сюда и заходят.
@@ -465,6 +483,9 @@ function renderDashboard(){
     dashOpen[k]=!dashOpen[k];
     b.closest('.dash-fold').classList.toggle('open',dashOpen[k]);
   });
+  // переключатель «Обычные заказы / Барахолка»
+  $('main').querySelectorAll('[data-dashsub]').forEach(b2=>b2.onclick=()=>{
+    dashSub=b2.dataset.dashsub;renderDashboard();});
   // обработчики фильтра периода
   if($('dashMonth'))$('dashMonth').onchange=e=>{dashPeriod.month=parseInt(e.target.value,10);renderDashboard();};
   if($('dashYear'))$('dashYear').onchange=e=>{dashPeriod.year=parseInt(e.target.value,10);renderDashboard();};

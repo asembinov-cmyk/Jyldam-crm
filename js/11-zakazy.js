@@ -533,16 +533,22 @@ function renderOrders(mode){
   const list=ordersDateScopedList();
   const totalCost=list.reduce((s,o)=>s+orderSum(o),0);
   const paid=list.filter(o=>o.pay_date).length;
-  const titles={'':'Заказы заборов',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня'};
+  const titles={'':'Заказы заборов',courier:'Курьерская доставка',mail:'Почтовая доставка',today:'Заказы сегодня',
+    baraholka:'Барахолка'};
   const subs={'':'Отправления: курьерская и почтовая доставка',courier:'Заказы с курьерской доставкой',
-    mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня'};
+    mail:'Заказы с почтовой доставкой',today:'Заказы, созданные сегодня',
+    baraholka:'Готовые реестры Казпочты — загрузка из Excel. В заказы заборов не попадают'};
   let dayNote='';
   if(of.createFrom&&of.createFrom===of.createTo){const t=localToday();dayNote=of.createFrom===t?'за сегодня':('за '+fmtDate(of.createFrom));}
   else if(of.createFrom||of.createTo){dayNote='за период';}
+  // Барахолка: своя кнопка загрузки вместо «Создать заказ» — заказы сюда попадают только
+  // реестром. Кнопка «Загрузить из Excel» ЖИВЁТ ТОЛЬКО ЗДЕСЬ: пока она стояла в «Заказах
+  // заборов», реестровые заказы наливали в общий список, и из этого выросла вся мешанина.
+  const bar=ordersMode==='baraholka';
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>${head}</h1><p>${isCourier()?'Отправления: курьерская и почтовая доставка':((subs[ordersMode]||'')+(dayNote?(' · '+dayNote):''))}</p></div>
-      <div class="head-actions">${canMod('orders')?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(can('orders','create')&&isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${can('orders','create')?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
+      <div class="head-actions">${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&(ordersMode==='mail'||bar))?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}</div></div>
     ${(ordersMode==='courier'||ordersMode==='mail')?`
     <div class="stats stats-1">
       <div class="stat"><div class="k">Всего</div><div class="v">${list.length}<small> / ${ordersWithPhone(list)} сохранено</small></div></div>
@@ -964,6 +970,11 @@ function ordersWithPhone(list){return list.filter(o=>(o.phone||'').toString().re
 // список заказов с учётом режима вкладки (курьер/почта/сегодня)
 function ordersScopedList(){
   let list=visibleOrders();
+  // БАРАХОЛКА — ОТДЕЛЬНАЯ ВЕТКА. В своём модуле только она, во всех остальных режимах
+  // («Заказы заборов», «Курьерская», «Почтовая», «Сегодня») её нет вовсе: это решение
+  // владельца 02.10.2026, а не фильтр по вкусу. Один и тот же признак и включает её
+  // здесь, и исключает там — иначе состав модуля и состав исключений разошлись бы.
+  list=ordersMode==='baraholka'?barOnlyOrders(list):mainOrders(list);
   if(ordersMode==='courier')list=list.filter(o=>isCourierDelivery(o.delivery_id));
   else if(ordersMode==='mail')list=list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id));
   else if(ordersMode==='today'){const t=localToday();list=list.filter(o=>(o.created_at||'').slice(0,10)===t||(o.pickup_date||'').slice(0,10)===t);}
@@ -1620,8 +1631,11 @@ function drawOrders(){
   }
   // если включён режим «выбраны все» — добавляем id текущей страницы в выбор
   if(ketSelectAll)allRows.forEach(o=>ketSelected.add(o.id));
+  // В Барахолке колонки «Фото» нет: заказы приходят готовым реестром, бланк никто не
+  // фотографирует — столбец был бы пустым на всю страницу.
+  const noPhoto=ordersMode==='baraholka';
   el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}<th>Фото</th><th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
     ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
     <tbody>${rows.map(o=>{
@@ -1631,7 +1645,7 @@ function drawOrders(){
         : '<span style="color:var(--line)">—</span>';
       return `<tr data-orow="${o.id}" style="cursor:pointer" class="${o.via_integration?'order-row-api':''}" title="${o.via_integration?'Пришёл от партнёра напрямую через API-интеграцию':''}">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
-      <td data-label="Фото">${photoCell}</td>
+      ${noPhoto?'':`<td data-label="Фото">${photoCell}</td>`}
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
       <td data-label="Дата забора">${esc(fmtDate(o.pickup_date))}${o.created_at?(()=>{
         // время создания показываем всегда: по нему видно, когда заказ реально завели.

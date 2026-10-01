@@ -803,6 +803,7 @@ function canMod(key){
   if(S.myPerms[permKey]&&typeof S.myPerms[permKey].view!=='undefined')return !!S.myPerms[permKey].view;
   // фолбэк: старая привязка модулей к базовым правам
   const fb={dashboard:'orders',pickups:'pickups',orders:'orders',courier:'orders',mail:'orders',
+    baraholka:null,
     intercity:null,cash:null,sorting:null,filling:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
     users:'users',settings:'directories'};
   const base=fb[key];
@@ -879,6 +880,7 @@ const ICONS={
   stats:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 20h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="13" width="3.4" height="5" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="10.3" y="10" width="3.4" height="8" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="16.6" y="6.5" width="3.4" height="11.5" rx="1" stroke="currentColor" stroke-width="1.7"/><path d="M4.5 9.2L9 5.6l3.4 2.2L20 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16.4 3H20v3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   dashboard:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
   pickups:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v8.5M12 11.5l-3.2-3.2M12 11.5l3.2-3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h4.2l1.4 2.6h6.8L16.8 13H21v5a3 3 0 01-3 3H6a3 3 0 01-3-3v-5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  baraholka:'<svg viewBox="0 0 24 24" fill="none"><path d="M3.3 9.3l2.4-5a1 1 0 01.9-.6h10.8a1 1 0 01.9.6l2.4 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.9 9.3h18.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M9.3 3.7L8.5 9.3M14.7 3.7l.8 5.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M5.3 9.3v10.4M18.7 9.3v10.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="8.7" y="13.3" width="6.6" height="6.4" rx="1.1" stroke="currentColor" stroke-width="1.7"/></svg>',
   orders:'<svg viewBox="0 0 24 24" fill="none"><path d="M12.6 2.6l8.8 8.8a2 2 0 010 2.8l-6.2 6.2a2 2 0 01-2.8 0L3.6 11.6A2 2 0 013 10.2V4a1 1 0 011-1h6.2a2 2 0 011.4.6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7.6" cy="7.6" r="1.4" stroke="currentColor" stroke-width="1.7"/></svg>',
   handshake:'<svg viewBox="0 0 24 24" fill="none"><path d="M2 12l5-4 4 3 3-2 5 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 8l3.5 3.5a1.8 1.8 0 002.5 0v0a1.8 1.8 0 000-2.5L9 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12v5a1 1 0 001 1h2M22 12v5a1 1 0 01-1 1h-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="16" y="7" width="4" height="9" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="7" width="4" height="9" rx="1" stroke="currentColor" stroke-width="1.7"/></svg>',
   today:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="15" r="2" fill="currentColor"/></svg>',
@@ -936,6 +938,9 @@ function buildNav(opts){
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Статистика',icon:'stats'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
+    // Барахолка — отдельная ветка бизнеса, отдельным правом (по умолчанию только админу).
+    // Стоит сразу под «Заказами заборов»: это её сосед по смыслу, а не подраздел.
+    if(canMod('baraholka'))main.push({k:'baraholka',label:'Барахолка',icon:'baraholka'});
     if(main.length)groups.push({title:'Основное',items:main});
 
     const delivery=[];
@@ -982,6 +987,7 @@ function buildNav(opts){
     if(can('pickups','view'))items.push({k:'pickups',label:'Мои заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Мои заказы',icon:'orders'});
     const COURIER_EXTRA=[
+      ['baraholka','Барахолка','baraholka'],
       ['intercity','Отправки межгород','intercity'],['sorting','Сортировка','scan'],
       ['cash','Склад','warehouse'],['filling','Заполнение','fill'],
       ['courier','Курьерская доставка','courier'],['mail','Почтовая доставка','mail'],

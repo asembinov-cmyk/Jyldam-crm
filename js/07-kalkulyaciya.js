@@ -35,7 +35,8 @@ const CALC_BAR_FUNDS=[
   {key:'bar_fund_delivery', label:'ЗП доставки до почты (в месяц)',hint:'Делится на заказы Барахолки за месяц'},
 ];
 // Раздел заказа. Пусто = обычный; метка проставляется при создании из карточки партнёра.
-const isBaraholkaOrder=o=>String(o&&o.calc_group||'')==='baraholka';
+// isBaraholkaOrder переехал в js/01-yadro.js: его спрашивают модули, которые
+// подключаются раньше Калькуляции (Сортировка, Центр контроля, меню).
 // Вкладка появляется, только если колонки в базе есть (db/13 выполнен).
 const baraholkaReady=()=>!!(S.orders&&S.orders.length&&('calc_group' in S.orders[0]));
 

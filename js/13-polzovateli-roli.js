@@ -4,6 +4,7 @@ const MODULES=[
   ['dashboard','Статистика'],
   ['pickups','Заявки на забор'],
   ['orders','Заказы заборов'],
+  ['baraholka','Барахолка'],
   ['filling','Заполнение'],
   ['ket_orders','SPA трафик'],
   ['courier','Курьерская доставка'],

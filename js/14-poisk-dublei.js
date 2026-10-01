@@ -47,7 +47,10 @@ async function checkOrderDuplicate(phone,client){
   const np=normPhone(phone);
   if(np.length<10)return null;
   const now=new Date().toISOString();
-  const matches=(S.orders||[]).filter(o=>{
+  // Барахолку в поиске дублей не ищем (решение владельца 02.10.2026): эти заказы
+  // приходят реестром, и дубли там ловятся по трек-номеру при самой загрузке — там же
+  // и перечисляются. Здесь они были бы шумом в чужой ветке бизнеса.
+  const matches=mainOrders().filter(o=>{
     if(o.ket_id&&!o.code)return false; // на всякий случай не трогаем чисто-KET
     return normPhone(o.phone)===np;
   });
@@ -104,7 +107,7 @@ function confirmDuplicate(w){
 // возвращает массив групп: [{phone, orders:[...], hasDup:bool}]
 function findDuplicateGroups(){
   const byPhone={};
-  (S.orders||[]).forEach(o=>{
+  mainOrders().forEach(o=>{
     const np=normPhone(o.phone);
     if(np.length<10)return;
     (byPhone[np]=byPhone[np]||[]).push(o);
@@ -179,7 +182,7 @@ function bindDuplicatesPanel(){
 async function runDuplicatesAI(){
   const box=$('dupAiBox');if(box)box.innerHTML='<div class="nf-ai-empty">🤖 ИИ анализирует…</div>';
   // собираем компактный срез заказов для анализа (телефон, фио, менеджер, дата)
-  const data=(S.orders||[]).slice(0,400).map(o=>({
+  const data=mainOrders().slice(0,400).map(o=>({
     code:o.code||String(o.id).slice(0,8),
     phone:normPhone(o.phone),
     fio:o.client||'',
