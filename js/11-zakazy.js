@@ -1664,8 +1664,8 @@ function drawOrders(){
   const noPhoto=ordersMode==='baraholka';
   el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}<th>Адрес</th><th>Статус</th><th>Трек-код</th>
-    ${staff?'<th>Стоимость</th>':''}<th></th></tr></thead>
+    <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th>':''}<th>Трек-код</th>
+    <th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
       const photoCell=ph.length
@@ -1691,12 +1691,12 @@ function drawOrders(){
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       ${ordersMode!=='mail'?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
+      ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
+      <td data-label="Трек-код">${esc(o.track)||'—'}</td>
       <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
         <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div></td>
-      <td data-label="Трек-код">${esc(o.track)||'—'}</td>
-      ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
       <td data-label="" class="cell-actions"><div class="row-actions">
         ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
       </div></td></tr>`;
