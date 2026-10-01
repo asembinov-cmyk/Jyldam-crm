@@ -2203,10 +2203,8 @@ function orderModal(id,readonly){
           <div id="o_chat_box" style="border:1px solid var(--line);border-radius:10px;max-height:260px;overflow-y:auto;padding:10px;background:#fafafa;display:flex;flex-direction:column;margin-top:6px">
             <div class="hint">Загрузка…</div>
           </div>
-          ${!ro?`<div style="display:flex;gap:8px;margin-top:8px">
-            <input id="o_chat_input" placeholder="Написать получателю…" style="flex:1">
-            <button type="button" class="btn primary sm" id="o_chat_send">Отправить</button>
-          </div>`:''}
+          <!-- Поле ответа убрано 02.10.2026: переписку здесь читают, а пишут получателю
+               из самого WhatsApp. Загрузка истории и чтение остались. -->
         </div>`:''}
       </div>
       <div class="oform-col">
@@ -2421,21 +2419,6 @@ function orderModal(id,readonly){
   // не партнёра — у разных заказов одного партнёра получатели разные
   if(o&&o.id&&o.phone&&$('o_chat_box')){
     loadPhoneChat(o.phone,'o_chat_box');
-    const oChatSendBtn=$('o_chat_send'),oChatInput=$('o_chat_input');
-    if(oChatSendBtn&&oChatInput){
-      const doOrderSend=async()=>{
-        const text=oChatInput.value.trim();if(!text)return;
-        oChatSendBtn.disabled=true;
-        try{
-          const res=await callKelesuSend({phone:o.phone,text});
-          if(res&&res.success){oChatInput.value='';await loadPhoneChat(o.phone,'o_chat_box');}
-          else{toast('Не удалось отправить: '+(res&&res.error||'ошибка'));}
-        }catch(e){toast('Не удалось отправить сообщение');}
-        finally{oChatSendBtn.disabled=false;}
-      };
-      oChatSendBtn.onclick=doOrderSend;
-      oChatInput.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();doOrderSend();}});
-    }
     const oChatSyncBtn=$('o_chat_sync');
     if(oChatSyncBtn)oChatSyncBtn.onclick=async()=>{
       oChatSyncBtn.disabled=true;oChatSyncBtn.textContent='⏳ Загружаем…';

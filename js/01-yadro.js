@@ -781,7 +781,10 @@ async function callDeleteUser(payload){
   }catch(e){return {error:String(e&&e.message||e)};}
 }
 // отправка сообщения в WhatsApp через Kelesu (Edge Function kelesu-send) — только для
-// залогиненного сотрудника, вызывается из блока «Переписка» в карточке партнёра
+// залогиненного сотрудника.
+// СЕЙЧАС НЕ ВЫЗЫВАЕТСЯ НИОТКУДА: поле ответа в карточке заказа убрано 02.10.2026 —
+// переписку читают здесь, а пишут получателю из самого WhatsApp. Функцию оставили: сама
+// Edge Function на месте, и вернуть отправку — это одно поле ввода и обработчик.
 async function callKelesuSend(payload){
   const {data:sess}=await sb.auth.getSession();
   const token=sess&&sess.session?sess.session.access_token:'';

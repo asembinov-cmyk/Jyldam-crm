@@ -445,13 +445,12 @@ function orderBigPhotoInner(o,canEdit){
   const byLine=ph.length?`<div class="obig-by" id="obigBy">${photoByLabel(ph[0])}</div>`:'';
   const rotBtns=ph.length?`<div class="obig-rotate"><button type="button" class="btn sm" id="orotL">↺ Влево</button><button type="button" class="btn sm" id="orotR">↻ Вправо</button></div>`:'';
   const thumbs=ph.length>1?`<div class="obig-thumbs">${ph.map((f,i)=>`<img data-ph="${esc(photoPath(f))}" data-obigthumb="${esc(photoPath(f))}" data-obigby="${esc(photoByLabel(f))}" class="${i===0?'active':''}">`).join('')}</div>`:'';
-  const adder=canEdit?`<div class="photo-grid" style="margin-top:10px">
-    <label class="photo-add">📷 Снять фото<input type="file" accept="image/*" capture="environment" multiple data-paddphoto="${o.id}" style="display:none"></label>
-    <label class="photo-add">🖼️ Из галереи<input type="file" accept="image/*" multiple data-paddphoto="${o.id}" style="display:none"></label>
-  </div>`:'';
-  const delBtn=(ph.length&&canEdit)?`<button type="button" class="btn sm danger" data-pdelphoto data-idx="0" style="margin-top:8px">Удалить это фото</button>`:'';
+  // В КАРТОЧКЕ ЗАКАЗА фото только смотрят: добавление («Снять фото»/«Из галереи») и
+  // «Удалить это фото» убраны по просьбе владельца 02.10.2026 — фотографируют бланк в
+  // карточке ЗАБОРА, а здесь эти кнопки лишь повторяли ту же возможность и мешали.
+  // Загрузка фото в заявке (`photoBlockHtml`) не тронута — она там основная.
   const aiBtn=(ph.length&&canEdit&&isStaff())?`<button type="button" class="btn ai-btn" id="oAiRecognize" style="margin-top:10px;width:100%">🤖 Распознать данные с фото</button><div class="ai-recog-note" id="oAiNote"></div>`:'';
-  return `<label>Фотографии заказа</label>${big}${byLine}${rotBtns}${thumbs}${delBtn}${aiBtn}${adder}`;
+  return `<label>Фотографии заказа</label>${big}${byLine}${rotBtns}${thumbs}${aiBtn}`;
 }
 // подпись «загрузил: имя · дата» для фото (только если есть автор)
 function photoByLabel(f){
