@@ -274,10 +274,11 @@ function partnerVolumePanelHtml(){
         <button class="btn btn-excel sm" id="nfVolExcel">⬇ Выгрузить Excel</button>
       </div>
       <div class="table-scroll" style="max-height:60vh;overflow-y:auto"><table class="resp-table"><thead><tr>
-        <th>Партнёр</th><th>Город забора</th><th>Заказов</th><th>В среднем в день</th>
+        <th style="width:44px">№</th><th>Партнёр</th><th>Город забора</th><th>Заказов</th><th>В среднем в день</th>
         <th>Макс за день</th><th>Дней</th><th>Курьерских</th><th>Почтовых</th>
       </tr></thead><tbody>
-      ${shown.length?shown.map(r=>`<tr>
+      ${shown.length?shown.map((r,i)=>`<tr>
+        <td data-label="№" style="color:var(--muted)">${i+1}</td>
         <td data-label="Партнёр">${esc(r.partner)}</td>
         <td data-label="Город забора">${esc(cityName(r.cityId)||'— не указан —')}</td>
         <td data-label="Заказов"><a href="#" data-nfvolday="${esc(r.key)}"><b>${r.total}</b></a></td>
@@ -286,9 +287,9 @@ function partnerVolumePanelHtml(){
         <td data-label="Дней">${r.days}</td>
         <td data-label="Курьерских">${r.courier}</td>
         <td data-label="Почтовых">${r.mail}${r.noType?`<small class="cell-time">+${r.noType} без типа</small>`:''}</td>
-      </tr>`).join(''):`<tr><td colspan="8"><div class="empty" style="padding:24px"><div class="big">Ничего не найдено</div>${all.length?'Сузился поиск — очистите поле.':'За '+esc(nfVolMonthLabel(nfVolMonth))+' заказов нет.'}</div></td></tr>`}
+      </tr>`).join(''):`<tr><td colspan="9"><div class="empty" style="padding:24px"><div class="big">Ничего не найдено</div>${all.length?'Сузился поиск — очистите поле.':'За '+esc(nfVolMonthLabel(nfVolMonth))+' заказов нет.'}</div></td></tr>`}
       </tbody>${all.length?`<tfoot><tr>
-        <td><b>Итого за ${esc(nfVolMonthLabel(nfVolMonth))}</b></td><td>${nfVolCity?esc(nfVolCity==='-'?'город не указан':cityName(nfVolCity)):rows.length+' строк'}</td>
+        <td></td><td><b>Итого за ${esc(nfVolMonthLabel(nfVolMonth))}</b></td><td>${nfVolCity?esc(nfVolCity==='-'?'город не указан':cityName(nfVolCity)):rows.length+' строк'}</td>
         <td><b>${sum('total')}</b></td><td>—</td><td>—</td><td>—</td>
         <td><b>${sum('courier')}</b></td><td><b>${sum('mail')}</b></td>
       </tr></tfoot>`:''}</table></div>
@@ -339,13 +340,13 @@ function nfVolDayModal(key){
 function nfVolExcel(){
   const rows=nfVolFiltered(nfVolRows(nfVolMonth));
   if(!rows.length){toast('Нечего выгружать');return;}
-  const data=rows.map(r=>({
-    'Партнёр':r.partner,'Город забора':cityName(r.cityId)||'',
+  const data=rows.map((r,i)=>({
+    '№':i+1,'Партнёр':r.partner,'Город забора':cityName(r.cityId)||'',
     'Заказов':r.total,'В среднем в день':Math.round(r.avg*10)/10,'Макс за день':r.max,
     'Дней с заказами':r.days,'Курьерских':r.courier,'Почтовых':r.mail,'Без типа доставки':r.noType,
   }));
   const ws=XLSX.utils.json_to_sheet(data);
-  ws['!cols']=[{wch:30},{wch:18},{wch:10},{wch:16},{wch:12},{wch:14},{wch:12},{wch:11},{wch:16}];
+  ws['!cols']=[{wch:5},{wch:30},{wch:18},{wch:10},{wch:16},{wch:12},{wch:14},{wch:12},{wch:11},{wch:16}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Партнёры');
   XLSX.writeFile(wb,`Партнёры_по_городам_${nfVolMonth}.xlsx`);
