@@ -161,6 +161,7 @@ let notifyTrashCollapsed=true; // корзина свёрнута при отк�
 // (те же грабли уже разбирали в сводке для ИИ-помощника, раздел 8p).
 let nfVolMonth='';      // YYYY-MM; пусто — самый свежий месяц с заказами
 let nfVolQ='';          // поиск по партнёру и городу
+let nfVolCity='';       // фильтр города забора; '' — все, '-' — город не указан
 let nfVolBar=false;     // считать ли Барахолку
 const NF_VOL_LIMIT=300; // строк на экране — дальше таблица нечитаема, сужайте поиском
 // Город партнёра для этой сводки: где ЗАБРАЛИ посылку. Если у заказа города нет —
@@ -207,9 +208,22 @@ function nfVolRows(month){
 }
 function nfVolFiltered(rows){
   const q=nfVolQ.trim().toLowerCase();
-  if(!q)return rows;
-  return rows.filter(r=>(r.partner||'').toLowerCase().includes(q)
-    ||(cityName(r.cityId)||'').toLowerCase().includes(q));
+  return rows.filter(r=>{
+    // '-' — это «город не указан»: пустую строку в <option value> отличить от «все города»
+    // нельзя, а строки без города спрашивают отдельно — по ним не видно, откуда возят.
+    if(nfVolCity==='-'&&r.cityId)return false;
+    if(nfVolCity&&nfVolCity!=='-'&&r.cityId!==nfVolCity)return false;
+    if(!q)return true;
+    return (r.partner||'').toLowerCase().includes(q)
+      ||(cityName(r.cityId)||'').toLowerCase().includes(q);
+  });
+}
+// Города, по которым в этом месяце реально есть заказы — показывать весь справочник
+// незачем, половина городов в заборах не участвует вовсе.
+function nfVolCities(rows){
+  const ids=[...new Set(rows.map(r=>r.cityId))];
+  const named=ids.filter(Boolean).sort((a,b)=>(cityName(a)||'').localeCompare(cityName(b)||'','ru'));
+  return {named,hasEmpty:ids.some(x=>!x)};
 }
 const nfVolMonthLabel=m=>{
   if(!m)return '';
@@ -222,13 +236,16 @@ function partnerVolumePanelHtml(){
   const all=nfVolRows(nfVolMonth);
   const rows=nfVolFiltered(all);
   const shown=rows.slice(0,NF_VOL_LIMIT);
-  const sum=k=>all.reduce((s,r)=>s+r[k],0);
+  // Итоги считаем по ВИДИМЫМ строкам, а не по всему месяцу: выбрали город — в итоге
+  // должен стоять этот город, иначе строка «Итого» спорит с таблицей над ней.
+  const sum=k=>rows.reduce((s,r)=>s+r[k],0);
+  const cities=nfVolCities(all);
   // Пока полная история не подъехала, в памяти только сегодняшние заказы — и таблица
   // показала бы один день вместо месяца. Честнее сказать это, чем нарисовать неверное.
   const loading=!S._heavyLoaded&&S._heavyLoading;
   return `
     <div class="panel" style="margin-bottom:18px">
-      <div class="panel-head"><h2>📦 Партнёры по городам</h2><span class="count">${all.length}</span></div>
+      <div class="panel-head"><h2>📦 Партнёры по городам</h2><span class="count">${rows.length}</span></div>
       <div class="hint" style="margin:0 20px 10px;color:var(--muted)">
         Сколько заказов даёт партнёр в каждом городе забора. Месяц считается по дате забора,
         а если её нет — по дате создания, как в Калькуляции. «В среднем» — по дням, когда
@@ -236,6 +253,10 @@ function partnerVolumePanelHtml(){
       ${loading?'<div class="loading" style="padding:30px">Загружаем историю заказов…</div>':`
       <div class="filters" style="padding:0 20px 14px">
         <select id="nfVolMonth">${months.map(m=>`<option value="${m}" ${nfVolMonth===m?'selected':''}>${esc(nfVolMonthLabel(m))}</option>`).join('')}</select>
+        <select id="nfVolCity"><option value="">Город забора: все</option>
+          ${cities.named.map(id=>`<option value="${id}" ${nfVolCity===id?'selected':''}>${esc(cityName(id))}</option>`).join('')}
+          ${cities.hasEmpty?`<option value="-" ${nfVolCity==='-'?'selected':''}>— город не указан —</option>`:''}
+        </select>
         <input class="search" id="nfVolQ" placeholder="Поиск: партнёр или город" value="${esc(nfVolQ)}">
         <label style="display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:14px;cursor:pointer"><input type="checkbox" id="nfVolBar" ${nfVolBar?'checked':''} style="width:18px;height:18px;flex:none;min-width:0"><span>Считать Барахолку</span></label>
         <button class="btn btn-excel sm" id="nfVolExcel">⬇ Выгрузить Excel</button>
@@ -255,7 +276,7 @@ function partnerVolumePanelHtml(){
         <td data-label="Почтовых">${r.mail}${r.noType?`<small class="cell-time">+${r.noType} без типа</small>`:''}</td>
       </tr>`).join(''):`<tr><td colspan="8"><div class="empty" style="padding:24px"><div class="big">Ничего не найдено</div>${all.length?'Сузился поиск — очистите поле.':'За '+esc(nfVolMonthLabel(nfVolMonth))+' заказов нет.'}</div></td></tr>`}
       </tbody>${all.length?`<tfoot><tr>
-        <td><b>Итого за ${esc(nfVolMonthLabel(nfVolMonth))}</b></td><td>${all.length} строк</td>
+        <td><b>Итого за ${esc(nfVolMonthLabel(nfVolMonth))}</b></td><td>${nfVolCity?esc(nfVolCity==='-'?'город не указан':cityName(nfVolCity)):rows.length+' строк'}</td>
         <td><b>${sum('total')}</b></td><td>—</td><td>—</td><td>—</td>
         <td><b>${sum('courier')}</b></td><td><b>${sum('mail')}</b></td>
       </tr></tfoot>`:''}</table></div>
@@ -267,6 +288,7 @@ function partnerVolumePanelHtml(){
 function bindPartnerVolumePanel(){
   const re=()=>{render();};
   if($('nfVolMonth'))$('nfVolMonth').onchange=e=>{nfVolMonth=e.target.value;re();};
+  if($('nfVolCity'))$('nfVolCity').onchange=e=>{nfVolCity=e.target.value;re();};
   if($('nfVolBar'))$('nfVolBar').onchange=e=>{nfVolBar=e.target.checked;re();};
   if($('nfVolQ')){
     // перерисовываем только эту таблицу, иначе фокус уходит из поля на каждой букве
