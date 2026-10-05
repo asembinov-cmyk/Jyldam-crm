@@ -148,6 +148,175 @@ async function loadAiInsights(){
 let notifyTrashCollapsed=true; // корзина свёрнута при открытии раздела — в ней сотни записей
 // и они оттесняют вниз выводы и важные изменения. Разворачивается кликом по заголовку,
 // выбор держится до перезагрузки страницы.
+/* ================= ОБЪЁМЫ ПАРТНЁРОВ ПО ГОРОДАМ ================= */
+// Сколько заказов даёт каждый партнёр в каждом городе за месяц: всего, в среднем в день,
+// максимум за день и разбивка курьерские/почтовые. Просьба владельца 05.10.2026.
+//
+// МЕСЯЦ СЧИТАЕТСЯ ПО ДАТЕ ЗАБОРА, а при её отсутствии по дате создания — ровно как в
+// Калькуляции (`ordersInOrderMonth`). Иначе два экрана про одни и те же заказы показывали
+// бы разные числа, и выяснять, какое верное, пришлось бы руками.
+//
+// «В среднем в день» делится на ДНИ С ЗАКАЗАМИ, а не на календарные дни месяца: партнёр,
+// который возит раз в неделю, иначе выглядел бы мелким, хотя в свой день привозит полсотни
+// (те же грабли уже разбирали в сводке для ИИ-помощника, раздел 8p).
+let nfVolMonth='';      // YYYY-MM; пусто — самый свежий месяц с заказами
+let nfVolQ='';          // поиск по партнёру и городу
+let nfVolBar=false;     // считать ли Барахолку
+const NF_VOL_LIMIT=300; // строк на экране — дальше таблица нечитаема, сужайте поиском
+// Город партнёра для этой сводки: где ЗАБРАЛИ посылку. Если у заказа города нет —
+// берём город из карточки партнёра, иначе половина строк была бы «не указан».
+function nfVolCityId(o){
+  if(o.pickup_city_id)return o.pickup_city_id;
+  if(o.partner_id){const p=(S.partners||[]).find(x=>x.id===o.partner_id);if(p&&p.city_id)return p.city_id;}
+  return '';
+}
+const nfVolMonthOf=o=>(o.pickup_date||o.created_at||'').slice(0,7);
+function nfVolOrders(){
+  const list=nfVolBar?(S.orders||[]):mainOrders();
+  return list;
+}
+// Месяцы, по которым вообще есть заказы — новые сверху
+function nfVolMonths(){
+  const set=new Set();
+  nfVolOrders().forEach(o=>{const m=nfVolMonthOf(o);if(m)set.add(m);});
+  return [...set].sort((a,b)=>b.localeCompare(a));
+}
+function nfVolRows(month){
+  const by={};
+  nfVolOrders().forEach(o=>{
+    if(nfVolMonthOf(o)!==month)return;
+    const partner=orderPartnerLabel(o);
+    const cityId=nfVolCityId(o);
+    const key=partner+'|'+cityId;
+    if(!by[key])by[key]={key,partner,cityId,total:0,courier:0,mail:0,noType:0,byDay:{}};
+    const g=by[key];
+    g.total++;
+    if(!o.delivery_id)g.noType++;
+    else if(isCourierDelivery(o.delivery_id))g.courier++;
+    else g.mail++;
+    const d=(o.pickup_date||o.created_at||'').slice(0,10);
+    if(d)g.byDay[d]=(g.byDay[d]||0)+1;
+  });
+  const rows=Object.values(by).map(g=>{
+    const days=Object.keys(g.byDay).length;
+    const max=days?Math.max(...Object.values(g.byDay)):0;
+    return {...g,days,max,avg:days?g.total/days:0};
+  });
+  rows.sort((a,b)=>b.total-a.total||a.partner.localeCompare(b.partner,'ru'));
+  return rows;
+}
+function nfVolFiltered(rows){
+  const q=nfVolQ.trim().toLowerCase();
+  if(!q)return rows;
+  return rows.filter(r=>(r.partner||'').toLowerCase().includes(q)
+    ||(cityName(r.cityId)||'').toLowerCase().includes(q));
+}
+const nfVolMonthLabel=m=>{
+  if(!m)return '';
+  const names=['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+  return names[parseInt(m.slice(5,7),10)-1]+' '+m.slice(0,4);
+};
+function partnerVolumePanelHtml(){
+  const months=nfVolMonths();
+  if(!nfVolMonth||!months.includes(nfVolMonth))nfVolMonth=months[0]||localToday().slice(0,7);
+  const all=nfVolRows(nfVolMonth);
+  const rows=nfVolFiltered(all);
+  const shown=rows.slice(0,NF_VOL_LIMIT);
+  const sum=k=>all.reduce((s,r)=>s+r[k],0);
+  // Пока полная история не подъехала, в памяти только сегодняшние заказы — и таблица
+  // показала бы один день вместо месяца. Честнее сказать это, чем нарисовать неверное.
+  const loading=!S._heavyLoaded&&S._heavyLoading;
+  return `
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>📦 Партнёры по городам</h2><span class="count">${all.length}</span></div>
+      <div class="hint" style="margin:0 20px 10px;color:var(--muted)">
+        Сколько заказов даёт партнёр в каждом городе забора. Месяц считается по дате забора,
+        а если её нет — по дате создания, как в Калькуляции. «В среднем» — по дням, когда
+        заказы реально были.</div>
+      ${loading?'<div class="loading" style="padding:30px">Загружаем историю заказов…</div>':`
+      <div class="filters" style="padding:0 20px 14px">
+        <select id="nfVolMonth">${months.map(m=>`<option value="${m}" ${nfVolMonth===m?'selected':''}>${esc(nfVolMonthLabel(m))}</option>`).join('')}</select>
+        <input class="search" id="nfVolQ" placeholder="Поиск: партнёр или город" value="${esc(nfVolQ)}">
+        <label style="display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:14px;cursor:pointer"><input type="checkbox" id="nfVolBar" ${nfVolBar?'checked':''} style="width:18px;height:18px;flex:none;min-width:0"><span>Считать Барахолку</span></label>
+        <button class="btn btn-excel sm" id="nfVolExcel">⬇ Выгрузить Excel</button>
+      </div>
+      <div class="table-scroll" style="max-height:60vh;overflow-y:auto"><table class="resp-table"><thead><tr>
+        <th>Партнёр</th><th>Город забора</th><th>Заказов</th><th>В среднем в день</th>
+        <th>Макс за день</th><th>Дней</th><th>Курьерских</th><th>Почтовых</th>
+      </tr></thead><tbody>
+      ${shown.length?shown.map(r=>`<tr>
+        <td data-label="Партнёр">${esc(r.partner)}</td>
+        <td data-label="Город забора">${esc(cityName(r.cityId)||'— не указан —')}</td>
+        <td data-label="Заказов"><a href="#" data-nfvolday="${esc(r.key)}"><b>${r.total}</b></a></td>
+        <td data-label="В среднем в день">${r.avg.toFixed(1).replace('.',',')}</td>
+        <td data-label="Макс за день">${r.max}</td>
+        <td data-label="Дней">${r.days}</td>
+        <td data-label="Курьерских">${r.courier}</td>
+        <td data-label="Почтовых">${r.mail}${r.noType?`<small class="cell-time">+${r.noType} без типа</small>`:''}</td>
+      </tr>`).join(''):`<tr><td colspan="8"><div class="empty" style="padding:24px"><div class="big">Ничего не найдено</div>${all.length?'Сузился поиск — очистите поле.':'За '+esc(nfVolMonthLabel(nfVolMonth))+' заказов нет.'}</div></td></tr>`}
+      </tbody>${all.length?`<tfoot><tr>
+        <td><b>Итого за ${esc(nfVolMonthLabel(nfVolMonth))}</b></td><td>${all.length} строк</td>
+        <td><b>${sum('total')}</b></td><td>—</td><td>—</td><td>—</td>
+        <td><b>${sum('courier')}</b></td><td><b>${sum('mail')}</b></td>
+      </tr></tfoot>`:''}</table></div>
+      ${rows.length>NF_VOL_LIMIT?`<div class="hint" style="margin:10px 20px 14px;color:var(--rust)">
+        Показаны первые ${NF_VOL_LIMIT} строк из ${rows.length} — сузьте поиском или выгрузите в Excel.</div>`:''}
+      `}
+    </div>`;
+}
+function bindPartnerVolumePanel(){
+  const re=()=>{render();};
+  if($('nfVolMonth'))$('nfVolMonth').onchange=e=>{nfVolMonth=e.target.value;re();};
+  if($('nfVolBar'))$('nfVolBar').onchange=e=>{nfVolBar=e.target.checked;re();};
+  if($('nfVolQ')){
+    // перерисовываем только эту таблицу, иначе фокус уходит из поля на каждой букве
+    $('nfVolQ').oninput=e=>{nfVolQ=e.target.value;nfVolRedraw();};
+  }
+  if($('nfVolExcel'))$('nfVolExcel').onclick=()=>nfVolExcel();
+  $('main').querySelectorAll('[data-nfvolday]').forEach(a=>a.onclick=ev=>{
+    ev.preventDefault();nfVolDayModal(a.dataset.nfvolday);
+  });
+}
+// Перерисовка только панели: полный render() сбрасывал бы фокус в поле поиска.
+function nfVolRedraw(){
+  const panels=[...$('main').querySelectorAll('.panel')];
+  const panel=panels.find(p=>{const h=p.querySelector('.panel-head h2');return h&&h.textContent.indexOf('Партнёры по городам')>=0;});
+  if(!panel)return;
+  const tmp=document.createElement('div');
+  tmp.innerHTML=partnerVolumePanelHtml();
+  panel.replaceWith(tmp.firstElementChild);
+  bindPartnerVolumePanel();
+  const inp=$('nfVolQ');
+  if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}
+}
+// Разбивка по дням для одной пары «партнёр + город» — ответ на «сколько даёт ежедневно»
+function nfVolDayModal(key){
+  const row=nfVolRows(nfVolMonth).find(r=>r.key===key);
+  if(!row){toast('Строка не найдена');return;}
+  const days=Object.entries(row.byDay).sort((a,b)=>a[0].localeCompare(b[0]));
+  showInfo(`${esc(row.partner)} · ${esc(cityName(row.cityId)||'город не указан')}`,`
+    <div class="hint" style="margin-bottom:10px">${esc(nfVolMonthLabel(nfVolMonth))} · заказов ${row.total} ·
+      в среднем ${row.avg.toFixed(1).replace('.',',')} в день · максимум ${row.max}</div>
+    <div class="table-scroll" style="max-height:52vh;overflow-y:auto"><table class="resp-table"><thead><tr>
+      <th>День</th><th>Заказов</th></tr></thead><tbody>
+      ${days.map(([d,n])=>`<tr><td data-label="День">${esc(fmtDate(d))}</td><td data-label="Заказов">${n}</td></tr>`).join('')}
+    </tbody></table></div>`,{wide:true});
+}
+function nfVolExcel(){
+  const rows=nfVolFiltered(nfVolRows(nfVolMonth));
+  if(!rows.length){toast('Нечего выгружать');return;}
+  const data=rows.map(r=>({
+    'Партнёр':r.partner,'Город забора':cityName(r.cityId)||'',
+    'Заказов':r.total,'В среднем в день':Math.round(r.avg*10)/10,'Макс за день':r.max,
+    'Дней с заказами':r.days,'Курьерских':r.courier,'Почтовых':r.mail,'Без типа доставки':r.noType,
+  }));
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:30},{wch:18},{wch:10},{wch:16},{wch:12},{wch:14},{wch:12},{wch:11},{wch:16}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Партнёры');
+  XLSX.writeFile(wb,`Партнёры_по_городам_${nfVolMonth}.xlsx`);
+  toast(`Выгружено строк: ${rows.length}`);
+}
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const trash=S.deletedItems||[];
@@ -198,10 +367,13 @@ function renderNotify(){
       <div style="padding:0 20px 18px"><button class="btn" id="nfSetPartner">Открыть</button></div>
     </div>`:''}
 
+    ${isStaff()?partnerVolumePanelHtml():''}
+
     ${isStaff()?duplicatesPanelHtml():''}`;
   if($('nfSetPartner'))$('nfSetPartner').onclick=()=>setPartnerBulkModal();
   if($('nfAiRun'))$('nfAiRun').onclick=()=>loadAiInsights();
   bindDuplicatesPanel();
+  if(isStaff())bindPartnerVolumePanel();
   // переходы по клику на задачу
   $('main').querySelectorAll('[data-nfgo]').forEach(el=>el.onclick=()=>{
     const tab=el.dataset.nfgo;
