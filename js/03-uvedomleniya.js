@@ -240,6 +240,10 @@ function partnerVolumePanelHtml(){
   // должен стоять этот город, иначе строка «Итого» спорит с таблицей над ней.
   const sum=k=>rows.reduce((s,r)=>s+r[k],0);
   const cities=nfVolCities(all);
+  // Партнёров считаем ПО ИМЕНАМ, а не по строкам: один партнёр возит из двух городов и
+  // даёт две строки — иначе «партнёров» было бы больше, чем их есть на самом деле.
+  const partnersCnt=new Set(rows.map(r=>r.partner)).size;
+  const scopeLabel=nfVolCity?(nfVolCity==='-'?'город не указан':cityName(nfVolCity)):'все города';
   // Пока полная история не подъехала, в памяти только сегодняшние заказы — и таблица
   // показала бы один день вместо месяца. Честнее сказать это, чем нарисовать неверное.
   const loading=!S._heavyLoaded&&S._heavyLoading;
@@ -251,6 +255,14 @@ function partnerVolumePanelHtml(){
         а если её нет — по дате создания, как в Калькуляции. «В среднем» — по дням, когда
         заказы реально были.</div>
       ${loading?'<div class="loading" style="padding:30px">Загружаем историю заказов…</div>':`
+      <div class="nf-vol-sum">
+        <div class="nfv-i"><span>Партнёров</span><b>${partnersCnt}</b></div>
+        <div class="nfv-i"><span>Заказов</span><b>${sum('total')}</b></div>
+        <div class="nfv-i"><span>Курьерских</span><b>${sum('courier')}</b></div>
+        <div class="nfv-i"><span>Почтовых</span><b>${sum('mail')}</b></div>
+        ${sum('noType')?`<div class="nfv-i"><span>Без типа</span><b>${sum('noType')}</b></div>`:''}
+        <div class="nfv-i nfv-scope"><span>${esc(nfVolMonthLabel(nfVolMonth))}</span><b>${esc(scopeLabel)}</b></div>
+      </div>
       <div class="filters" style="padding:0 20px 14px">
         <select id="nfVolMonth">${months.map(m=>`<option value="${m}" ${nfVolMonth===m?'selected':''}>${esc(nfVolMonthLabel(m))}</option>`).join('')}</select>
         <select id="nfVolCity"><option value="">Город забора: все</option>

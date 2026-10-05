@@ -469,6 +469,17 @@
   .ohist-v{flex:1;min-width:0}
   .ohist-v b{font-weight:700}
   .ohist-v small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+  /* Сводка над фильтрами грида «Партнёры по городам» — считается по тому, что видно */
+  .nf-vol-sum{display:flex;flex-wrap:wrap;gap:10px;padding:0 20px 12px}
+  .nfv-i{display:flex;flex-direction:column;gap:2px;padding:8px 14px;border:1px solid var(--line);
+    border-radius:10px;background:var(--paper);min-width:96px}
+  .nfv-i span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+  .nfv-i b{font-family:'Fraunces',serif;font-weight:900;font-size:20px;line-height:1.1}
+  .nfv-scope b{font-family:'Spline Sans',sans-serif;font-size:14px;font-weight:600}
+  @media (max-width:760px),(pointer:coarse){
+    .nf-vol-sum{padding:0 12px 10px;gap:8px}
+    .nfv-i{flex:1 1 calc(50% - 8px);min-width:0;padding:8px 12px}
+  }
   /* кнопка «скопировать номер» — в гриде под ID и в карточке рядом с полем */
   .copy-btn{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;
     width:26px;height:26px;padding:0;margin-left:6px;border:1px solid var(--line);border-radius:7px;
