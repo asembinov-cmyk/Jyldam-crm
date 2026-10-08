@@ -1441,6 +1441,18 @@
 .ft-period input[type=date]{font:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--line);
   border-radius:9px;background:var(--card);color:var(--ink)}
 
+/* Полоса выбора города забора в «Заполнении»: это фильтр не вида, а ВЫДАЧИ — выбрал
+   город, и заказы падают только его. Поэтому стоит отдельной строкой наверху, а не
+   прячется среди фильтров: от неё зависит, что человек получит по кнопке. */
+.fill-city{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+.fill-city .fc-l{font-size:13px;font-weight:700;color:var(--muted)}
+.fill-city select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--line);
+  border-radius:9px;background:var(--card);color:var(--ink);max-width:100%}
+.fill-city .fc-note{font-size:12.5px;color:var(--muted)}
+/* Город выбран — говорим об этом цветом: пустая очередь из-за фильтра выглядит точно
+   так же, как «работы нет». */
+.fill-city .fc-on{font-size:12.5px;color:var(--rust);font-weight:600}
+
 .ft-rank{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
   border-radius:8px;background:var(--paper);color:var(--muted);font-weight:700;font-size:13px}
 .ft-rank.top{background:var(--rust);color:#fff}
@@ -1725,6 +1737,8 @@ td .ft-dot{margin:0 0 0 8px}
      .field и .filters — такой select оставался 19 px с 13-м шрифтом, то есть и мимо
      пальца, и с зумом от iOS при касании. */
   .resp-table td select{font-size:16px;min-height:44px;max-width:100%}
+  /* Выбор города в «Заполнении»: этим списком пользуются с телефона на складе. */
+  .fill-city select{font-size:16px;min-height:44px}
   /* Пагинация была столбиком: три этажа кнопок, 110 px экрана и 150 px
      отступа под ними. Возвращаем в строку с нормальными кнопками. */
   .orders-pager{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:8px}

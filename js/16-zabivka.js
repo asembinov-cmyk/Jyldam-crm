@@ -28,6 +28,15 @@ const FILL_CLAIM_MIN = 30;   // сколько минут заказ держи�
 const FILL_MEASURE_MAX_MIN = 10;
 const FILL_NORM_SEC  = 60;   // норма времени на один заказ
 let fillFrom = '', fillTo = '';  // период статистики, пусто = сегодня
+// ГОРОД ЗАБОРА — фильтр ОЧЕРЕДИ (просьба владельца 08.10.2026): выбрал город — заказы
+// падают только этого города. Не вид списка, а именно выдача: «Взять следующий» и пробел
+// берут из того же отфильтрованного набора.
+//
+// Хранится в localStorage, а не в памяти вкладки: по городу работают всю смену, и
+// выставлять его заново после каждой перезагрузки человек просто забудет. Это СВОЙ выбор
+// каждого устройства — у двух менеджеров на одном складе он разный.
+// '' — все города, '-' — заказы, у которых город не определён вовсе.
+let fillCity = (() => { try{ return localStorage.getItem('fillCity') || ''; }catch(e){ return ''; } })();
 let fillBusy = false;            // защита от двойного нажатия «Взять следующий»
 
 // Колонки могли ещё не появиться в базе (SQL из db/11 не выполнен). Понять это можно
@@ -91,11 +100,57 @@ function fillInQueue(o){
   return !!d && d >= fillQueueFrom() && d <= localToday();
 }
 const fillPrevDay = d => new Date(new Date(d).getTime() - 86400000).toISOString().slice(0, 10);
+// Город заказа — ОДНОЙ функцией с Калькуляцией (orderCalcCity, js/07): своё поле
+// `pickup_city_id`, а если пусто — город партнёра. Вторую такую писать нельзя: правило
+// «из какого города заказ» в системе должно быть одно, иначе фильтр и деньги разойдутся.
+const fillCityOf = o => orderCalcCity(o) || '';
+function fillInCity(o){
+  if(!fillCity) return true;
+  const c = fillCityOf(o);
+  return fillCity === '-' ? !c : c === fillCity;
+}
+const fillCityLabel = () => !fillCity ? '' : (fillCity === '-' ? 'без города' : (cityName(fillCity) || '—'));
+// Варианты собираем ИЗ САМОЙ ОЧЕРЕДИ, а не из справочника городов: в заборах участвует
+// десяток городов из сорока, и выбирать нужный среди пустых — значит искать его глазами.
+// В скобках — сколько там СВОБОДНЫХ заказов прямо сейчас: цифра отвечает на вопрос
+// «есть ли там для меня работа», а не «сколько всего».
+//
+// Выбранный город остаётся в списке даже с нулём: пропади он — select показал бы чужое
+// значение, и человек решил бы, что фильтр снят, хотя заказы ему не падают.
+function fillCityOptions(){
+  const base = fillQueueAll().filter(o => !fillClaimAlive(o));
+  const by = {};
+  base.forEach(o => { const c = fillCityOf(o) || '-'; by[c] = (by[c] || 0) + 1; });
+  if(fillCity && by[fillCity] == null) by[fillCity] = 0;
+  const named = Object.keys(by).filter(k => k !== '-')
+    .map(id => ({ id, name: cityName(id) || '—', n: by[id] }))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+  return { named, none: by['-'] || 0, total: base.length };
+}
+// Свободные заказы В ДРУГИХ городах — чтобы не сидеть без работы при полном складе:
+// менеджер выбрал Алматы, алматинские кончились, а в Астане висит сорок штук.
+function fillFreeElsewhere(){
+  if(!fillCity) return 0;
+  return fillQueueAll().filter(o => !fillClaimAlive(o) && !fillInCity(o)).length;
+}
 // ПОЧЕМУ БРАТЬ НЕЧЕГО. «Взять следующий» неактивен по пяти разным причинам, и со стороны
 // они выглядят одинаково — «кнопка не работает». Причин, по сути, две группы: заказы есть,
 // но заняты (вами же, отложены, у коллег), или их правда нет за выбранные дни.
 function fillWhyEmpty(queue, free, mine, held){
   if(free.length) return '';
+  // ГОРОД ВЫБРАН, а свободных в нём нет — эту причину со стороны не видно вовсе: очередь
+  // выглядит пустой, хотя на складе работы полно. Поэтому называем её ПЕРВОЙ и сразу
+  // говорим, сколько свободно в других городах — иначе человек сидит и ждёт заказов,
+  // которых ему и не дадут.
+  if(fillCity){
+    const others = queue.filter(o => fillClaimAlive(o) && !fillIsMine(o)).length;
+    const other = fillFreeElsewhere();
+    return `по городу «${fillCityLabel()}» свободных нет`
+      + (others ? ` · ${others} сейчас у коллег` : '')
+      + (other ? ` · в других городах свободно ${other}, снимите фильтр города` : '')
+      + (mine.length ? ` · у вас в работе ${mine.length}` : '')
+      + (held.length ? ` · отложено ${held.length}` : '');
+  }
   if(mine.length) return 'заказ уже у вас в работе';
   const others = queue.filter(o => fillClaimAlive(o) && !fillIsMine(o)).length;
   if(held.length && !others) return `у вас отложено ${held.length}, верните в работу выше`;
@@ -110,7 +165,9 @@ function fillWhyEmpty(queue, free, mine, held){
 // «добрать 400 заказов за месяц» — это не про работу, а про старые брошенные болванки.
 function fillTailCount(){
   const d = fillPrevDay(fillQueueFrom());
-  return (S.orders || []).filter(o => fillNeedsWork(o) && fillOrderDate(o) === d).length;
+  // Фильтр города учитываем и здесь: кнопка обещает N заказов, и обещать она должна то,
+  // что человеку реально упадёт, а не вместе с чужими городами.
+  return (S.orders || []).filter(o => fillNeedsWork(o) && fillOrderDate(o) === d && fillInCity(o)).length;
 }
 // Захват живой? Отложенный заказ не протухает: менеджер ждёт данных от партнёра,
 // и отдавать заказ соседу через десять минут — значит потерять то, чего он ждал.
@@ -119,10 +176,17 @@ function fillIsHeld(o){ return !!o.claim_hold; }
 function fillClaimAlive(o){ return fillIsHeld(o) || !!(o.claimed_at && o.claimed_at > fillCutoff()); }
 function fillIsMine(o){ return fillClaimAlive(o) && o.claimed_by === (S.me && S.me.id); }
 
-function fillQueue(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillInQueue(o)); }
+// Очередь по датам, БЕЗ фильтра города: на ней считаются варианты фильтра и чужие
+// захваты в таблице «Менеджеры заказов» — кто у кого в работе, от МОЕГО выбора города
+// зависеть не должно.
+function fillQueueAll(){ return (S.orders || []).filter(o => fillNeedsWork(o) && fillInQueue(o)); }
+function fillQueue(){ return fillQueueAll().filter(fillInCity); }
 function fillFree(){ return fillQueue().filter(o => !fillClaimAlive(o)); }
-function fillMine(){ return fillQueue().filter(o => fillIsMine(o) && !fillIsHeld(o)); }
-function fillHeld(){ return fillQueue().filter(o => fillIsMine(o) && fillIsHeld(o)); }
+// А ВОТ СВОИ взятые и отложенные заказы фильтр города НЕ прячет. Человек их уже держит;
+// исчезни они с экрана при смене города — он бы о них забыл, захват висел бы до конца
+// срока, а заказ стоял. Поэтому здесь fillQueueAll, а не fillQueue.
+function fillMine(){ return fillQueueAll().filter(o => fillIsMine(o) && !fillIsHeld(o)); }
+function fillHeld(){ return fillQueueAll().filter(o => fillIsMine(o) && fillIsHeld(o)); }
 
 /* ---------- выдача следующего заказа ---------- */
 // Попытка захватить один из переданных заказов. Возвращает захваченный или null.
@@ -160,16 +224,21 @@ async function fillTryClaim(list){
 // в окне дат. «Есть фото» запросом не выразить (поле — массив), поэтому досеиваем
 // на месте через fillNeedsWork.
 async function fillFreshCandidates(){
-  const { data, error } = await sb.from('orders')
+  let q = sb.from('orders')
     .select('*')
     .is('filled_at', null)
     .gte('pickup_date', fillQueueFrom())
     .lte('pickup_date', localToday())
-    .or(`claimed_at.is.null,claimed_at.lt.${fillCutoff()}`)
-    .order('created_at', { ascending: true })
-    .limit(200);
+    .or(`claimed_at.is.null,claimed_at.lt.${fillCutoff()}`);
+  // Город — сразу в запрос: двести свежайших строк могут оказаться все чужого города,
+  // и выборка вернулась бы пустой при полном складе. Условие тут СТРОГОЕ, по полю заказа:
+  // заказ с пустым городом, но партнёром из этого города, сюда не попадёт — он и так
+  // лежит в памяти вкладки, то есть достаётся первой попыткой в fillTakeNext.
+  if(fillCity === '-') q = q.is('pickup_city_id', null);
+  else if(fillCity) q = q.eq('pickup_city_id', fillCity);
+  const { data, error } = await q.order('created_at', { ascending: true }).limit(200);
   if(error){ console.error('fill fresh', error); return []; }
-  const rows = (data || []).filter(o => fillNeedsWork(o) && !fillIsHeld(o));
+  const rows = (data || []).filter(o => fillNeedsWork(o) && !fillIsHeld(o) && fillInCity(o));
   // Заодно освежаем память вкладки: счётчики на экране перестанут врать.
   const byId = {}; (S.orders || []).forEach((o, i) => { byId[o.id] = i; });
   (data || []).forEach(row => {
@@ -317,7 +386,7 @@ function fillStatsRows(){
     }
   });
   const inWork = {}, onHold = {}, holdSince = {};
-  fillQueue().filter(fillClaimAlive).forEach(o => {
+  fillQueueAll().filter(fillClaimAlive).forEach(o => {
     const nm = o.claimed_by_name || '—';
     const box = fillIsHeld(o) ? onHold : inWork;
     box[nm] = (box[nm] || 0) + 1;
@@ -436,6 +505,36 @@ function fillSetTab(k){
   else if(k==='month'){fillFrom=localToday().slice(0,8)+'01';fillTo=localToday();}
   renderFilling();fillEnsureLoaded();
 }
+// Выбор города: запоминаем на устройстве и перерисовываем экран. Данные дотягивать не
+// нужно — город есть у всех заказов, которые уже в памяти, в отличие от смены периода.
+function fillSetCity(v){
+  fillCity=v||'';
+  try{localStorage.setItem('fillCity',fillCity);}catch(e){}
+  renderFilling();
+}
+// Полоса выбора города. Рисуется и администратору: заказы он тоже берёт, а на складе
+// с двумя городами это тот же вопрос.
+//
+// Пока очередь пуста и город не выбран, полосы нет вовсе: выбирать не из чего, а пустой
+// список выглядел бы поломкой. Но ЕСЛИ город выбран, полоса остаётся всегда — иначе
+// фильтр стало бы невозможно снять, и человек сидел бы без заказов, не понимая почему.
+function fillCityBarHtml(){
+  const {named,none,total}=fillCityOptions();
+  if(!named.length&&!none&&!fillCity)return '';
+  const opt=(v,label,n,sel)=>`<option value="${esc(v)}" ${sel?'selected':''}>${esc(label)}${n==null?'':` (${n})`}</option>`;
+  return `<div class="fill-city">
+    <span class="fc-l">Город забора</span>
+    <select id="fillCitySel" title="Заказы будут падать только из выбранного города">
+      ${opt('','Все города',total,!fillCity)}
+      ${named.map(c=>opt(c.id,c.name,c.n,fillCity===c.id)).join('')}
+      ${(none||fillCity==='-')?opt('-','Город не указан',none,fillCity==='-'):''}
+    </select>
+    ${fillCity
+      ? `<span class="fc-on">падают только заказы «${esc(fillCityLabel())}»</span>
+         <button class="btn sm ghost" id="fillCityAll">Все города</button>`
+      : '<span class="fc-note">В скобках — сколько там свободных заказов прямо сейчас</span>'}
+  </div>`;
+}
 // «Добрать вчерашние»: сдвигает окно очереди на день назад. Ставим и «по», чтобы кнопка
 // «Вчера» подсветилась — человек нажал именно её смысл, пусть видит это в фильтре.
 function fillExtendQueue(){
@@ -516,6 +615,7 @@ function renderFilling(){
       </div>
     </div>
     <div id="fillFindBox"></div>
+    ${fillCityBarHtml()}
     ${!admin?`<div class="ft-period fill-period-own">
       ${FILL_TABS.map(([k,l])=>`<button data-filltab="${k}" class="${tab===k?'active':''}">${l}</button>`).join('')}
       <input type="date" id="fillFromInp" value="${esc(from)}" max="${esc(localToday())}" title="С какого дня">
@@ -527,7 +627,7 @@ function renderFilling(){
         <div class="fk-k">Ждут заполнения</div>
         <div class="fk-v">${queue.length}</div>
         <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}${held.length?` · отложено ${held.length}`:''}${
-          qWide?` · с ${esc(fmtDate(qFrom))}`:''}</div>
+          qWide?` · с ${esc(fmtDate(qFrom))}`:''}${fillCity?` · город ${esc(fillCityLabel())}`:''}</div>
       </div>
       ${!admin?`
       <div class="fk">
@@ -642,7 +742,7 @@ function renderFilling(){
     <div class="fill-take">
       <button class="btn" id="fillNextBottom" ${free.length||mine.length?'':'disabled'}>Взять следующий</button>
       <span>${free.length
-        ? `свободных заказов: ${free.length}${qWide?` · с ${esc(fmtDate(qFrom))}`:''}`
+        ? `свободных заказов: ${free.length}${qWide?` · с ${esc(fmtDate(qFrom))}`:''}${fillCity?` · город ${esc(fillCityLabel())}`:''}`
         : `свободных заказов нет — ${esc(fillWhyEmpty(queue,free,mine,held))}`}</span>
       ${tail?`<button class="btn sm ghost" id="fillTail">Добрать за ${esc(fmtDate(tailDay))} (${tail})</button>`:''}
       ${admin?'':reload}
@@ -660,6 +760,8 @@ function renderFilling(){
   if(fillFindRes!==null)fillFindDraw();
   $('main').querySelectorAll('.fill-reload').forEach(b=>b.onclick=()=>fillRefresh());
   if($('fillTail'))$('fillTail').onclick=()=>fillExtendQueue();
+  const cs=$('fillCitySel'); if(cs) cs.onchange=()=>fillSetCity(cs.value);
+  if($('fillCityAll'))$('fillCityAll').onclick=()=>fillSetCity('');
   $('main').querySelectorAll('[data-fillopen]').forEach(b=>b.onclick=()=>orderModal(b.dataset.fillopen));
   $('main').querySelectorAll('[data-fillrel]').forEach(b=>b.onclick=()=>fillRelease(b.dataset.fillrel));
   $('main').querySelectorAll('[data-fillhold]').forEach(b=>b.onclick=()=>fillHold(b.dataset.fillhold,true));
