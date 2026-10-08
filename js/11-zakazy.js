@@ -358,7 +358,7 @@ async function pickupOrdersModal(pickupId){
             const sizes=packageSizesFor(pt);
             if(sizes[size]&&!o.paid_by_sender){
               const courier=isCourierDelivery(o.delivery_id);
-              const amount=sizes[size][courier?'courier':'mail']+weightSurcharge(o.weight,courier);
+              const amount=sizes[size][courier?'courier':'mail']+weightSurcharge(o.weight,courier,isBaraholkaOrder(o));
               patch.order_sum=amount;patch.cost=amount;
             }
           }
@@ -1934,9 +1934,15 @@ function packageSizesFor(partner){
 // 2,1 → +100, 3,1 → +200. Начатый, а не полный: посылка в 2,1 кг занимает у почты место
 // как трёхкилограммовая. У курьерских заказов надбавки нет — там цена по размеру пакета.
 // Порог и ставка правятся в «Калькуляции» → «Размеры пакетов и перевес».
-function weightSurcharge(weight, isCourier){
+//
+// ТРЕТИЙ АРГУМЕНТ — ЗАКАЗ БАРАХОЛКИ: у неё своя пара ставок («Калькуляция» →
+// «Барахолка» → «Перевес»), а пока они не заданы — те же, что в заборах
+// (barPriceNorm, js/01-yadro.js). Признак берём у ЗАКАЗА (isBaraholkaOrder), а не у
+// режима грида: карточку открывают и из «Заполнения», и из поиска.
+function weightSurcharge(weight, isCourier, bar){
   if(isCourier) return 0;
-  const free=priceNorm('weight_free_kg'), fee=priceNorm('weight_step_fee');
+  const norm=k=>bar?barPriceNorm(k):priceNorm(k);
+  const free=norm('weight_free_kg'), fee=norm('weight_step_fee');
   const w = parseFloat(weight);
   if(isNaN(w) || w <= free) return 0;
   return Math.ceil(w - free) * fee;
@@ -1951,7 +1957,8 @@ function weightSurcharge(weight, isCourier){
 function repriceForWeight(order, newWeight){
   if(!order || order.paid_by_sender) return null;      // сумма намеренно 0
   if(isCourierDelivery(order.delivery_id)) return null; // у курьерских надбавки нет
-  const delta = weightSurcharge(newWeight, false) - weightSurcharge(order.weight, false);
+  const bar = isBaraholkaOrder(order);
+  const delta = weightSurcharge(newWeight, false, bar) - weightSurcharge(order.weight, false, bar);
   if(!delta) return null;
   const sum = Math.max(0, (orderSum(order) || 0) + delta);
   return {order_sum: sum, cost: sum};
@@ -2641,9 +2648,11 @@ function orderModal(id,readonly){
     // Подпись под весом: видно, откуда взялась надбавка, иначе сумма меняется молча.
     const updateWeightHint=()=>{
       const wh=$('o_weight_hint');if(!wh)return;
-      const extra=weightSurcharge(parseWeight(val('o_weight')),isCourierDelivery(val('o_delivery')));
+      const bar=isBaraholkaOrder(d);
+      const norm=k=>bar?barPriceNorm(k):priceNorm(k);
+      const extra=weightSurcharge(parseWeight(val('o_weight')),isCourierDelivery(val('o_delivery')),bar);
       wh.textContent=extra
-        ? `Перевес: +${extra} ₸ — по ${priceNorm('weight_step_fee')} ₸ за каждый начатый кг свыше ${String(priceNorm('weight_free_kg')).replace('.',',')} кг`
+        ? `Перевес: +${extra} ₸ — по ${norm('weight_step_fee')} ₸ за каждый начатый кг свыше ${String(norm('weight_free_kg')).replace('.',',')} кг${bar?' · ставка Барахолки':''}`
         : 'Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.';
     };
     const applySize=()=>{
@@ -2654,7 +2663,7 @@ function orderModal(id,readonly){
       const sumEl=$('o_sum');
       // Выбор размера — явное действие: цена считается заново, от тарифа, и вес
       // учитывается тут же, иначе надбавка потерялась бы при смене размера.
-      const extra=weightSurcharge(parseWeight(val('o_weight')),courier);
+      const extra=weightSurcharge(parseWeight(val('o_weight')),courier,isBaraholkaOrder(d));
       if(sumEl&&!sumEl.disabled){sumEl.value=(courier?cfg.courier:cfg.mail)+extra;sumTouched=false;}
       updateWeightHint();
       // подпись под списком тоже обновляем — числа могли смениться вместе с партнёром
@@ -2674,7 +2683,8 @@ function orderModal(id,readonly){
     if(wEl)wEl.onchange=()=>{
       const courier=isCourierDelivery(val('o_delivery'));
       const newW=parseWeight(val('o_weight'));
-      const delta=weightSurcharge(newW,courier)-weightSurcharge(lastWeight,courier);
+      const bar=isBaraholkaOrder(d);
+      const delta=weightSurcharge(newW,courier,bar)-weightSurcharge(lastWeight,courier,bar);
       lastWeight=newW;
       const sumEl=$('o_sum');
       if(delta&&sumEl&&!sumEl.disabled){

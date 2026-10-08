@@ -34,6 +34,28 @@ const CALC_BAR_FUNDS=[
   {key:'bar_fund_warehouse',label:'Аренда склада (в месяц)',       hint:'Делится на заказы Барахолки за месяц'},
   {key:'bar_fund_delivery', label:'ЗП доставки до почты (в месяц)',hint:'Делится на заказы Барахолки за месяц'},
 ];
+// ПЕРЕВЕС У БАРАХОЛКИ — такая же пара, как в заборах, но своя (просьба владельца
+// 08.10.2026). Лежит в `pricing_settings` (db/30), а НЕ в `calc_settings`: надбавку
+// начисляет загрузка реестра, а у того, кто её делает, права «Калькуляция» может не
+// быть — положи мы ставку туда, она молча стала бы нулевой, и тяжёлая посылка уехала
+// бы по цене обычной (то же решение, что у размеров пакета, раздел 5c).
+// Поэтому и без периода: сумма пишется в сам заказ, прошлые месяцы не пересчитываются.
+const CALC_BAR_PRICE_FIELDS=[
+  {key:'bar_weight_free_kg', label:'Перевес · с какого веса (кг)', hint:'Всё до этого веса включительно — без надбавки. Пусто = как в заборах', unit:'кг', step:'0.001'},
+  {key:'bar_weight_step_fee',label:'Перевес · за каждый кг (₸)',   hint:'За каждый НАЧАТЫЙ килограмм сверх порога. Пусто = как в заборах'},
+];
+// Пример под панелью: складывать надбавки в уме неудобно, а ошибку в пороге видно сразу.
+// Читаем ЖИВЫЕ значения из полей, а не сохранённые, — иначе пример отстаёт на одну правку.
+function barPriceExampleHtml(){
+  const money=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
+  const read=k=>{const el=document.querySelector(`[data-pricenorm="bar_${k}"]`);
+    return el&&el.value.trim()!==''?(parseFloat(el.value)||0):barPriceNorm(k);};
+  const free=read('weight_free_kg'), fee=read('weight_step_fee');
+  const kg=n=>String(Math.round(n*1000)/1000).replace('.',',');
+  if(!fee)return 'Ставка за килограмм не задана — надбавка за перевес не начисляется.';
+  return `До ${kg(free)} кг включительно — без надбавки. Посылка ${kg(free+0.1)} кг → <b>+${money(fee)}</b>,`
+    + ` ${kg(free+1.1)} кг → <b>+${money(fee*2)}</b>, ${kg(free+2.1)} кг → <b>+${money(fee*3)}</b>.`;
+}
 // Раздел заказа. Пусто = обычный; метка проставляется при создании из карточки партнёра.
 // isBaraholkaOrder переехал в js/01-yadro.js: его спрашивают модули, которые
 // подключаются раньше Калькуляции (Сортировка, Центр контроля, меню).
@@ -1184,11 +1206,37 @@ function renderCalcBarNorms(){
         </p>
       </div>
     </div>
+    <div class="panel calc-panel" style="margin-bottom:18px">
+      <h3 class="calc-h">Барахолка — перевес</h3>
+      <p class="calc-note">Надбавка начисляется САМА при загрузке реестра: вес из файла больше порога —
+        к сумме заказа прибавляется по ставке за каждый начатый килограмм сверх. Действует на новые
+        заказы: суммы уже загруженных не пересчитываются — они записаны в самом заказе.</p>
+      ${barPricingReady()
+        ? CALC_BAR_PRICE_FIELDS.map(barPriceRow).join('')
+        : `<p class="calc-note" style="color:var(--rust)">Своих ставок по Барахолке в базе пока нет —
+            выполните <b>db/30-ПЕРЕВЕС-БАРАХОЛКА.sql</b>. До этого действуют ставки из заборов
+            («Расходы компании» → «Размеры пакетов и перевес»), и перевес по ним уже начисляется.</p>`}
+      <div class="calc-note" id="barPriceExample" style="margin:12px 0 0">${barPriceExampleHtml()}</div>
+    </div>
     <div class="calc-save-bar"><button class="btn primary" id="calcSaveBtn">Сохранить нормативы за ${esc(monthsRU[calcNormPeriod.month])} ${calcNormPeriod.year}</button><span class="calc-saved" id="calcSaved"></span></div>
     ${barSummaryHtml(P)}`;
   $('calcSaveBtn').onclick=saveCalcSettings;
+  // пример пересчитываем прямо при вводе — как у размеров пакета на вкладке расходов
+  document.querySelectorAll('[data-pricenorm]').forEach(inp=>{inp.oninput=()=>{
+    const box=$('barPriceExample');if(box)box.innerHTML=barPriceExampleHtml();};});
   if($('calcNormMonth'))$('calcNormMonth').onchange=e=>{calcNormPeriod.month=parseInt(e.target.value,10);renderCalc();};
   if($('calcNormYear'))$('calcNormYear').onchange=e=>{calcNormPeriod.year=parseInt(e.target.value,10);renderCalc();};
+}
+// Строка поля перевеса Барахолки. Отдельно от fieldRow: единица не всегда ₸, таблица
+// другая (data-pricenorm, а не data-calcnorm), а в подсказке поля стоит ставка заборов —
+// видно, что подставится, если оставить пусто.
+function barPriceRow(f){
+  const v=(S.pricing&&S.pricing[f.key]!=null&&S.pricing[f.key]!=='')?esc(S.pricing[f.key]):'';
+  const fallback=priceNorm(f.key.replace(/^bar_/,''));
+  return `<div class="calc-norm-row">
+    <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
+    <div class="cn-input"><input type="number" min="0" step="${f.step||'0.01'}" data-pricenorm="${f.key}" value="${v}" placeholder="${esc(fallback)}"> ${esc(f.unit||'₸')}</div>
+  </div>`;
 }
 
 // Сводка прямо под нормативами: поменял число — сразу видно, во что это вылилось.
