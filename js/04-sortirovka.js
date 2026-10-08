@@ -9,6 +9,33 @@
 let sortingDate=null; // выбранная дата для просмотра/сортировки — по умолчанию сегодня
 let sortingListFilter='all'; // 'all'|'sorted'|'unsorted' — фильтр статуса в списке заказов
 let sortingListDelivery=''; // ''|'courier'|'mail' — фильтр типа доставки в списке заказов
+let sortingListCourier='';  // id курьера-заборщика; '' — все, '-' — заявки без курьера
+// КТО ПРИВЁЗ ЗАКАЗ. В самом заказе этого нет: курьер назначается на ЗАЯВКУ на забор
+// (`pickups.courier_id`), а заказ ссылается на заявку (`orders.pickup_id`). Поэтому идём
+// через заявку. Не путать с `order_courier_id` — это курьер, который заказ РАЗВЕЗЁТ.
+function sortingPickupCourierId(o){
+  if(!o||!o.pickup_id)return '';
+  const p=(S.pickups||[]).find(x=>x.id===o.pickup_id);
+  return (p&&p.courier_id)||'';
+}
+// Список курьеров для фильтра собирается ИЗ ЗАКАЗОВ ЭТОГО ДНЯ, а не из справочника по городу
+// сотрудника. Так «Астана видит астанинских, Алматы — алматинских» получается само: заказы
+// кладовщику уже отфильтрованы по его складу (`sortingPool`/`cityFilter`).
+//
+// Фильтровать сам справочник по `couriers.city_id` было бы ошибкой: заказы, забранные в
+// ТАЛДЫКОРГАНЕ, физически привозят на склад Алматы (`sortingCityId`), а у того курьера в
+// карточке стоит Талдыкорган — он исчез бы из фильтра, хотя его заказы в списке есть.
+function sortingCourierOptions(dayOrders){
+  const ids=[...new Set((dayOrders||[]).map(sortingPickupCourierId))];
+  // Выбранный курьер мог остаться с прошлого дня, а сегодня у него заказов нет. Тогда в
+  // списке его нет, выбор не виден, а таблица пуста — выглядит как поломка. Сбрасываем.
+  if(sortingListCourier&&sortingListCourier!=='-'&&!ids.includes(sortingListCourier))sortingListCourier='';
+  if(sortingListCourier==='-'&&!ids.some(x=>!x))sortingListCourier='';
+  const named=ids.filter(Boolean)
+    .map(id=>({id,fio:courierName(id)}))
+    .sort((a,b)=>(a.fio||'').localeCompare(b.fio||'','ru'));
+  return {named,hasEmpty:ids.some(x=>!x)};
+}
 // Панель печати бланков свёрнута при каждом заходе в раздел: нужна она не всем и не всегда,
 // а занимает место над списком, ради которого в раздел и приходят. Состояние живёт в памяти
 // вкладки — раскрыли на время, ушли и вернулись, снова свёрнуто (как таблицы в «Статистике»,
@@ -29,6 +56,10 @@ function sortingListFiltered(processed){
   // это разные стопки, и список удобно сузить до одной.
   if(sortingListDelivery==='courier')rows=rows.filter(o=>isCourierDelivery(o.delivery_id));
   else if(sortingListDelivery==='mail')rows=rows.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id));
+  // '-' — «курьер не назначен»: пустую строку в <option value> не отличить от «все курьеры»,
+  // а такие заказы спрашивают отдельно — по ним не видно, кто привёз посылку.
+  if(sortingListCourier==='-')rows=rows.filter(o=>!sortingPickupCourierId(o));
+  else if(sortingListCourier)rows=rows.filter(o=>sortingPickupCourierId(o)===sortingListCourier);
   const q=sortingListSearch.trim().toLowerCase();
   if(q){
     const qDigits=q.replace(/\D/g,'');
@@ -50,6 +81,9 @@ function sortingListRowHtml(o){
     <td data-label="Тип доставки">${courier?'🚚 Курьер':'📮 Почта'}</td>
     <td data-label="Адрес">${esc(o.address||'—')}</td>
     <td data-label="№ заказа" style="font-family:monospace">${esc(o.code||'')}</td>
+    <td data-label="Курьер привёз">${(()=>{const cid=sortingPickupCourierId(o);
+      return cid?`<span class="pill moss">${esc(courierName(cid))}</span>`
+        :'<span style="color:var(--muted)">не назначен</span>';})()}</td>
     <td data-label="Кто принял">${isS
       ? `✅ Принят<small class="cell-time">${esc(o.sorted_by_name||'кто — не записано')}</small><small class="cell-time">${esc(fmtDateTime(o.sorted_at))}</small>`
       : '🔴 Не принят'}</td>
@@ -74,7 +108,7 @@ function renderSortListOnly(){
     const startIdx=(sortListPage-1)*sortListPerPage;
     rows=filtered.slice(startIdx,startIdx+sortListPerPage);
   }
-  tbody.innerHTML=rows.length?rows.map(sortingListRowHtml).join(''):'<tr><td colspan="6"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>';
+  tbody.innerHTML=rows.length?rows.map(sortingListRowHtml).join(''):'<tr><td colspan="7"><div class="empty" style="padding:20px">Заказов нет</div></td></tr>';
   bindSortRowClicks();
   renderSortListFooter(filtered,mobile);
 }
@@ -239,10 +273,17 @@ function renderSorting(){
           <option value="courier" ${sortingListDelivery==='courier'?'selected':''}>🚚 Курьерская</option>
           <option value="mail" ${sortingListDelivery==='mail'?'selected':''}>📮 Почтовая</option>
         </select>
+        ${(()=>{const co=sortingCourierOptions(dayOrders);
+          if(!co.named.length&&!co.hasEmpty)return '';
+          return `<select id="sortListCourierFilter" style="min-width:200px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);flex:1 1 200px">
+            <option value="">Курьер: все</option>
+            ${co.named.map(c=>`<option value="${c.id}" ${sortingListCourier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}
+            ${co.hasEmpty?`<option value="-" ${sortingListCourier==='-'?'selected':''}>— курьер не назначен —</option>`:''}
+          </select>`;})()}
         <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:2 1 260px;min-width:260px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line)">
       </div>
       <div class="table-scroll"><table class="resp-table sorting-tbl"><thead><tr>
-        <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>Адрес</th><th>№ заказа</th><th>Кто принял</th>
+        <th>ФИО</th><th>Телефон</th><th>Тип доставки</th><th>Адрес</th><th>№ заказа</th><th>Курьер привёз</th><th>Кто принял</th>
       </tr></thead><tbody id="sortListTbody"></tbody></table></div>
     </div>`;
   const inp=$('sortPhotoInput');
@@ -259,6 +300,8 @@ function renderSorting(){
   if(statusFilterEl)statusFilterEl.onchange=()=>{sortingListFilter=statusFilterEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
   const delFilterEl=$('sortListDeliveryFilter');
   if(delFilterEl)delFilterEl.onchange=()=>{sortingListDelivery=delFilterEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
+  const courFilterEl=$('sortListCourierFilter');
+  if(courFilterEl)courFilterEl.onchange=()=>{sortingListCourier=courFilterEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
   const searchEl=$('sortListSearch');
   if(searchEl){
     searchEl.oninput=()=>{sortingListSearch=searchEl.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSortListOnly();};
