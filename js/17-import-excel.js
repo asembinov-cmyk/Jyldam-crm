@@ -103,6 +103,21 @@ function impSumSource(pt){
   return (pt && typeof isExplicitZero === 'function' && isExplicitZero(pt.tariff_post))
     ? 'zero' : 'file';
 }
+// УСЛОВНАЯ ВЫРУЧКА при нулевом тарифе — то, что Калькуляция посчитает вместо нуля
+// (`order_sum_orig`, правило «оплачено отправителем» в `calcOrder`). Вопрос владельца
+// 10.10.2026: «как сделать, чтобы калькуляция считала верно — он платит заказы по 0,
+// но сумма чтобы считалась».
+//
+// Берём СУММУ ИЗ ФАЙЛА, а не «условную сумму» из карточки: в файле стоит цена этого
+// конкретного заказа вместе с надбавкой за перевес (1520 там, где тариф 1400), и
+// по счёту в конце месяца партнёр заплатит именно её. Фиксированное число из карточки
+// — грубее: оно одно на все заказы и перевес не знает. Оно и остаётся запасным
+// вариантом, когда в файле суммы нет вовсе.
+function impNotional(r, pt){
+  if(!pt || typeof isExplicitZero !== 'function' || !isExplicitZero(pt.tariff_post)) return null;
+  if(r.sum) return r.sum;
+  return pt.direct_pay_amount != null && pt.direct_pay_amount !== '' ? +pt.direct_pay_amount : null;
+}
 
 // Что мешает создать заказ. Возвращаем причину или пусто.
 function impProblem(r, seenTracks){
@@ -265,12 +280,22 @@ function impPreviewModal(fileName, rows, dbTracks){
              и CRM её не пересчитывает.`
           : ''}
       </p>
-      ${pt && impSumSource(pt) === 'zero' ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
+      ${pt && impSumSource(pt) === 'zero' ? (() => {
+        // Деньги не теряются, а переезжают в «условную выручку»: в заказе 0, в Калькуляции
+        // — сумма из файла. Пишем это числом, иначе обнуление выглядит потерей.
+        const withSum = ok.filter(r => r.sum).length;
+        const noSum = ok.length - withSum;
+        const total = ok.reduce((a, r) => a + (impNotional(r, pt) || 0), 0);
+        return `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
         ⚠️ Тариф у партнёра «${esc(pt.name)}» — <b>0</b>: доставку он оплачивает отдельно, по счёту.
-        Поэтому суммы из файла в заказы НЕ пойдут, у всех будет 0 ₸ и отметка «Оплачено отправителем»${
-          pt.direct_pay_amount != null
-            ? `, а в Калькуляцию уйдёт условная выручка <b>${(+pt.direct_pay_amount).toLocaleString('ru-RU')} ₸</b> из его карточки.`
-            : `. Условная сумма при прямой оплате в карточке не задана — в Калькуляции эти заказы будут чистым убытком.`}</div>` : ''}
+        Поэтому в самих заказах будет <b>0 ₸</b> и отметка «Оплачено отправителем», а в Калькуляцию
+        уйдёт условная выручка — сумма из файла по каждому заказу, всего
+        <b>${total.toLocaleString('ru-RU')} ₸</b>.
+        ${noSum ? `У ${noSum} ${noSum === 1 ? 'строки' : 'строк'} суммы в файле нет — ${
+          pt.direct_pay_amount != null && pt.direct_pay_amount !== ''
+            ? `для них возьму условную сумму <b>${(+pt.direct_pay_amount).toLocaleString('ru-RU')} ₸</b> из карточки.`
+            : `а условная сумма в карточке не задана, и в Калькуляции они будут чистым убытком.`}` : ''}</div>`;
+      })() : ''}
       ${impOtherMonth(date) ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
         ⚠️ Дата забора — <b>${esc(fmtDate(date))}</b>, а это не текущий месяц. В Калькуляции и в
         отчёте эти заказы лягут в <b>${esc(impOtherMonth(date))}</b>, а не в текущий месяц.
@@ -290,7 +315,9 @@ function impPreviewModal(fileName, rows, dbTracks){
           <td data-label="Трек">${esc(r.track || '—')}</td>
           <td data-label="Вес">${isNaN(r.weight) || r.weight == null ? '—' : esc(fmtWeight(r.weight))}</td>
           <td data-label="Сумма">${pt && impSumSource(pt) === 'zero'
-            ? `<b>0 ₸</b><small class="cell-time">в файле ${r.sum ? esc(r.sum.toLocaleString('ru-RU')) + ' ₸' : '—'} · тариф 0</small>`
+            ? `<b>0 ₸</b><small class="cell-time">${impNotional(r, pt)
+                ? 'в Калькуляцию ' + esc(impNotional(r, pt).toLocaleString('ru-RU')) + ' ₸'
+                : 'в Калькуляцию ничего — суммы нет'}</small>`
             : (r.sum ? esc(r.sum.toLocaleString('ru-RU')) + ' ₸' : '—')}</td>
           <td data-label="Что будет">${r.problem ? `<span class="imp-skip">пропуск · ${esc(r.problem)}</span>` : '<span class="imp-ok">создать</span>'}</td>
         </tr>`).join('')}
@@ -356,7 +383,9 @@ function impPreviewModal(fileName, rows, dbTracks){
       order_sum: zeroTariff ? 0 : (sum || null),
       cost: zeroTariff ? 0 : (sum || null),
       paid_by_sender: zeroTariff,
-      order_sum_orig: (zeroTariff && pt.direct_pay_amount != null) ? pt.direct_pay_amount : null,
+      // Условная выручка — сумма ЭТОГО заказа из файла (impNotional): в заказе ноль, а
+      // Калькуляция считает по ней. Иначе обнуление превращало бы месяц в чистый убыток.
+      order_sum_orig: impNotional(r, pt),
       delivery_id: mail ? mail.id : null,
       pickup_date: date,
       pickup_city_id: pt.city_id || null,
