@@ -77,34 +77,11 @@ function impReadSheet(wb){
   return { rows: out, head };
 }
 
-// НАДБАВКА ЗА ПЕРЕВЕС — начисляется прямо здесь, при загрузке реестра (просьба
-// владельца 08.10.2026). В карточке она считается сама (weightSurcharge, js/11), но
-// карточки этих заказов никто не открывает: их сотни, и приходят они готовыми.
+// НАДБАВКИ ЗА ПЕРЕВЕС ЗДЕСЬ НЕТ. 08.10.2026 загрузка реестра начисляла её сама (сумма
+// из файла плюс надбавка по весу), 10.10.2026 владелец её убрал целиком: у Барахолки
+// перевес не считается вовсе (weightSurcharge, js/11-zakazy.js). Сумма заказа — ровно
+// та, что в колонке файла.
 //
-// ПРИБАВЛЯЕМ К СУММЕ ИЗ ФАЙЛА — решение владельца. Ни размера пакета, ни тарифной
-// цены в реестре нет, есть ровно колонка суммы, и она же становится суммой заказа.
-//
-// Если суммы в файле нет, надбавку НЕ начисляем: прибавлять её не к чему, а одна
-// надбавка в поле суммы (100 ₸ вместо цены доставки) выглядела бы как настоящая цена
-// и попала бы в выручку Калькуляции. Такие строки видно в предпросмотре отдельно.
-//
-// Ставка — своя у Барахолки, общая у остальных: это решает weightSurcharge по третьему
-// аргументу. Тип доставки у реестра всегда почтовый, поэтому isCourier здесь false.
-function impSurcharge(r, pt){
-  if(!r.sum) return 0;
-  if(typeof weightSurcharge !== 'function') return 0;
-  return weightSurcharge(r.weight, false, !!(pt && pt.is_baraholka));
-}
-// Вес за порогом, а суммы в файле нет — надбавку начислить некуда. Строка создаётся,
-// но об этом сказано в предпросмотре: молча потерянная надбавка — это недовыставленный счёт.
-function impSurchargeLost(r, pt){
-  if(r.sum) return false;
-  if(typeof weightSurcharge !== 'function') return false;
-  return weightSurcharge(r.weight, false, !!(pt && pt.is_baraholka)) > 0;
-}
-// Сумма, которая запишется в заказ: из файла плюс перевес.
-const impTotal = (r, pt) => (r.sum || 0) + impSurcharge(r, pt);
-
 // Что мешает создать заказ. Возвращаем причину или пусто.
 function impProblem(r, seenTracks){
   if(r.phone.length < 10) return 'телефон неполный: ' + (r.rawPhone || 'пусто');
@@ -261,22 +238,7 @@ function impPreviewModal(fileName, rows, dbTracks){
         Файл: <b>${esc(fileName)}</b> · строк с ФИО: <b>${rows.length}</b> ·
         создам: <b>${ok.length}</b>${bad.length ? ` · пропущу: <b>${bad.length}</b>` : ''}
         ${pt ? `<br>Тип доставки — почтовая. Менеджер продаж и обработчик возьмутся из карточки партнёра${pt.is_baraholka ? ', раздел — Барахолка' : ''}.` : ''}
-        ${(() => {
-          // Перевес называем числом и суммой: надбавка меняет деньги, и видеть её надо
-          // ДО создания заказов, а не искать потом по карточкам.
-          const rows = ok.filter(r => impSurcharge(r, pt) > 0);
-          if(!rows.length) return '';
-          const total = rows.reduce((a, r) => a + impSurcharge(r, pt), 0);
-          const free = pt && pt.is_baraholka ? barPriceNorm('weight_free_kg') : priceNorm('weight_free_kg');
-          const fee  = pt && pt.is_baraholka ? barPriceNorm('weight_step_fee') : priceNorm('weight_step_fee');
-          return `<br>Перевес: надбавка у <b>${rows.length}</b> заказов на <b>${total.toLocaleString('ru-RU')} ₸</b>`
-            + ` — по ${fee} ₸ за каждый начатый кг свыше ${String(free).replace('.', ',')} кг`
-            + `${pt && pt.is_baraholka ? ' (ставка Барахолки)' : ''}. Прибавляется к сумме из файла.`;
-        })()}
       </p>
-      ${ok.some(r => impSurchargeLost(r, pt)) ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
-        ⚠️ У части строк вес больше порога, но суммы в файле нет — надбавку за перевес прибавить не к чему,
-        и эти заказы создадутся без неё. Такие строки отмечены в таблице.</div>` : ''}
       ${impOtherMonth(date) ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
         ⚠️ Дата забора — <b>${esc(fmtDate(date))}</b>, а это не текущий месяц. В Калькуляции и в
         отчёте эти заказы лягут в <b>${esc(impOtherMonth(date))}</b>, а не в текущий месяц.
@@ -286,8 +248,7 @@ function impPreviewModal(fileName, rows, dbTracks){
         не сюда, а в «Заказы заборов» — и смешаются с обычными. Если это реестр Барахолки,
         сначала поставьте галочку в карточке партнёра.</div>` : ''}
       <div class="table-scroll imp-table"><table class="resp-table"><thead><tr>
-        <th>Стр.</th><th>ФИО</th><th>Телефон</th><th>Индекс</th><th>Трек</th><th>Вес</th>
-        <th>Сумма из файла</th><th>Перевес</th><th>Итого</th><th>Что будет</th>
+        <th>Стр.</th><th>ФИО</th><th>Телефон</th><th>Индекс</th><th>Трек</th><th>Вес</th><th>Сумма</th><th>Что будет</th>
       </tr></thead><tbody>
         ${marked.map(r => `<tr class="${r.problem ? 'imp-bad' : ''}">
           <td data-label="Стр.">${r.line}</td>
@@ -296,11 +257,7 @@ function impPreviewModal(fileName, rows, dbTracks){
           <td data-label="Индекс">${esc(r.index || '—')}${r.rawIndex && r.index !== r.rawIndex ? `<small class="cell-time">было ${esc(r.rawIndex)}</small>` : ''}</td>
           <td data-label="Трек">${esc(r.track || '—')}</td>
           <td data-label="Вес">${isNaN(r.weight) || r.weight == null ? '—' : esc(fmtWeight(r.weight))}</td>
-          <td data-label="Сумма из файла">${r.sum ? esc(r.sum.toLocaleString('ru-RU')) + ' ₸' : '—'}</td>
-          <td data-label="Перевес">${impSurcharge(r, pt)
-            ? '<b>+' + esc(impSurcharge(r, pt).toLocaleString('ru-RU')) + ' ₸</b>'
-            : (impSurchargeLost(r, pt) ? '<span class="imp-skip">не начислю · в файле нет суммы</span>' : '—')}</td>
-          <td data-label="Итого">${impTotal(r, pt) ? esc(impTotal(r, pt).toLocaleString('ru-RU')) + ' ₸' : '—'}</td>
+          <td data-label="Сумма">${r.sum ? esc(r.sum.toLocaleString('ru-RU')) + ' ₸' : '—'}</td>
           <td data-label="Что будет">${r.problem ? `<span class="imp-skip">пропуск · ${esc(r.problem)}</span>` : '<span class="imp-ok">создать</span>'}</td>
         </tr>`).join('')}
       </tbody></table></div>`;
@@ -354,10 +311,8 @@ function impPreviewModal(fileName, rows, dbTracks){
       index: r.index,
       track: r.track,
       weight: (isNaN(r.weight) || r.weight == null) ? null : r.weight,
-      // Сумма из файла плюс надбавка за перевес — одной функцией, той же, что
-      // показывала её в предпросмотре: разойдись они, в заказ ушло бы не то, что видели.
-      order_sum: impTotal(r, pt) || null,
-      cost: impTotal(r, pt) || null,
+      order_sum: r.sum || null,
+      cost: r.sum || null,
       delivery_id: mail ? mail.id : null,
       pickup_date: date,
       pickup_city_id: pt.city_id || null,

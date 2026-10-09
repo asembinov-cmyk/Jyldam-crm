@@ -1935,14 +1935,17 @@ function packageSizesFor(partner){
 // как трёхкилограммовая. У курьерских заказов надбавки нет — там цена по размеру пакета.
 // Порог и ставка правятся в «Калькуляции» → «Размеры пакетов и перевес».
 //
-// ТРЕТИЙ АРГУМЕНТ — ЗАКАЗ БАРАХОЛКИ: у неё своя пара ставок («Калькуляция» →
-// «Барахолка» → «Перевес»), а пока они не заданы — те же, что в заборах
-// (barPriceNorm, js/01-yadro.js). Признак берём у ЗАКАЗА (isBaraholkaOrder), а не у
+// У БАРАХОЛКИ НАДБАВКИ НЕТ ВОВСЕ (третий аргумент, решение владельца 10.10.2026).
+// Два дня у неё была своя пара ставок, и владелец их убрал: «в барахолке убери функцию,
+// которая делала надбавку за вес». Признак берём у ЗАКАЗА (isBaraholkaOrder), а не у
 // режима грида: карточку открывают и из «Заполнения», и из поиска.
+//
+// Возвращать ноль ЗДЕСЬ, а не вырезать вызовы, — чтобы правило жило в одном месте:
+// карточка, «Сортировка» и список «Заполнения» считают надбавку этой же функцией, и
+// порознь они разошлись бы.
 function weightSurcharge(weight, isCourier, bar){
-  if(isCourier) return 0;
-  const norm=k=>bar?barPriceNorm(k):priceNorm(k);
-  const free=norm('weight_free_kg'), fee=norm('weight_step_fee');
+  if(isCourier || bar) return 0;
+  const free=priceNorm('weight_free_kg'), fee=priceNorm('weight_step_fee');
   const w = parseFloat(weight);
   if(isNaN(w) || w <= free) return 0;
   return Math.ceil(w - free) * fee;
@@ -2648,11 +2651,9 @@ function orderModal(id,readonly){
     // Подпись под весом: видно, откуда взялась надбавка, иначе сумма меняется молча.
     const updateWeightHint=()=>{
       const wh=$('o_weight_hint');if(!wh)return;
-      const bar=isBaraholkaOrder(d);
-      const norm=k=>bar?barPriceNorm(k):priceNorm(k);
-      const extra=weightSurcharge(parseWeight(val('o_weight')),isCourierDelivery(val('o_delivery')),bar);
+      const extra=weightSurcharge(parseWeight(val('o_weight')),isCourierDelivery(val('o_delivery')),isBaraholkaOrder(d));
       wh.textContent=extra
-        ? `Перевес: +${extra} ₸ — по ${norm('weight_step_fee')} ₸ за каждый начатый кг свыше ${String(norm('weight_free_kg')).replace('.',',')} кг${bar?' · ставка Барахолки':''}`
+        ? `Перевес: +${extra} ₸ — по ${priceNorm('weight_step_fee')} ₸ за каждый начатый кг свыше ${String(priceNorm('weight_free_kg')).replace('.',',')} кг`
         : 'Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.';
     };
     const applySize=()=>{
