@@ -77,11 +77,34 @@ function impReadSheet(wb){
   return { rows: out, head };
 }
 
-// НАДБАВКИ ЗА ПЕРЕВЕС ЗДЕСЬ НЕТ. 08.10.2026 загрузка реестра начисляла её сама (сумма
-// из файла плюс надбавка по весу), 10.10.2026 владелец её убрал целиком: у Барахолки
-// перевес не считается вовсе (weightSurcharge, js/11-zakazy.js). Сумма заказа — ровно
-// та, что в колонке файла.
+// НАДБАВКИ ЗА ПЕРЕВЕС ЗДЕСЬ НЕТ. 08.10.2026 загрузка реестра начисляла её сама,
+// 10.10.2026 владелец её убрал целиком: у Барахолки перевес не считается вовсе
+// (weightSurcharge, js/11-zakazy.js).
 //
+// СУММА ЗАКАЗА БЕРЁТСЯ ИЗ КАРТОЧКИ ПАРТНЁРА, А НЕ ИЗ ФАЙЛА (решение владельца
+// 10.10.2026: «пусть CRM тянет информацию от партнёра в карточке, а не от экселя»).
+//
+// Колонка суммы в реестре — это НАЛОЖЕННЫЙ ПЛАТЁЖ, то есть цена ТОВАРА, которую
+// получатель отдаёт на почте. К нашей доставке она отношения не имеет, а выручка
+// Калькуляции считается именно по сумме заказа (раздел 5a) — то есть раздувалась в разы
+// на пустом месте. Теперь сумма = почтовый тариф партнёра, ровно как её считает карточка
+// заказа для размера S (`packageSizesFor`): правило цены в системе должно быть одно.
+//
+// НОЛЬ ТАРИФОМ СЧИТАЕТСЯ: у партнёров Барахолки он сплошь и рядом нулевой — такие платят
+// раз в месяц по счёту (раздел 5b), и ноль в заказе у них правильный, а не «не задано».
+// А вот ПУСТОЙ тариф — единственный случай, когда берём сумму из файла: иначе весь реестр
+// ушёл бы с нулевой выручкой молча. В предпросмотре видно, что именно подставится.
+function impOrderSum(r, pt){
+  if(pt && typeof isExplicitNum === 'function' && isExplicitNum(pt.tariff_post)) return +pt.tariff_post;
+  return r.sum || 0;
+}
+// Откуда взялась сумма — для подписи в предпросмотре. Молча подставленная цена в чужом
+// реестре — это счёт, который потом не объяснить.
+function impSumSource(pt){
+  return (pt && typeof isExplicitNum === 'function' && isExplicitNum(pt.tariff_post))
+    ? 'tariff' : 'file';
+}
+
 // Что мешает создать заказ. Возвращаем причину или пусто.
 function impProblem(r, seenTracks){
   if(r.phone.length < 10) return 'телефон неполный: ' + (r.rawPhone || 'пусто');
@@ -238,7 +261,21 @@ function impPreviewModal(fileName, rows, dbTracks){
         Файл: <b>${esc(fileName)}</b> · строк с ФИО: <b>${rows.length}</b> ·
         создам: <b>${ok.length}</b>${bad.length ? ` · пропущу: <b>${bad.length}</b>` : ''}
         ${pt ? `<br>Тип доставки — почтовая. Менеджер продаж и обработчик возьмутся из карточки партнёра${pt.is_baraholka ? ', раздел — Барахолка' : ''}.` : ''}
+        ${pt && impSumSource(pt) === 'tariff'
+          ? `<br>Сумма заказа — <b>${(+pt.tariff_post).toLocaleString('ru-RU')} ₸</b>, почтовый тариф партнёра
+             из его карточки. Колонка суммы в файле — это наложенный платёж, в заказ она не пишется.`
+          : ''}
+        ${pt && isExplicitZero(pt.tariff_post)
+          ? `<br>Тариф у партнёра <b>0</b> — значит доставку он оплачивает отдельно, по счёту. Заказы
+             создам с отметкой «Оплачено отправителем»${pt.direct_pay_amount != null
+               ? `, а в Калькуляцию уйдёт условная выручка <b>${(+pt.direct_pay_amount).toLocaleString('ru-RU')} ₸</b> из его карточки.`
+               : `. Условная сумма при прямой оплате в карточке не задана — в Калькуляции эти заказы будут чистым убытком.`}`
+          : ''}
       </p>
+      ${pt && impSumSource(pt) === 'file' ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
+        ⚠️ У партнёра «${esc(pt.name)}» не заполнен почтовый тариф, поэтому сумму заказа возьму из файла —
+        а там наложенный платёж, то есть цена товара, и выручка по этим заказам будет неверной.
+        Правильнее заполнить тариф в карточке партнёра и загрузить реестр заново.</div>` : ''}
       ${impOtherMonth(date) ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
         ⚠️ Дата забора — <b>${esc(fmtDate(date))}</b>, а это не текущий месяц. В Калькуляции и в
         отчёте эти заказы лягут в <b>${esc(impOtherMonth(date))}</b>, а не в текущий месяц.
@@ -248,7 +285,7 @@ function impPreviewModal(fileName, rows, dbTracks){
         не сюда, а в «Заказы заборов» — и смешаются с обычными. Если это реестр Барахолки,
         сначала поставьте галочку в карточке партнёра.</div>` : ''}
       <div class="table-scroll imp-table"><table class="resp-table"><thead><tr>
-        <th>Стр.</th><th>ФИО</th><th>Телефон</th><th>Индекс</th><th>Трек</th><th>Вес</th><th>Сумма</th><th>Что будет</th>
+        <th>Стр.</th><th>ФИО</th><th>Телефон</th><th>Индекс</th><th>Трек</th><th>Вес</th><th>Сумма из файла</th><th>Сумма заказа</th><th>Что будет</th>
       </tr></thead><tbody>
         ${marked.map(r => `<tr class="${r.problem ? 'imp-bad' : ''}">
           <td data-label="Стр.">${r.line}</td>
@@ -257,7 +294,11 @@ function impPreviewModal(fileName, rows, dbTracks){
           <td data-label="Индекс">${esc(r.index || '—')}${r.rawIndex && r.index !== r.rawIndex ? `<small class="cell-time">было ${esc(r.rawIndex)}</small>` : ''}</td>
           <td data-label="Трек">${esc(r.track || '—')}</td>
           <td data-label="Вес">${isNaN(r.weight) || r.weight == null ? '—' : esc(fmtWeight(r.weight))}</td>
-          <td data-label="Сумма">${r.sum ? esc(r.sum.toLocaleString('ru-RU')) + ' ₸' : '—'}</td>
+          <td data-label="Сумма из файла"><span style="color:var(--muted)">${r.sum ? esc(r.sum.toLocaleString('ru-RU')) + ' ₸' : '—'}</span></td>
+          <td data-label="Сумма заказа">${impOrderSum(r, pt)
+            ? '<b>' + esc(impOrderSum(r, pt).toLocaleString('ru-RU')) + ' ₸</b>'
+            : (pt && impSumSource(pt) === 'tariff' ? '<b>0 ₸</b>' : '—')}${
+            pt ? `<small class="cell-time">${impSumSource(pt) === 'tariff' ? 'тариф партнёра' : 'из файла'}</small>` : ''}</td>
           <td data-label="Что будет">${r.problem ? `<span class="imp-skip">пропуск · ${esc(r.problem)}</span>` : '<span class="imp-ok">создать</span>'}</td>
         </tr>`).join('')}
       </tbody></table></div>`;
@@ -299,8 +340,14 @@ function impPreviewModal(fileName, rows, dbTracks){
     const mail = (S.delivery || []).find(d => /почт/i.test(d.name || ''));
     const bar = (typeof baraholkaReady === 'function' && baraholkaReady());
     const now = new Date().toISOString();
+    // Тариф 0 — партнёр платит за доставку сам, по счёту: ставим «Оплачено отправителем»
+    // и условную выручку из карточки. Ровно то же делают создание заказов по заявке
+    // (js/11) и кабинет партнёра (js/08) — правило в системе должно быть одно.
+    const zeroTariff = typeof isExplicitZero === 'function' && isExplicitZero(pt.tariff_post);
+    const byTariff = impSumSource(pt) === 'tariff';
     const built = fresh.map(r => {
       const pool = poolByTrack.get(String(r.track || '').trim());
+      const sum = impOrderSum(r, pt);
       return {
       code: pool ? pool.code : genOrderCode(),
       partner_id: pt.id,
@@ -311,8 +358,13 @@ function impPreviewModal(fileName, rows, dbTracks){
       index: r.index,
       track: r.track,
       weight: (isNaN(r.weight) || r.weight == null) ? null : r.weight,
-      order_sum: r.sum || null,
-      cost: r.sum || null,
+      // Сумма — из карточки партнёра (impOrderSum). Если она взята из ТАРИФА, ноль пишем
+      // именно нулём: у партнёра «по счёту раз в месяц» это настоящая цена заказа. А если
+      // тарифа нет и сумма пришла из файла, пустое значение остаётся пустым, как раньше.
+      order_sum: byTariff ? sum : (sum || null),
+      cost: byTariff ? sum : (sum || null),
+      paid_by_sender: zeroTariff,
+      order_sum_orig: (zeroTariff && pt.direct_pay_amount != null) ? pt.direct_pay_amount : null,
       delivery_id: mail ? mail.id : null,
       pickup_date: date,
       pickup_city_id: pt.city_id || null,
