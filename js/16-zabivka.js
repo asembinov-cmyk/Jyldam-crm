@@ -407,6 +407,128 @@ function fillStatsRows(){
     holdSince: holdSince[r.name] || null,
   })).sort((a,b) => b.count - a.count);
 }
+/* ================= РАВНОМЕРНАЯ ДОЛЯ И ВРЕМЯ НА ЗАКАЗ (12.10.2026) =================
+   Просьба владельца: «система равномерно распределяла заказы общие между менеджерами,
+   и пусть у них висит счётчик времени, за сколько они должны заполнить исходя из
+   среднего времени; отложенные не бери в учёт — там ждут информации по клиентам».
+
+   ДОЛЯ — ЦЕЛЬ, А НЕ ЗАКРЕПЛЕНИЕ (решение владельца). Заказы никому не раздаются: очередь
+   общая, «Взять следующий» работает как раньше. Система считает, сколько ДОЛЖНО выйти у
+   каждого, и показывает, сколько ему осталось до этой цифры. Закрепление отпало сознательно:
+   человек ушёл на обед — его заказы стояли бы до вмешательства администратора, а здесь доля
+   оставшихся просто пересчитывается сама.
+
+   РАВНОМЕРНО — ЗНАЧИТ ПО ИТОГУ ДНЯ, а не «поделить остаток поровну». Цель на человека =
+   (всё, что смена уже заполнила сегодня, + свободные) ÷ на людей в смене. Поэтому тот, кто
+   отстал, получает больше, а кто уже сделал свою норму — меньше: к концу дня у всех выходит
+   примерно одинаково. Делить только остаток было бы «поровну» лишь на бумаге — утренняя
+   разница в полсотни заказов так и осталась бы.
+*/
+const FILL_SHIFT_IDLE_MIN = 60;   // час без заполненных заказов — человек уже не в смене
+const FILL_TARGET_MIN_SEC = 30;   // ниже этого цель на заказ не опускаем
+const FILL_TARGET_MIN_MEASURED = 5; // меньше замеров за день — среднему верить рано
+
+// Кто сегодня в смене и сколько каждый уже заполнил.
+//
+// Список людей собирается ИЗ САМИХ ЗАКАЗОВ, а не из справочника сотрудников: `S.profiles`
+// грузится только тем, у кого есть право «Сотрудники», и у менеджера его нет — он бы не
+// смог посчитать свою долю вовсе. По той же причине не берём presence целиком: там и
+// курьеры, и кладовщики, и админ, а делить очередь надо между теми, кто её разбирает.
+function fillShift(){
+  const today = localToday(), cut = nowMs() - FILL_SHIFT_IDLE_MIN * 60000;
+  const by = {};
+  const add = (id, nm) => {
+    const k = id || ('name:' + (nm || '—'));
+    return (by[k] = by[k] || { id: id || null, name: nm || '—', done: 0, last: null, inWork: 0 });
+  };
+  fillDoneIn(today, today).forEach(o => {
+    const r = add(o.filled_by, o.filled_by_name || '— без имени —');
+    r.done++;
+    if(!r.last || o.filled_at > r.last) r.last = o.filled_at;
+  });
+  // Кто держит заказ прямо сейчас. ОТЛОЖЕННЫЕ СЮДА НЕ ИДУТ: такой заказ ждёт данных от
+  // партнёра, человек в это время берёт другие, и считать его «занятым» нельзя.
+  fillQueueAll().filter(o => fillClaimAlive(o) && !fillIsHeld(o)).forEach(o => {
+    add(o.claimed_by, o.claimed_by_name || '—').inWork++;
+  });
+  const meId = (S.me && S.me.id) || null;
+  if(meId) add(meId, fillMeName());   // себя считаем всегда: я открыл раздел — значит работаю
+  // «В смене» определяем ПО РАБОТЕ, а не по presence. Зелёная точка знает только, что
+  // вкладка открыта: забытая на ночь вкладка попала бы в делитель и занизила бы цель всем
+  // остальным, а у человека, у которого канал presence не поднялся, точки нет вовсе —
+  // и он бы из делителя выпал, хотя работает.
+  const inShift = Object.values(by).filter(r =>
+    (meId && r.id === meId) || r.inWork > 0 || (r.last && new Date(r.last).getTime() > cut));
+  return { inShift, meId };
+}
+// ЦЕЛЬ ПО ВРЕМЕНИ НА ЗАКАЗ — среднее по команде за СЕГОДНЯ, как и просил владелец
+// («исходя из среднего времени»). Пока замеров мало, среднее скачет от одного заказа,
+// поэтому до FILL_TARGET_MIN_MEASURED берём норму. Считаем по тем же правилам, что и
+// остальное время в разделе (`fillOrderSecs`): чужие заказы и паузы дольше десяти минут
+// в среднее не идут, а отложенные не попадают туда по определению — их не успевают
+// заполнить в это окно.
+function fillTargetSec(){
+  const secs = fillDoneIn(localToday(), localToday()).map(fillOrderSecs).filter(s => s != null);
+  if(secs.length < FILL_TARGET_MIN_MEASURED) return FILL_NORM_SEC;
+  return Math.max(FILL_TARGET_MIN_SEC, Math.round(secs.reduce((a, b) => a + b, 0) / secs.length));
+}
+// Моя доля и доли остальных. Свободные берём из `fillFree()` — там уже нет ни отложенных,
+// ни занятых коллегами, ни чужого города, если фильтр включён (раздел 8яд).
+function fillShare(){
+  const { inShift, meId } = fillShift();
+  const people = inShift.length || 1;
+  const free = fillFree().length;
+  const doneShift = inShift.reduce((a, r) => a + r.done, 0);
+  const target = Math.ceil((doneShift + free) / people);
+  const sec = fillTargetSec();
+  // Обещать больше, чем реально свободно, нельзя: цифра должна быть выполнимой.
+  const leftOf = done => Math.max(0, Math.min(free, target - done));
+  const rows = inShift.map(r => ({ ...r, left: leftOf(r.done) }))
+    .sort((a, b) => b.done - a.done);
+  const me = rows.find(r => meId && r.id === meId) || { done: 0, left: leftOf(0) };
+  return { people, free, target, sec, rows, myDone: me.done, left: me.left,
+           minutes: Math.round(me.left * sec / 60) };
+}
+
+/* СЧЁТЧИК ВРЕМЕНИ НА ЗАКАЗ. Висит в шапке самой карточки — там, где человек в этот момент
+   работает: список он не видит. Второй такой же стоит в «У меня в работе».
+   Тикает ОДИН интервал на всю страницу и гаснет сам, когда счётчиков на экране не осталось
+   (карточку закрыли, заказ заполнили) — вешать таймер на каждый узел нельзя, их переживает
+   любая перерисовка грида. */
+const fillCdHtml = o => `<span class="fill-cd" data-fillcd="${o.id}"></span>`;
+function fillCdText(o){
+  if(!o || o.filled_at) return { txt: '', cls: '' };
+  // ОТЛОЖЕННЫЙ НЕ ТИКАЕТ: он ждёт данных от партнёра, и это не работа менеджера.
+  if(fillIsHeld(o)) return { txt: '⏸ отложен — время не идёт', cls: 'hold' };
+  if(!o.claimed_at) return { txt: '', cls: '' };
+  const goal = fillTargetSec();
+  const left = Math.round(goal - (nowMs() - new Date(o.claimed_at).getTime()) / 1000);
+  return left >= 0
+    ? { txt: `⏳ ${fillFmtSec(left)} из ${fillFmtSec(goal)}`, cls: 'ok' }
+    : { txt: `⏱ +${fillFmtSec(-left)} сверх ${fillFmtSec(goal)}`, cls: 'over' };
+}
+let _fillCdTimer = null;
+function fillCdTick(){
+  const nodes = document.querySelectorAll('[data-fillcd]');
+  if(!nodes.length){ if(_fillCdTimer){ clearInterval(_fillCdTimer); _fillCdTimer = null; } return; }
+  nodes.forEach(el => {
+    const o = (S.orders || []).find(x => x.id === el.dataset.fillcd);
+    const { txt, cls } = fillCdText(o);
+    el.textContent = txt;
+    el.className = 'fill-cd' + (cls ? ' ' + cls : '');
+  });
+  if(!_fillCdTimer) _fillCdTimer = setInterval(fillCdTick, 1000);
+}
+// Зовётся из `orderModal` (js/11) — один вызов, вся механика здесь.
+function fillAttachCardTimer(o){
+  if(!o || !o.id || !fillReady() || o.filled_at) return;
+  if(!fillIsMine(o)) return;                       // чужой заказ — не моё время
+  const h3 = document.querySelector('.overlay .modal-head h3');
+  if(!h3 || h3.parentNode.querySelector('[data-fillcd]')) return;
+  h3.insertAdjacentHTML('afterend', fillCdHtml(o));
+  fillCdTick();
+}
+
 // Отложен слишком давно? Полсуток — уже не «жду ответа партнёра», а «забыли».
 const FILL_HOLD_STALE_H = 12;
 const fillHoldStale = iso => !!iso && (Date.now() - new Date(iso)) > FILL_HOLD_STALE_H * 3600000;
@@ -578,6 +700,7 @@ function renderFilling(){
   const tail=fillTailCount(), tailDay=fillPrevDay(qFrom);
   const canHold=fillHoldReady();
   const admin=isAdmin();
+  const share=fillShare();   // равномерная доля на смену и цель по времени
   // Статистику считаем всегда: администратору — по всем, менеджеру — только его строку.
   // Сравнивать себя с коллегами по ходу смены незачем, а свой темп видеть полезно.
   const rows=fillStatsRows();
@@ -622,14 +745,20 @@ function renderFilling(){
       <input type="date" id="fillToInp" value="${esc(to)}" max="${esc(localToday())}" title="По какой день">
       ${reload}
     </div>`:''}
-    <div class="fill-kpi">
+    <div class="fill-kpi${admin?'':' kpi5'}">
       <div class="fk fk-main">
         <div class="fk-k">Ждут заполнения</div>
         <div class="fk-v">${queue.length}</div>
         <div class="fk-s">свободно ${free.length}${mine.length?` · у меня ${mine.length}`:''}${held.length?` · отложено ${held.length}`:''}${
-          qWide?` · с ${esc(fmtDate(qFrom))}`:''}${fillCity?` · город ${esc(fillCityLabel())}`:''}</div>
+          qWide?` · с ${esc(fmtDate(qFrom))}`:''}${fillCity?` · город ${esc(fillCityLabel())}`:''}${
+          admin?` · в смене ${share.people}, по ${share.target} на человека`:''}</div>
       </div>
       ${!admin?`
+      <div class="fk fk-share">
+        <div class="fk-k">Моя доля · осталось</div>
+        <div class="fk-v">${share.left}<small> из ${share.target}</small></div>
+        <div class="fk-s">сделано сегодня ${share.myDone} · ${share.minutes?`≈ ${share.minutes} мин`:'доля закрыта'} · в смене ${share.people}</div>
+      </div>
       <div class="fk">
         <div class="fk-k">Заполнено мной ${esc(fillPeriodWord(tab))}</div>
         <div class="fk-v">${my.count}</div>
@@ -670,11 +799,12 @@ function renderFilling(){
     </div>
     ${mine.length?`<div class="panel">
       <div class="panel-head"><h2>У меня в работе</h2><span class="count">${mine.length}</span></div>
-      <div class="table-scroll"><table class="resp-table"><thead><tr><th>Заказ</th><th>Партнёр</th><th>Взят</th><th></th></tr></thead><tbody>
+      <div class="table-scroll"><table class="resp-table"><thead><tr><th>Заказ</th><th>Партнёр</th><th>Взят</th><th>Осталось по времени</th><th></th></tr></thead><tbody>
         ${mine.map(o=>`<tr>
           <td data-label="Заказ"><strong style="font-family:'Fraunces',serif">${esc(o.code||'')}</strong></td>
           <td data-label="Партнёр">${esc(o.sender||partnerName(o.partner_id)||'—')}</td>
           <td data-label="Взят">${esc(fillAgo(o.claimed_at))}</td>
+          <td data-label="Осталось по времени">${fillCdHtml(o)}</td>
           <td data-label=""><button class="btn sm" data-fillopen="${o.id}">Заполнить</button>
             ${canHold?`<button class="btn sm ghost" data-fillhold="${o.id}" title="Заказ останется за вами, пока не заполните или не вернёте">Отложить</button>`:''}
             <button class="btn sm ghost" data-fillrel="${o.id}">Вернуть</button></td>
@@ -693,7 +823,20 @@ function renderFilling(){
             <button class="btn sm ghost" data-fillrel="${o.id}">В общую очередь</button></td>
         </tr>`).join('')}
       </tbody></table></div></div>`:''}
-    ${admin?`<div class="panel fill-team">
+    ${admin?`<div class="panel fill-share-panel">
+      <div class="fsh-top">
+        <b>Распределение прямо сейчас</b>
+        <span>свободно ${free.length} · в смене ${share.people} · цель <b>${share.target}</b> заказов на человека ·
+          ${fillFmtSec(share.sec)} на заказ (${share.sec===FILL_NORM_SEC?`норма, замеров за сегодня меньше ${FILL_TARGET_MIN_MEASURED}`:'среднее по команде за сегодня'})</span>
+      </div>
+      <div class="fsh-people">
+        ${share.rows.map(r=>`<span class="fsh-p"><i>${esc(r.name)}</i> ${r.done} → ${r.left?`ещё ${r.left}`:'доля закрыта'}</span>`).join('')}
+      </div>
+      <p class="staff-hint" style="margin:10px 0 0">Цель считается так: всё, что смена заполнила сегодня, плюс свободные
+        заказы — делится на тех, кто в смене. Отложенные не в счёт: они ждут данных от партнёра.
+        Заказы ни за кем не закреплены — это ориентир, очередь остаётся общей.</p>
+    </div>
+    <div class="panel fill-team">
       <div class="panel-head">
         <h2>Менеджеры заказов</h2>
         <div class="ft-period">
@@ -748,6 +891,7 @@ function renderFilling(){
       ${admin?'':reload}
     </div>`;
 
+  fillCdTick();   // обратный отсчёт в «У меня в работе» — и сам погаснет, когда нечего считать
   ['fillNext','fillNextBottom'].forEach(id=>{const b=$(id);if(b)b.onclick=()=>fillTakeNext();});
   if($('fillFindBtn'))$('fillFindBtn').onclick=()=>fillFind();
   if($('fillFind')){

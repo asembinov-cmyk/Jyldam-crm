@@ -1432,6 +1432,29 @@
 .fk-main .fk-k,.fk-main .fk-s{color:rgba(255,255,255,.8)}
 .fk-ringrow{display:flex;align-items:center;justify-content:space-between;gap:14px}
 
+/* Счётчик времени на заказ: в шапке карточки и в «У меня в работе». Зелёный, пока
+   укладываешься в цель, красный — когда вышел за неё. Не запрет, а подсказка. */
+.fill-cd{display:inline-block;margin-left:10px;font-size:12.5px;font-weight:700;white-space:nowrap}
+.fill-cd.ok{color:var(--moss)}
+.fill-cd.over{color:var(--rust)}
+.fill-cd.hold{color:var(--muted);font-weight:600}
+.resp-table .fill-cd{margin-left:0}
+
+/* Полоса распределения у администратора: кто в смене, сколько сделал и сколько ему
+   осталось до равной доли. Стоит НАД таблицей команды — это про «сейчас», а таблица
+   про выбранный период. */
+.fill-share-panel{padding:18px 20px;margin-bottom:18px}
+.fsh-top{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.fsh-top b{font-family:'Fraunces',serif;font-weight:900;font-size:17px}
+.fsh-top span{font-size:13px;color:var(--muted)}
+.fsh-top span b{font-family:inherit;font-size:13px;color:var(--ink)}
+.fsh-people{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.fsh-p{background:var(--paper);border-radius:10px;padding:7px 12px;font-size:13px;white-space:nowrap}
+.fsh-p i{font-style:normal;font-weight:700;margin-right:6px}
+/* Пятая карточка у менеджера — «Моя доля». У администратора её нет: он не заполняет. */
+.fill-kpi.kpi5{grid-template-columns:repeat(5,1fr)}
+.fk-share .fk-v{color:var(--rust)}
+
 .fill-team .panel-head{flex-wrap:wrap;gap:10px}
 .ft-period{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}
 .ft-period button{font:inherit;font-size:13px;padding:7px 14px;border-radius:9px;
@@ -1487,9 +1510,9 @@
 .fill-take .btn{padding:14px 34px;font-size:16px}
 .fill-take span{color:var(--muted);font-size:13px}
 
-@media(max-width:1100px){.fill-kpi{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1100px){.fill-kpi,.fill-kpi.kpi5{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:640px){
-  .fill-kpi{grid-template-columns:1fr}
+  .fill-kpi,.fill-kpi.kpi5{grid-template-columns:1fr}
   .fill-head-act{width:100%;justify-content:space-between}
   .ft-legend-note{margin-left:0;flex:0 0 100%}
   .ft-bar{max-width:100%}
