@@ -493,6 +493,14 @@
     background:var(--ink);color:#fff;box-shadow:0 10px 30px -10px rgba(0,0,0,.5);
     font-size:14px;max-width:92vw}
   .app-update .btn{background:#fff;color:var(--ink);border-color:#fff;white-space:nowrap}
+  /* Колокольчик в шапке: включены ли уведомления на ЭТОМ устройстве. Настройка личная
+     и для каждого телефона своя, поэтому живёт рядом с именем, а не в разделах. */
+  .push-btn{margin-left:auto;font-size:18px;line-height:1;background:none;border:1px solid var(--line);
+    border-radius:10px;padding:7px 10px;cursor:pointer;color:var(--muted)}
+  .push-btn:hover{border-color:var(--ink)}
+  .push-btn.on{border-color:var(--rust);background:rgba(37,70,201,.07)}
+  @media (max-width:760px),(pointer:coarse){ .push-btn{min-height:44px;min-width:44px} }
+
   /* «Поставьте приложение» — та же полоса, что у обновления, только выше: если обе
      появятся разом, они не перекроют друг друга. */
   .app-install{position:fixed;left:50%;transform:translateX(-50%);bottom:80px;z-index:2999;

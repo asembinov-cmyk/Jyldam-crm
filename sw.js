@@ -81,3 +81,49 @@ self.addEventListener('fetch', e => {
     return net;
   })());
 });
+
+
+/* ============================================================
+   PUSH-УВЕДОМЛЕНИЯ
+
+   Приходят, даже когда CRM закрыта: показывает их этот воркер, а не страница.
+   Что внутри сообщения, решает функция `push-send` (Supabase), здесь только показ
+   и переход по нажатию.
+   ============================================================ */
+self.addEventListener('push', e => {
+  let d = {};
+  try{ d = e.data ? e.data.json() : {}; }catch(err){ d = { body: (e.data && e.data.text()) || '' }; }
+  const title = d.title || 'Jyldam CRM';
+  const opts = {
+    body: d.body || '',
+    icon: 'assets/icon-192.png',
+    badge: 'assets/icon-192.png',
+    lang: 'ru',
+    // tag — чтобы однотипные уведомления заменяли друг друга, а не копились стопкой:
+    // курьеру с утра может прилететь пять заявок, и пять одинаковых строк в шторке
+    // он просто смахнёт не читая.
+    tag: d.tag || 'jyldam',
+    renotify: !!d.tag,
+    requireInteraction: !!d.important,
+    data: { url: d.url || './', kind: d.kind || '' }
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+
+// Нажали на уведомление: если CRM уже открыта — показываем ту вкладку и уводим её
+// на нужный раздел, а не плодим вторую копию приложения.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for(const c of all){
+      if(c.url.indexOf(self.location.origin) === 0){
+        await c.focus();
+        try{ c.postMessage({ type: 'push-open', url: target }); }catch(err){}
+        return;
+      }
+    }
+    await self.clients.openWindow(target);
+  })());
+});

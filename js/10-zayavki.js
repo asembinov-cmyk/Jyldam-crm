@@ -475,7 +475,10 @@ function bindPhotoBlock(root,rec,redraw,table){
     inp.value='';
     if(!ok){toast(fail?'Не удалось загрузить фото':'Файлы не выбраны');return;}
     const u=await dbUpdate(table,rec.id,{photos:arr});
-    if(u){Object.assign(rec,u);toast(fail?`Загружено ${ok}, ошибок ${fail}`:`Добавлено фото: ${ok}`);if(redraw)redraw();}
+    if(u){Object.assign(rec,u);toast(fail?`Загружено ${ok}, ошибок ${fail}`:`Добавлено фото: ${ok}`);if(redraw)redraw();
+      // Фото у ЗАКАЗА — это и есть «появилась работа» для «Заполнения» (fillNeedsWork
+      // требует фото). Паузу между уведомлениями держит сервер, здесь просто сообщаем факт.
+      if(table==='orders'&&ok&&typeof pushFillQueue==='function')pushFillQueue(ok);}
   });
   root.querySelectorAll('[data-pdelphoto]').forEach(btn=>btn.onclick=async e=>{
     e.stopPropagation();const idx=+btn.dataset.idx;const arr=pickupPhotos(rec).slice();const item=arr[idx];if(!item)return;
@@ -558,9 +561,13 @@ function pickupModal(id,readonly){
       if(newStatus&&newStatus!==prevStatus){row.status_at=new Date().toISOString();hist.push({statusId:newStatus,at:row.status_at});}
       row.status_history=hist;
       if(id){const before=Object.assign({},p);const u=await dbUpdate('pickups',id,row);if(!u)return false;Object.assign(p,u);
-        await logAction('update','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:buildChanges(before,p)});}
+        await logAction('update','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:buildChanges(before,p)});
+        // Уведомление курьеру — только когда заявку НА НЕГО назначили: сохранение карточки
+        // по другой причине не должно звенеть у него в телефоне (js/20-push.js).
+        if(row.courier_id&&before.courier_id!==row.courier_id&&typeof pushPickupAssigned==='function')pushPickupAssigned(p);}
       else{const u=await dbInsert('pickups',row);if(!u)return false;S.pickups.unshift(u);
         await logAction('create','pickups',{entity_id:u.id,entity_label:pickupLabel(u)});
+        if(u.courier_id&&typeof pushPickupAssigned==='function')pushPickupAssigned(u);
         // если заявка создалась на дату вне текущего фильтра (например, после 18:00 дата ушла на
         // завтра, а список сейчас показывает только сегодня) — расширяем фильтр, чтобы её сразу увидеть
         const ud=(u.pickup_date||'').slice(0,10);

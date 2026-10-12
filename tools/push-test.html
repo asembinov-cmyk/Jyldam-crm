@@ -1,0 +1,158 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<title>Проверка push: ключи и шифрование</title>
+<style>
+ body{font:15px/1.6 system-ui,sans-serif;max-width:860px;margin:30px auto;padding:0 16px;color:#16213a}
+ h1{font-size:22px} h2{font-size:17px;margin-top:28px}
+ .ok{color:#2f7d54;font-weight:700} .bad{color:#a5342a;font-weight:700}
+ pre{background:#eef2f9;padding:12px;border-radius:10px;overflow:auto;font-size:13px}
+ input{width:100%;font:13px ui-monospace,monospace;padding:10px;border:1px solid #dde3ee;border-radius:9px}
+ .warn{background:#fdf1ef;border-radius:10px;padding:12px}
+ button{font:inherit;padding:10px 18px;border-radius:10px;border:1px solid #2546c9;background:#2546c9;color:#fff;cursor:pointer}
+</style></head><body>
+<h1>Проверка push-уведомлений</h1>
+<p>Страница служебная, работает только локально (<code>python3 tools/refresh-versions.py</code> её не трогает,
+в боевой сайт она попадает, но сама по себе ничего не делает и ничего не хранит).
+Она: 1) создаёт пару ключей VAPID, 2) прогоняет НАСТОЯЩИЙ код шифрования из
+<code>functions/push-send/index.ts</code> и проверяет, что зашифрованное расшифровывается обратно.</p>
+
+<h2>1. Ключи</h2>
+<p>Открытый ключ идёт в код CRM (он публичный). <b>Закрытый — только в секреты Supabase</b>
+(<code>VAPID_PRIVATE_KEY</code>), никому не показывайте и не вставляйте в репозиторий.</p>
+<p>Открытый (VAPID_PUBLIC_KEY):</p><input id="pub" readonly>
+<p>Закрытый (VAPID_PRIVATE_KEY):</p><input id="priv" readonly>
+<p><button id="gen">Создать новую пару</button></p>
+
+<h2>2. Живая проверка на этом устройстве</h2>
+<p>Подписывает этот браузер и отправляет настоящее уведомление тем же кодом, что в функции.
+Работает только локально и только если браузер разрешит уведомления.</p>
+<p><button id="live">Подписаться и прислать уведомление</button></p>
+<pre id="livelog">—</pre>
+
+<h2>3. Проверка кода отправки</h2>
+<pre id="log">запускаю…</pre>
+<script type="module">
+const $=id=>document.getElementById(id);
+const log=[];
+const say=(ok,txt)=>{log.push((ok===null?'·  ':ok?'ok  ':'FAIL ')+txt);$('log').innerHTML=log.map(l=>
+  l.startsWith('ok')?'<span class="ok">'+l+'</span>':l.startsWith('FAIL')?'<span class="bad">'+l+'</span>':l).join('\n');};
+const b64u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const dec=s=>{s=s.replace(/-/g,'+').replace(/_/g,'/');const b=atob(s+'='.repeat((4-s.length%4)%4));
+  return Uint8Array.from(b,c=>c.charCodeAt(0));};
+const cat=(...a)=>{let n=0;a.forEach(x=>n+=x.length);const o=new Uint8Array(n);let p=0;a.forEach(x=>{o.set(x,p);p+=x.length;});return o;};
+const te=s=>new TextEncoder().encode(s);
+
+// Пара запоминается в этом браузере: при перезагрузке страницы она ДОЛЖНА остаться
+// прежней — иначе открытый ключ в коде CRM и закрытый в секретах окажутся из разных пар,
+// и уведомления будут молча отклоняться сервером с 403.
+async function makeVapid(fresh){
+  if(!fresh){
+    try{
+      const saved=JSON.parse(localStorage.getItem('vapidPair')||'null');
+      if(saved&&saved.pub&&saved.priv){ $('pub').value=saved.pub; $('priv').value=saved.priv; return saved; }
+    }catch(e){}
+  }
+  const kp=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const pub=b64u(await crypto.subtle.exportKey('raw',kp.publicKey));
+  const jwk=await crypto.subtle.exportKey('jwk',kp.privateKey);
+  const pair={pub, priv:jwk.d};
+  try{ localStorage.setItem('vapidPair',JSON.stringify(pair)); }catch(e){}
+  $('pub').value=pub; $('priv').value=jwk.d;
+  return pair;
+}
+// Берём код ровно из файла функции — между метками CRYPTO START/END.
+async function loadCrypto(){
+  const src=await fetch('../functions/push-send/index.ts').then(r=>{if(!r.ok)throw new Error('файл функции не найден: '+r.status);return r.text();});
+  const a=src.indexOf('/* ==================== CRYPTO START ====================');
+  const b=src.indexOf('/* ==================== CRYPTO END ====================');
+  if(a<0||b<0) throw new Error('метки CRYPTO в файле не найдены');
+  const body=src.slice(a,b)+'\nreturn {encryptPush,vapidAuth,sendOne,b64uEnc,b64uDec,hkdf,cat,enc};';
+  return (new Function(body))();
+}
+// Расшифровываем так, как это делает браузер получателя (RFC 8291 наоборот).
+async function decryptPush(bytes, recvPrivKey, recvPubRaw, authSecret){
+  const salt=bytes.slice(0,16);
+  const keyLen=bytes[20];
+  const asPub=bytes.slice(21,21+keyLen);
+  const ct=bytes.slice(21+keyLen);
+  const asKey=await crypto.subtle.importKey('raw',asPub,{name:'ECDH',namedCurve:'P-256'},false,[]);
+  const shared=new Uint8Array(await crypto.subtle.deriveBits({name:'ECDH',public:asKey},recvPrivKey,256));
+  const hk=async(s,ikm,info,len)=>{const k=await crypto.subtle.importKey('raw',ikm,'HKDF',false,['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({name:'HKDF',hash:'SHA-256',salt:s,info},k,len*8));};
+  const ikm=await hk(authSecret,shared,cat(te('WebPush: info'),new Uint8Array([0]),recvPubRaw,asPub),32);
+  const cek=await hk(salt,ikm,cat(te('Content-Encoding: aes128gcm'),new Uint8Array([0])),16);
+  const nonce=await hk(salt,ikm,cat(te('Content-Encoding: nonce'),new Uint8Array([0])),12);
+  const k=await crypto.subtle.importKey('raw',cek,'AES-GCM',false,['decrypt']);
+  const plain=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:nonce},k,ct));
+  let end=plain.length; while(end>0&&plain[end-1]===0)end--;      // хвостовые нули
+  if(end>0&&plain[end-1]===2)end--;                               // признак последней записи
+  return new TextDecoder().decode(plain.slice(0,end));
+}
+
+(async()=>{
+  try{
+    const vap=await makeVapid();
+    say(true,'пара ключей VAPID создана (открытый '+vap.pub.length+' знаков)');
+    const C=await loadCrypto();
+    say(true,'код шифрования взят из functions/push-send/index.ts');
+
+    // «получатель» — такая же пара, какую браузер выдаёт при подписке
+    const recv=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);
+    const recvPub=new Uint8Array(await crypto.subtle.exportKey('raw',recv.publicKey));
+    const authSecret=crypto.getRandomValues(new Uint8Array(16));
+    const msg=JSON.stringify({title:'Новая заявка',body:'ИП Болаткан · Алматы · 12 заказов',url:'./?tab=pickups'});
+    const packet=await C.encryptPush(b64u(recvPub),b64u(authSecret),msg);
+    say(true,'сообщение зашифровано, длина пакета '+packet.length+' байт');
+    say(packet.length>21+65, 'в пакете есть соль, размер записи и открытый ключ отправителя');
+
+    const back=await decryptPush(packet,recv.privateKey,recvPub,authSecret);
+    say(back===msg, back===msg?'расшифровалось обратно слово в слово':'расшифровалось НЕ ТО: '+back.slice(0,80));
+
+    // подпись VAPID: собираем заголовок и проверяем подпись открытым ключом
+    const hdr=await C.vapidAuth('https://fcm.googleapis.com/fcm/send/abc', vap.pub, vap.priv, 'mailto:test@jyldam-crm.kz');
+    const t=/t=([^,]+)/.exec(hdr)[1], k=/k=(.+)$/.exec(hdr)[1];
+    const [h,p,s]=t.split('.');
+    const pubKey=await crypto.subtle.importKey('raw',dec(vap.pub),{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
+    const okSig=await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},pubKey,dec(s),te(h+'.'+p));
+    const claims=JSON.parse(new TextDecoder().decode(dec(p)));
+    say(okSig,'подпись VAPID проверяется открытым ключом');
+    say(k===vap.pub,'в заголовке стоит наш открытый ключ');
+    say(claims.aud==='https://fcm.googleapis.com','адресат подписи — сервер уведомлений ('+claims.aud+')');
+    say(claims.exp>Math.floor(Date.now()/1000),'срок подписи в будущем ('+Math.round((claims.exp-Date.now()/1000)/3600)+' ч)');
+    say(null,'');
+    say(null,'Готово. Закрытый ключ из поля выше — в секрет VAPID_PRIVATE_KEY, открытый я впишу в код CRM.');
+  }catch(e){ say(false,'сломалось: '+e.message); }
+})();
+// ЖИВАЯ ПРОВЕРКА: подписка этого браузера + отправка на настоящий адрес push-сервиса.
+$('live').onclick=async()=>{
+  const out=[];const put=t=>{out.push(t);$('livelog').textContent=out.join('\n');};
+  try{
+    const pair=await makeVapid(false);
+    put('ключи на месте');
+    const reg=await navigator.serviceWorker.register('../sw.js',{updateViaCache:'none'});
+    await navigator.serviceWorker.ready;
+    put('service worker готов');
+    let perm=Notification.permission;
+    if(perm!=='granted') perm=await Notification.requestPermission();
+    put('разрешение на уведомления: '+perm);
+    if(perm!=='granted'){put('без разрешения дальше нельзя');return;}
+    const keyBytes=dec(pair.pub);
+    let sub=await reg.pushManager.getSubscription();
+    if(sub && b64u(sub.options.applicationServerKey||new ArrayBuffer(0))!==pair.pub){ await sub.unsubscribe(); sub=null; }
+    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes});
+    const j=sub.toJSON();
+    put('подписка получена: '+sub.endpoint.slice(0,48)+'…');
+    const C=await loadCrypto();
+    const r=await C.sendOne({endpoint:sub.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth},
+      {title:'Проверка связи',body:'Если видите это уведомление — вся цепочка работает',url:'./',tag:'test'},
+      {publicKey:pair.pub,privateKey:pair.priv,subject:'mailto:test@jyldam-crm.kz'});
+    put('ответ сервера уведомлений: '+(r.ok?'принято ('+r.status+')':'ОТКАЗ '+r.status+' '+r.text));
+    if(r.ok) put('ждите уведомление — его показывает service worker');
+  }catch(e){ put('сломалось: '+(e&&e.message||e)); }
+};
+
+$('gen').onclick=async()=>{
+  if(!confirm('Создать НОВУЮ пару? Старая перестанет работать: придётся заново вписать открытый ключ в код и закрытый в секреты.'))return;
+  try{ localStorage.removeItem('vapidPair'); }catch(e){}
+  location.reload();
+};
+</script></body></html>
