@@ -358,9 +358,21 @@ function fillOrderSecs(o){
   // среднее, ни в общее время за день: один обед превратил бы цифры в бессмыслицу.
   return (sec >= 0 && sec <= FILL_MEASURE_MAX_MIN * 60) ? sec : null;
 }
+// «ЗАГРУЗКА ИЗ EXCEL» — НЕ ЧЕЛОВЕК, и в статистике раздела её быть не должно
+// (просьба владельца 16.10.2026: «пусть будут только менеджеры заказов»).
+// Реестровым заказам `filled_at` ставится прямо при СОЗДАНИИ (js/17-import-excel.js):
+// ФИО, адрес и телефон пришли готовыми, менеджер за них не садился. Отметка в самом
+// заказе остаётся — по ней видно, откуда данные (история заказа, раздел 8w), и по ней
+// же реестровые заказы не попадают в очередь заполнения.
+//
+// Фильтруем в ОДНОМ месте, здесь: отсюда считаются и таблица команды, и карточки
+// наверху, и доля на смену, и сравнение с прошлым периодом. Вырежи по отдельности —
+// и числа начали бы спорить друг с другом.
+const FILL_IMPORT_NAME = /из\s*excel/i;
+const fillByPerson = o => !FILL_IMPORT_NAME.test(o.filled_by_name || '');
 function fillDoneIn(from, to){
   return (S.orders || []).filter(o => {
-    if(!o.filled_at) return false;
+    if(!o.filled_at || !fillByPerson(o)) return false;
     const d = localDateOf(o.filled_at);
     return d >= from && d <= to;
   });
@@ -1040,7 +1052,10 @@ function fillFindDraw(note){
     const secs=fillOrderSecs(o);
     let who,when,cls;
     if(o.filled_at){
-      who=esc(o.filled_by_name||'—');
+      // Реестровый заказ человек не заполнял: подписываем прямо, чтобы «загрузка из
+      // Excel» не читалась как имя менеджера (в статистике раздела её нет вовсе).
+      who=esc(o.filled_by_name||'—')+(fillByPerson(o)
+        ?'':'<small class="cell-time">данные пришли готовыми в реестре</small>');
       when=esc(fmtDateTime(o.filled_at))+(secs!=null?` · за ${Math.round(secs)} сек`:'');
       cls='ff-done';
     }else if(o._logName){
