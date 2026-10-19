@@ -495,8 +495,12 @@ async function waNotifySelection(key){
   for(let i=0;i<ok.length;i+=WA_CHUNK){
     const part=ok.slice(i,i+WA_CHUNK);
     toast(`Отправляю: ${Math.min(i+part.length,ok.length)} из ${ok.length}…`);
-    const r=await callEdge('kelesu-waba',{action:'send',template:t.name,
+    const r=await callEdge('kelesu-waba',{action:'send',template:t.name,button:key,
       items:part.map(x=>({order_id:x.o.id,code:x.o.code,phone:x.phone,
+        // Раздел пишем ПО ЗАКАЗУ, а не по гриду: в отчёте (db/36) разбивка именно по нему,
+        // а смешанная выборка иначе легла бы в один раздел целиком.
+        section:(typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(x.o))?'baraholka':'main',
+        button:key,
         components:waComponentsFor(t,x.o,pin.params)}))});
     if(!r||r.error){all.push({code:'',ok:false,error:(r&&r.error)||'ошибка вызова'});break;}
     all.push(...(r.results||[]));
@@ -548,6 +552,9 @@ async function renderWaSettings(){
       ><small style="opacity:.8;font-weight:400">${t?esc(t):'шаблон не выбран'}</small></button>`;
   }).join('');
 
+  // Две панели в разных контейнерах: чип переключают часто, а отчёт читает журнал за две
+  // недели — перечитывать его на каждое нажатие чипа незачем.
+  box.innerHTML='<div id="waCfgPanel"></div><div id="waRepBox"></div>';
   const drawBtn=()=>{
     const pin=cfg[waCfgBtn]||{template:'',params:null};
     // У НЕПРИВЯЗАННОЙ кнопки в списке стоит «— не выбран —», а не первый шаблон по порядку.
@@ -555,7 +562,7 @@ async function renderWaSettings(){
     // уходит с вкладки, считая, что привязка есть. Та же ловушка, что с пустым пунктом в
     // «Типе доставки» (раздел 6): пустой пункт нужен, пока выбор не сделан, и только тогда.
     const cur=appr.find(t=>t.name===pin.template)||null;
-    box.innerHTML=`
+    $('waCfgPanel').innerHTML=`
       <div class="panel">
         <div class="panel-head"><h2>Оповещения в WhatsApp</h2></div>
         <p class="hint">Выберите кнопку из меню «⚙ Действие» в «Заказах» и «Барахолке», затем шаблон,
@@ -571,7 +578,7 @@ async function renderWaSettings(){
           ${pin.template?'<button class="btn ghost" id="waCfgClear" style="margin-left:8px">Отвязать шаблон</button>':''}
         </div>
       </div>`;
-    box.querySelectorAll('[data-wacfgbtn]').forEach(b=>{
+    $('waCfgPanel').querySelectorAll('[data-wacfgbtn]').forEach(b=>{
       b.onclick=()=>{waCfgBtn=b.dataset.wacfgbtn;drawBtn();};
     });
     const drawBody=()=>{
@@ -600,7 +607,7 @@ async function renderWaSettings(){
       const t=appr.find(x=>x.name===$('waCfgTpl').value);
       if(!t){toast('Выберите шаблон');return;}
       const params={};
-      box.querySelectorAll('.wa-cfg').forEach(s=>{params[s.dataset.k]=s.value;});
+      $('waCfgPanel').querySelectorAll('.wa-cfg').forEach(s=>{params[s.dataset.k]=s.value;});
       const btn=$('waCfgSave');btn.disabled=true;
       const okSave=await waCfgSave(waCfgBtn,t.name,params);
       btn.disabled=false;
@@ -621,4 +628,152 @@ async function renderWaSettings(){
     };
   };
   drawBtn();
+  waReportRender();
+}
+
+/* ================= ОТЧЁТ ПО РАССЫЛКЕ (19.10.2026) =================
+   Просьба владельца: «в настройках надо оповещение — сколько ушло, и чтобы такая разбивка:
+   модуль Барахолка, WhatsApp оповещение, отправлено 1594, доставлено до клиента 1500,
+   столько-то не доставлено по такой-то причине, и прямо как грид, каждый день чтобы
+   сохраняло и показывало».
+
+   СОХРАНЯТЬ ОТДЕЛЬНО НИЧЕГО НЕ НАДО, И ЗАДАНИЯ ПО РАСПИСАНИЮ ТОЖЕ: каждую отправку функция
+   кладёт строкой в `wa_sends` (db/34), строки не удаляются, и грид считает по журналу на
+   лету. Ежедневный снимок был бы вторым источником правды о том же самом — разойдутся, и
+   будет не понять, какой верен.
+
+   РАЗБИВКА ПО МОДУЛЮ ЖИВЁТ В САМОМ ЖУРНАЛЕ (`section`, `button` — db/36), а не считается
+   join-ом к заказам: раздел известен в момент отправки, а заказ потом могут и удалить —
+   счёт за рассылку при этом останется.
+
+   ⚠️ «ДОСТАВЛЕНО» ПОКА НЕ ЗАПОЛНЯЕТСЯ, И ЭТО НЕ ОШИБКА ОТЧЁТА. `status` пишется на момент
+   отправки: `sent` или `failed`. «Доставлено» и «прочитано» Meta присылает ПОЗЖЕ, событием
+   `message.status`, и приходит оно на вебхук Kelesu — в функцию `kelesu-webhook`, исходника
+   которой у нас нет (он только в панели Supabase). Что туда дописать — в конце `db/36`.
+   Пока не дописано, в этих колонках стоит прочерк и сказано, почему: «нет данных» и «не
+   доставлено» — разные вещи, и путать их в отчёте о платной рассылке нельзя. */
+const WA_REP_PAGE=1000;
+let waRepDays=14;
+// Коды Meta, которые реально встречаются. Текст её ответа длинный и английский, а человеку
+// нужно одно: можно ли что-то сделать.
+const WA_ERR_HINT=[
+  [/132000/, 'не совпало число параметров шаблона'],
+  [/131047/, 'окно 24 часа закрыто — нужен шаблон'],
+  [/131026/, 'номер не в WhatsApp или не принимает сообщения'],
+  [/131049/, 'Meta придержала доставку (слишком часто этому номеру)'],
+  [/\b429\b/, 'упёрлись в лимит — повторить позже'],
+  [/131053|media/i, 'Meta не приняла вложение'],
+];
+function waErrLabel(e){
+  const t=String(e||'').trim();
+  if(!t)return 'без объяснения';
+  for(const [re,msg] of WA_ERR_HINT)if(re.test(t))return msg;
+  return t.length>70?t.slice(0,70)+'…':t;
+}
+const WA_SECTION_RU={baraholka:'Барахолка',main:'Заказы заборов'};
+async function waReportLoad(days){
+  const from=new Date(nowMs()-days*86400000).toISOString();
+  const rows=[];
+  for(let i=0;;i+=WA_REP_PAGE){
+    const {data,error}=await sb.from('wa_sends')
+      .select('created_at,section,button,template,status,error')
+      .gte('created_at',from).order('created_at',{ascending:false})
+      .range(i,i+WA_REP_PAGE-1);
+    if(error)return {error:dbErrText?dbErrText(error):(error.message||'ошибка запроса')};
+    rows.push(...(data||[]));
+    if(!data||data.length<WA_REP_PAGE)break;
+  }
+  return {rows};
+}
+async function waReportRender(){
+  const box=$('waRepBox');if(!box)return;
+  box.innerHTML='<div class="panel" style="margin-top:14px"><div class="loading" style="padding:24px">Считаем по журналу рассылки…</div></div>';
+  const res=await waReportLoad(waRepDays);
+  if(!$('waRepBox'))return;                        // ушли с вкладки, пока считали
+  const days=[7,14,30,90];
+  const head=`<div class="panel-head"><h2>Что уходило — по дням</h2>
+      <span class="count">${res.rows?res.rows.length:0}</span></div>
+    <div class="filters" style="padding:0;margin:0 0 10px;gap:8px">
+      ${days.map(d=>`<button type="button" class="btn sm ${d===waRepDays?'primary':'ghost'}" data-warepd="${d}">${d} дней</button>`).join('')}
+      <button type="button" class="btn sm ghost" id="waRepReload">🔄 Обновить</button>
+    </div>`;
+  const wrap=inner=>{box.innerHTML=`<div class="panel" style="margin-top:14px">${head}${inner}</div>`;waReportBind();};
+  if(res.error){
+    wrap(`<div class="empty" style="padding:20px"><div class="big">Журнал не прочитан</div>
+      <p>${esc(res.error)}</p>
+      <p class="hint">Если таблицы нет — выполните <b>db/34</b>, а колонки разбивки добавляет <b>db/36</b>.</p></div>`);
+    return;
+  }
+  const rows=res.rows;
+  if(!rows.length){
+    wrap(`<div class="empty" style="padding:20px"><div class="big">За этот период рассылок не было</div>
+      <p class="hint">Журнал хранит каждую отправку — выберите период побольше.</p></div>`);
+    return;
+  }
+  // Группируем по дню + разделу + кнопке: ровно та разбивка, которую просил владелец.
+  const g={};
+  rows.forEach(r=>{
+    const day=String(r.created_at||'').slice(0,10);
+    const key=day+'|'+(r.section||'?')+'|'+(r.button||'?')+'|'+(r.template||'');
+    const c=g[key]||(g[key]={day,section:r.section||'',button:r.button||'',template:r.template||'',
+      sent:0,deliv:0,read:0,fail:0,err:{}});
+    /* «ОТПРАВЛЕНО» — ЭТО ПРИНЯТЫЕ Meta, А НЕ ВСЕ ПОПЫТКИ. Сначала считались все подряд, и
+       в строке выходило «отправлено 1608 · не ушло 14» — то есть четырнадцать штук были
+       посчитаны дважды. Владелец и формулировал иначе: «отправлено 1594, доставлено 1500,
+       столько-то не доставлено». Теперь столбцы складываются: принято + не ушло = попыток. */
+    const failed=(r.status==='failed'||!!r.error);
+    if(failed){c.fail++;const k=waErrLabel(r.error);c.err[k]=(c.err[k]||0)+1;}
+    else c.sent++;
+    if(r.status==='read'){c.read++;c.deliv++;}
+    else if(r.status==='delivered')c.deliv++;
+  });
+  const list=Object.values(g).sort((a,b)=>b.day.localeCompare(a.day)
+    ||String(a.section).localeCompare(String(b.section))||String(a.button).localeCompare(String(b.button)));
+  const tot=list.reduce((t,c)=>({sent:t.sent+c.sent,deliv:t.deliv+c.deliv,read:t.read+c.read,fail:t.fail+c.fail}),
+    {sent:0,deliv:0,read:0,fail:0});
+  /* ПРОЧЕРК СЧИТАЕТСЯ ПО СТРОКЕ, А НЕ ПО ПЕРИОДУ. Сначала флаг был один на весь отчёт, и
+     стоило одному дню получить статусы — у всех остальных вместо прочерка вставал «0», то
+     есть «ничего не доставлено». А это разные вещи: пока вебхук не дописывает статус, у
+     строки его нет вовсе. День, в который и правда не доставили ничего, от дня без данных
+     отличить нечем — Meta события «не доставлено» не присылает вовсе (отказ приходит сразу
+     и считается в «Не ушло»), поэтому прочерк здесь честнее нуля. */
+  const noData=list.some(c=>!c.deliv&&!c.read);
+  const num=n=>n.toLocaleString('ru-RU');
+  const cell=(n,on)=>on?`<b>${num(n)}</b>`:'<span class="wh-cat" title="Meta присылает статус доставки отдельным событием — см. примечание">—</span>';
+  const body=list.map(c=>`<tr class="open">
+      <td data-label="Дата">${esc(fmtDate(c.day))}</td>
+      <td data-label="Раздел">${esc(WA_SECTION_RU[c.section]||'не записан')}</td>
+      <td data-label="Кнопка">${esc(c.button?(typeof waBtnLabel==='function'?waBtnLabel(c.button):c.button):'не записана')}</td>
+      <td data-label="Шаблон"><span class="wh-cat">${esc(c.template||'—')}</span></td>
+      <td data-label="Отправлено"><b>${num(c.sent)}</b></td>
+      <td data-label="Доставлено">${cell(c.deliv,c.deliv>0||c.read>0)}</td>
+      <td data-label="Прочитано">${cell(c.read,c.deliv>0||c.read>0)}</td>
+      <td data-label="Не ушло">${c.fail?`<b style="color:var(--rust)">${num(c.fail)}</b>`:'0'}</td>
+      <td data-label="Почему не ушло">${Object.keys(c.err).length
+        ? Object.entries(c.err).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`<div class="wh-cat">${esc(k)} — ${num(n)}</div>`).join('')
+        : '<span class="wh-cat">—</span>'}</td>
+    </tr>`).join('');
+  wrap(`<div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Дата</th><th>Раздел</th><th>Кнопка</th><th>Шаблон</th><th>Отправлено</th>
+      <th>Доставлено</th><th>Прочитано</th><th>Не ушло</th><th>Почему не ушло</th></tr></thead>
+      <tbody>${body}<tr class="open" style="font-weight:700;background:var(--bg)">
+        <td data-label="Дата">Итого</td><td data-label="Раздел">за ${waRepDays} дней</td><td></td><td></td>
+        <td data-label="Отправлено">${num(tot.sent)}</td>
+        <td data-label="Доставлено">${cell(tot.deliv,tot.deliv>0)}</td>
+        <td data-label="Прочитано">${cell(tot.read,tot.deliv>0)}</td>
+        <td data-label="Не ушло">${num(tot.fail)}</td><td></td></tr></tbody></table></div>
+    ${!noData?'':`<div class="hint" style="margin-top:10px;line-height:1.6">
+      <b>Про «Доставлено» и «Прочитано»:</b> прочерк означает «нет данных», а НЕ «не доставлено».
+      Отправку подтвердила Meta, а статус доставки она присылает позже отдельным событием
+      <b>message.status</b> — оно приходит на вебхук Kelesu, в функцию <b>kelesu-webhook</b>,
+      и пока та не дописывает статус в журнал, взять его неоткуда. Что именно туда добавить —
+      написано в конце <b>db/36</b>.</div>`}
+    <div class="hint" style="margin-top:6px">Журнал хранит каждую отправку и не чистится — отдельного
+      ежедневного сохранения не нужно, грид считает по нему за любой период.</div>`);
+}
+function waReportBind(){
+  document.querySelectorAll('[data-warepd]').forEach(b=>{
+    b.onclick=()=>{waRepDays=+b.dataset.warepd||14;waReportRender();};
+  });
+  if($('waRepReload'))$('waRepReload').onclick=()=>waReportRender();
 }
