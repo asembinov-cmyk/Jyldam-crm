@@ -790,10 +790,16 @@ function renderOrders(mode){
         const r=await callKet({action:'send',account:acc,order:payload});
         rememberKetExchange(o,payload,r,acc);
         const result=(r&&r.ket&&r.ket.result)||{};
+        const ketId=ketOrderId(result);
+        // «success TRUE» с нулевым id — заказ НЕ создан (разбор 19.10.2026). Считаем это
+        // неудачей: иначе в итоге стоит «отправлено 40», а у KET нет ни одного.
+        if(!r.error&&(result.success||'').toUpperCase()==='TRUE'&&!ketId)
+          return {ok:false,reason:`${o.code}: KET принял, но заказа не создал (id 0)`
+            +(result.message?' · '+result.message:''),retry:false};
         if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
-          const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
+          const u=await dbUpdate('orders',o.id,{ket_id:ketId,ket_synced_at:new Date().toISOString()});
           if(u)Object.assign(o,u);
-          logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:result.id||null}});
+          logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:ketId}});
           return {ok:true,sentAs:ketSentAs(acc,r)};
         }
         const reason=r.error||result.message||(r&&r.raw)||(r&&JSON.stringify(r.ket))||'неизвестно';

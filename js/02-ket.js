@@ -216,8 +216,19 @@ async function sendOrderToKet(o){
   rememberKetExchange(o,payload,r,acc);
   if(r.error){toast('Ошибка KET: '+r.error);return false;}
   const result=(r.ket&&r.ket.result)||{};
+  // «УСПЕХ» БЕЗ НОМЕРА ЗАКАЗА — ЭТО НЕ УСПЕХ (19.10.2026). KET на нулевую цену
+  // отвечает `{"id":0,"success":"TRUE","message":"200 ОК"}`: запрос принят, а заказа у
+  // них не появилось. Раньше CRM смотрела только на success и рапортовала «Заказ
+  // отправлен в KET (ID ?)» — то есть прямо врала, и «не приходит в KET» выяснялось
+  // через неделю. Настоящее создание всегда возвращает номер (02.10 — id 9407627).
+  if((result.success||'').toUpperCase()==='TRUE'&&!ketOrderId(result)){
+    toast('KET принял запрос, но заказа НЕ создал (id 0)'
+      +(result.message?' · ответ: '+result.message:'')
+      +'. Нажмите «🔍 Что ушло» в карточке — там весь ответ.',9000);
+    return false;
+  }
   if((result.success||'').toUpperCase()==='TRUE'){
-    const ketId=result.id||null;
+    const ketId=ketOrderId(result);
     const u=await dbUpdate('orders',o.id,{ket_id:ketId,ket_synced_at:new Date().toISOString()});
     if(u)Object.assign(o,u);
     logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:ketId}});
@@ -240,6 +251,13 @@ async function sendOrderToKet(o){
 // Чем прокси реально отправил заказ: имя аккаунта и uid из его ответа. Если прокси старый
 // (аккаунт в нём ещё не выложен), он молча берёт аккаунт по умолчанию и uid в ответе не
 // возвращает вовсе — тогда так и пишем, вместо того чтобы повторять наше пожелание.
+// Номер заказа у KET из их ответа. Ноль и пустая строка — это ОТСУТСТВИЕ номера:
+// заказ не создан, сколько бы ни стояло в success (см. разбор 19.10.2026).
+function ketOrderId(result){
+  const id=result&&result.id;
+  if(id==null||id===''||id===0||id==='0')return null;
+  return id;
+}
 function ketSentAs(asked,resp){
   const got=resp&&resp.account?String(resp.account):'';
   const uid=resp&&resp.uid?String(resp.uid):'';
