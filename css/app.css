@@ -1861,6 +1861,11 @@ td .ft-dot{margin:0 0 0 8px}
 
 /* Подсказка под полем индекса: что это за отделение Казпочты. Нужна, чтобы менеджер
    сверил индекс с адресом, который он только что переписал с бланка (19.10.2026). */
+/* Полоса хода рассылки. Висит поверх всего, пока идёт отправка: тост на девятнадцать минут
+   работы не годится, а незамеченный обрыв уже стоил 1343 неотправленных сообщений. */
+.wa-prog{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:300;
+  background:var(--ink);color:var(--paper);padding:12px 20px;border-radius:12px;
+  font-size:14px;font-weight:600;box-shadow:0 20px 50px -20px rgba(0,0,0,.6)}
 /* Полоса режима «Дубль» над гридом заказов: в нём видны строки за чужие даты, и без
    объяснения это выглядит как сбой фильтров. */
 .dup-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:10px;padding:10px 14px;

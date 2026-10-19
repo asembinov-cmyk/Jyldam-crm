@@ -477,24 +477,45 @@ async function waNotifySelection(key){
   }
 
   const rows=list.map(o=>({o,phone:waPhone(o.phone)}));
-  const ok=rows.filter(r=>r.phone), bad=rows.filter(r=>!r.phone);
+  let ok=rows.filter(r=>r.phone);
+  const bad=rows.filter(r=>!r.phone);
   if(!ok.length){
     waBlockModal('Не на что отправлять',
       `Среди отмеченных заказов (${list.length}) нет ни одного с телефоном получателя.`);
+    return;
+  }
+  // Кому этот шаблон уже уходил — пропускаем: сообщения платные, а повторное нажатие после
+  // оборвавшейся рассылки иначе оплатило бы всё заново.
+  const seen=await waAlreadySent(ok.map(r=>r.o.id),t.name);
+  if(seen.error){waBlockModal('Журнал не прочитан',
+    `Не удалось проверить, кому уже слали: ${esc(seen.error)}<br><br>Без этой проверки отправлять`
+    +' опасно — повтор оплачивается заново. Попробуйте ещё раз.');return;}
+  const again=ok.filter(r=>seen.done.has(r.o.id));
+  ok=ok.filter(r=>!seen.done.has(r.o.id));
+  if(!ok.length){
+    waBlockModal('Уже отправлено',
+      `Все отмеченные заказы (${again.length}) уже получали шаблон <b>${esc(t.name)}</b>.`
+      +'<br><br>Повторно он не уходит: сообщения платные. Нужен именно повтор — отправьте его'
+      +' другим шаблоном или спросите меня, как снять отметку.');
     return;
   }
 
   // Вот то самое «отправить 1 смс? да или отмена». Про платность говорим от полусотни:
   // отметить «все» — одно движение, а в Барахолке их полторы тысячи.
   const msg=`${label}\n\nОтправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
+    +(again.length?`\n\nПропустим ${again.length} — им этот шаблон уже уходил.`:'')
     +(bad.length?`\n\nБез телефона и не уйдут: ${bad.length}`:'')
-    +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`:'');
+    +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`
+      +`\n\nОтправка займёт примерно ${waEta(ok.length)}. НЕ ЗАКРЫВАЙТЕ вкладку и не уходите`
+      +' со страницы: отправка идёт отсюда и на полпути оборвётся. Если оборвалась — нажмите'
+      +' кнопку ещё раз, уже отправленным повторно не уйдёт.':'');
   if(!confirm(msg))return;
 
   const all=[];
+  let stopped='';
   for(let i=0;i<ok.length;i+=WA_CHUNK){
     const part=ok.slice(i,i+WA_CHUNK);
-    toast(`Отправляю: ${Math.min(i+part.length,ok.length)} из ${ok.length}…`);
+    waProgress(`💬 Отправка: ${i} из ${ok.length} · не закрывайте вкладку`);
     const r=await callEdge('kelesu-waba',{action:'send',template:t.name,button:key,
       items:part.map(x=>({order_id:x.o.id,code:x.o.code,phone:x.phone,
         // Раздел пишем ПО ЗАКАЗУ, а не по гриду: в отчёте (db/36) разбивка именно по нему,
@@ -502,10 +523,23 @@ async function waNotifySelection(key){
         section:(typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(x.o))?'baraholka':'main',
         button:key,
         components:waComponentsFor(t,x.o,pin.params)}))});
-    if(!r||r.error){all.push({code:'',ok:false,error:(r&&r.error)||'ошибка вызова'});break;}
+    if(!r||r.error){
+      // Обрыв на середине — это не «ошибка отправки», а остановка: часть сообщений уже ушла
+      // и денег стоила. Говорим, сколько именно, и что повтор их не задвоит.
+      stopped=(r&&r.error)||'ошибка вызова';
+      break;
+    }
     all.push(...(r.results||[]));
   }
+  waProgress('');
   const sent=all.filter(r=>r.ok).length, fail=all.length-sent;
+  if(stopped){
+    waBlockModal('Отправка прервалась',
+      `Ушло: <b>${sent}</b> из ${ok.length}. Причина остановки:<br><b>${esc(stopped)}</b>`
+      +'<br><br>Нажмите кнопку ещё раз — уже отправленным повторно не уйдёт, продолжим с того'
+      +' места, где встали.');
+    return;
+  }
   // Всё ушло — хватит тоста. Что-то не ушло — показываем разбор по причинам: иначе
   // «отправлено 38 из 40» остаётся загадкой, а повторить уже нечем.
   if(!fail&&!bad.length)toast(`Отправлено: ${sent}`);
@@ -671,6 +705,46 @@ function waErrLabel(e){
   return t.length>70?t.slice(0,70)+'…':t;
 }
 const WA_SECTION_RU={baraholka:'Барахолка',main:'Заказы заборов'};
+
+/* ================= ПОВТОР НЕ ДОЛЖЕН СТОИТЬ ВТОРОЙ РАЗ (19.10.2026) =================
+   Владелец отправил 1594, а в журнале оказался 251: рассылка оборвалась на шестой пачке.
+   1594 сообщения по 700 мс — это 19 минут, и всё это время цикл живёт в ОТКРЫТОЙ вкладке;
+   закрыли её, перешли в раздел с перезагрузкой, уснул ноутбук — отправка встала молча.
+
+   Самое дорогое следствие было не в этом, а в том, что повторное нажатие слало бы всё
+   заново, включая те 251: сообщения платные, а Meta на повтор не жалуется. Поэтому перед
+   отправкой спрашиваем журнал, кому этот шаблон уже уходил, и таких пропускаем.
+
+   СМОТРИМ ПО ПАРЕ «ЗАКАЗ + ШАБЛОН», а не по заказу: «Прибыл заказ» и «Курьерское
+   оповещение» по одному заказу — это два разных уведомления, и второе не должно отмениться
+   из-за первого. Отказавшиеся (`status='failed'`) не считаются отправленными — их как раз
+   и надо повторить. */
+async function waAlreadySent(ids,template){
+  const done=new Set();
+  for(let i=0;i<ids.length;i+=100){
+    const part=ids.slice(i,i+100);
+    const {data,error}=await sb.from('wa_sends').select('order_id,status')
+      .eq('template',template).in('order_id',part);
+    if(error)return {error:dbErrText?dbErrText(error):(error.message||'ошибка запроса')};
+    (data||[]).forEach(r=>{if(r.order_id&&r.status!=='failed')done.add(r.order_id);});
+  }
+  return {done};
+}
+/* Полоса хода отправки. Тост живёт 2,2 секунды и внизу экрана — на девятнадцать минут
+   работы этого мало, а человеку надо видеть, что процесс идёт и вкладку закрывать нельзя.
+   Ровно по этой причине 1594 и оборвались незамеченными. */
+function waProgress(txt){
+  let el=$('waProg');
+  if(!txt){if(el)el.remove();return;}
+  if(!el){el=document.createElement('div');el.id='waProg';el.className='wa-prog';document.body.appendChild(el);}
+  el.textContent=txt;
+}
+// «19 минут» понятнее, чем «1594 сообщения по 0,7 секунды».
+function waEta(n){
+  const sec=Math.round(n*0.75)+Math.ceil(n/WA_CHUNK)*2;
+  if(sec<90)return `${sec} сек`;
+  return `${Math.round(sec/60)} мин`;
+}
 async function waReportLoad(days){
   const from=new Date(nowMs()-days*86400000).toISOString();
   const rows=[];
