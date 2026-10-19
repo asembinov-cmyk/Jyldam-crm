@@ -956,7 +956,19 @@
 
   /* ── Компактные карточки заказов для курьера ── */
   .cour-cards{display:flex;flex-direction:column;gap:12px}
-  .cour-card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+  .cour-card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;
+    /* УДЕРЖАНИЕ — ЭТО НАШ ЖЕСТ, А НЕ ВЫДЕЛЕНИЕ ТЕКСТА (19.10.2026). На iPhone долгое
+       нажатие по умолчанию начинает выделять текст: всплывает «Скопировать», появляются
+       синие маркеры, и перетаскивание превращается в борьбу с ними. Убираем и выделение,
+       и системное меню по удержанию (`-webkit-touch-callout`) — на ссылках оно тоже
+       вылезает, а тут вся карточка состоит из ссылок: адрес и телефон. */
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  /* Поля ввода исключаем: в количестве собранных заказов текст правят руками, и
+     запрет выделения мешал бы ставить курсор. */
+  .cour-card input,.cour-card select,.cour-card textarea{-webkit-user-select:text;user-select:text}
+  /* iOS умеет «перетаскивать» саму ссылку по удержанию — адрес и телефон тут ссылки,
+     и это второй способ сорвать жест. Нажатие по ним работает как раньше. */
+  .cour-card a{-webkit-user-drag:none;-webkit-touch-callout:none}
   .cc-head{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;cursor:pointer;user-select:none}
   .cc-main{flex:1;min-width:0}
   .cc-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
