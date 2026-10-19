@@ -1861,6 +1861,11 @@ td .ft-dot{margin:0 0 0 8px}
 
 /* Подсказка под полем индекса: что это за отделение Казпочты. Нужна, чтобы менеджер
    сверил индекс с адресом, который он только что переписал с бланка (19.10.2026). */
+/* Полоса режима «Дубль» над гридом заказов: в нём видны строки за чужие даты, и без
+   объяснения это выглядит как сбой фильтров. */
+.dup-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:10px;padding:10px 14px;
+  border:1px solid var(--rust);border-radius:10px;background:#fff6f3;color:var(--ink);font-size:13.5px}
+.dup-bar .btn{margin-left:auto}
 .idx-info{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px;font-size:12.5px;line-height:1.35}
 .idx-info:empty{display:none}
 .idx-ok{color:var(--ink);font-weight:600}

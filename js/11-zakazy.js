@@ -501,6 +501,10 @@ async function pickupOrdersModal(pickupId){
   },30);
 }
 let ordersMode=''; // ''=все, 'courier', 'mail', 'today', 'baraholka'
+/* РЕЖИМ «ДУБЛЬ» — грид показывает только повторы трек-кода (js/14-poisk-dublei.js, просьба
+   владельца 19.10.2026: «пусть они просто в гриде появляются списком отдельно, окно не
+   надо»). Набор заказов считает база за ВСЕ даты, здесь лежат только их id. */
+let ordersDupIds=null, ordersDupGroups=0, ordersDupMode='';
 // Режим грида задаётся ВКЛАДКОЙ, а не только аргументом renderOrders.
 //
 // Грабли, из-за которых «Барахолка» выкидывала в «Заказы заборов» на любом действии:
@@ -542,6 +546,9 @@ function applyOrdersFiltersToggle(){
 }
 function renderOrders(mode){
   ordersMode=mode===undefined?ordersModeForTab():(mode||'');
+  // Дубли считаются ПО РАЗДЕЛУ, и набор одного раздела в другом показывать нельзя: в гриде
+  // «Заказов заборов» барахолочные заказы не показываются вовсе, и список выглядел бы пустым.
+  if(ordersDupIds&&ordersDupMode!==ordersMode){ordersDupIds=null;ordersDupGroups=0;}
   // по умолчанию показываем заказы, созданные СЕГОДНЯ (до первой ручной правки дат)
   // localToday(), а не UTC: раньше здесь стояла дата по Гринвичу, и с полуночи до 5–6 утра
   // по Казахстану раздел открывался на ВЧЕРАШНЕМ дне — список выглядел пустым.
@@ -609,7 +616,7 @@ function renderOrders(mode){
         ${(isStaff()||can('orders','delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
           <span class="act-menu" id="ordersActMenu" style="display:none">
             ${isStaff()&&typeof WA_BUTTONS!=='undefined'?WA_BUTTONS.map(b=>`<button type="button" class="act-item" data-wabtn="${esc(b[0])}">${esc(b[1])}</button>`).join(''):''}
-            ${(isStaff()&&bar)?'<button type="button" class="act-item" id="ordersTrackDup">🔁 Дубль — повторы трек-кода</button>':''}
+            ${(isStaff()&&(bar||!ordersMode))?'<button type="button" class="act-item" id="ordersTrackDup">🔁 Дубль — повторы трек-кода</button>':''}
             ${can('orders','delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
           </span></span>`:''}
         <div class="filters filters-dates" style="padding:0;margin:0">
@@ -680,13 +687,14 @@ function renderOrders(mode){
       if(typeof waNotifySelection==='function')waNotifySelection(b.dataset.wabtn);
     };
   });
-  /* «Дубль» — повторы трек-кода ПО ВСЕМ ЗАКАЗАМ И ЗА ВСЕ ДАТЫ (просьба владельца
-     19.10.2026). Галочки ему не нужны: ищет запросом к базе, а не по отмеченным и не по
-     памяти вкладки — там после входа лежат только сегодняшние заказы. Сам поиск в
-     js/14-poisk-dublei.js, там же объяснено, почему он отдельно от блока «Возможные дубли». */
+  /* «Дубль» — повторы трек-кода ЗА ВСЕ ДАТЫ, по разделу текущего грида. Галочки ему не
+     нужны: ищет запросом к базе, а не по отмеченным и не по памяти вкладки — там после входа
+     лежат только сегодняшние заказы. Результат показывает САМ ГРИД, окна нет (просьба
+     владельца). Поиск — в js/14-poisk-dublei.js, там же объяснено, почему он отдельно от
+     блока «Возможные дубли» и почему считается по разделам. */
   if($('ordersTrackDup'))$('ordersTrackDup').onclick=()=>{
     if(actMenu)actMenu.style.display='none';
-    if(typeof trackDupModal==='function')trackDupModal();
+    if(typeof trackDupShowInGrid==='function')trackDupShowInGrid();
   };
   // удаление отмеченных галочками заказов
   if($('ordersDelSel'))$('ordersDelSel').onclick=async()=>{
@@ -1086,6 +1094,16 @@ function ordersDateScopedList(){
   });
 }
 function filteredOrders(){
+  /* РЕЖИМ «ДУБЛЬ» ОТМЕНЯЕТ ОСТАЛЬНЫЕ ФИЛЬТРЫ, и это не небрежность. Дубли найдены за ВСЕ
+     даты, а фильтр дат в гриде по умолчанию стоит на сегодня — он скрыл бы почти все
+     найденные строки, и кнопка выглядела бы сломанной. Раздел при этом сохраняется
+     (`ordersScopedList`): в «Заказах заборов» барахолочных строк не будет и здесь.
+     Сортируем по треку — тогда заказы одной группы стоят в списке рядом. */
+  if(ordersDupIds){
+    return ordersScopedList().filter(o=>ordersDupIds.has(o.id))
+      .sort((a,b)=>String(a.track||'').localeCompare(String(b.track||''))
+        ||String(a.code||'').localeCompare(String(b.code||'')));
+  }
   const q=of.q.toLowerCase().trim();
   return ordersDateScopedList().filter(o=>{
     if(of.status&&o.status_id!==of.status)return false;
@@ -1708,12 +1726,30 @@ function exportInboundToExcel(rows){
   XLSX.writeFile(wb,`Заказы_KET_${today}.xlsx`);
   toast(`Выгружено заказов: ${rows.length}`);
 }
+/* Полоса над таблицей в режиме «Дубль». Без неё человек видит в гриде полсотни строк за
+   чужие даты и не понимает, почему фильтры на них не действуют. Рисуется в самом гриде, а не
+   в шапке: грид перерисовывается чаще, и полоса обязана исчезать вместе с режимом. */
+function ordersDupBarHtml(n){
+  if(!ordersDupIds)return '';
+  return `<div class="dup-bar">🔁 <b>Дубли трек-кода</b> · заказов ${n} в ${ordersDupGroups} `
+    +`${ordersDupGroups===1?'группе':'группах'} · ${ordersMode==='baraholka'?'Барахолка':'заказы заборов'}`
+    +` · показаны за все даты, остальные фильтры сейчас не действуют`
+    +`<button type="button" class="btn sm ghost" id="ordersDupOff">✕ Показать все заказы</button></div>`;
+}
+function bindOrdersDupOff(){
+  const b=$('ordersDupOff');
+  if(b)b.onclick=()=>{ordersDupIds=null;ordersDupGroups=0;renderOrders();};
+}
 function drawOrders(){
   const el=$('orderTable');const allRows=filteredOrders();
   // счётчик у «Список заказов» = число с учётом ВСЕХ фильтров (вкл. тип доставки, поиск)
   const cntEl=$('ordersCount');if(cntEl)cntEl.textContent=allRows.length;
   removeOrdersPager(); // убрать старую плавающую панель, если была
-  if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;return;}
+  if(!allRows.length){
+    el.innerHTML=ordersDupBarHtml(0)
+      +`<div class="empty"><div class="big">Заказов нет</div>${isStaff()?'Нажмите «Создать заказ».':'Вам пока не назначены заказы.'}</div>`;
+    bindOrdersDupOff();return;
+  }
   if(isCourier()){drawCourierOrderCards(el,allRows);return;}
   const staff=isStaff();
   const mobile=isMobileView();
@@ -1735,7 +1771,7 @@ function drawOrders(){
   // В Барахолке колонки «Фото» нет: заказы приходят готовым реестром, бланк никто не
   // фотографирует — столбец был бы пустым на всю страницу.
   const noPhoto=ordersMode==='baraholka';
-  el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
+  el.innerHTML=ordersDupBarHtml(allRows.length)+`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th>':''}<th>Трек-код</th>
     <th>Статус</th><th></th></tr></thead>
@@ -1823,6 +1859,7 @@ function drawOrders(){
     updateSelBtns();
   };
   updateKetAllChk(allRows);
+  bindOrdersDupOff();
   if(mobile){
     if(rows.length<allRows.length){
       const more=document.createElement('button');
