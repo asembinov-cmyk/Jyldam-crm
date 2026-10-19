@@ -153,6 +153,20 @@ function filteredPickups(){
     if(q){const hay=[p.name,phoneDisplay(p.phone),cityName(p.city_id),districtName(p.district_id),courierName(p.courier_id),p.address].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   });
+  // СВОЙ ПОРЯДОК, выставленный пальцем, главнее всего остального: это последнее, что
+  // человек сделал руками, и спорить с ним автоматике незачем (маршрут по близости —
+  // только подсказка). Заявки, которых в сохранённом порядке нет (пришли позже),
+  // уходят в КОНЕЦ: подставлять их в середину чужого маршрута нельзя.
+  if(isCourier()&&ccOrder()&&ccOrder().length){
+    const ord=ccOrder();
+    return rows.sort((a,b)=>{
+      const ia=ord.indexOf(a.id),ib=ord.indexOf(b.id);
+      if(ia===-1&&ib===-1)return 0;
+      if(ia===-1)return 1;
+      if(ib===-1)return -1;
+      return ia-ib;
+    });
+  }
   // если курьер построил маршрут по близости — сортируем строго по нему (ближайшее сверху)
   if(isCourier()&&_courierRouteOrder){
     return rows.sort((a,b)=>{
@@ -315,7 +329,10 @@ function renderPickupsPager(total,totalPages,startIdx,shownCount){
 }
 /* Компактные карточки заявок на забор для курьера-заборщика: свёрнуто — наименование/адрес/телефон/статус */
 function drawCourierPickupCards(el,rows){
-  el.innerHTML=`<div class="cour-cards">${rows.map(p=>{
+  const mine=!!(ccOrder()&&ccOrder().length);
+  el.innerHTML=`<div class="cc-hint">↕ Зажмите карточку и потяните — поменяете порядок
+      <button class="link-btn" id="ccReset" ${mine?'':'hidden'}>сбросить свой порядок</button></div>
+    <div class="cour-cards">${rows.map(p=>{
     const ph=phoneStored(p.phone);
     return `<div class="cour-card" data-card="${p.id}">
       <div class="cc-head" data-toggle="${p.id}">
@@ -325,7 +342,7 @@ function drawCourierPickupCards(el,rows){
           ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}</div>`:''}
           ${(p.give_packets||p.give_invoices)?`<div class="cc-give">${p.give_packets?'<span class="cc-give-tag">📦 Пакеты для партнёра</span>':''}${p.give_invoices?'<span class="cc-give-tag">📄 Накладные для партнёра</span>':''}</div>`:''}
         </div>
-        <div class="cc-right"><span class="cc-chev">▾</span></div>
+        <div class="cc-right"><span class="cc-grip" data-grip title="Потяните, чтобы переставить">⠿</span><span class="cc-chev">▾</span></div>
       </div>
       <div class="cc-statusrow">
         <select class="status-pick" data-pstatus="${p.id}" style="border-color:${(statusObj(p.status_id)||{}).color||'var(--line)'}">
@@ -345,8 +362,15 @@ function drawCourierPickupCards(el,rows){
     </div>`;}).join('')}</div>`;
   el.querySelectorAll('[data-toggle]').forEach(h=>h.onclick=e=>{
     if(e.target.closest('a'))return;
+    // После перетаскивания палец отрывается над карточкой, и обычный тап раскрыл бы её
+    // прямо в момент, когда человек только что закончил двигать. Поэтому короткое окно
+    // после перетаскивания тапы не считаются (см. _ccJustDragged).
+    if(e.target.closest('.cc-grip'))return;
+    if(nowMs()-_ccJustDragged<400)return;
     h.closest('.cour-card').classList.toggle('open');
   });
+  if($('ccReset'))$('ccReset').onclick=()=>{ccOrderClear();toast('Порядок сброшен');drawPickups();};
+  bindCourierCardDrag(el.querySelector('.cour-cards'));
   el.querySelectorAll('[data-gis]').forEach(a=>a.onclick=e=>{e.preventDefault();e.stopPropagation();open2gis(a.dataset.gis);});
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=e=>{e.stopPropagation();pickupModal(b.dataset.pview,true);});
   el.querySelectorAll('[data-pgen]').forEach(b=>b.onclick=e=>{e.stopPropagation();
@@ -365,6 +389,137 @@ function drawCourierPickupCards(el,rows){
     inp.onblur=commit;inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
   });
 }
+/* ============ ПОРЯДОК ЗАЯВОК У КУРЬЕРА: ЗАЖАЛ И ПОТАЩИЛ (19.10.2026) ============
+   Просьба владельца: «в курьерском кабинете сделай возможность заявки менять местами —
+   на заявку пальцем зажал и потащил вверх или вниз».
+
+   ПОРЯДОК ЛЕЖИТ В localStorage, А НЕ В БАЗЕ. Список у курьера дневной (`visiblePickups`
+   отдаёт только сегодняшние), телефон у него один, а колонка в базе означала бы ещё один
+   SQL, без которого перетаскивание молча не работало бы вовсе. Ключ — свой на человека и
+   на день; вчерашние ключи стираются при первом же сохранении, иначе они копились бы.
+
+   ЖЕСТ ДВА РАЗНЫХ, И ЭТО НАМЕРЕННО. За ручку «⠿» карточка берётся сразу, за саму
+   карточку — только после удержания (`CC_HOLD_MS`). Иначе перетаскивание отбирало бы у
+   списка обычную прокрутку: пальцем по карточкам листают чаще, чем переставляют.
+
+   КАРТОЧКУ НЕ ТАЩИМ ТРАНСФОРМОМ, А ПЕРЕСТАВЛЯЕМ В DOM. Карточки разной высоты —
+   раскрытая втрое выше свёрнутой, — и вычислять середины вручную пришлось бы по живым
+   размерам на каждом движении. `elementFromPoint` отвечает на это сам; у поднятой карточки
+   на время перетаскивания выключены указатели (`pointer-events:none` в CSS), иначе она
+   находила бы под пальцем саму себя. */
+const CC_HOLD_MS=320;       // сколько держать палец на карточке, чтобы она поднялась
+const CC_MOVE_CANCEL=10;    // сдвинулся раньше — это прокрутка, а не перетаскивание
+const CC_EDGE=90;           // у края экрана список подкручивается сам
+const CC_SCROLL_STEP=12;
+let _ccDrag=null;           // идёт перетаскивание
+let _ccJustDragged=0;       // когда закончили — чтобы тап не раскрыл карточку следом
+let _ccOrder=null, _ccOrderKey='';
+const ccKey=()=>'courPickupOrder:'+((S.me&&S.me.id)||'-')+':'+localToday();
+// Читаем лениво и перечитываем при смене дня: ключ дневной, а вкладка может висеть сутки.
+function ccOrder(){
+  const k=ccKey();
+  if(_ccOrderKey!==k){
+    _ccOrderKey=k;
+    try{const raw=localStorage.getItem(k);const v=raw?JSON.parse(raw):null;_ccOrder=Array.isArray(v)?v:null;}
+    catch(e){_ccOrder=null;}
+  }
+  return _ccOrder;
+}
+function ccOrderSave(ids){
+  _ccOrderKey=ccKey();_ccOrder=ids;
+  try{
+    localStorage.setItem(_ccOrderKey,JSON.stringify(ids));
+    const pref='courPickupOrder:'+((S.me&&S.me.id)||'-')+':';
+    for(let i=localStorage.length-1;i>=0;i--){
+      const k=localStorage.key(i);
+      if(k&&k.indexOf(pref)===0&&k!==_ccOrderKey)localStorage.removeItem(k);
+    }
+  }catch(e){}
+}
+function ccOrderClear(){_ccOrderKey=ccKey();_ccOrder=null;try{localStorage.removeItem(_ccOrderKey);}catch(e){}}
+
+function bindCourierCardDrag(box){
+  if(!box)return;
+  let hold=null, startY=0, startX=0, cand=null, autoTimer=null, lastY=0;
+  // Кнопки, поля и ссылки внутри карточки живут своей жизнью: статус, количество, телефон,
+  // 2ГИС. Удержание на них перетаскивание не начинает — иначе не выбрать статус.
+  const interactive=t=>!!(t&&t.closest&&t.closest('button,select,input,textarea,a'));
+  const cardOf=t=>(t&&t.closest)?t.closest('.cour-card'):null;
+
+  const autoScroll=()=>{
+    if(!_ccDrag)return;
+    const dir=lastY<CC_EDGE?-1:(lastY>window.innerHeight-CC_EDGE?1:0);
+    if(dir)window.scrollBy(0,dir*CC_SCROLL_STEP);
+  };
+  const begin=card=>{
+    _ccDrag={card};
+    card.classList.add('cc-drag');
+    box.classList.add('cc-dragging');
+    // Короткая вибрация — единственный способ сказать «взял» на телефоне: пальцем
+    // карточку не видно, она под ним.
+    if(navigator.vibrate){try{navigator.vibrate(25);}catch(e){}}
+    autoTimer=setInterval(autoScroll,16);
+  };
+  const moveOver=(x,y)=>{
+    if(!_ccDrag)return;
+    lastY=y;
+    const over=cardOf(document.elementFromPoint(x,y));
+    if(!over||over===_ccDrag.card||over.parentNode!==box)return;
+    const r=over.getBoundingClientRect();
+    box.insertBefore(_ccDrag.card, y<r.top+r.height/2?over:over.nextSibling);
+  };
+  const finish=()=>{
+    if(hold){clearTimeout(hold);hold=null;}
+    if(autoTimer){clearInterval(autoTimer);autoTimer=null;}
+    cand=null;
+    if(!_ccDrag)return;
+    const card=_ccDrag.card;_ccDrag=null;
+    card.classList.remove('cc-drag');box.classList.remove('cc-dragging');
+    _ccJustDragged=nowMs();
+    const ids=[...box.querySelectorAll('.cour-card')].map(c=>c.dataset.card);
+    ccOrderSave(ids);
+    const rst=$('ccReset');if(rst)rst.hidden=false;
+    toast('Порядок сохранён — он держится до конца дня');
+  };
+
+  box.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1)return;
+    const t=e.touches[0];const card=cardOf(e.target);
+    if(!card)return;
+    startX=t.clientX;startY=lastY=t.clientY;
+    // За ручку берём сразу, за карточку — после удержания.
+    if(e.target.closest('.cc-grip')){begin(card);return;}
+    if(interactive(e.target))return;
+    cand=card;
+    hold=setTimeout(()=>{hold=null;if(cand)begin(cand);},CC_HOLD_MS);
+  },{passive:true});
+
+  // passive:false обязателен: пока карточка поднята, прокрутку страницы надо ОТМЕНЯТЬ,
+  // иначе список едет вместе с пальцем и попасть в нужное место невозможно.
+  box.addEventListener('touchmove',e=>{
+    const t=e.touches[0];if(!t)return;
+    if(_ccDrag){e.preventDefault();moveOver(t.clientX,t.clientY);return;}
+    // Палец поехал раньше, чем карточка поднялась — значит человек листает список.
+    if(hold&&(Math.abs(t.clientY-startY)>CC_MOVE_CANCEL||Math.abs(t.clientX-startX)>CC_MOVE_CANCEL)){
+      clearTimeout(hold);hold=null;cand=null;
+    }
+  },{passive:false});
+
+  box.addEventListener('touchend',finish);
+  box.addEventListener('touchcancel',finish);
+
+  // Мышью — только за ручку: на компьютере у курьера те же карточки, и удержание там
+  // ничего не даёт, зато мешало бы выделять текст.
+  box.addEventListener('mousedown',e=>{
+    if(e.button!==0||!e.target.closest('.cc-grip'))return;
+    const card=cardOf(e.target);if(!card)return;
+    e.preventDefault();begin(card);
+    const mm=ev=>moveOver(ev.clientX,ev.clientY);
+    const mu=()=>{document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);finish();};
+    document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
+  });
+}
+
 async function setPickupStatus(id,statusId){
   const p=S.pickups.find(x=>x.id===id);if(!p||p.status_id===statusId)return;
   const at=new Date().toISOString();
