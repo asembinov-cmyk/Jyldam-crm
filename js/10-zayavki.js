@@ -153,28 +153,28 @@ function filteredPickups(){
     if(q){const hay=[p.name,phoneDisplay(p.phone),cityName(p.city_id),districtName(p.district_id),courierName(p.courier_id),p.address].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   });
-  // СВОЙ ПОРЯДОК, выставленный пальцем, главнее всего остального: это последнее, что
-  // человек сделал руками, и спорить с ним автоматике незачем (маршрут по близости —
-  // только подсказка). Заявки, которых в сохранённом порядке нет (пришли позже),
-  // уходят в КОНЕЦ: подставлять их в середину чужого маршрута нельзя.
-  if(isCourier()&&ccOrder()&&ccOrder().length){
-    const ord=ccOrder();
+  // ── ПОРЯДОК У КУРЬЕРА: СНАЧАЛА СТАТУС, ВНУТРИ СТАТУСА — СВОЙ ПОРЯДОК ──────────
+  // Просьба владельца (19.10.2026): «отмена в самом низу, потом забрал посылки, потом
+  // новая, а в самом верху в пути». Это РАЗБИВКА ПО ГРУППАМ, и она главнее ручного
+  // порядка: иначе отменённая заявка, один раз перетащенная наверх, осталась бы там
+  // навсегда — а просили ровно обратного, чтобы она уходила вниз сама.
+  //
+  // СЛЕДСТВИЕ, О КОТОРОМ ВЛАДЕЛЬЦУ СКАЗАНО: перетащить карточку из одной группы в
+  // другую не получится — при следующей отрисовке она вернётся в свою. Внутри группы
+  // ручной порядок работает полностью.
+  if(isCourier()){
+    const ord=(ccOrder()&&ccOrder().length)?ccOrder():null;
+    // Внутри группы: сначала свой порядок, если он есть; иначе маршрут по близости;
+    // иначе — как пришло (сортировка устойчивая, поэтому ноль сохраняет исходный ряд).
+    const pos=p=>{
+      if(ord){const i=ord.indexOf(p.id);return i===-1?1e6:i;}        // новые — в конец группы
+      if(_courierRouteOrder){const i=_courierRouteOrder.indexOf(p.id);return i===-1?1e6:i;}
+      return 0;
+    };
     return rows.sort((a,b)=>{
-      const ia=ord.indexOf(a.id),ib=ord.indexOf(b.id);
-      if(ia===-1&&ib===-1)return 0;
-      if(ia===-1)return 1;
-      if(ib===-1)return -1;
-      return ia-ib;
-    });
-  }
-  // если курьер построил маршрут по близости — сортируем строго по нему (ближайшее сверху)
-  if(isCourier()&&_courierRouteOrder){
-    return rows.sort((a,b)=>{
-      const ia=_courierRouteOrder.indexOf(a.id),ib=_courierRouteOrder.indexOf(b.id);
-      if(ia===-1&&ib===-1)return 0;
-      if(ia===-1)return 1; // без координат — в конец
-      if(ib===-1)return -1;
-      return ia-ib;
+      const ra=pickupStatusRank(a.status_id),rb=pickupStatusRank(b.status_id);
+      if(ra!==rb)return ra-rb;
+      return pos(a)-pos(b);
     });
   }
   return rows.sort((a,b)=>{
@@ -537,6 +537,10 @@ function bindCourierCardDrag(box){
     const ids=[...box.querySelectorAll('.cour-card')].map(c=>c.dataset.card);
     ccOrderSave(ids);
     toast('Порядок сохранён — он держится до конца дня');
+    // Перерисовываем: карточку могли перенести в чужую группу статусов, и список должен
+    // сразу показать, как он теперь выглядит на самом деле. Без этого правда всплывала бы
+    // только при следующей перерисовке — человек ушёл бы с экрана, уверенный в другом.
+    drawPickups();
   };
 
   box.addEventListener('touchstart',e=>{

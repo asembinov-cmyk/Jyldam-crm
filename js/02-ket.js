@@ -881,6 +881,28 @@ function cityPill(cityId){
 const statusObj=id=>S.statuses.find(s=>s.id===id)||null;
 // статус означает «собрано/забрано»: по слову в названии
 function isCollectedStatus(id){const s=statusObj(id);if(!s)return false;return /забра|забро|собра|готов/i.test(s.name||'');}
+/* ПОРЯДОК ЗАЯВОК ПО СТАТУСУ (19.10.2026). Просьба владельца: «отмена в самом низу, потом
+   забрал посылки, потом новая, а в самом верху в пути».
+
+   Узнаём статус ПО НАЗВАНИЮ, а не по id: справочник статусов ведут руками в «Настройках»,
+   id там у каждого проекта свои, а названия люди пишут понятные. Тот же приём, что в
+   `isCollectedStatus` выше и в фильтре типов доставки.
+
+   НЕИЗВЕСТНЫЙ СТАТУС встаёт в середину (2), а не наверх и не вниз: заведут завтра
+   «Перенесено на завтра» — и оно не должно ни прыгнуть на первое место, ни уехать к
+   отменённым. Наверх и вниз попадают только те, про кого сказано явно. */
+const PICKUP_STATUS_RANK=[
+  [/в\s*пут|в\s*дорог|еду|выехал|выезжа/i, 0],   // самое срочное — сверху
+  [/нова|новый|создан/i,                   1],
+  [/забра|забро|собра|получ/i,             3],
+  [/отмен|отказ|аннул/i,                   4],   // в самый низ
+];
+function pickupStatusRank(id){
+  const nm=((statusObj(id)||{}).name||'').trim();
+  if(!nm)return 2;                                  // статус не выбран — туда же, в середину
+  for(const [re,rank] of PICKUP_STATUS_RANK)if(re.test(nm))return rank;
+  return 2;
+}
 const isCourierDelivery=id=>{const d=S.delivery.find(x=>x.id===id);return d?/курьер/i.test(d.name):false;};
 function statusBadge(id){const s=statusObj(id);if(!s)return '<span style="color:var(--muted)">—</span>';
   return `<span class="pill" style="color:${s.color};background:${s.color}1a;border-color:${s.color}55">${esc(s.name)}</span>`;}
