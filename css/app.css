@@ -1827,6 +1827,9 @@ td .ft-dot{margin:0 0 0 8px}
   .content.has-pager .panel:last-of-type{margin-bottom:96px}
   /* Тост вылезал ровно под плавающей панелью — поднимаем над ней. */
   body.has-pager-panel .toast,.content.has-pager ~ .toast{bottom:104px}
+  /* Варианты отделений под полем адреса — пальцем по 11-му шрифту не попасть.
+     Не 44 px: это не главное действие, а запасные варианты рядом с подставленным. */
+  .idx-info .link-btn{min-height:32px;font-size:13px;padding:4px 2px}
   /* Кнопки модалки: в один ряд они жмутся, «Сохранить» — главное действие. */
   .modal-foot{flex-wrap:wrap}
   .modal-foot .btn{flex:1 1 auto;justify-content:center}

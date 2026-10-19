@@ -2316,7 +2316,7 @@ function orderModal(id,readonly){
            складе, — и молча решать его за человека нельзя. -->
       <div class="field"><label>Тип доставки <span style="color:var(--rust)">*</span></label><select id="o_delivery" ${dis}>${d.delivery_id?'':'<option value="">—</option>'}${S.delivery.filter(x=>/курьер|почт/i.test(x.name||'')).map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
-      <div class="field full"><label>Адрес получателя</label><input id="o_address" value="${esc(d.address)}" ${dis}></div>
+      <div class="field full"><label>Адрес получателя</label><input id="o_address" value="${esc(d.address)}" ${dis}><div id="o_addr_info" class="idx-info"></div></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Вес (кг)</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint" id="o_weight_hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
@@ -2540,7 +2540,23 @@ function orderModal(id,readonly){
   // Карточку открыли заново — забываем, что подставляли в прошлой: иначе адрес, вписанный
   // автоматом в соседнем заказе, здесь сочли бы «нашим» и затёрли.
   if(typeof _kpAutoAddr!=='undefined')_kpAutoAddr='';
+  if(typeof _kpAutoIndex!=='undefined')_kpAutoIndex='';
+  if(typeof _kpPickedIndex!=='undefined')_kpPickedIndex='';
   if(oIndexEl&&oIndexEl.value)kpIndexHint(oIndexEl.value);   // и при открытии карточки
+  /* ОБРАТНАЯ СТОРОНА: вписали адрес — предложим индекс (просьба владельца 19.10.2026,
+     раздел 6f). Ждём 400 мс после последней буквы: адрес набирают посимвольно, а на каждой
+     букве перебирать полторы тысячи названий незачем. Рисует подсказку `kpAddrHint`
+     в `#o_addr_info`, подставляет индекс только в ПУСТОЕ поле или в свою же подстановку. */
+  const oAddrEl=$('o_address');
+  if(oAddrEl&&typeof kpAddrHint==='function'){
+    let addrT=null;
+    oAddrEl.addEventListener('input',()=>{
+      clearTimeout(addrT);
+      addrT=setTimeout(()=>kpAddrHint(oAddrEl.value),400);
+    });
+    // И при открытии карточки: заказ из реестра приходит с адресом, но бывает без индекса.
+    if(oAddrEl.value&&oIndexEl&&!oIndexEl.value)kpAddrHint(oAddrEl.value);
+  }
   if($('o_kazpost_btn'))$('o_kazpost_btn').onclick=async()=>{
     const btn=$('o_kazpost_btn');btn.disabled=true;btn.textContent='⏳ Получаем…';
     try{

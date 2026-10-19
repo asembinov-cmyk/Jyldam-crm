@@ -631,7 +631,10 @@ function kpOfficeAddress(r){
   const rBare=(r.r||'').replace(/\s*район\s*/i,'').trim().toLowerCase();
   const rayon=(r.r&&!inCity&&rBare!==String(r.c||'').trim().toLowerCase())?r.r:'';
   const obl=(r.o&&r.o!==r.c)?r.o:'';
-  return [city,rayon,obl,r.a].filter(Boolean).join(', ');
+  // В реестре Казпочты у 43 отделений в адресе подчёркивания вместо пробелов
+  // («Кенесары_хан_65А») — в адрес заказа это попадать не должно.
+  const a=String(r.a||'').replace(/_+/g,' ').replace(/\s+/g,' ').trim();
+  return [city,rayon,obl,a].filter(Boolean).join(', ');
 }
 /* Что CRM сама вписала в адрес в прошлый раз. Нужно, чтобы поправленный индекс обновил
    адрес, а НАБРАННЫЙ РУКАМИ адрес остался нетронутым: если в поле лежит ровно наша прошлая
@@ -740,6 +743,183 @@ async function kpIndexHint(code){
     if(box)box.innerHTML='';
     toast('Адрес отделения подставлен');
   };
+}
+
+/* ---------- ОБРАТНАЯ СТОРОНА: АДРЕС → ИНДЕКС (19.10.2026) ----------
+   Просьба владельца: «в Заполнении сделай в обратную сторону: если почтовый заказ и на фото
+   индекса нет, чисто адрес, — когда вписываешь адрес, он предлагает автоматом индекс этого
+   адреса».
+
+   У КАЗПОЧТЫ ОБРАТНОГО ПОИСКА НЕТ ВООБЩЕ: в их SOAP восемнадцать методов, и ни один не
+   ищет по адресу (`SearchCity2` принимает только НАЗВАНИЕ отделения — раздел 6f). Поэтому
+   считаем по тому же офлайн-справочнику `assets/kazpost-index.json`, что и прямое
+   направление, — другого источника у нас нет.
+
+   ЧТО МЫ ЗНАЕМ, А ЧЕГО НЕТ. В справочнике лежат отделения: индекс и адрес САМОГО отделения.
+   Какая улица к какому отделению приписана — не знает никто, кроме Казпочты. Значит:
+
+   | В населённом пункте | Что делаем |
+   |---|---|
+   | одно отделение (1224 из 1496) | индекс однозначен — подставляем сам |
+   | 2–8 отделений (261) | подставляем ГЛАВНОЕ, и прямо пишем, что в городе их N |
+   | больше 8 (11 городов) | НЕ подставляем: в Алматы 46 отделений, индекс зависит от улицы |
+
+   То есть на 1485 населённых пунктах из 1496 вопрос закрыт, а в одиннадцати больших городах
+   мы честно говорим, что угадать нельзя, и предлагаем выбрать из списка.
+
+   ГЛАВНОЕ ОТДЕЛЕНИЕ — ЭТО ИНДЕКС С НУЛЯМИ НА КОНЦЕ: Балхаш 100300, Шиели 120700, Жанаозен
+   130200, Алтай 070800. Проверено на данных — сходится везде. Посылку в небольшой город
+   ведёт именно оно, а дальше её разбирают на месте.
+
+   НАСТОЯЩИЕ ИНДЕКСЫ НАЧИНАЮТСЯ С 01–16. В реестре Казпочты есть ещё полторы сотни
+   внутренних номеров вида `8xxxxx`/`9xxxxx` (у Алматы их набиралось 168 против 46 настоящих).
+   Набрать такой человек не может, а подставить его мы были обязаны не уметь — отсюда
+   `KP_REAL_INDEX`. */
+const KP_REAL_INDEX=/^(0[1-9]|1[0-6])\d{4}$/;
+const KP_AUTO_MAX=8;              // сколько отделений в городе ещё позволяют подставить главное
+// Слова-указатели перед названием: «г. Балхаш», «с. Шортанды», «аул Акжар». Нужны, чтобы
+// отличить населённый пункт от улицы с тем же именем — «Абая 50» в Алматы это улица, а
+// «г. Абай» в Карагандинской области город.
+const KP_MARKERS=/^(г|гор|город|қ|с|село|п|пос|поселок|пгт|ст|станция|аул|а)$/;
+/* А ЭТО ЗАПРЕТ, И ОН ВАЖНЕЕ РАЗРЕШЕНИЯ. «проспект Достык 12» — это улица, но Достык ещё и
+   посёлок (их семь в разных областях), и первая версия молча подставила 040212. Улица с
+   названием города — обычное дело: Достык, Абай, Сатпаев, Тараз. Поэтому слово-указатель
+   улицы ПЕРЕД названием отменяет совпадение целиком. Пусть лучше CRM скажет «не нашли», чем
+   отправит посылку в чужую область. */
+const KP_STREET=/^(ул|улица|уч|пр|просп|проспект|пр-т|мкр|микрорайон|д|дом|кв|шоссе|пер|переулок|бульвар|б-р|тупик|квартал|проезд|тракт|жм|жилой)$/;
+/* Сокращения областей из реестров: «ВКО г Алтай» — область названа, но слова
+   «Восточно-Казахстанская» в адресе нет, и одноимённые сёла не развести. */
+const KP_OBL_ABBR={вко:'восточно',зко:'западно',ско:'северно',юко:'южно', казо:'казахстан',
+  кзо:'кызылорд',акм:'акмолин',актоб:'актюбин',карагандинская:'караганд'};
+function kpNorm(s){
+  return String(s||'').toLowerCase().replace(/ё/g,'е')
+    .replace(/[^a-zа-я0-9-]+/g,' ').replace(/\s+/g,' ').trim();
+}
+let _kpCities=null;
+function kpCities(tbl){
+  if(_kpCities)return _kpCities;
+  _kpCities={};
+  for(const k in tbl){
+    if(!KP_REAL_INDEX.test(k))continue;
+    const n=kpNorm(tbl[k].c); if(!n)continue;
+    (_kpCities[n]||(_kpCities[n]=[])).push(k);
+  }
+  return _kpCities;
+}
+// Сколько нулей на конце — столько «главности» у отделения (см. выше).
+const kpTailZeros=k=>k.length-k.replace(/0+$/,'').length;
+// Область названа в адресе? Нужно, когда одно и то же название есть в нескольких областях
+// (таких 169). Сверяем по началу первого слова: «Кызылординская» ⊃ «кызылорд».
+function kpRegionHit(norm,o){
+  const w=kpNorm(o).split(' ')[0]; if(!w||w.length<5)return false;
+  const stem=w.slice(0,7);
+  const toks=norm.split(' ');
+  if(toks.some(t=>t.indexOf(stem)===0||(stem.indexOf(t)===0&&t.length>=6)))return true;
+  // «ВКО», «ЗКО» — область названа сокращением, полного слова в адресе нет.
+  return toks.some(t=>KP_OBL_ABBR[t]&&w.indexOf(KP_OBL_ABBR[t])===0);
+}
+/* Найти населённый пункт в тексте адреса. Берём САМОЕ ДЛИННОЕ совпадение («им. Бауыржан
+   Момышулы», а не «Бауыржан»), при равенстве — то, перед которым стоит «г.»/«с.», при
+   равенстве — то, что встретилось раньше: адрес пишут от области к улице, и название
+   города стоит до названия улицы. */
+function kpAddrMatch(tbl,addr){
+  const norm=kpNorm(addr);
+  if(norm.length<4)return null;
+  const map=kpCities(tbl), w=norm.split(' ');
+  let best=null;
+  for(let i=0;i<w.length;i++){
+    for(let len=Math.min(4,w.length-i);len>=1;len--){
+      const name=w.slice(i,i+len).join(' ');
+      if(!map[name])continue;
+      if(i>0&&KP_STREET.test(w[i-1]))break;        // «проспект Достык» — это улица, а не посёлок
+      const cand={name,at:i,len,mark:(i>0&&KP_MARKERS.test(w[i-1]))?1:0,codes:map[name]};
+      if(!best||cand.len>best.len||(cand.len===best.len&&(cand.mark>best.mark
+        ||(cand.mark===best.mark&&cand.at<best.at))))best=cand;
+      break;                       // с этой позиции длиннее уже не будет
+    }
+  }
+  if(!best)return null;
+  let codes=best.codes.slice();
+  // Одноимённые в разных областях разводим по области, если она в адресе названа.
+  if(codes.length>1){
+    const nar=codes.filter(k=>kpRegionHit(norm,tbl[k].o));
+    if(nar.length)codes=nar;
+  }
+  // В большом городе единственная зацепка — улица отделения. Совпала с улицей в адресе —
+  // это отделение и предлагаем первым: почта обслуживает свою округу.
+  const street=codes.filter(k=>{
+    const st=kpNorm(tbl[k].a).split(' ').filter(x=>x.length>5);
+    return st.some(x=>w.some(t=>t.length>5&&(t.indexOf(x.slice(0,6))===0||x.indexOf(t.slice(0,6))===0)));
+  });
+  codes.sort((a,b)=>kpTailZeros(b)-kpTailZeros(a)||a.localeCompare(b));
+  return {name:best.name,codes,street,rec:tbl[codes[0]]};
+}
+/* Что CRM сама подставила в индекс. Как и `_kpAutoAddr`, нужно ровно для одного: правка
+   адреса должна обновить НАШ индекс и не трогать набранный руками. */
+let _kpAutoIndex='', _kpPickedIndex='';
+async function kpAddrHint(addr){
+  const box=$('o_addr_info'); if(!box)return;
+  const el=$('o_index');
+  // Индекса нет у курьерского заказа вовсе, а в чужой набранный индекс не лезем.
+  if(!el||el.disabled){box.innerHTML='';return;}
+  const cur=(el.value||'').replace(/\D/g,'');
+  if(cur&&cur!==_kpAutoIndex){box.innerHTML='';return;}
+  if(kpNorm(addr).length<4){box.innerHTML='';return;}
+  const tbl=await kpIndexTable();
+  // Пока грузилось, адрес могли дописать — ответ старого запроса выбрасываем.
+  if(kpNorm(($('o_address')||{}).value||'')!==kpNorm(addr))return;
+  const m=kpAddrMatch(tbl,addr);
+  if(!m){
+    box.innerHTML='<span class="idx-type">населённый пункт в справочнике Казпочты не нашли —'
+      +' индекс впишите с бланка</span>';
+    return;
+  }
+  const put=(code,why)=>{
+    el.value=code;_kpAutoIndex=code;
+    el.style.borderColor='';
+    el.dispatchEvent(new Event('input',{bubbles:true}));   // заодно проверит индекс и продлит захват
+    if(why)toast(why);
+  };
+  const place=[m.rec.ct,m.rec.c].filter(Boolean).join(' ');
+  const pick=(code,label)=>`<button type="button" class="link-btn" data-kpidx="${code}">${esc(code)}${
+    label?' · '+esc(String(label).replace(/_+/g,' ')):''}</button>`;
+  if(m.codes.length<=KP_AUTO_MAX){
+    const onStreet=(m.street[0]&&m.codes.indexOf(m.street[0])>=0)?m.street[0]:'';
+    /* ВЫБРАННОЕ ОТДЕЛЕНИЕ ПЕРЕБИВАЕТ НАШЕ. Нажатие кнопки «100301 · Ленина 7» ставит индекс
+       и перерисовывает подсказку — а перерисовка подставляла главное обратно, и выбор
+       отменялся сам. Поэтому: индекс уже из списка этого населённого пункта — оставляем как
+       есть. Сменили адрес на другой город — индекс в список не попадёт, и подставится новый. */
+    const code=(cur&&m.codes.indexOf(cur)>=0)?cur:(onStreet||m.codes[0]);
+    if(cur!==code)put(code);
+    const others=m.codes.filter(k=>k!==code);
+    /* ПОДПИСЬ НЕ ДОЛЖНА ВРАТЬ. «Подставили главное» верно, только когда у индекса нули на
+       конце; у Сатпаева, например, их нет ни у одного (100697, 101301, 160521), и первая
+       версия всё равно писала «главное» — то есть выдавала «первое по порядку» за решение.
+       Три случая — три разные подписи, и в третьем прямо сказано сверить по улице. */
+    const why=m.codes.length===1 ? 'единственное отделение'
+      : (code===_kpPickedIndex) ? `выбрано вручную, всего отделений ${m.codes.length}`
+      : (onStreet===code) ? `отделение на этой улице, всего в населённом пункте ${m.codes.length}`
+      : kpTailZeros(code) ? `отделений в населённом пункте ${m.codes.length}, подставили главное`
+      : `отделений в населённом пункте ${m.codes.length}, главного среди них нет — сверьте по улице`;
+    box.innerHTML=`<span class="idx-ok">📮 Индекс ${esc(code)} — ${esc(place)}</span>`
+      +`<span class="idx-type">${why}</span>`
+      +others.slice(0,6).map(k=>pick(k,tbl[k].a)).join('');
+  }else{
+    // Одиннадцать больших городов. Подставлять нельзя — и это главное, что здесь надо
+    // сказать вслух: иначе человек решит, что CRM «не сработала», и впишет что попало.
+    const list=[...m.street,...m.codes.filter(k=>m.street.indexOf(k)<0)].slice(0,6);
+    box.innerHTML=`<span class="idx-ok">📮 ${esc(place)} — отделений ${m.codes.length}</span>`
+      +`<span class="idx-type">индекс зависит от улицы, сами не подставляем${
+        m.street.length?' · по улице похоже на первый':''}</span>`
+      +list.map(k=>pick(k,tbl[k].a)).join('');
+  }
+  box.querySelectorAll('[data-kpidx]').forEach(b=>{
+    b.onclick=()=>{
+      _kpPickedIndex=b.dataset.kpidx;        // чтобы подпись не выдавала выбор за нашу догадку
+      put(_kpPickedIndex,'Индекс подставлен');
+      kpAddrHint(($('o_address')||{}).value||'');
+    };
+  });
 }
 
 /* ---------- ФОТО (Supabase Storage) ---------- */
