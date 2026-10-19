@@ -206,3 +206,119 @@ async function runDuplicatesAI(){
     if(box)box.innerHTML='<div class="nf-ai-empty">⚠️ Не удалось выполнить анализ: '+esc(String(e&&e.message||e).slice(0,140))+'</div>';
   }
 }
+
+
+/* ============================================================
+   ДУБЛИ ТРЕК-КОДОВ ЗА ВСЁ ВРЕМЯ (19.10.2026)
+
+   Просьба владельца: «в Барахолке в „Действие" добавь кнопку „Дубль", пусть этот фильтр
+   показывает дубли трек-кода за всё время, за все даты».
+
+   ПОЧЕМУ ОТДЕЛЬНО ОТ СОСЕДНЕГО БЛОКА «Возможные дубли». Тот ищет повторных клиентов по
+   телефону и ФИО среди ЗАГРУЖЕННЫХ в память вкладки заказов (`mainOrders()`), то есть по
+   сегодняшним. Здесь другое и по смыслу, и по способу: один трек на две посылки — это не
+   «похоже на дубль», а точно ошибка, и искать её надо ЗАПРОСОМ К БАЗЕ по всем датам.
+   В памяти вкладки после входа лежат только сегодняшние заказы — там этого не видно вовсе.
+
+   ЧЕМ ЭТО ОПАСНО: у Казпочты трек ведёт посылку. Два заказа с одним треком — это один
+   статус и одна претензия на двоих, вторая посылка исчезает из отслеживания, а в KET трек
+   уходит только при создании заказа и дослать его нечем (раздел 6b).
+
+   ИЩЕМ ПО ВСЕМ ЗАКАЗАМ, А НЕ ТОЛЬКО ПО БАРАХОЛКЕ, хотя кнопка стоит в её меню: уникальность
+   трека в системе ГЛОБАЛЬНАЯ (индексы `db/20`), и самый неприятный случай — когда один трек
+   оказался у барахолочного заказа и у заказа заборов. Раздел у каждой строки подписан.
+
+   ЕСЛИ `db/20` ВЫПОЛНЕН, дублей не будет вовсе: `orders_track_uniq` их просто не пускает.
+   Пустой результат здесь — это «всё чисто», а не «не сработало», и так и написано. */
+const TDUP_PAGE=1000;          // строк в одном запросе
+const TDUP_MAX_GROUPS=200;     // сколько групп показываем
+const tdupKey=t=>String(t||'').trim().toUpperCase();
+
+async function trackDupScan(say){
+  const rows=[], cols='id,code,track,client,phone,sender,partner_id,calc_group,created_at,pickup_date';
+  for(let from=0;;from+=TDUP_PAGE){
+    const {data,error}=await sb.from('orders').select(cols)
+      .not('track','is',null).neq('track','')
+      .order('track',{ascending:true}).order('id',{ascending:true})
+      .range(from,from+TDUP_PAGE-1);
+    if(error)return {error:dbErrText?dbErrText(error):(error.message||'ошибка запроса')};
+    rows.push(...(data||[]));
+    if(say)say(rows.length);
+    if(!data||data.length<TDUP_PAGE)break;
+  }
+  const by={};
+  rows.forEach(o=>{const k=tdupKey(o.track);if(k)(by[k]=by[k]||[]).push(o);});
+  const groups=Object.keys(by).filter(k=>by[k].length>1).map(k=>({track:k,orders:by[k]}));
+  // Сначала самые многочисленные: три заказа на один трек хуже двух.
+  groups.sort((a,b)=>b.orders.length-a.orders.length||a.track.localeCompare(b.track));
+  return {groups,scanned:rows.length};
+}
+
+/* Карточку открываем ПО ЗАГРУЖЕННОМУ заказу. `orderModal(id)` ищет заказ в `S.orders`, а
+   не найдя — открывает форму НОВОГО заказа с новым номером. Здесь заказы за все даты, и в
+   памяти вкладки их обычно нет, поэтому недостающий сначала догружаем. */
+async function tdupOpenOrder(id){
+  if(!(S.orders||[]).some(o=>o.id===id)){
+    const {data,error}=await sb.from('orders').select('*').eq('id',id).maybeSingle();
+    if(error||!data){toast('Не удалось открыть заказ');return;}
+    S.orders.push(data);
+  }
+  orderModal(id,!can('orders','edit'));
+}
+
+async function trackDupModal(){
+  showInfo('🔁 Дубли трек-кодов','<div id="tdupBox" class="hint" style="line-height:1.6">'
+    +'Проверяем все заказы за все даты…</div>');
+  const res=await trackDupScan(n=>{const b=$('tdupBox');if(b)b.textContent=`Проверяем… прочитано заказов с треком: ${n}`;});
+  const box=$('tdupBox');
+  if(!box)return;                                    // окно закрыли, пока считали
+  if(res.error){
+    box.innerHTML=`<b style="color:var(--rust)">Не удалось прочитать заказы</b><br>${esc(res.error)}`;
+    return;
+  }
+  const {groups,scanned}=res;
+  const dupOrders=groups.reduce((n,g)=>n+g.orders.length,0);
+  const head=`<div style="margin-bottom:10px">Проверено заказов с треком: <b>${scanned}</b> (все даты)`
+    +` · треков с повтором: <b>${groups.length}</b> · заказов в них: <b>${dupOrders}</b></div>`;
+  if(!groups.length){
+    box.innerHTML=head+'<div class="empty" style="padding:20px"><div class="big">✅ Дублей нет</div>'
+      +'Ни один трек-код не стоит у двух заказов.</div>';
+    return;
+  }
+  const partnerOf=o=>{
+    const p=o.partner_id&&(S.partners||[]).find(x=>x.id===o.partner_id);
+    return (p&&p.name)||o.sender||'—';
+  };
+  const rowsHtml=groups.slice(0,TDUP_MAX_GROUPS).map(g=>{
+    const items=g.orders.map(o=>`<div data-tdup="${esc(o.id)}" title="Открыть карточку заказа"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;cursor:pointer">
+        <b>${esc(o.code||String(o.id).slice(0,8))}</b>
+        <span>${esc(o.client||'—')}</span>
+        <span class="wh-cat">${esc(partnerOf(o))}</span>
+        <span class="wh-cat">${esc(fmtDate(o.pickup_date||o.created_at))}</span>
+        <span class="wh-cat">${o.calc_group==='baraholka'?'Барахолка':'Заказы заборов'}</span>
+      </div>`).join('');
+    return `<div class="nf-issue nf-i-crit" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="nf-i-ico">🔴</div>
+        <div class="nf-i-body"><div class="nf-i-title">${esc(g.track)} — заказов ${g.orders.length}</div></div>
+      </div>
+      <div style="display:grid;gap:4px;padding-left:34px">${items}</div>
+    </div>`;
+  }).join('');
+  box.innerHTML=head
+    +'<div style="margin-bottom:10px"><button type="button" class="btn sm" id="tdupCopy">📋 Скопировать список</button></div>'
+    +rowsHtml
+    +(groups.length>TDUP_MAX_GROUPS?`<div class="hint" style="margin-top:10px">Показаны первые ${TDUP_MAX_GROUPS} из ${groups.length} — остальные в скопированном списке.</div>`:'');
+  box.querySelectorAll('[data-tdup]').forEach(el=>{
+    el.onclick=()=>tdupOpenOrder(el.dataset.tdup);
+  });
+  // Список копируем ЦЕЛИКОМ, а не только показанные группы: его отправляют партнёру или
+  // разбирают в таблице, и обрезанный там хуже отсутствующего.
+  if($('tdupCopy'))$('tdupCopy').onclick=()=>{
+    const txt=groups.map(g=>g.track+'\n'+g.orders.map(o=>
+      `  ${o.code||o.id} · ${o.client||'—'} · ${partnerOf(o)} · ${fmtDate(o.pickup_date||o.created_at)}`
+      +` · ${o.calc_group==='baraholka'?'Барахолка':'заборы'}`).join('\n')).join('\n\n');
+    copyText(txt);
+  };
+}

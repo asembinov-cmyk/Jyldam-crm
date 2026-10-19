@@ -609,6 +609,7 @@ function renderOrders(mode){
         ${(isStaff()||can('orders','delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
           <span class="act-menu" id="ordersActMenu" style="display:none">
             ${isStaff()&&typeof WA_BUTTONS!=='undefined'?WA_BUTTONS.map(b=>`<button type="button" class="act-item" data-wabtn="${esc(b[0])}">${esc(b[1])}</button>`).join(''):''}
+            ${(isStaff()&&bar)?'<button type="button" class="act-item" id="ordersTrackDup">🔁 Дубль — повторы трек-кода</button>':''}
             ${can('orders','delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
           </span></span>`:''}
         <div class="filters filters-dates" style="padding:0;margin:0">
@@ -679,6 +680,14 @@ function renderOrders(mode){
       if(typeof waNotifySelection==='function')waNotifySelection(b.dataset.wabtn);
     };
   });
+  /* «Дубль» — повторы трек-кода ПО ВСЕМ ЗАКАЗАМ И ЗА ВСЕ ДАТЫ (просьба владельца
+     19.10.2026). Галочки ему не нужны: ищет запросом к базе, а не по отмеченным и не по
+     памяти вкладки — там после входа лежат только сегодняшние заказы. Сам поиск в
+     js/14-poisk-dublei.js, там же объяснено, почему он отдельно от блока «Возможные дубли». */
+  if($('ordersTrackDup'))$('ordersTrackDup').onclick=()=>{
+    if(actMenu)actMenu.style.display='none';
+    if(typeof trackDupModal==='function')trackDupModal();
+  };
   // удаление отмеченных галочками заказов
   if($('ordersDelSel'))$('ordersDelSel').onclick=async()=>{
     const ids=[...ketSelected];
