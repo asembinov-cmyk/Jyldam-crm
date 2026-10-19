@@ -98,9 +98,16 @@ def main():
         return s
 
     by_index = {}
+    skipped = 0
     for r in seen.values():
         idx = re.sub(r"\D", "", r["PstIndex"])
         if len(idx) != 6: continue
+        # В реестре есть мусорная запись: индекс 123456, адрес главпочтамта Алматы и ПУСТАЯ
+        # область. На пробный индекс CRM показывала бы «г. Алматы» как ни в чём не бывало,
+        # поэтому записи без области выбрасываем — у настоящих отделений она заполнена всегда
+        # (проверено: такая запись ровно одна на 3676).
+        if not r["States"].strip():
+            skipped += 1; continue
         cur = by_index.get(idx)
         if cur is None or score(r) > score(cur["_src"]):
             ct, city = split_city(r["City"])
@@ -118,6 +125,7 @@ def main():
     out = Path("assets/kazpost-index.json")
     out.write_text(json.dumps({"n": len(by_index), "i": by_index}, ensure_ascii=False,
                               separators=(",", ":")), encoding="utf-8")
-    print(f"\n{out}: индексов {len(by_index)}, {out.stat().st_size//1024} КБ")
+    print(f"\n{out}: индексов {len(by_index)}, {out.stat().st_size//1024} КБ"
+          + (f" · выброшено записей без области: {skipped}" if skipped else ""))
 
 main()

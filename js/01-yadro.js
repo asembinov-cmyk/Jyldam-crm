@@ -604,7 +604,7 @@ let _kpIdx=null, _kpIdxWait=null;
 function kpIndexTable(){
   if(_kpIdx)return Promise.resolve(_kpIdx);
   if(_kpIdxWait)return _kpIdxWait;
-  _kpIdxWait=fetch('assets/kazpost-index.json?v=0770e7f7')
+  _kpIdxWait=fetch('assets/kazpost-index.json?v=5c674e0b')
     .then(r=>r.ok?r.json():null)
     .then(j=>{_kpIdx=(j&&j.i)||{};return _kpIdx;})
     .catch(e=>{console.warn('справочник индексов',e);_kpIdx={};return _kpIdx;});
@@ -624,7 +624,12 @@ function kpOfficeAddress(r){
   if(!r)return '';
   const city=[r.ct,r.c].filter(Boolean).join(' ');
   const inCity=(r.ct==='г.')||(r.o&&r.o===r.c);   // город или город-область (Астана, Алматы)
-  const rayon=(r.r&&!inCity&&r.c&&r.r.indexOf(r.c)===-1)?r.r:'';
+  /* Район у села нужен, но не всякий: «Жанаозен район» и «Тараз район» просто повторяют
+     название, а «Шиелийский район» при селе Шиели — нет, и без него адрес неполон.
+     Поэтому сравниваем район БЕЗ слова «район» с названием посёлка целиком, а не по
+     вхождению: «Шиелийский» начинается на «Шиели», и проверка вхождением срезала его зря. */
+  const rBare=(r.r||'').replace(/\s*район\s*/i,'').trim().toLowerCase();
+  const rayon=(r.r&&!inCity&&rBare!==String(r.c||'').trim().toLowerCase())?r.r:'';
   const obl=(r.o&&r.o!==r.c)?r.o:'';
   return [city,rayon,obl,r.a].filter(Boolean).join(', ');
 }
@@ -636,6 +641,30 @@ let _kpAutoAddr='';
    информацию автоматом вставляй в строку адреса вместо того, что снизу индекса пишет»).
    Сам адрес отделения уходит в «Адрес получателя» — там он и нужен, а дублировать его
    подсказкой незачем. Тип отделения и кнопку «на карте» убрали тогда же. */
+/* ЧТО ДЕЛАТЬ, КОГДА ТОЧНОГО ИНДЕКСА В СПРАВОЧНИКЕ НЕТ (19.10.2026).
+   Владелец поймал на живом заказе: `120701` — это «Шиели-1», в интернете он находится, а
+   CRM писала «такого индекса нет». Проверено: дело НЕ в нашей выборке — у самой Казпочты в
+   `SearchCity2` его нет вовсе (поиск по «Шиели» отдаёт 120001, 120700 и 120703). Сторонние
+   сайты индексов живут на другом, более полном наборе данных.
+
+   Зато соседи по индексу на месте: 1207** — это двадцать с лишним отделений, и у ВСЕХ
+   «Шиелийский район, Кызылординская область». Этого хватает для сверки: главная ошибка в
+   индексе — не улица, а область, из-за которой посылка уезжает через всю страну.
+
+   Поэтому: не нашли точный — берём соседей по первым четырём цифрам (потом трём, потом
+   двум) и показываем ТОЛЬКО то, что у них СОВПАДАЕТ ПОЛНОСТЬЮ. Разошлись — не показываем:
+   приблизительная подсказка, выдуманная из разных районов, хуже честного «не нашли». */
+function kpIndexApprox(tbl,idx){
+  for(const len of [4,3,2]){
+    const pre=idx.slice(0,len), hits=[];
+    for(const k in tbl)if(k.length===6&&k.indexOf(pre)===0)hits.push(tbl[k]);
+    if(!hits.length)continue;
+    const only=f=>{const set=new Set(hits.map(h=>h[f]).filter(Boolean));return set.size===1?[...set][0]:'';};
+    const o=only('o'), r=only('r');
+    if(o||r)return {o,r,n:hits.length};
+  }
+  return null;
+}
 async function kpIndexHint(code){
   const box=$('o_index_info');
   const idx=String(code||'').replace(/\D/g,'');
@@ -647,6 +676,23 @@ async function kpIndexHint(code){
   if(now&&now!==idx)return;
   const rec=tbl[idx];
   if(!rec){
+    const near=kpIndexApprox(tbl,idx);
+    if(near){
+      const where=[near.r,near.o].filter(Boolean).join(', ');
+      if(box)box.innerHTML=`<span class="idx-ok">≈ ${esc(where)}</span>`
+        +`<span class="idx-type">точного отделения по индексу ${esc(idx)} в справочнике Казпочты нет —`
+        +` это по соседним индексам (${near.n})</span>`
+        +(($('o_address')&&!$('o_address').disabled)?'<button type="button" class="link-btn" id="idxUse">подставить в адрес</button>':'');
+      const el2=$('o_address'), use2=$('idxUse');
+      // Адрес тут НЕ подставляем сами, даже в пустое поле: улицы отделения мы не знаем, а
+      // «район, область» без улицы — это ещё не адрес. Решает человек.
+      if(use2&&el2)use2.onclick=()=>{
+        el2.value=where;_kpAutoAddr=where;
+        el2.dispatchEvent(new Event('input',{bubbles:true}));
+        if(box)box.innerHTML='';toast('Подставлены район и область');
+      };
+      return;
+    }
     // Полезный сигнал, а не придирка: чаще всего так видно опечатку в цифрах. Но справочник
     // собран на дату, поэтому «нет» значит «не нашли», а не «не существует».
     if(box)box.innerHTML='<span class="idx-bad">⚠ Такого индекса в справочнике Казпочты нет — проверьте цифры</span>';
