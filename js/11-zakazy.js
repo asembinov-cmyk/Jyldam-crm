@@ -783,14 +783,18 @@ function renderOrders(mode){
       if(!o.phone||o.phone.length<10)return {ok:false,reason:`${o.code}: нет телефона`};
       try{
         const payload=orderToKet(o);
-        const r=await callKet({action:'send',account:ketAccountForOrder(o),order:payload});
-        rememberKetExchange(o,payload,r);
+        // Аккаунт = пара uid+secret = МЕНЕДЖЕР, под которым заказ появится у KET.
+        // Барахолка уходит под своего (раздел 5f), и это надо видеть в итоге отправки:
+        // «заказ не пришёл» чаще всего означает «пришёл, но в другой аккаунт».
+        const acc=ketAccountForOrder(o);
+        const r=await callKet({action:'send',account:acc,order:payload});
+        rememberKetExchange(o,payload,r,acc);
         const result=(r&&r.ket&&r.ket.result)||{};
         if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
           const u=await dbUpdate('orders',o.id,{ket_id:result.id||null,ket_synced_at:new Date().toISOString()});
           if(u)Object.assign(o,u);
           logAction('ket','orders',{entity_id:o.id,entity_label:orderLabel(o),meta:{ket_id:result.id||null}});
-          return {ok:true};
+          return {ok:true,sentAs:ketSentAs(acc,r)};
         }
         const reason=r.error||result.message||(r&&r.raw)||(r&&JSON.stringify(r.ket))||'неизвестно';
         return {ok:false,reason:`${o.code}: ${reason}`,retry:true};
@@ -798,13 +802,17 @@ function renderOrders(mode){
     };
     const BATCH=10; // отправляем по 10 заказов параллельно
     let ok=0,fail=0;const errs=[];let failedOrders=[];
+    // Чем прокси РЕАЛЬНО отправил — по каждой пачке, с подсчётом. В одиночной отправке это
+    // пишется в сообщении об успехе, а здесь не писалось вовсе: после «отправлено 40»
+    // узнать, к какому менеджеру они ушли, было негде, а метода обновления у KET нет.
+    const sentAs={};
     const runBatches=async(orders)=>{
       for(let i=0;i<orders.length;i+=BATCH){
         const chunk=orders.slice(i,i+BATCH);
         b.textContent=`Отправка… ${Math.min(i+BATCH,orders.length)}/${orders.length}`;
         const results=await Promise.all(chunk.map(o=>sendOne(o).then(res=>({o,res}))));
         results.forEach(({o,res})=>{
-          if(res.ok)ok++;
+          if(res.ok){ok++;if(res.sentAs)sentAs[res.sentAs]=(sentAs[res.sentAs]||0)+1;}
           else{fail++;errs.push(res.reason);if(res.retry)failedOrders.push(o);}
         });
       }
@@ -818,8 +826,19 @@ function renderOrders(mode){
       await runBatches(retryList);
     }
     b.disabled=false;b.textContent=origLabel;
-    toast(`Отправлено в KET: ${ok}${fail?(', с ошибкой: '+fail):''}`);
+    // Аккаунтов в одной отправке может быть несколько: Барахолка идёт под своим менеджером,
+    // алматинские заказы — под алматинским. Поэтому перечисляем все, с числами.
+    const accLines=Object.entries(sentAs).map(([k,n])=>`${k} — ${n}`);
+    toast(`Отправлено в KET: ${ok}${fail?(', с ошибкой: '+fail):''}`
+      +(accLines.length?' · '+accLines.join(' · '):''),8000);
     if(errs.length)alert('Не отправлены:\n\n'+errs.join('\n'));
+    // Просили один аккаунт, а ушло другим — это значит, что в ket-proxy нужный аккаунт не
+    // выложен, и заказы появились у ЧУЖОГО менеджера. Переделать нечем: метода обновления
+    // у KET нет. Поэтому не тост, а окно — такое нельзя пролистать мимо.
+    if(accLines.some(l=>/^просили|не сказал/.test(l)))
+      alert('ЗАКАЗЫ УШЛИ НЕ ПОД ТЕМ АККАУНТОМ KET:\n\n'+accLines.join('\n')
+        +'\n\nЗначит в ket-proxy этот аккаунт не выложен. Исправить уже отправленные нечем —'
+        +'\nу KET нет метода обновления. Выложите функцию и отправьте заново.');
     ketSelected.clear();ketSelectAll=false;
     renderOrders();
   };
