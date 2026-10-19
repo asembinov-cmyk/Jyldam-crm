@@ -855,6 +855,7 @@
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
   .stats.stats-5{grid-template-columns:repeat(5,1fr)}
   .stats.stats-4{grid-template-columns:repeat(4,1fr)}
+  .stats.stats-2{grid-template-columns:repeat(2,1fr)}
   .simple-pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 10px;flex-wrap:wrap}
   .simple-pager-label{font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
   .ac-dropdown{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--line);
@@ -1179,7 +1180,7 @@
 
   @media (max-width:760px){
     .grid2{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}
-    .stats.stats-5,.stats.stats-4,.stats.stats-1,.stats.stats-3{grid-template-columns:1fr 1fr;max-width:none}
+    .stats.stats-5,.stats.stats-4,.stats.stats-1,.stats.stats-3,.stats.stats-2{grid-template-columns:1fr 1fr;max-width:none}
     .stats .stat{padding:13px 14px}
     .stats .stat .v{font-size:24px}
     .page-head h1{font-size:24px}
@@ -1551,6 +1552,9 @@
   border-radius:9px;background:var(--card);color:var(--ink);min-width:140px;
   cursor:pointer;white-space:nowrap;text-align:left}
 .filters .filters-btn:hover{border-color:var(--ink)}
+.filters .filters-btn:disabled{opacity:.5;cursor:default}
+.filters .filters-btn.is-armed{border-color:#1f8a4c;color:#1f8a4c;background:#eaf7ef}
+.filters .filters-btn.is-armed:hover{background:#dcf1e4}
 
 /* ─── Модуль «Сортировка» ───────────────────────────────────────────────
    Шапка-баннер вместо россыпи одинаковых плашек: у кладовщика одно главное

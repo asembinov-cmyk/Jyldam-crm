@@ -606,6 +606,7 @@ function renderOrders(mode){
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
+        ${isStaff()?'<button type="button" class="filters-btn" id="ordersWaSel" title="Отправить получателям уведомление в WhatsApp — шаблоном, одобренным Meta">💬 WhatsApp</button>':''}
         ${can('orders','delete')?'<button type="button" class="filters-btn filters-btn-danger" id="ordersDelSel" title="Удалить заказы, отмеченные галочками">🗑 Удалить выделенные</button>':''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
@@ -639,6 +640,10 @@ function renderOrders(mode){
     try{await printMailLabelsPdf(list);}
     catch(e){console.error(e);toast('Не удалось сформировать бланки: '+(e&&e.message||e));}
     finally{btn.disabled=false;btn.textContent=origLabel;}
+  };
+  // рассылка WhatsApp по отмеченным заказам (js/21-whatsapp.js)
+  if($('ordersWaSel'))$('ordersWaSel').onclick=()=>{
+    if(typeof waSendFromSelection==='function')waSendFromSelection();
   };
   // удаление отмеченных галочками заказов
   if($('ordersDelSel'))$('ordersDelSel').onclick=async()=>{
@@ -1773,6 +1778,7 @@ function updateKetAllChk(allRows){
   chk.checked=total>0&&selected===total;
   chk.indeterminate=selected>0&&selected<total;
   updateDelSelBtn();
+  if(typeof updateWaSelBtn==='function')updateWaSelBtn();
 }
 // Счётчик на кнопке «Удалить выделенные». Галочки меняются без перерисовки страницы,
 // поэтому число на кнопке обновляем отдельно — иначе оно отставало бы от выбора.
