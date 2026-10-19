@@ -55,8 +55,22 @@ function orderToKet(o){
   // «отправная точка» для KET — КОД по ГОРОДУ ЗАБОРА (откуда забрали): Астана→ASTANA-KURER, Алматы→ALMATA
   const pickupCityNm=o.pickup_city_id?cityName(o.pickup_city_id):'';
   const originCode=ketOriginCode(pickupCityNm);
-  // сумма: сначала order_sum, иначе cost (дубль). Идёт и в price, и в total_price
-  const sumVal=orderSum(o);
+  // СУММА: сначала order_sum, иначе cost (дубль), а при нуле — условная выручка
+  // `order_sum_orig`. Идёт и в price, и в total_price.
+  //
+  // ПОЧЕМУ ТУТ ТРЕТЬЕ ПОЛЕ (19.10.2026). У KET `price` — «стоимость товара», и до
+  // 10.10 туда уходила сумма из реестра Барахолки. С 10.10 у партнёров с тарифом 0 в
+  // `order_sum` пишется ноль, а сама сумма переехала в `order_sum_orig` (раздел 5f) —
+  // число не потерялось, просто лежит в другом поле. KET на нулевую цену отвечает
+  // `{"id":0,"success":"TRUE"}` и заказа НЕ создаёт, то есть заказы Барахолки перестали
+  // до него доходить ровно с этой правки: `js/02-ket.js` с 02.10, когда это работало,
+  // не менялся вовсе — в запросе изменилось только это число.
+  //
+  // Поэтому отправляем ровно то, что уходило раньше. Новых чисел не выдумываем: на
+  // нашу выручку это не влияет (её считает Калькуляция по `order_sum`/`order_sum_orig`),
+  // а KET получает ту же цену доставки по этому заказу, что и до 10.10.
+  const sumOrig=(o.order_sum_orig==null||o.order_sum_orig==='')?0:(+o.order_sum_orig||0);
+  const sumVal=orderSum(o)||sumOrig;
   const sumStr=String(sumVal||0);
   const data={
     phone:'7'+(o.phone||''),                 // телефон в формате 7XXXXXXXXXX (* обязательное)
