@@ -402,11 +402,25 @@ function drawCourierPickupCards(el,rows){
    карточку — только после удержания (`CC_HOLD_MS`). Иначе перетаскивание отбирало бы у
    списка обычную прокрутку: пальцем по карточкам листают чаще, чем переставляют.
 
-   КАРТОЧКУ НЕ ТАЩИМ ТРАНСФОРМОМ, А ПЕРЕСТАВЛЯЕМ В DOM. Карточки разной высоты —
-   раскрытая втрое выше свёрнутой, — и вычислять середины вручную пришлось бы по живым
-   размерам на каждом движении. `elementFromPoint` отвечает на это сам; у поднятой карточки
-   на время перетаскивания выключены указатели (`pointer-events:none` в CSS), иначе она
-   находила бы под пальцем саму себя. */
+   КАРТОЧКА ОТРЫВАЕТСЯ ОТ МЕСТА И ЕДЕТ ПОД ПАЛЬЦЕМ (19.10.2026, просьба владельца:
+   «будто карточка открывается от места вперёд и ты её пальцем несёшь куда надо»).
+   Делается это тремя вещами сразу:
+
+     • карточка переводится в `position:fixed` по своим же экранным координатам — то есть
+       с места не прыгает, а дальше её `top` идёт за пальцем;
+     • на её месте остаётся ГНЕЗДО (`.cc-ph`) той же высоты — иначе список схлопнулся бы
+       под пальцем и целиться стало бы некуда;
+     • `fixed` берётся намеренно, а не `transform`: пока палец у края, список
+       подкручивается сам, и при `transform` карточка уезжала бы вместе с содержимым.
+       Координаты `fixed` считаются от экрана, поэтому карточка остаётся под пальцем.
+
+   ЗАПОМИНАЕМ, ЗА КАКОЕ МЕСТО ВЗЯЛИ (`grabDY`). Без этого карточка прыгает серединой к
+   пальцу в момент захвата — выглядит как рывок и сбивает прицел.
+
+   МЕСТО В СПИСКЕ ОПРЕДЕЛЯЕТ `elementFromPoint`, а не арифметика по серединам: карточки
+   разной высоты — раскрытая втрое выше свёрнутой, — и считать пришлось бы по живым
+   размерам на каждом движении. У летящей карточки выключены указатели
+   (`pointer-events:none` в CSS), иначе под пальцем она находила бы саму себя. */
 const CC_HOLD_MS=320;       // сколько держать палец на карточке, чтобы она поднялась
 const CC_MOVE_CANCEL=10;    // сдвинулся раньше — это прокрутка, а не перетаскивание
 const CC_EDGE=90;           // у края экрана список подкручивается сам
@@ -443,7 +457,7 @@ window.ccOrderReset=()=>{ccOrderClear();if(typeof drawPickups==='function')drawP
 
 function bindCourierCardDrag(box){
   if(!box)return;
-  let hold=null, startY=0, startX=0, cand=null, autoTimer=null, lastY=0;
+  let hold=null, startY=0, startX=0, cand=null, autoTimer=null, lastX=0, lastY=0;
   // Кнопки, поля и ссылки внутри карточки живут своей жизнью: статус, количество, телефон,
   // 2ГИС. Удержание на них перетаскивание не начинает — иначе не выбрать статус.
   const interactive=t=>!!(t&&t.closest&&t.closest('button,select,input,textarea,a'));
@@ -451,11 +465,32 @@ function bindCourierCardDrag(box){
 
   const autoScroll=()=>{
     if(!_ccDrag)return;
+    // Список мог перерисоваться прямо во время переноса — заявки приходят по Realtime, и
+    // `drawPickups` пересоздаёт карточки. Тогда наша улетевшая карточка больше не на
+    // странице: порядок с неё снимать нельзя (он от старых узлов), а таймер надо погасить,
+    // иначе он крутится до перезагрузки вкладки.
+    if(!document.body.contains(_ccDrag.card)){abort();return;}
     const dir=lastY<CC_EDGE?-1:(lastY>window.innerHeight-CC_EDGE?1:0);
-    if(dir)window.scrollBy(0,dir*CC_SCROLL_STEP);
+    if(!dir)return;
+    window.scrollBy(0,dir*CC_SCROLL_STEP);
+    // Палец стоит у края и не двигается — `touchmove` больше не приходит, а содержимое
+    // под ним едет. Поэтому гнездо переставляем сами, иначе оно замирало бы на месте,
+    // пока список прокручивается.
+    moveOver(lastX,lastY);
   };
-  const begin=card=>{
-    _ccDrag={card};
+  const begin=(card,grabY)=>{
+    const r=card.getBoundingClientRect();
+    // Гнездо — пустое место там, где карточка лежала. Ставим ДО того, как вынем её из
+    // потока: иначе список успеет схлопнуться и всё под пальцем подпрыгнет.
+    const ph=document.createElement('div');
+    ph.className='cc-ph';ph.style.height=r.height+'px';
+    box.insertBefore(ph,card);
+    card.style.position='fixed';
+    card.style.left=r.left+'px';
+    card.style.width=r.width+'px';
+    card.style.top=r.top+'px';
+    card.style.zIndex='9000';
+    _ccDrag={card,ph,grabDY:(grabY==null?r.height/2:grabY-r.top)};
     card.classList.add('cc-drag');
     box.classList.add('cc-dragging');
     // Короткая вибрация — единственный способ сказать «взял» на телефоне: пальцем
@@ -464,19 +499,39 @@ function bindCourierCardDrag(box){
     autoTimer=setInterval(autoScroll,16);
   };
   const moveOver=(x,y)=>{
-    if(!_ccDrag)return;
-    lastY=y;
+    const d=_ccDrag;if(!d)return;
+    lastX=x;lastY=y;
+    d.card.style.top=(y-d.grabDY)+'px';
     const over=cardOf(document.elementFromPoint(x,y));
-    if(!over||over===_ccDrag.card||over.parentNode!==box)return;
+    if(!over||over===d.card||over.parentNode!==box)return;
     const r=over.getBoundingClientRect();
-    box.insertBefore(_ccDrag.card, y<r.top+r.height/2?over:over.nextSibling);
+    // Двигаем ГНЕЗДО, а не саму карточку: карточка летит под пальцем, а список должен
+    // показывать, куда она ляжет.
+    box.insertBefore(d.ph, y<r.top+r.height/2?over:over.nextSibling);
+  };
+  // Бросить перенос, НИЧЕГО не сохраняя: применяется, когда карточки под нами не стало.
+  const abort=()=>{
+    if(hold){clearTimeout(hold);hold=null;}
+    if(autoTimer){clearInterval(autoTimer);autoTimer=null;}
+    cand=null;
+    if(!_ccDrag)return;
+    const {card,ph}=_ccDrag;_ccDrag=null;
+    if(ph)ph.remove();
+    card.style.position=card.style.left=card.style.top=card.style.width=card.style.zIndex='';
+    card.classList.remove('cc-drag');
+    box.classList.remove('cc-dragging');
   };
   const finish=()=>{
     if(hold){clearTimeout(hold);hold=null;}
     if(autoTimer){clearInterval(autoTimer);autoTimer=null;}
     cand=null;
     if(!_ccDrag)return;
-    const card=_ccDrag.card;_ccDrag=null;
+    if(!document.body.contains(_ccDrag.card)){abort();return;}
+    const {card,ph}=_ccDrag;_ccDrag=null;
+    // Возвращаем карточку в поток ровно туда, где стоит гнездо.
+    if(ph&&ph.parentNode===box)box.insertBefore(card,ph);
+    if(ph)ph.remove();
+    card.style.position=card.style.left=card.style.top=card.style.width=card.style.zIndex='';
     card.classList.remove('cc-drag');box.classList.remove('cc-dragging');
     _ccJustDragged=nowMs();
     const ids=[...box.querySelectorAll('.cour-card')].map(c=>c.dataset.card);
@@ -490,10 +545,13 @@ function bindCourierCardDrag(box){
     if(!card)return;
     startX=t.clientX;startY=lastY=t.clientY;
     // За ручку берём сразу, за карточку — после удержания.
-    if(e.target.closest('.cc-grip')){begin(card);return;}
+    lastX=t.clientX;
+    if(e.target.closest('.cc-grip')){begin(card,t.clientY);return;}
     if(interactive(e.target))return;
     cand=card;
-    hold=setTimeout(()=>{hold=null;if(cand)begin(cand);},CC_HOLD_MS);
+    // Берём за ту точку, где палец лежит сейчас: за время удержания он не сдвинулся
+    // больше чем на CC_MOVE_CANCEL, иначе захват был бы отменён.
+    hold=setTimeout(()=>{hold=null;if(cand)begin(cand,startY);},CC_HOLD_MS);
   },{passive:true});
 
   // passive:false обязателен: пока карточка поднята, прокрутку страницы надо ОТМЕНЯТЬ,
@@ -515,7 +573,7 @@ function bindCourierCardDrag(box){
   box.addEventListener('mousedown',e=>{
     if(e.button!==0||!e.target.closest('.cc-grip'))return;
     const card=cardOf(e.target);if(!card)return;
-    e.preventDefault();begin(card);
+    e.preventDefault();begin(card,e.clientY);
     const mm=ev=>moveOver(ev.clientX,ev.clientY);
     const mu=()=>{document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);finish();};
     document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);

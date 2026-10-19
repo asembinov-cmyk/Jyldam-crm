@@ -998,11 +998,17 @@
   .cc-grip{font-size:21px;line-height:1;color:var(--muted);cursor:grab;padding:7px 9px;
     margin:-5px -7px 0 0;touch-action:none;user-select:none}
   .cc-grip:active{cursor:grabbing;color:var(--ink)}
-  /* Поднятая карточка: приподнята тенью и не ловит указатели — иначе
-     elementFromPoint под пальцем находил бы её саму, а не соседа под ней. */
-  .cour-card.cc-drag{pointer-events:none;box-shadow:0 12px 28px rgba(0,0,0,.22);
-    transform:scale(1.02);border-color:var(--ink);position:relative;z-index:5}
-  .cour-cards.cc-dragging .cour-card:not(.cc-drag){transition:transform .12s ease}
+  /* Карточка в полёте: оторвана от места (`position:fixed` ставится из кода), чуть
+     увеличена и с тенью — так видно, что её «несут». Указатели выключены, иначе
+     elementFromPoint под пальцем находил бы её саму, а не соседа под ней.
+     `transition:none` обязателен: координату мы правим на каждое движение пальца, и
+     любая плавность превратилась бы в запаздывание. */
+  .cour-card.cc-drag{pointer-events:none;box-shadow:0 18px 38px rgba(20,30,60,.28);
+    transform:scale(1.03) rotate(-.5deg);border-color:var(--ink);transition:none;
+    opacity:.97}
+  /* Гнездо — пустое место, куда карточка ляжет, если отпустить сейчас. */
+  .cc-ph{border:2px dashed #b9c4d6;border-radius:14px;background:rgba(40,60,110,.04);
+    box-sizing:border-box}
   .cour-cards.cc-dragging{cursor:grabbing}
   .cc-statusrow{display:flex;align-items:center;gap:8px;padding:0 16px 12px}
   .cc-statusrow .status-pick{flex:1;min-width:0}
