@@ -1906,7 +1906,20 @@ function updateDelSelBtn(){
   b.disabled=!n;
   b.classList.toggle('is-armed',!!n);
 }
-// плавающая (закреплённая снизу) панель навигации по страницам заказов
+/* ПАНЕЛЬ СТРАНИЦ У ЗАКАЗОВ СТОИТ НАВЕРХУ ГРИДА (19.10.2026).
+   Просьба владельца со скриншотом: «из-за пагинации не видно, что там написано — может, её
+   куда-нибудь сверху грида, где ФИО, телефон, туда переместить». Плавающая панель
+   прикреплена к низу экрана и на длинном списке закрывала последние строки: отступ снизу
+   спасает только когда список доскроллен до конца, а в середине прокрутки она висит прямо
+   поверх строк.
+
+   ОСТАЛЬНЫЕ МОДУЛИ НЕ ТРОГАЕМ: класс `.orders-pager` общий, им же пользуются «Сортировка»,
+   «Заявки», «Склад» и «Заказы партнёров». Поэтому место меняет только грид заказов —
+   отдельным классом `op-top`, а общий вид панели остаётся прежним.
+
+   И ПОЭТОМУ ЖЕ здесь больше не нужен `has-pager`: он освобождал место снизу под плавающую
+   панель, а статической панели освобождать нечего — остался бы пустой подвал в сотню
+   пикселей. */
 function removeOrdersPager(){const ex=$('ordersPager');if(ex)ex.remove();const m=$('main');if(m&&!$('pickupsPager')&&!$('inboundPager')&&!$('whProdPager'))m.classList.remove('has-pager');}
 function renderOrdersPager(total,totalPages,startIdx,shownCount){
   removeOrdersPager();
@@ -1918,8 +1931,7 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
   if(totalPages<=1)return;
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
-  bar.id='ordersPager';bar.className='orders-pager';
-  {const m=$('main');if(m)m.classList.add('has-pager');}
+  bar.id='ordersPager';bar.className='orders-pager op-top';
   bar.innerHTML=`
     <button class="op-btn" id="opRefreshBtn" title="Подтянуть свежие данные">🔄</button>
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
@@ -1939,7 +1951,13 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-opage="next" ${ordersPage>=totalPages?'disabled':''}>Вперёд ›</button>
       <button class="op-btn" data-opage="last" ${ordersPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
-  document.body.appendChild(bar);
+  // Наверх грида, над шапкой таблицы. Если контейнера вдруг нет (чужой вызов, другой
+  // экран) — ведём себя как раньше и вешаем на страницу: пусть лучше висит снизу, чем
+  // пропадёт совсем.
+  const host=$('orderTable');
+  if(host)host.insertBefore(bar,host.firstChild);
+  else{bar.classList.remove('op-top');document.body.appendChild(bar);
+    const m=$('main');if(m)m.classList.add('has-pager');}
   const opRefreshBtn=bar.querySelector('#opRefreshBtn');
   if(opRefreshBtn)opRefreshBtn.onclick=async()=>{
     opRefreshBtn.disabled=true;opRefreshBtn.textContent='…';
