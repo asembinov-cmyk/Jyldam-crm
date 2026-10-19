@@ -418,29 +418,75 @@ function waPlural(n){
   if(d>=2&&d<=4&&(dd<12||dd>14))return 'сообщения';
   return 'сообщений';
 }
+/* ПОЧЕМУ ОТКАЗ — ОКНОМ, А НЕ ТОСТОМ (19.10.2026). Владелец отметил заказы, нажал кнопку и
+   получил «тишину»: отказ уходил тостом — полоска внизу на 2,2 секунды, под плавающей
+   панелью страниц, в гриде на полторы тысячи строк. Со стороны это неотличимо от «кнопка
+   не работает», а причина каждый раз РАЗНАЯ и требует разных действий — выложить функцию,
+   выполнить SQL, выбрать шаблон. Поэтому здесь окно с конкретным шагом.
+   Правило раздела 12: молчаливая кнопка в рассылке клиентам недопустима. */
+function waBlockModal(title,html){
+  if(typeof showInfo==='function')showInfo('💬 '+title,`<div class="hint" style="line-height:1.6">${html}</div>`);
+  else alert(title);
+}
 async function waNotifySelection(key){
   key=key||WA_BUTTONS[0][0];
+  const label=waBtnLabel(key);
   const list=[...ketSelected].map(id=>(S.orders||[]).find(o=>o.id===id)).filter(Boolean);
-  if(!list.length){toast('Сначала отметьте заказы галочками');return;}
+  if(!list.length){
+    waBlockModal('Заказы не отмечены',
+      `Отметьте заказы галочками в первой колонке — рассылка идёт только по отмеченным.`
+      +(ketSelected.size?`<br><br>Отмечено ${ketSelected.size}, но этих заказов нет в загруженном списке: смените фильтр или обновите страницу.`:''));
+    return;
+  }
   const cfg=await waCfgLoad();
-  if(cfg===null){toast('Таблица настроек не найдена — выполните db/34 (блок 3)');return;}
+  if(cfg===null){
+    waBlockModal('Раздел ещё не включён',
+      `Нет таблицы настроек <b>wa_buttons</b> — она хранит, какой шаблон уходит по какой кнопке.
+       <br><br>Выполните <b>db/34-WHATSAPP-рассылка.sql</b>, <b>блок 3</b>, и обновите страницу.`);
+    return;
+  }
   const pin=cfg[key];
   if(!pin||!pin.template){
-    toast(`Для «${waBtnLabel(key)}» шаблон не выбран: Настройки → Оповещения`);return;
+    waBlockModal('Шаблон не выбран',
+      `Для кнопки «${esc(label)}» не выбран шаблон WhatsApp, поэтому отправлять нечего.
+       <br><br>Откройте <b>Настройки → Оповещения WhatsApp</b>, нажмите чип «${esc(label)}»,
+       выберите шаблон и сохраните.`);
+    return;
   }
   const tpls=await waLoadTemplates();
-  if(!tpls||tpls.error){toast((tpls&&tpls.error)||'не удалось получить шаблоны');return;}
+  if(!tpls||tpls.error){
+    waBlockModal('Шаблоны не получены',
+      `Не удалось спросить список шаблонов у Kelesu:<br><br><b>${esc((tpls&&tpls.error)||'ошибка')}</b>
+       <br><br>Проверьте, что функция <b>kelesu-waba</b> выложена в Supabase и у неё заданы секреты
+       <b>KELESU_API_KEY</b> и <b>KELESU_CHANNEL_ID</b>. После правки секретов функцию нужно
+       выложить заново — они читаются при запуске.`);
+    return;
+  }
   const t=tpls.find(x=>x.name===pin.template);
-  if(!t){toast(`Шаблон «${pin.template}» у Kelesu больше нет — поправьте в Настройках`);return;}
-  if(t.status!=='APPROVED'){toast(`Шаблон «${t.name}» не одобрен Meta — отправить нельзя`);return;}
+  if(!t){
+    waBlockModal('Шаблона больше нет',
+      `Шаблон <b>${esc(pin.template)}</b> у Kelesu не найден — его переименовали или удалили.
+       <br><br>Выберите другой в <b>Настройки → Оповещения WhatsApp</b>.`);
+    return;
+  }
+  if(t.status!=='APPROVED'){
+    waBlockModal('Шаблон не одобрен Meta',
+      `У шаблона <b>${esc(t.name)}</b> статус <b>${esc(t.status||'—')}</b>. Отправлять можно только
+       одобренные — это ограничение Meta, а не Kelesu.`);
+    return;
+  }
 
   const rows=list.map(o=>({o,phone:waPhone(o.phone)}));
   const ok=rows.filter(r=>r.phone), bad=rows.filter(r=>!r.phone);
-  if(!ok.length){toast('Ни у одного из отмеченных заказов нет телефона');return;}
+  if(!ok.length){
+    waBlockModal('Не на что отправлять',
+      `Среди отмеченных заказов (${list.length}) нет ни одного с телефоном получателя.`);
+    return;
+  }
 
   // Вот то самое «отправить 1 смс? да или отмена». Про платность говорим от полусотни:
   // отметить «все» — одно движение, а в Барахолке их полторы тысячи.
-  const msg=`${waBtnLabel(key)}\n\nОтправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
+  const msg=`${label}\n\nОтправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
     +(bad.length?`\n\nБез телефона и не уйдут: ${bad.length}`:'')
     +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`:'');
   if(!confirm(msg))return;
