@@ -406,14 +406,14 @@ function renderDashboard(){
     </div>`:''}
     <div class="dash-cards">
       <div class="dash-card c-new"><div class="dc-ic">📦</div><div><div class="dc-v">${ordersMonth}</div><div class="dc-k">Общее кол-во заказов</div>${trendHtml(trOrders)}<div class="dc-period">${esc(periodLabel)}</div></div></div>
-      <div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div>${trendHtml(trPickups)}<div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
-      <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Собрано заявок по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
+      ${bar?'':`<div class="dash-card c-pickup"><div class="dc-ic">📥</div><div><div class="dc-v">${pkCollectedMonth}</div><div class="dc-k">Заявки на забор</div>${trendHtml(trPickups)}<div class="dc-extra">собрано за месяц · сегодня ожидается ${pkTodayWaiting}</div><div class="dc-period">${esc(periodLabel)}</div></div></div>
+      <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Собрано заявок по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAstana/5)))||'○'}</span><span class="dcity-v">${cityAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(cityAlmaty/5)))||'○'}</span><span class="dcity-v">${cityAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>`}
     </div>
-    <div class="dash-cards dash-cards-2">
+    ${bar?'':`<div class="dash-cards dash-cards-2">
       <div class="dash-card c-donut"><div class="dc-donut-wrap">${donut}<div class="dc-donut-leg"><div><span class="lg-dot" style="background:#c97a3d"></span>Курьерская <b>${pctCourier}%</b></div><div><span class="lg-dot" style="background:#3d6478"></span>Почтовая <b>${pctMail}%</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div></div>
       <div class="dash-card c-fin"><div class="dc-ic">₸</div><div><div class="dc-fin-row"><span>Сегодня</span><b>${fmtMoney(revToday)}</b></div><div class="dc-fin-row"><span>За месяц</span><b>${fmtMoney(revMonth)}</b></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
       <div class="dash-card c-cities"><div class="dc-cities"><div class="dc-cities-h">Заказы по городам</div><div class="dcity"><span class="dcity-n">Астана</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAstana/30)))||'○'}</span><span class="dcity-v">${ordAstana}</span></div><div class="dcity"><span class="dcity-n">Алматы</span><span class="dcity-dots">${'●'.repeat(Math.min(12,Math.ceil(ordAlmaty/30)))||'○'}</span><span class="dcity-v">${ordAlmaty}</span></div><div class="dc-period">${esc(periodLabel)}</div></div></div>
-    </div>
+    </div>`}
     <div class="panel dash-fold${dashOpen.days?' open':''}">
       <button type="button" class="panel-head dash-fold-head" data-fold="days">
         <h2>Статистика по дням</h2><span class="count">${statRows.length}</span>
@@ -422,30 +422,30 @@ function renderDashboard(){
       <div class="table-scroll dash-stat-scroll"><table class="dash-stat"><thead>
         <tr>
           <th rowspan="2">Дата</th>
-          <th colspan="3" class="grp grp-ord">Кол-во заказов</th>
-          <th colspan="3" class="grp grp-pk">Заборы (собрано / всего)</th>
-          <th colspan="2" class="grp grp-del">Доставка</th>
+          <th colspan="${bar?2:3}" class="grp grp-ord">Кол-во заказов</th>
+          ${bar?'':'<th colspan="3" class="grp grp-pk">Заборы (собрано / всего)</th>'}
+          <th colspan="${bar?1:2}" class="grp grp-del">Доставка</th>
         </tr>
         <tr>
-          <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
-          <th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>
-          <th>Курьерская</th><th>Почтовая</th>
+          <th>Всего</th><th class="c-alm">Алматы</th>${bar?'':'<th class="c-ast">Астана</th>'}
+          ${bar?'':'<th>Всего</th><th class="c-alm">Алматы</th><th class="c-ast">Астана</th>'}
+          ${bar?'':'<th>Курьерская</th>'}<th>Почтовая</th>
         </tr></thead>
         <tbody>${statRows.length?statRows.map(r=>`<tr>
           <td class="d-date"><b>${esc(fmtDate(r.dt))}</b></td>
-          <td class="num"><b>${r.ordTotal}</b></td><td class="num c-alm">${r.ordAlmaty||'—'}</td><td class="num c-ast">${r.ordAstana||'—'}</td>
-          <td class="num"><b>${r.pkCollected}</b><small style="color:var(--muted)"> / ${r.pkTotal}</small></td><td class="num c-alm">${r.pkAlmaty||'—'}</td><td class="num c-ast">${r.pkAstana||'—'}</td>
-          <td class="num">${r.courierDel||'—'}</td><td class="num">${r.mailDel||'—'}</td>
-        </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">Пока нет данных</td></tr>`}</tbody>
+          <td class="num"><b>${r.ordTotal}</b></td><td class="num c-alm">${r.ordAlmaty||'—'}</td>${bar?'':`<td class="num c-ast">${r.ordAstana||'—'}</td>`}
+          ${bar?'':`<td class="num"><b>${r.pkCollected}</b><small style="color:var(--muted)"> / ${r.pkTotal}</small></td><td class="num c-alm">${r.pkAlmaty||'—'}</td><td class="num c-ast">${r.pkAstana||'—'}</td>`}
+          ${bar?'':`<td class="num">${r.courierDel||'—'}</td>`}<td class="num">${r.mailDel||'—'}</td>
+        </tr>`).join(''):`<tr><td colspan="${bar?4:9}" style="text-align:center;color:var(--muted);padding:30px">Пока нет данных</td></tr>`}</tbody>
         ${statRows.length?`<tfoot><tr class="dash-total">
           <td>Итого</td>
           <td class="num"><b>${statRows.reduce((s,r)=>s+r.ordTotal,0)}</b></td>
           <td class="num c-alm">${statRows.reduce((s,r)=>s+r.ordAlmaty,0)}</td>
-          <td class="num c-ast">${statRows.reduce((s,r)=>s+r.ordAstana,0)}</td>
+          ${bar?'':`<td class="num c-ast">${statRows.reduce((s,r)=>s+r.ordAstana,0)}</td>
           <td class="num"><b>${statRows.reduce((s,r)=>s+r.pkCollected,0)}</b><small style="color:var(--muted)"> / ${statRows.reduce((s,r)=>s+r.pkTotal,0)}</small></td>
           <td class="num c-alm">${statRows.reduce((s,r)=>s+r.pkAlmaty,0)}</td>
           <td class="num c-ast">${statRows.reduce((s,r)=>s+r.pkAstana,0)}</td>
-          <td class="num">${statRows.reduce((s,r)=>s+r.courierDel,0)}</td>
+          <td class="num">${statRows.reduce((s,r)=>s+r.courierDel,0)}</td>`}
           <td class="num">${statRows.reduce((s,r)=>s+r.mailDel,0)}</td>
         </tr></tfoot>`:''}
       </table></div>
