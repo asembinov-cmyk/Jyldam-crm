@@ -125,11 +125,13 @@ function waParam(v){
 // как и кнопку удаления. Любой новый путь, меняющий ketSelected без перерисовки,
 // обязан позвать и эту функцию (раздел 8e).
 function updateWaSelBtn(){
-  const b = $('ordersWaSel'); if (!b) return;
   const n = ketSelected.size;
-  b.textContent = n ? `💬 WhatsApp оповещение (${n})` : '💬 WhatsApp оповещение';
-  b.disabled = !n;
-  b.classList.toggle('is-armed', !!n);
+  // Пунктов в меню столько, сколько строк в WA_BUTTONS, — подписываем каждый по его ключу.
+  document.querySelectorAll('[data-wabtn]').forEach(b => {
+    const label = (typeof waBtnLabel === 'function') ? waBtnLabel(b.dataset.wabtn) : b.textContent;
+    b.textContent = n ? `${label} (${n})` : label;
+    b.disabled = !n;
+  });
 }
 
 async function waSendFromSelection(){
@@ -358,8 +360,22 @@ function waResultModal(results, noPhone){
    ЗАЧЕМ ВООБЩЕ ПОДТВЕРЖДЕНИЕ, РАЗ ПРОСИЛИ «НА АВТОМАТЕ». Сообщение уходит клиенту сразу,
    отозвать его нечем, и оно платное. Один вопрос «да/отмена» — это и есть просьба владельца
    дословно, он сам его и назвал. */
-const WA_BTN_NOTIFY='notify';     // ключ кнопки в таблице wa_buttons
-let _waCfg=null;                  // настройки кнопок: {notify:{template,params}}
+/* КНОПКИ ЗАДАНЫ СПИСКОМ, А НЕ ПО ОДНОЙ (19.10.2026). Владелец попросил добавить к первой
+   ещё «Прибыл заказ» и «Курьерское оповещение» — и так будет дальше: у него пять
+   одобренных шаблонов на разные события. Поэтому кнопка — это строка здесь, и всё
+   остальное (пункт меню, счётчик, вкладка в настройках, отправка) берётся из неё.
+   НОВАЯ КНОПКА = СТРОКА В ЭТОМ СПИСКЕ, больше нигде ничего дописывать не нужно.
+
+   Ключ (`notify`, `arrived`, `courier`) — это ключ строки в таблице `wa_buttons`, и
+   МЕНЯТЬ ЕГО НЕЛЬЗЯ: по нему хранится выбранный шаблон. Переименовать подпись можно
+   свободно, ключ — нет. */
+const WA_BUTTONS=[
+  ['notify',  '💬 WhatsApp оповещение'],
+  ['arrived', '📦 Прибыл заказ'],
+  ['courier', '🚚 Курьерское оповещение'],
+];
+const waBtnLabel=key=>((WA_BUTTONS.find(b=>b[0]===key)||[,key])[1]);
+let _waCfg=null;                  // настройки кнопок: {ключ:{template,params}}
 
 async function waCfgLoad(force){
   if(_waCfg&&!force)return _waCfg;
@@ -402,14 +418,15 @@ function waPlural(n){
   if(d>=2&&d<=4&&(dd<12||dd>14))return 'сообщения';
   return 'сообщений';
 }
-async function waNotifySelection(){
+async function waNotifySelection(key){
+  key=key||WA_BUTTONS[0][0];
   const list=[...ketSelected].map(id=>(S.orders||[]).find(o=>o.id===id)).filter(Boolean);
   if(!list.length){toast('Сначала отметьте заказы галочками');return;}
   const cfg=await waCfgLoad();
   if(cfg===null){toast('Таблица настроек не найдена — выполните db/34 (блок 3)');return;}
-  const pin=cfg[WA_BTN_NOTIFY];
+  const pin=cfg[key];
   if(!pin||!pin.template){
-    toast('Шаблон не выбран: Настройки → «WhatsApp оповещение»');return;
+    toast(`Для «${waBtnLabel(key)}» шаблон не выбран: Настройки → Оповещения`);return;
   }
   const tpls=await waLoadTemplates();
   if(!tpls||tpls.error){toast((tpls&&tpls.error)||'не удалось получить шаблоны');return;}
@@ -423,7 +440,7 @@ async function waNotifySelection(){
 
   // Вот то самое «отправить 1 смс? да или отмена». Про платность говорим от полусотни:
   // отметить «все» — одно движение, а в Барахолке их полторы тысячи.
-  const msg=`Отправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
+  const msg=`${waBtnLabel(key)}\n\nОтправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
     +(bad.length?`\n\nБез телефона и не уйдут: ${bad.length}`:'')
     +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`:'');
   if(!confirm(msg))return;
@@ -445,7 +462,16 @@ async function waNotifySelection(){
   else waResultModal(all,bad);
 }
 
-/* ---------- вкладка «WhatsApp оповещение» в Настройках ---------- */
+/* ---------- вкладка «Оповещения» в Настройках ---------- */
+/* ОДНА ВКЛАДКА НА ВСЕ КНОПКИ (19.10.2026). Просьба владельца: «в настройках сделай, чтобы
+   можно было выбрать, на какую кнопку шаблон привязываешь». Кнопки перечислены чипами
+   наверху, под ними — шаблон и подстановки выбранной. По вкладке на кнопку делать нельзя:
+   кнопок будет пять, а список справочников и так на девятнадцать пунктов (раздел 8a).
+
+   Шаблоны и настройки читаются ОДИН раз за открытие вкладки, переключение чипа только
+   перерисовывает панель: иначе каждое нажатие ходило бы к Kelesu, а там лимит 100 запросов
+   в минуту на ключ. */
+let waCfgBtn = WA_BUTTONS[0][0];
 async function renderWaSettings(){
   const box=$('dirContent');if(!box)return;
   box.innerHTML='<div class="loading" style="padding:40px">Загружаем шаблоны…</div>';
@@ -463,49 +489,90 @@ async function renderWaSettings(){
     return;
   }
   const appr=tpls.filter(t=>t.status==='APPROVED');
-  const pin=cfg[WA_BTN_NOTIFY]||{template:'',params:null};
-  const cur=appr.find(t=>t.name===pin.template)||appr[0]||null;
+  if(!WA_BUTTONS.some(b=>b[0]===waCfgBtn))waCfgBtn=WA_BUTTONS[0][0];
 
-  box.innerHTML=`
-    <div class="panel">
-      <div class="panel-head"><h2>Кнопка «💬 WhatsApp оповещение»</h2></div>
-      <p class="hint">Этот шаблон уйдёт по кнопке в «Заказах» и «Барахолке» — без окна и без
-        вопросов, только с подтверждением «отправить N?». Параметры подставляются из заказа;
-        CRM угадывает их по тексту шаблона, а здесь можно поправить.</p>
-      <div class="field"><label>Шаблон</label>
-        <select id="waCfgTpl">${appr.map(t=>`<option value="${esc(t.name)}" ${cur&&cur.name===t.name?'selected':''}>${esc(t.name)}${t.language?' · '+esc(t.language):''}</option>`).join('')}</select>
-        ${appr.length?'':'<div class="hint" style="color:var(--rust)">Нет одобренных шаблонов — заведите их в Meta Business Suite</div>'}
-      </div>
-      <div id="waCfgBody"></div>
-      <div style="margin-top:12px"><button class="btn primary" id="waCfgSave">Сохранить</button></div>
-    </div>`;
-  const draw=()=>{
-    const t=appr.find(x=>x.name===$('waCfgTpl').value);
-    const bodyBox=$('waCfgBody');if(!t||!bodyBox)return;
-    const n=t.body_params||0;
-    const fieldOpts=sel=>WA_FIELDS.map(f=>`<option value="${f[0]}" ${sel===f[0]?'selected':''}>${esc(f[1])}</option>`).join('');
-    const saved=(t.name===pin.template&&pin.params)?pin.params:null;
-    bodyBox.innerHTML=`
-      <div class="panel" style="margin:8px 0"><div class="hint" style="white-space:pre-wrap">${esc(t.body_text||'')}</div></div>
-      ${n?`<table class="resp-table"><thead><tr><th>Параметр</th><th>Что подставить</th></tr></thead><tbody>${
-        Array.from({length:n},(_,i)=>i+1).map(k=>{
-          const sel=(saved&&(saved[k]||saved[String(k)]))||waGuessField(waCtx(t.body_text,k),k);
-          const ctx=waCtx(t.body_text,k);
-          return `<tr class="open"><td data-label="Параметр"><b>{{${k}}}</b>${ctx?`<small class="cell-time">${esc(ctx)}</small>`:''}</td>
-            <td data-label="Что подставить"><select class="wa-cfg" data-k="${k}">${fieldOpts(sel)}</select></td></tr>`;
-        }).join('')}</tbody></table>`
-        :'<div class="hint">У шаблона нет подстановок — уйдёт как есть.</div>'}`;
+  // Чип показывает не только название кнопки, но и привязанный шаблон: главный вопрос здесь —
+  // «что по какой кнопке уйдёт», и отвечать на него перебором чипов было бы странно.
+  const chips=()=>WA_BUTTONS.map(([key,label])=>{
+    const t=(cfg[key]&&cfg[key].template)||'';
+    // Кнопка — это flex-контейнер, и обычный <br> в ней не переносит: подпись и шаблон
+    // должны быть ОТДЕЛЬНЫМИ элементами, иначе имя шаблона встаёт в ту же строку.
+    return `<button type="button" class="btn sm ${key===waCfgBtn?'primary':'ghost'}" data-wacfgbtn="${esc(key)}"
+      style="flex-direction:column;align-items:flex-start;gap:2px;line-height:1.25;height:auto;padding:8px 12px"><span>${esc(label)}</span
+      ><small style="opacity:.8;font-weight:400">${t?esc(t):'шаблон не выбран'}</small></button>`;
+  }).join('');
+
+  const drawBtn=()=>{
+    const pin=cfg[waCfgBtn]||{template:'',params:null};
+    // У НЕПРИВЯЗАННОЙ кнопки в списке стоит «— не выбран —», а не первый шаблон по порядку.
+    // Иначе чип пишет «шаблон не выбран», а список показывает order_accepted — и человек
+    // уходит с вкладки, считая, что привязка есть. Та же ловушка, что с пустым пунктом в
+    // «Типе доставки» (раздел 6): пустой пункт нужен, пока выбор не сделан, и только тогда.
+    const cur=appr.find(t=>t.name===pin.template)||null;
+    box.innerHTML=`
+      <div class="panel">
+        <div class="panel-head"><h2>Оповещения в WhatsApp</h2></div>
+        <p class="hint">Выберите кнопку из меню «⚙ Действие» в «Заказах» и «Барахолке», затем шаблон,
+          который по ней уйдёт. Отправка идёт без окна — только с подтверждением «отправить N?».</p>
+        <div class="filters" style="padding:0;margin:0 0 12px;gap:8px;flex-wrap:wrap">${chips()}</div>
+        <div class="field"><label>Шаблон для «${esc(waBtnLabel(waCfgBtn))}»</label>
+          <select id="waCfgTpl">${cur?'':'<option value="" selected>— шаблон не выбран —</option>'}${appr.map(t=>`<option value="${esc(t.name)}" ${cur&&cur.name===t.name?'selected':''}>${esc(t.name)}${t.language?' · '+esc(t.language):''}</option>`).join('')}</select>
+          ${appr.length?'':'<div class="hint" style="color:var(--rust)">Нет одобренных шаблонов — заведите их в Meta Business Suite</div>'}
+        </div>
+        <div id="waCfgBody"></div>
+        <div style="margin-top:12px">
+          <button class="btn primary" id="waCfgSave">Сохранить</button>
+          ${pin.template?'<button class="btn ghost" id="waCfgClear" style="margin-left:8px">Отвязать шаблон</button>':''}
+        </div>
+      </div>`;
+    box.querySelectorAll('[data-wacfgbtn]').forEach(b=>{
+      b.onclick=()=>{waCfgBtn=b.dataset.wacfgbtn;drawBtn();};
+    });
+    const drawBody=()=>{
+      const bodyBox=$('waCfgBody');if(!bodyBox)return;
+      const t=appr.find(x=>x.name===$('waCfgTpl').value);
+      if(!t){bodyBox.innerHTML='<div class="hint">Выберите шаблон — тогда покажем его текст и подстановки.</div>';return;}
+      const n=t.body_params||0;
+      const fieldOpts=sel=>WA_FIELDS.map(f=>`<option value="${f[0]}" ${sel===f[0]?'selected':''}>${esc(f[1])}</option>`).join('');
+      // Сохранённые подстановки берём только у СВОЕГО шаблона: выбрали в списке другой —
+      // у него и параметры другие, и чужая раскладка подставила бы адрес в дату.
+      const saved=(t.name===pin.template&&pin.params)?pin.params:null;
+      bodyBox.innerHTML=`
+        <div class="panel" style="margin:8px 0"><div class="hint" style="white-space:pre-wrap">${esc(t.body_text||'')}</div></div>
+        ${n?`<table class="resp-table"><thead><tr><th>Параметр</th><th>Что подставить</th></tr></thead><tbody>${
+          Array.from({length:n},(_,i)=>i+1).map(k=>{
+            const sel=(saved&&(saved[k]||saved[String(k)]))||waGuessField(waCtx(t.body_text,k),k);
+            const ctx=waCtx(t.body_text,k);
+            return `<tr class="open"><td data-label="Параметр"><b>{{${k}}}</b>${ctx?`<small class="cell-time">${esc(ctx)}</small>`:''}</td>
+              <td data-label="Что подставить"><select class="wa-cfg" data-k="${k}">${fieldOpts(sel)}</select></td></tr>`;
+          }).join('')}</tbody></table>`
+          :'<div class="hint">У шаблона нет подстановок — уйдёт как есть.</div>'}`;
+    };
+    if($('waCfgTpl'))$('waCfgTpl').onchange=drawBody;
+    drawBody();
+    if($('waCfgSave'))$('waCfgSave').onclick=async()=>{
+      const t=appr.find(x=>x.name===$('waCfgTpl').value);
+      if(!t){toast('Выберите шаблон');return;}
+      const params={};
+      box.querySelectorAll('.wa-cfg').forEach(s=>{params[s.dataset.k]=s.value;});
+      const btn=$('waCfgSave');btn.disabled=true;
+      const okSave=await waCfgSave(waCfgBtn,t.name,params);
+      btn.disabled=false;
+      if(okSave){
+        cfg[waCfgBtn]={template:t.name,params};
+        toast(`«${waBtnLabel(waCfgBtn)}» будет слать шаблон ${t.name}`);
+        drawBtn();   // чип этой кнопки должен сразу показать новый шаблон
+      }
+    };
+    // Отвязать нужно по-настоящему: кнопку из меню убрать нельзя (она строкой в WA_BUTTONS),
+    // а слать по ней старый шаблон после «я это больше не использую» — хуже, чем отказ.
+    if($('waCfgClear'))$('waCfgClear').onclick=async()=>{
+      if(!confirm(`Отвязать шаблон от «${waBtnLabel(waCfgBtn)}»?\n\nКнопка останется в меню, но будет писать, что шаблон не выбран.`))return;
+      const btn=$('waCfgClear');btn.disabled=true;
+      const okSave=await waCfgSave(waCfgBtn,'',null);
+      btn.disabled=false;
+      if(okSave){cfg[waCfgBtn]={template:'',params:null};toast('Отвязано');drawBtn();}
+    };
   };
-  if($('waCfgTpl'))$('waCfgTpl').onchange=draw;
-  draw();
-  if($('waCfgSave'))$('waCfgSave').onclick=async()=>{
-    const t=appr.find(x=>x.name===$('waCfgTpl').value);
-    if(!t){toast('Выберите шаблон');return;}
-    const params={};
-    box.querySelectorAll('.wa-cfg').forEach(s=>{params[s.dataset.k]=s.value;});
-    const btn=$('waCfgSave');btn.disabled=true;
-    const okSave=await waCfgSave(WA_BTN_NOTIFY,t.name,params);
-    btn.disabled=false;
-    if(okSave){pin.template=t.name;pin.params=params;toast('Сохранено — кнопка будет слать этот шаблон');}
-  };
+  drawBtn();
 }

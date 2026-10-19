@@ -608,7 +608,7 @@ function renderOrders(mode){
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
         ${(isStaff()||can('orders','delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
           <span class="act-menu" id="ordersActMenu" style="display:none">
-            ${isStaff()?'<button type="button" class="act-item" id="ordersWaSel">💬 WhatsApp оповещение</button>':''}
+            ${isStaff()&&typeof WA_BUTTONS!=='undefined'?WA_BUTTONS.map(b=>`<button type="button" class="act-item" data-wabtn="${esc(b[0])}">${esc(b[1])}</button>`).join(''):''}
             ${can('orders','delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
           </span></span>`:''}
         <div class="filters filters-dates" style="padding:0;margin:0">
@@ -669,12 +669,16 @@ function renderOrders(mode){
     window.addEventListener('scroll',close,{passive:true});
     window.addEventListener('resize',close);
   }
-  // WhatsApp-оповещение: шаблон и подстановки закреплены в Настройках, окно не открывается —
-  // только подтверждение «отправить N?» (js/21-whatsapp.js).
-  if($('ordersWaSel'))$('ordersWaSel').onclick=()=>{
-    if(actMenu)actMenu.style.display='none';
-    if(typeof waNotifySelection==='function')waNotifySelection();
-  };
+  /* WhatsApp-оповещения: шаблон и подстановки закреплены в Настройках, окно не открывается —
+     только подтверждение «отправить N?» (js/21-whatsapp.js). Обработчик ОДИН на все кнопки
+     и берёт ключ из самой кнопки: их столько, сколько строк в WA_BUTTONS, и новая должна
+     заработать без правок здесь. */
+  document.querySelectorAll('[data-wabtn]').forEach(b=>{
+    b.onclick=()=>{
+      if(actMenu)actMenu.style.display='none';
+      if(typeof waNotifySelection==='function')waNotifySelection(b.dataset.wabtn);
+    };
+  });
   // удаление отмеченных галочками заказов
   if($('ordersDelSel'))$('ordersDelSel').onclick=async()=>{
     const ids=[...ketSelected];
