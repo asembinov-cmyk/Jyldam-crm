@@ -2491,6 +2491,9 @@ function orderModal(id,readonly){
     oIndexEl.style.borderColor='';
     kpIndexHint(cleaned);          // что это за отделение — сразу под полем
   };
+  // Карточку открыли заново — забываем, что подставляли в прошлой: иначе адрес, вписанный
+  // автоматом в соседнем заказе, здесь сочли бы «нашим» и затёрли.
+  if(typeof _kpAutoAddr!=='undefined')_kpAutoAddr='';
   if(oIndexEl&&oIndexEl.value)kpIndexHint(oIndexEl.value);   // и при открытии карточки
   if($('o_kazpost_btn'))$('o_kazpost_btn').onclick=async()=>{
     const btn=$('o_kazpost_btn');btn.disabled=true;btn.textContent='⏳ Получаем…';

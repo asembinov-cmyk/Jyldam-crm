@@ -604,43 +604,68 @@ let _kpIdx=null, _kpIdxWait=null;
 function kpIndexTable(){
   if(_kpIdx)return Promise.resolve(_kpIdx);
   if(_kpIdxWait)return _kpIdxWait;
-  _kpIdxWait=fetch('assets/kazpost-index.json?v=c51156cf')
+  _kpIdxWait=fetch('assets/kazpost-index.json?v=0770e7f7')
     .then(r=>r.ok?r.json():null)
     .then(j=>{_kpIdx=(j&&j.i)||{};return _kpIdx;})
     .catch(e=>{console.warn('справочник индексов',e);_kpIdx={};return _kpIdx;});
   return _kpIdxWait;
 }
-// Что показать под полем индекса. Пустая строка — пока цифр меньше шести: дёргать подсказку
-// на каждой набранной цифре значит мигать ею четыре раза подряд.
-function kpIndexText(r){
-  if(!r)return null;
-  const where=[r.c,r.o&&r.o!==r.c?r.o:''].filter(Boolean).join(', ');
-  const parts=[where,r.a].filter(Boolean);
-  return {where:parts.join(' · '), vydacha:r.v===1, type:r.t||'', geo:r.g||'',
-    query:[r.c,r.a].filter(Boolean).join(', ')};
+/* АДРЕС ОТДЕЛЕНИЯ ОДНОЙ СТРОКОЙ — так, как его пишут на конверте:
+   «г. Жанаозен, Мангистауская область, Шугыла 24Б».
+
+   РАЙОН ставим только для сёл и посёлков. У городов в справочнике Казпочты он либо
+   повторяет город («Жанаозен район», «Тараз район»), либо это район ВНУТРИ города
+   («Сарыарка район») — в почтовом адресе оба лишние, посылку всё равно ведёт индекс.
+   А у села он обязателен: «с. Шортанды, Шортандинский район» без него не найти.
+
+   ОБЛАСТЬ пропускаем, когда она и есть город: Астана и Алматы в справочнике записаны
+   областью сами себе, и вышло бы «г. Астана, Астана». */
+function kpOfficeAddress(r){
+  if(!r)return '';
+  const city=[r.ct,r.c].filter(Boolean).join(' ');
+  const inCity=(r.ct==='г.')||(r.o&&r.o===r.c);   // город или город-область (Астана, Алматы)
+  const rayon=(r.r&&!inCity&&r.c&&r.r.indexOf(r.c)===-1)?r.r:'';
+  const obl=(r.o&&r.o!==r.c)?r.o:'';
+  return [city,rayon,obl,r.a].filter(Boolean).join(', ');
 }
+/* Что CRM сама вписала в адрес в прошлый раз. Нужно, чтобы поправленный индекс обновил
+   адрес, а НАБРАННЫЙ РУКАМИ адрес остался нетронутым: если в поле лежит ровно наша прошлая
+   подстановка — заменяем, если человек там что-то писал — не трогаем вовсе. */
+let _kpAutoAddr='';
+/* Под полем индекса остаются ТОЛЬКО предупреждения (19.10.2026, просьба владельца: «эту
+   информацию автоматом вставляй в строку адреса вместо того, что снизу индекса пишет»).
+   Сам адрес отделения уходит в «Адрес получателя» — там он и нужен, а дублировать его
+   подсказкой незачем. Тип отделения и кнопку «на карте» убрали тогда же. */
 async function kpIndexHint(code){
-  const box=$('o_index_info');if(!box)return;
+  const box=$('o_index_info');
   const idx=String(code||'').replace(/\D/g,'');
-  if(idx.length<6){box.innerHTML='';return;}
-  box.innerHTML='<span class="idx-wait">смотрим по справочнику Казпочты…</span>';
+  if(idx.length<6){if(box)box.innerHTML='';return;}
+  if(box)box.innerHTML='<span class="idx-wait">смотрим по справочнику Казпочты…</span>';
   const tbl=await kpIndexTable();
-  // Пока грузилось, человек мог набрать другой индекс — свежую подсказку не перетираем.
+  // Пока грузилось, человек мог набрать другой индекс — ответ старого запроса выбрасываем.
   const now=(($('o_index')||{}).value||'').replace(/\D/g,'');
   if(now&&now!==idx)return;
-  const info=kpIndexText(tbl[idx]);
-  if(!info){
-    // Это полезный сигнал, а не придирка: чаще всего так видно опечатку в цифрах. Но
-    // справочник собран на дату, поэтому «нет» не значит «не существует» — только «не нашли».
-    box.innerHTML='<span class="idx-bad">⚠ Такого индекса в справочнике Казпочты нет — проверьте цифры</span>';
+  const rec=tbl[idx];
+  if(!rec){
+    // Полезный сигнал, а не придирка: чаще всего так видно опечатку в цифрах. Но справочник
+    // собран на дату, поэтому «нет» значит «не нашли», а не «не существует».
+    if(box)box.innerHTML='<span class="idx-bad">⚠ Такого индекса в справочнике Казпочты нет — проверьте цифры</span>';
+    // Адрес, который мы же и подставили по прошлому индексу, убираем: индекс теперь другой,
+    // и оставить от него адрес — значит оставить заведомо чужой город в заказе.
+    {const el=$('o_address');
+     if(el&&!el.disabled&&_kpAutoAddr&&(el.value||'').trim()===_kpAutoAddr){
+       el.value='';_kpAutoAddr='';el.dispatchEvent(new Event('input',{bubbles:true}));}}
     return;
   }
-  box.innerHTML=`<span class="idx-ok">📮 ${esc(info.where)}</span>`
-    +(info.type?`<span class="idx-type">${esc(info.type)}</span>`:'')
-    +(info.vydacha?'':'<span class="idx-bad">выдачи посылок тут нет</span>')
-    +(info.query?`<button type="button" class="link-btn" data-idxgis="${esc(info.query)}">на карте</button>`:'');
-  const b=box.querySelector('[data-idxgis]');
-  if(b)b.onclick=()=>open2gis(b.dataset.idxgis);
+  // Выдача бывает не везде (банкоматы, почтоматы) — об этом сказать надо, посылке туда нельзя.
+  if(box)box.innerHTML=rec.v===1?'':'<span class="idx-bad">⚠ По этому индексу посылки не выдают</span>';
+  const addr=kpOfficeAddress(rec);
+  const el=$('o_address');
+  if(!el||!addr||el.disabled)return;   // карточку могли открыть только на просмотр
+  const cur=(el.value||'').trim();
+  if(cur&&cur!==_kpAutoAddr)return;   // человек написал адрес сам — не затираем
+  el.value=addr;_kpAutoAddr=addr;
+  el.dispatchEvent(new Event('input',{bubbles:true}));  // продлить захват в «Заполнении» и т.п.
 }
 
 /* ---------- ФОТО (Supabase Storage) ---------- */
