@@ -329,10 +329,11 @@ function renderPickupsPager(total,totalPages,startIdx,shownCount){
 }
 /* Компактные карточки заявок на забор для курьера-заборщика: свёрнуто — наименование/адрес/телефон/статус */
 function drawCourierPickupCards(el,rows){
-  const mine=!!(ccOrder()&&ccOrder().length);
-  el.innerHTML=`<div class="cc-hint">↕ Зажмите карточку и потяните — поменяете порядок
-      <button class="link-btn" id="ccReset" ${mine?'':'hidden'}>сбросить свой порядок</button></div>
-    <div class="cour-cards">${rows.map(p=>{
+  // Подписи про перетаскивание здесь НЕТ (просьба владельца 19.10.2026: «в курьерском
+  // аккаунте убери эту информацию»). Жест остаётся, объяснять его на экране не надо —
+  // курьеру показали руками. Сброс порядка тоже убран с экрана: ключ дневной, назавтра
+  // список и порядок всё равно новые, а на сегодня есть `ccOrderReset()` в консоли.
+  el.innerHTML=`<div class="cour-cards">${rows.map(p=>{
     const ph=phoneStored(p.phone);
     return `<div class="cour-card" data-card="${p.id}">
       <div class="cc-head" data-toggle="${p.id}">
@@ -369,7 +370,6 @@ function drawCourierPickupCards(el,rows){
     if(nowMs()-_ccJustDragged<400)return;
     h.closest('.cour-card').classList.toggle('open');
   });
-  if($('ccReset'))$('ccReset').onclick=()=>{ccOrderClear();toast('Порядок сброшен');drawPickups();};
   bindCourierCardDrag(el.querySelector('.cour-cards'));
   el.querySelectorAll('[data-gis]').forEach(a=>a.onclick=e=>{e.preventDefault();e.stopPropagation();open2gis(a.dataset.gis);});
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=e=>{e.stopPropagation();pickupModal(b.dataset.pview,true);});
@@ -437,6 +437,9 @@ function ccOrderSave(ids){
   }catch(e){}
 }
 function ccOrderClear(){_ccOrderKey=ccKey();_ccOrder=null;try{localStorage.removeItem(_ccOrderKey);}catch(e){}}
+// Кнопки сброса на экране больше нет — вернуть порядок к обычному можно отсюда:
+// `ccOrderReset()` в консоли браузера. Само собой он сбрасывается на следующий день.
+window.ccOrderReset=()=>{ccOrderClear();if(typeof drawPickups==='function')drawPickups();toast('Порядок сброшен');};
 
 function bindCourierCardDrag(box){
   if(!box)return;
@@ -478,7 +481,6 @@ function bindCourierCardDrag(box){
     _ccJustDragged=nowMs();
     const ids=[...box.querySelectorAll('.cour-card')].map(c=>c.dataset.card);
     ccOrderSave(ids);
-    const rst=$('ccReset');if(rst)rst.hidden=false;
     toast('Порядок сохранён — он держится до конца дня');
   };
 
