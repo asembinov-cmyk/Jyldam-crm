@@ -1864,3 +1864,17 @@ td .ft-dot{margin:0 0 0 8px}
 .idx-type{color:var(--muted)}
 .idx-bad{color:var(--rust);font-weight:600}
 .idx-wait{color:var(--muted)}
+
+/* Меню «Действие» в строке фильтров заказов (19.10.2026): внутри — «WhatsApp оповещение»
+   и «Удалить выделенные». Координаты ставит код (position:fixed), потому что строка
+   фильтров прокручивается вбок и абсолютное меню обрезалось бы её краем. */
+.act-wrap{position:relative;display:inline-flex}
+.filters .filters-btn.active{border-color:var(--ink)}
+.act-menu{display:flex;flex-direction:column;gap:2px;background:#fff;border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 10px 28px rgba(20,30,60,.18);padding:6px;z-index:9000}
+.act-item{display:block;width:100%;text-align:left;font:inherit;font-size:14px;padding:11px 12px;
+  border:none;background:none;border-radius:8px;cursor:pointer;color:var(--ink);white-space:nowrap}
+.act-item:hover:not(:disabled){background:var(--paper)}
+.act-item:disabled{opacity:.45;cursor:default}
+.act-danger{color:#c0392b}
+.act-danger:hover:not(:disabled){background:#fdeceb}

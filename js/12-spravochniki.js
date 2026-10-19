@@ -31,6 +31,9 @@ const SET_GROUPS=[
   ['Финансы',[['fin_kassa','Кассы','card'],['fin_categories','Категории расходов','out'],
               ['fin_income_categories','Категории приходов','out'],['fin_partners','Партнёры (финансы)','user']]],
   ['Казпочта',[['maillabel','Бланк Казпочты','env'],['blanks','Бланки заранее','label']]],
+  // Какой шаблон уходит по кнопке «WhatsApp оповещение» в гриде заказов (раздел 12).
+  // Живёт в «Настройках», потому что настраивают один раз, а шлют каждый день.
+  ['Оповещения',[['wa','WhatsApp оповещение','env']]],
   ['Разработка',[['apidocs','Документация API','code']]],
 ];
 const setAllItems=()=>SET_GROUPS.flatMap(([g,items])=>items.map(it=>[...it,g]));
@@ -58,7 +61,8 @@ function renderSettings(){
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
     fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners,
-    maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings};
+    maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings,
+    wa:(typeof renderWaSettings==='function'?renderWaSettings:dirCities)};
   (map[S.dir]||dirCities)();
 }
 // вкладка «Документация API» в Настройках — две ссылки на документацию по интеграциям,

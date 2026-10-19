@@ -606,8 +606,11 @@ function renderOrders(mode){
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
-        ${isStaff()?'<button type="button" class="filters-btn" id="ordersWaSel" title="Отправить получателям уведомление в WhatsApp — шаблоном, одобренным Meta">💬 WhatsApp</button>':''}
-        ${can('orders','delete')?'<button type="button" class="filters-btn filters-btn-danger" id="ordersDelSel" title="Удалить заказы, отмеченные галочками">🗑 Удалить выделенные</button>':''}
+        ${(isStaff()||can('orders','delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
+          <span class="act-menu" id="ordersActMenu" style="display:none">
+            ${isStaff()?'<button type="button" class="act-item" id="ordersWaSel">💬 WhatsApp оповещение</button>':''}
+            ${can('orders','delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
+          </span></span>`:''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
           <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
@@ -641,9 +644,36 @@ function renderOrders(mode){
     catch(e){console.error(e);toast('Не удалось сформировать бланки: '+(e&&e.message||e));}
     finally{btn.disabled=false;btn.textContent=origLabel;}
   };
-  // рассылка WhatsApp по отмеченным заказам (js/21-whatsapp.js)
+  /* Меню «Действие» — по просьбе владельца 19.10.2026: две кнопки над таблицей он попросил
+     убрать внутрь одного пункта. Меню рисуется ФИКСИРОВАННЫМ и по координатам кнопки: строка
+     фильтров сама прокручивается вбок, и абсолютное меню обрезалось бы её краем — те же
+     грабли, что с меню строки в «Сотрудниках» (раздел 8i). */
+  const actBtn=$('ordersActBtn'), actMenu=$('ordersActMenu');
+  if(actBtn&&actMenu){
+    const place=()=>{
+      const r=actBtn.getBoundingClientRect();
+      actMenu.style.position='fixed';
+      actMenu.style.minWidth=Math.max(220,r.width)+'px';
+      actMenu.style.left=Math.min(r.left,window.innerWidth-240)+'px';
+      actMenu.style.top=(r.bottom+6)+'px';
+    };
+    const close=()=>{actMenu.style.display='none';actBtn.classList.remove('active');};
+    actBtn.onclick=e=>{
+      e.stopPropagation();
+      if(actMenu.style.display==='flex'){close();return;}
+      place();actMenu.style.display='flex';actBtn.classList.add('active');
+    };
+    // Закрывается щелчком мимо, прокруткой и сменой размера окна: фиксированное меню иначе
+    // осталось бы висеть на прежнем месте экрана, когда список уехал.
+    document.addEventListener('click',ev=>{if(!actMenu.contains(ev.target)&&ev.target!==actBtn)close();});
+    window.addEventListener('scroll',close,{passive:true});
+    window.addEventListener('resize',close);
+  }
+  // WhatsApp-оповещение: шаблон и подстановки закреплены в Настройках, окно не открывается —
+  // только подтверждение «отправить N?» (js/21-whatsapp.js).
   if($('ordersWaSel'))$('ordersWaSel').onclick=()=>{
-    if(typeof waSendFromSelection==='function')waSendFromSelection();
+    if(actMenu)actMenu.style.display='none';
+    if(typeof waNotifySelection==='function')waNotifySelection();
   };
   // удаление отмеченных галочками заказов
   if($('ordersDelSel'))$('ordersDelSel').onclick=async()=>{
@@ -1812,6 +1842,10 @@ function updateKetAllChk(allRows){
 function updateSelBtns(){
   updateDelSelBtn();
   if(typeof updateWaSelBtn==='function')updateWaSelBtn();
+  const a=$('ordersActBtn');
+  if(a){const n=ketSelected.size;
+    a.textContent=n?`⚙ Действие (${n}) ▾`:'⚙ Действие ▾';
+    a.classList.toggle('is-armed',!!n);}
 }
 // Счётчик на кнопке «Удалить выделенные». Галочки меняются без перерисовки страницы,
 // поэтому число на кнопке обновляем отдельно — иначе оно отставало бы от выбора.

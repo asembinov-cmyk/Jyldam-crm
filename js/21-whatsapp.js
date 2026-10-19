@@ -127,7 +127,7 @@ function waParam(v){
 function updateWaSelBtn(){
   const b = $('ordersWaSel'); if (!b) return;
   const n = ketSelected.size;
-  b.textContent = n ? `💬 WhatsApp (${n})` : '💬 WhatsApp';
+  b.textContent = n ? `💬 WhatsApp оповещение (${n})` : '💬 WhatsApp оповещение';
   b.disabled = !n;
   b.classList.toggle('is-armed', !!n);
 }
@@ -341,4 +341,171 @@ function waResultModal(results, noPhone){
     { wide: true });
   const c = $('waCopy');
   if (c) c.onclick = () => { copyText(plain); toast('Список скопирован'); };
+}
+
+/* ================= КНОПКА «WhatsApp ОПОВЕЩЕНИЕ»: БЕЗ ОКНА (19.10.2026) =================
+   Просьба владельца: «при нажатии кнопки ватсап-оповещение надо, чтобы вот так было на
+   автомате — это окно можно не открывать, просто пусть всплывает „отправить 1 смс? да или
+   отмена"; шаблон закрепить; выборку шаблона, какой отправлять по какой кнопке, перемести
+   в настройки».
+
+   ПОЭТОМУ ЗДЕСЬ ДВА РАЗНЫХ ПУТИ, И ПУТАТЬ ИХ НЕ НАДО:
+     • `waSendModal` — окно с выбором шаблона и предпросмотром. Осталось: им настраивают и
+       им же шлют что-то разовое;
+     • `waNotifySelection` — кнопка в гриде. Ничего не спрашивает, кроме «отправить N?»:
+       шаблон и подстановки взяты из настроек (`wa_buttons`).
+
+   ЗАЧЕМ ВООБЩЕ ПОДТВЕРЖДЕНИЕ, РАЗ ПРОСИЛИ «НА АВТОМАТЕ». Сообщение уходит клиенту сразу,
+   отозвать его нечем, и оно платное. Один вопрос «да/отмена» — это и есть просьба владельца
+   дословно, он сам его и назвал. */
+const WA_BTN_NOTIFY='notify';     // ключ кнопки в таблице wa_buttons
+let _waCfg=null;                  // настройки кнопок: {notify:{template,params}}
+
+async function waCfgLoad(force){
+  if(_waCfg&&!force)return _waCfg;
+  // Спрашиваем таблицу НАПРЯМУЮ, а не через dbList: тот на отсутствующую таблицу отвечает
+  // пустым массивом, и «db/34 не выполнен» было бы не отличить от «не настроено».
+  const {data,error}=await sb.from('wa_buttons').select('*');
+  if(error){_waCfg=null;return null;}
+  _waCfg={};(data||[]).forEach(r=>{_waCfg[r.key]={template:r.template||'',params:r.params||null};});
+  return _waCfg;
+}
+async function waCfgSave(key,template,params){
+  const row={key,template:template||null,params:params||null,
+    updated_at:new Date().toISOString(),updated_by:(S.me&&(S.me.full_name||S.me.email))||''};
+  const {error}=await sb.from('wa_buttons').upsert(row,{onConflict:'key'});
+  if(error){toast(dbErrText?dbErrText(error):(error.message||'не удалось сохранить'));return false;}
+  if(_waCfg)_waCfg[key]={template:row.template||'',params:row.params||null};
+  return true;
+}
+
+// Собрать components по закреплённым настройкам. Чего в настройках нет — угадываем по
+// тексту шаблона, как в окне: так закрепление не разваливается от нового параметра.
+function waComponentsFor(t,o,params){
+  const n=t.body_params||0;
+  const bodyParams=[];
+  for(let k=1;k<=n;k++){
+    const key=(params&&params[k])||(params&&params[String(k)])
+      ||waGuessField(waCtx(t.body_text,k),k);
+    bodyParams.push({type:'text',text:waParam(waFieldFn(key)(o))});
+  }
+  const comps=[];
+  if(bodyParams.length)comps.push({type:'body',parameters:bodyParams});
+  return comps;
+}
+
+// «1 сообщение · 2 сообщения · 5 сообщений» — вопрос читают бегло, и «2 сообщений» в нём
+// спотыкает глаз ровно там, где надо подумать.
+function waPlural(n){
+  const d=n%10, dd=n%100;
+  if(d===1&&dd!==11)return 'сообщение';
+  if(d>=2&&d<=4&&(dd<12||dd>14))return 'сообщения';
+  return 'сообщений';
+}
+async function waNotifySelection(){
+  const list=[...ketSelected].map(id=>(S.orders||[]).find(o=>o.id===id)).filter(Boolean);
+  if(!list.length){toast('Сначала отметьте заказы галочками');return;}
+  const cfg=await waCfgLoad();
+  if(cfg===null){toast('Таблица настроек не найдена — выполните db/34 (блок 3)');return;}
+  const pin=cfg[WA_BTN_NOTIFY];
+  if(!pin||!pin.template){
+    toast('Шаблон не выбран: Настройки → «WhatsApp оповещение»');return;
+  }
+  const tpls=await waLoadTemplates();
+  if(!tpls||tpls.error){toast((tpls&&tpls.error)||'не удалось получить шаблоны');return;}
+  const t=tpls.find(x=>x.name===pin.template);
+  if(!t){toast(`Шаблон «${pin.template}» у Kelesu больше нет — поправьте в Настройках`);return;}
+  if(t.status!=='APPROVED'){toast(`Шаблон «${t.name}» не одобрен Meta — отправить нельзя`);return;}
+
+  const rows=list.map(o=>({o,phone:waPhone(o.phone)}));
+  const ok=rows.filter(r=>r.phone), bad=rows.filter(r=>!r.phone);
+  if(!ok.length){toast('Ни у одного из отмеченных заказов нет телефона');return;}
+
+  // Вот то самое «отправить 1 смс? да или отмена». Про платность говорим от полусотни:
+  // отметить «все» — одно движение, а в Барахолке их полторы тысячи.
+  const msg=`Отправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
+    +(bad.length?`\n\nБез телефона и не уйдут: ${bad.length}`:'')
+    +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`:'');
+  if(!confirm(msg))return;
+
+  const all=[];
+  for(let i=0;i<ok.length;i+=WA_CHUNK){
+    const part=ok.slice(i,i+WA_CHUNK);
+    toast(`Отправляю: ${Math.min(i+part.length,ok.length)} из ${ok.length}…`);
+    const r=await callEdge('kelesu-waba',{action:'send',template:t.name,
+      items:part.map(x=>({order_id:x.o.id,code:x.o.code,phone:x.phone,
+        components:waComponentsFor(t,x.o,pin.params)}))});
+    if(!r||r.error){all.push({code:'',ok:false,error:(r&&r.error)||'ошибка вызова'});break;}
+    all.push(...(r.results||[]));
+  }
+  const sent=all.filter(r=>r.ok).length, fail=all.length-sent;
+  // Всё ушло — хватит тоста. Что-то не ушло — показываем разбор по причинам: иначе
+  // «отправлено 38 из 40» остаётся загадкой, а повторить уже нечем.
+  if(!fail&&!bad.length)toast(`Отправлено: ${sent}`);
+  else waResultModal(all,bad);
+}
+
+/* ---------- вкладка «WhatsApp оповещение» в Настройках ---------- */
+async function renderWaSettings(){
+  const box=$('dirContent');if(!box)return;
+  box.innerHTML='<div class="loading" style="padding:40px">Загружаем шаблоны…</div>';
+  const cfg=await waCfgLoad(true);
+  if(cfg===null){
+    box.innerHTML=`<div class="empty"><div class="big">Раздел ещё не включён</div>
+      <p>Нет таблицы настроек. Выполните <b>db/34-WHATSAPP-рассылка.sql</b>, блок 3, и обновите страницу.</p></div>`;
+    return;
+  }
+  const tpls=await waLoadTemplates(true);
+  if(!tpls||tpls.error){
+    box.innerHTML=`<div class="empty"><div class="big">Шаблоны не получены</div>
+      <p>${esc((tpls&&tpls.error)||'ошибка')}</p>
+      <p class="hint">Проверьте функцию <b>kelesu-waba</b> и секреты <b>KELESU_API_KEY</b>, <b>KELESU_CHANNEL_ID</b>.</p></div>`;
+    return;
+  }
+  const appr=tpls.filter(t=>t.status==='APPROVED');
+  const pin=cfg[WA_BTN_NOTIFY]||{template:'',params:null};
+  const cur=appr.find(t=>t.name===pin.template)||appr[0]||null;
+
+  box.innerHTML=`
+    <div class="panel">
+      <div class="panel-head"><h2>Кнопка «💬 WhatsApp оповещение»</h2></div>
+      <p class="hint">Этот шаблон уйдёт по кнопке в «Заказах» и «Барахолке» — без окна и без
+        вопросов, только с подтверждением «отправить N?». Параметры подставляются из заказа;
+        CRM угадывает их по тексту шаблона, а здесь можно поправить.</p>
+      <div class="field"><label>Шаблон</label>
+        <select id="waCfgTpl">${appr.map(t=>`<option value="${esc(t.name)}" ${cur&&cur.name===t.name?'selected':''}>${esc(t.name)}${t.language?' · '+esc(t.language):''}</option>`).join('')}</select>
+        ${appr.length?'':'<div class="hint" style="color:var(--rust)">Нет одобренных шаблонов — заведите их в Meta Business Suite</div>'}
+      </div>
+      <div id="waCfgBody"></div>
+      <div style="margin-top:12px"><button class="btn primary" id="waCfgSave">Сохранить</button></div>
+    </div>`;
+  const draw=()=>{
+    const t=appr.find(x=>x.name===$('waCfgTpl').value);
+    const bodyBox=$('waCfgBody');if(!t||!bodyBox)return;
+    const n=t.body_params||0;
+    const fieldOpts=sel=>WA_FIELDS.map(f=>`<option value="${f[0]}" ${sel===f[0]?'selected':''}>${esc(f[1])}</option>`).join('');
+    const saved=(t.name===pin.template&&pin.params)?pin.params:null;
+    bodyBox.innerHTML=`
+      <div class="panel" style="margin:8px 0"><div class="hint" style="white-space:pre-wrap">${esc(t.body_text||'')}</div></div>
+      ${n?`<table class="resp-table"><thead><tr><th>Параметр</th><th>Что подставить</th></tr></thead><tbody>${
+        Array.from({length:n},(_,i)=>i+1).map(k=>{
+          const sel=(saved&&(saved[k]||saved[String(k)]))||waGuessField(waCtx(t.body_text,k),k);
+          const ctx=waCtx(t.body_text,k);
+          return `<tr class="open"><td data-label="Параметр"><b>{{${k}}}</b>${ctx?`<small class="cell-time">${esc(ctx)}</small>`:''}</td>
+            <td data-label="Что подставить"><select class="wa-cfg" data-k="${k}">${fieldOpts(sel)}</select></td></tr>`;
+        }).join('')}</tbody></table>`
+        :'<div class="hint">У шаблона нет подстановок — уйдёт как есть.</div>'}`;
+  };
+  if($('waCfgTpl'))$('waCfgTpl').onchange=draw;
+  draw();
+  if($('waCfgSave'))$('waCfgSave').onclick=async()=>{
+    const t=appr.find(x=>x.name===$('waCfgTpl').value);
+    if(!t){toast('Выберите шаблон');return;}
+    const params={};
+    box.querySelectorAll('.wa-cfg').forEach(s=>{params[s.dataset.k]=s.value;});
+    const btn=$('waCfgSave');btn.disabled=true;
+    const okSave=await waCfgSave(WA_BTN_NOTIFY,t.name,params);
+    btn.disabled=false;
+    if(okSave){pin.template=t.name;pin.params=params;toast('Сохранено — кнопка будет слать этот шаблон');}
+  };
 }
