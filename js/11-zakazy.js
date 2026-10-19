@@ -1772,10 +1772,12 @@ function drawOrders(){
     if(e.target.checked){ketSelectAll=true;allRows.forEach(o=>ketSelected.add(o.id));}
     else{ketSelectAll=false;allRows.forEach(o=>ketSelected.delete(o.id));}
     el.querySelectorAll('.ketChk').forEach(c=>c.checked=e.target.checked);
-    // Кнопка «Удалить выделенные» живёт вне таблицы и сама о галочках не знает. Отметки
-    // строк её обновляют (через updateKetAllChk), а этот путь — «выбрать все» — не обновлял:
-    // заказы отмечены, а кнопка серая и не нажимается. Ровно на это и жаловались.
-    updateDelSelBtn();
+    // Кнопки над таблицей живут ВНЕ неё и о галочках сами не знают. Отметки строк их
+    // обновляют (через updateKetAllChk), а этот путь — «выбрать все» — не обновлял:
+    // заказы отмечены, а кнопка серая и не нажимается. На это жаловались дважды —
+    // 28.09 про «Удалить выделенные» и 19.10 про «WhatsApp», — поэтому теперь обе
+    // кнопки обновляет ОДНА функция, и третья присоединится к ней сама.
+    updateSelBtns();
   };
   updateKetAllChk(allRows);
   if(mobile){
@@ -1802,6 +1804,12 @@ function updateKetAllChk(allRows){
   const selected=allRows.filter(o=>ketSelected.has(o.id)).length;
   chk.checked=total>0&&selected===total;
   chk.indeterminate=selected>0&&selected<total;
+  updateSelBtns();
+}
+// Все кнопки, которые зависят от галочек, обновляются ОТСЮДА и только отсюда. Добавляете
+// такую кнопку — дописывайте её здесь, а не по местам: иначе она будет серой ровно на том
+// пути, который забыли (а забывают всегда «выбрать все»).
+function updateSelBtns(){
   updateDelSelBtn();
   if(typeof updateWaSelBtn==='function')updateWaSelBtn();
 }
