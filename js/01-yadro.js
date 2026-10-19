@@ -582,6 +582,67 @@ async function logAction(action,entity,opts={}){
 function orderLabel(o){return o?('#'+(o.code||o.id)):'';}
 function pickupLabel(p){return p?(p.name||('заявка '+p.id)):'';}
 
+/* ======== СПРАВОЧНИК ОТДЕЛЕНИЙ КАЗПОЧТЫ: ИНДЕКС → ПУНКТ ВЫДАЧИ (19.10.2026) ========
+   Просьба владельца: «когда менеджеры заполняют заказы и переписывают индекс, чтобы
+   вписанный индекс сразу смотрелся в интернете и показывал область и адрес этого пункта
+   выдачи — сверяться».
+
+   СПРАШИВАТЬ КАЗПОЧТУ НА КАЖДУЮ ЦИФРУ НЕЛЬЗЯ, И НЕ ТОЛЬКО ИЗ-ЗА СКОРОСТИ: их SOAP
+   ПО ИНДЕКСУ НЕ ИЩЕТ ВООБЩЕ. Метод `SearchCity2` принимает только название отделения —
+   на `080007` отвечает «no data» (проверено 19.10.2026). Зато по названию он отдаёт полную
+   карточку: индекс, область, район, город, улицу, дом, координаты, график и выдают ли там
+   посылки. Поэтому справочник собран ОДИН РАЗ (`tools/kazpost-offices.py`, 3677 отделений →
+   2719 индексов) и лежит в `assets/kazpost-index.json`: 522 КБ, по сети 83 КБ сжатым.
+
+   ГРУЗИТСЯ ЛЕНИВО И ОДИН РАЗ ЗА СЕАНС — только когда реально открыли почтовый заказ. Класть
+   его в общую загрузку при входе незачем: курьеру и складу он не нужен вовсе.
+
+   У ОДНОГО ИНДЕКСА БЫВАЕТ НЕСКОЛЬКО ТОЧЕК (отделение, банкомат, автомат выдачи). В таблицу
+   отобрана лучшая: действующая, с выдачей и не банкомат — то есть та, куда посылка и придёт.
+   Правило отбора живёт в инструменте, а не здесь: в CRM таблица уже готовая. */
+let _kpIdx=null, _kpIdxWait=null;
+function kpIndexTable(){
+  if(_kpIdx)return Promise.resolve(_kpIdx);
+  if(_kpIdxWait)return _kpIdxWait;
+  _kpIdxWait=fetch('assets/kazpost-index.json?v=c51156cf')
+    .then(r=>r.ok?r.json():null)
+    .then(j=>{_kpIdx=(j&&j.i)||{};return _kpIdx;})
+    .catch(e=>{console.warn('справочник индексов',e);_kpIdx={};return _kpIdx;});
+  return _kpIdxWait;
+}
+// Что показать под полем индекса. Пустая строка — пока цифр меньше шести: дёргать подсказку
+// на каждой набранной цифре значит мигать ею четыре раза подряд.
+function kpIndexText(r){
+  if(!r)return null;
+  const where=[r.c,r.o&&r.o!==r.c?r.o:''].filter(Boolean).join(', ');
+  const parts=[where,r.a].filter(Boolean);
+  return {where:parts.join(' · '), vydacha:r.v===1, type:r.t||'', geo:r.g||'',
+    query:[r.c,r.a].filter(Boolean).join(', ')};
+}
+async function kpIndexHint(code){
+  const box=$('o_index_info');if(!box)return;
+  const idx=String(code||'').replace(/\D/g,'');
+  if(idx.length<6){box.innerHTML='';return;}
+  box.innerHTML='<span class="idx-wait">смотрим по справочнику Казпочты…</span>';
+  const tbl=await kpIndexTable();
+  // Пока грузилось, человек мог набрать другой индекс — свежую подсказку не перетираем.
+  const now=(($('o_index')||{}).value||'').replace(/\D/g,'');
+  if(now&&now!==idx)return;
+  const info=kpIndexText(tbl[idx]);
+  if(!info){
+    // Это полезный сигнал, а не придирка: чаще всего так видно опечатку в цифрах. Но
+    // справочник собран на дату, поэтому «нет» не значит «не существует» — только «не нашли».
+    box.innerHTML='<span class="idx-bad">⚠ Такого индекса в справочнике Казпочты нет — проверьте цифры</span>';
+    return;
+  }
+  box.innerHTML=`<span class="idx-ok">📮 ${esc(info.where)}</span>`
+    +(info.type?`<span class="idx-type">${esc(info.type)}</span>`:'')
+    +(info.vydacha?'':'<span class="idx-bad">выдачи посылок тут нет</span>')
+    +(info.query?`<button type="button" class="link-btn" data-idxgis="${esc(info.query)}">на карте</button>`:'');
+  const b=box.querySelector('[data-idxgis]');
+  if(b)b.onclick=()=>open2gis(b.dataset.idxgis);
+}
+
 /* ---------- ФОТО (Supabase Storage) ---------- */
 const PHOTO_BUCKET='pickup-photos';
 
