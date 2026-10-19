@@ -18,6 +18,9 @@
    публичный (раздел 9a), а по ключу Kelesu можно рассылать от нашего имени. */
 
 const WA_CHUNK = 50;        // заказов за один вызов функции: дальше упираемся в её время
+// В ОЧЕРЕДЬ кладём крупнее: это обычная запись без пауз, и 1594 строки встают за секунды.
+// Ограничивает только размер запроса — у каждой строки внутри лежат подстановки шаблона.
+const WA_QUEUE_CHUNK = 500;
 let waTemplates = null;     // список шаблонов; грузится раз за сеанс
 let waSpecCache = {};       // подсказки по шаблону: что значит каждый {{N}}
 
@@ -506,44 +509,49 @@ async function waNotifySelection(key){
     +(again.length?`\n\nПропустим ${again.length} — им этот шаблон уже уходил.`:'')
     +(bad.length?`\n\nБез телефона и не уйдут: ${bad.length}`:'')
     +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`
-      +`\n\nОтправка займёт примерно ${waEta(ok.length)}. НЕ ЗАКРЫВАЙТЕ вкладку и не уходите`
-      +' со страницы: отправка идёт отсюда и на полпути оборвётся. Если оборвалась — нажмите'
-      +' кнопку ещё раз, уже отправленным повторно не уйдёт.':'');
+      +`\n\nШлёт сервер, примерно ${waEta(ok.length)}. Вкладку можно закрыть сразу после`
+      +' постановки в очередь — отправка от неё больше не зависит.':'');
   if(!confirm(msg))return;
 
-  const all=[];
-  let stopped='';
-  for(let i=0;i<ok.length;i+=WA_CHUNK){
-    const part=ok.slice(i,i+WA_CHUNK);
-    waProgress(`💬 Отправка: ${i} из ${ok.length} · не закрывайте вкладку`);
-    const r=await callEdge('kelesu-waba',{action:'send',template:t.name,button:key,
+  /* ОТПРАВЛЯЕТ СЕРВЕР, А НЕ ЭТА ВКЛАДКА (19.10.2026, очередь — db/37, db/38).
+     Просьба владельца после разбора «1594 отправили — ушло 251»: «сделай отправку на
+     сервере через очередь». Здесь теперь только постановка в очередь: пачки по 500 строк,
+     без пауз — это обычная запись, секунды. Дальше шлёт планировщик, раз в минуту по
+     60 сообщений, и вкладку можно закрыть. */
+  let queued=0, skipped=again.length, failEnq='';
+  for(let i=0;i<ok.length;i+=WA_QUEUE_CHUNK){
+    const part=ok.slice(i,i+WA_QUEUE_CHUNK);
+    waProgress(`💬 Ставим в очередь: ${i} из ${ok.length}…`);
+    const r=await callEdge('kelesu-waba',{action:'enqueue',template:t.name,button:key,
       items:part.map(x=>({order_id:x.o.id,code:x.o.code,phone:x.phone,
         // Раздел пишем ПО ЗАКАЗУ, а не по гриду: в отчёте (db/36) разбивка именно по нему,
         // а смешанная выборка иначе легла бы в один раздел целиком.
         section:(typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(x.o))?'baraholka':'main',
         button:key,
         components:waComponentsFor(t,x.o,pin.params)}))});
-    if(!r||r.error){
-      // Обрыв на середине — это не «ошибка отправки», а остановка: часть сообщений уже ушла
-      // и денег стоила. Говорим, сколько именно, и что повтор их не задвоит.
-      stopped=(r&&r.error)||'ошибка вызова';
-      break;
-    }
-    all.push(...(r.results||[]));
+    if(!r||r.error){failEnq=(r&&r.error)||'ошибка вызова';break;}
+    queued+=r.queued||0; skipped+=r.skipped||0;
   }
   waProgress('');
-  const sent=all.filter(r=>r.ok).length, fail=all.length-sent;
-  if(stopped){
-    waBlockModal('Отправка прервалась',
-      `Ушло: <b>${sent}</b> из ${ok.length}. Причина остановки:<br><b>${esc(stopped)}</b>`
-      +'<br><br>Нажмите кнопку ещё раз — уже отправленным повторно не уйдёт, продолжим с того'
-      +' места, где встали.');
+  if(failEnq&&!queued){
+    waBlockModal('Не удалось поставить в очередь',`${esc(failEnq)}`
+      +'<br><br>Если это «relation wa_queue does not exist» — выполните <b>db/37</b>,'
+      +' а расписание включает <b>db/38</b>.');
     return;
   }
-  // Всё ушло — хватит тоста. Что-то не ушло — показываем разбор по причинам: иначе
-  // «отправлено 38 из 40» остаётся загадкой, а повторить уже нечем.
-  if(!fail&&!bad.length)toast(`Отправлено: ${sent}`);
-  else waResultModal(all,bad);
+  /* Первую пачку толкаем сразу, не дожидаясь планировщика: при отправке на десяток
+     заказов ждать минуту незачем, да и видно сразу, работает ли связка. Ответа НЕ ждём —
+     проход идёт до 45 секунд, а человеку держать вкладку ради него уже не нужно. */
+  callEdge('kelesu-waba',{action:'drain'}).catch(()=>{});
+  waBlockModal('Поставлено в очередь',
+    `В очередь: <b>${queued}</b> ${waPlural(queued)}.`
+    +(skipped?`<br>Пропущено (уже уходило): ${skipped}.`:'')
+    +(bad.length?`<br>Без телефона: ${bad.length}.`:'')
+    +(failEnq?`<br><br><b style="color:var(--rust)">Часть не встала в очередь:</b> ${esc(failEnq)}`:'')
+    +'<br><br><b>Вкладку можно закрыть</b> — дальше шлёт сервер, примерно по 60 сообщений'
+    +` в минуту, то есть около ${waEta(queued)}.`
+    +'<br><br>Сколько осталось и что ушло — в <b>Настройки → Оповещения WhatsApp</b>.'
+    +' Если очередь стоит на месте, значит не выполнено <b>db/38</b> (расписание).');
 }
 
 /* ---------- вкладка «Оповещения» в Настройках ---------- */
@@ -588,7 +596,7 @@ async function renderWaSettings(){
 
   // Две панели в разных контейнерах: чип переключают часто, а отчёт читает журнал за две
   // недели — перечитывать его на каждое нажатие чипа незачем.
-  box.innerHTML='<div id="waCfgPanel"></div><div id="waRepBox"></div>';
+  box.innerHTML='<div id="waCfgPanel"></div><div id="waQueueBox"></div><div id="waRepBox"></div>';
   const drawBtn=()=>{
     const pin=cfg[waCfgBtn]||{template:'',params:null};
     // У НЕПРИВЯЗАННОЙ кнопки в списке стоит «— не выбран —», а не первый шаблон по порядку.
@@ -662,7 +670,69 @@ async function renderWaSettings(){
     };
   };
   drawBtn();
+  waQueueRender();
   waReportRender();
+}
+
+/* ================= ПАНЕЛЬ ОЧЕРЕДИ (19.10.2026) =================
+   Очередь живёт на сервере (db/37), шлёт её планировщик (db/38). Значит в CRM обязательно
+   должно быть видно, ЕДЕТ ЛИ ОНА: если расписание не выполнено, строки будут копиться молча,
+   и «я отправил, а клиенты ничего не получили» выяснится через сутки.
+
+   Поэтому здесь три числа — в очереди, отправлено, не ушло — и время последней отправки.
+   Плюс кнопка «Отправить пачку сейчас»: ею же проверяется связка целиком, не дожидаясь
+   следующей минуты. */
+const WA_QUEUE_STALE_MIN=5;       // столько ждём, прежде чем сказать «очередь стоит»
+async function waQueueRender(){
+  const box=$('waQueueBox');if(!box)return;
+  box.innerHTML='<div class="panel" style="margin-top:14px"><div class="loading" style="padding:20px">Смотрим очередь…</div></div>';
+  const r=await callEdge('kelesu-waba',{action:'queue'});
+  if(!$('waQueueBox'))return;
+  if(!r||r.error){
+    box.innerHTML=`<div class="panel" style="margin-top:14px"><div class="panel-head"><h2>Очередь отправки</h2></div>
+      <div class="hint">Не удалось спросить очередь: ${esc((r&&r.error)||'нет ответа')}<br>
+      Если это про <b>wa_queue</b> — выполните <b>db/37</b>, а расписание включает <b>db/38</b>.</div></div>`;
+    return;
+  }
+  const q=r.queue||{};
+  const left=(q.pending||0)+(q.sending||0);
+  const lastMs=r.last_done?Date.parse(r.last_done):0;
+  const minAgo=lastMs?Math.round((nowMs()-lastMs)/60000):null;
+  // Очередь не пуста, а последняя отправка была давно (или её не было вовсе) — значит
+  // планировщик не ходит. Это главное, что надо сказать вслух.
+  const stale=left>0&&(minAgo===null||minAgo>WA_QUEUE_STALE_MIN);
+  box.innerHTML=`<div class="panel" style="margin-top:14px">
+    <div class="panel-head"><h2>Очередь отправки</h2><span class="count">${left}</span></div>
+    <div class="stats stats-3">
+      <div class="stat"><div class="k">Ждут отправки</div><div class="v">${left}</div></div>
+      <div class="stat"><div class="k">Отправлено всего</div><div class="v">${q.sent||0}</div></div>
+      <div class="stat"><div class="k">Не ушло всего</div><div class="v">${q.failed||0}</div></div>
+    </div>
+    <div class="hint" style="margin-top:8px">${r.last_done
+      ? `Последняя отправка: ${esc(fmtDateTime?fmtDateTime(r.last_done):String(r.last_done).slice(0,16).replace('T',' '))}`
+      : 'Отправок ещё не было'}</div>
+    ${stale?`<div class="hint" style="margin-top:8px;color:var(--rust);line-height:1.6">
+      <b>Очередь стоит.</b> В ней ${left}, а сервер ничего не отправлял
+      ${minAgo===null?'ни разу':`${minAgo} мин`}. Скорее всего не выполнено <b>db/38</b>
+      (расписание) либо у функции <b>kelesu-waba</b> не выключен «Verify JWT» — планировщик
+      приходит без токена сотрудника, и платформа отрезает его раньше нашего кода.</div>`:''}
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn sm" id="waDrainNow">▶️ Отправить пачку сейчас</button>
+      <button class="btn sm ghost" id="waQueueReload">🔄 Обновить</button>
+    </div>
+    <div class="hint" style="margin-top:8px">Отправляет сервер — вкладку держать открытой не нужно.
+      Пачка — до 60 сообщений, следующая через минуту: пауза между сообщениями обязательна,
+      у Kelesu лимит 100 запросов в минуту.</div>
+  </div>`;
+  if($('waQueueReload'))$('waQueueReload').onclick=()=>waQueueRender();
+  if($('waDrainNow'))$('waDrainNow').onclick=async()=>{
+    const b=$('waDrainNow');b.disabled=true;b.textContent='Отправляем…';
+    const d=await callEdge('kelesu-waba',{action:'drain'});
+    b.disabled=false;b.textContent='▶️ Отправить пачку сейчас';
+    if(!d||d.error)toast('Не получилось: '+((d&&d.error)||'нет ответа'),6000);
+    else toast(d.drained?`Ушло ${d.sent||0}, не ушло ${d.failed||0}, осталось ${d.left??'?'}`:'Очередь пуста',6000);
+    waQueueRender();waReportRender();
+  };
 }
 
 /* ================= ОТЧЁТ ПО РАССЫЛКЕ (19.10.2026) =================
@@ -739,11 +809,13 @@ function waProgress(txt){
   if(!el){el=document.createElement('div');el.id='waProg';el.className='wa-prog';document.body.appendChild(el);}
   el.textContent=txt;
 }
-// «19 минут» понятнее, чем «1594 сообщения по 0,7 секунды».
+/* «23 минуты» понятнее, чем «1343 сообщения по 0,7 секунды». Считаем по темпу ОЧЕРЕДИ:
+   планировщик берёт до 60 строк в минуту (пауза 700 мс обязательна — лимит Kelesu). */
+const WA_PER_MIN=60;
 function waEta(n){
-  const sec=Math.round(n*0.75)+Math.ceil(n/WA_CHUNK)*2;
-  if(sec<90)return `${sec} сек`;
-  return `${Math.round(sec/60)} мин`;
+  if(n<=WA_PER_MIN)return `${Math.max(5,Math.round(n*0.75))} сек`;
+  const min=Math.ceil(n/WA_PER_MIN);
+  return min<60?`${min} мин`:`${(min/60).toFixed(1)} ч`;
 }
 async function waReportLoad(days){
   const from=new Date(nowMs()-days*86400000).toISOString();
