@@ -425,6 +425,10 @@ const DB_UNIQUE_MSG={
 };
 function dbErrText(error){
   const m=String((error&&error.message)||'');
+  /* P0001 — это `raise exception` из нашего же триггера (db/42, запрет дубля трека).
+     Текст там УЖЕ русский и называет конкретный заказ-конфликт, поэтому показываем его как
+     есть: приписка «Ошибка:» только мешала бы читать. */
+  if(error&&error.code==='P0001'&&m)return m;
   if(error&&(error.code==='23505'||/duplicate key/i.test(m))){
     for(const key in DB_UNIQUE_MSG)if(m.includes(key))return DB_UNIQUE_MSG[key];
     return 'Такая запись уже есть — повтор не создаётся.';

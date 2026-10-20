@@ -113,15 +113,39 @@ function buildPickupOrderRows(p,count){
 // Вставка готовых строк. Supabase/PostgREST спокойно принимает несколько тысяч строк за раз,
 // но на всякий случай (лимиты размера запроса, таймауты на слабом интернете) режем на пачки
 // по 200 штук — для 500 заказов это всего 3 запроса вместо пятисот.
+/* ПАЧКА, ОТКЛОНЁННАЯ ИЗ-ЗА ОДНОЙ СТРОКИ, ПЕРЕЗАЛИВАЕТСЯ ПОШТУЧНО (21.10.2026).
+
+   С запретом дубля трека в базе (`db/42`) это перестало быть редкостью: одна строка с
+   повтором отклоняла ВЕСЬ `insert` на 200 заказов, а `break` бросал и остаток файла. То
+   есть из-за одного трека реестр на 500 строк мог не загрузиться почти целиком.
+
+   Поэтому на ошибке пачки заходим по одной строке: плохие отсеются поимённо, хорошие
+   запишутся. Двести запросов — цена, которую платим только когда что-то не так; в обычном
+   проходе остаётся один запрос на пачку. Загрузка реестра сама покажет, какие строки
+   отклонила база (`impResultModal`), поэтому молчать здесь можно — но не про общий сбой. */
 async function insertOrderRows(rows){
   const made=[];
   const CHUNK=200;
+  let hardFail='';
   for(let i=0;i<rows.length;i+=CHUNK){
     const chunk=rows.slice(i,i+CHUNK);
     const {data:inserted,error}=await sb.from('orders').insert(chunk).select();
-    if(error){console.error('bulk insert orders',error);toast('Ошибка при создании заказов: '+error.message);break;}
-    if(inserted){inserted.forEach(u=>S.orders.unshift(u));made.push(...inserted);}
+    if(!error){
+      if(inserted){inserted.forEach(u=>S.orders.unshift(u));made.push(...inserted);}
+      continue;
+    }
+    console.error('bulk insert orders',error);
+    // Пачку отклонили целиком — пробуем по одной, чтобы не потерять остальные строки.
+    let rejected=0;
+    for(const row of chunk){
+      const {data:one,error:e1}=await sb.from('orders').insert(row).select();
+      if(e1){rejected++;console.error('insert order',e1);hardFail=hardFail||(dbErrText?dbErrText(e1):(e1.message||''));continue;}
+      if(one&&one[0]){S.orders.unshift(one[0]);made.push(one[0]);}
+    }
+    if(rejected)toast(`База отклонила строк: ${rejected} — остальные созданы`,6000);
   }
+  // Про саму причину говорим один раз и текстом базы: «дубль трека» там уже по-русски.
+  if(hardFail)toast(hardFail,8000);
   return made;
 }
 // Сколько заказов по этой заявке РЕАЛЬНО есть — считаем прямо из базы, а не из памяти
