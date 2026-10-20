@@ -732,6 +732,70 @@ function readPickupForm(){
     give_invoices:$('m_invoices')?$('m_invoices').checked:false,
     sales_id:val('m_sales'),processor_id:val('m_proc')};
 }
+/* ГОРОД ЗАЯВКИ ПОПРАВИЛИ ПОСЛЕ СОЗДАНИЯ ЗАКАЗОВ (20.10.2026).
+
+   Объяснение владельца, почему заказы оказывались на чужом складе: «менеджер заявок просто
+   при создании заявки менял город, но в Сортировке он уходил неправильно». Половину этого
+   закрыла правка в js/11 — город забора теперь берётся из заявки, а не из карточки партнёра.
+   Но вторая половина оставалась: болванки создаются СРАЗУ по плановому количеству, и если
+   город поправили уже после, у заказов остаётся прежний — то есть они так и лежат на чужом
+   складе, молча.
+
+   ПЕРЕНОСИМ ТОЛЬКО СПРОСИВ, и в вопросе названо всё, на что это влияет. `pickup_city_id` —
+   не только склад: по нему Калькуляция берёт ГОРОДСКИЕ СТАВКИ, а «Межгород» строит маршрут
+   и делит доли коробок. Молчаливый перенос двадцати заказов менял бы деньги месяца без
+   ведома человека.
+
+   Отдельно называем уже ПРИНЯТЫЕ складом: по ним отметка о приёмке останется от прежнего
+   склада, и это нормально (кто принял — факт), но знать об этом человек должен заранее.
+
+   Пишем ОДНИМ запросом по `pickup_id`, мимо `dbUpdate`: заказов у заявки бывает полсотни,
+   а он делает по два обращения на заказ плюс запись в журнал на каждое. В журнал кладём
+   одну запись с числом — как в смене партнёра (раздел 8q). */
+async function pickupCitySyncOrders(p, oldCityId){
+  if(!p||!p.id)return;
+  const to=p.city_id||null;
+  // Город стёрли — переносить некуда: пустой `pickup_city_id` просто спрячет заказы из
+  // «Сортировки» у всех кладовщиков с городом. Лучше оставить как было.
+  if(!to)return;
+  let rows=null;
+  try{
+    const {data,error}=await sb.from('orders').select('id,code,sorted_at,pickup_city_id').eq('pickup_id',p.id);
+    if(error)throw error;
+    rows=data||[];
+  }catch(e){
+    console.error('city sync count',e);
+    toast('Город заявки сохранён, но проверить её заказы не удалось — поправьте их вручную',7000);
+    return;
+  }
+  const need=rows.filter(o=>o.pickup_city_id!==to);
+  if(!need.length)return;                       // заказов нет или они уже в этом городе
+  const sorted=need.filter(o=>o.sorted_at).length;
+  const nm=cityName(to)||'—', was=cityName(oldCityId)||'не был указан';
+  // «3 заказов» спотыкает глаз ровно там, где надо подумать, — как и в вопросе про рассылку.
+  const d=need.length%10, dd=need.length%100;
+  const word=(d===1&&dd!==11)?'заказ':((d>=2&&d<=4&&(dd<12||dd>14))?'заказа':'заказов');
+  if(!confirm(`У этой заявки ${need.length} ${word} с прежним городом (${was}).\n\n`
+    +`Перенести их на склад «${nm}»?\n\n`
+    +`Это меняет, какой склад видит их в «Сортировке», а также городские ставки в Калькуляции `
+    +`и подбор в «Отправках межгород».`
+    +(sorted?`\n\n${sorted} из них склад уже принял — отметка о приёмке останется от прежнего склада.`:'')))return;
+  try{
+    const {error}=await sb.from('orders').update({pickup_city_id:to}).eq('pickup_id',p.id);
+    if(error)throw error;
+  }catch(e){
+    console.error('city sync update',e);
+    toast('Не удалось перенести заказы: '+(dbErrText?dbErrText(e):(e&&e.message||'ошибка')),7000);
+    return;
+  }
+  // В памяти вкладки правим сами: Realtime догонит, но грид и «Сортировка» должны
+  // показать новый склад сразу, иначе человек решит, что перенос не сработал.
+  (S.orders||[]).forEach(o=>{if(o.pickup_id===p.id)o.pickup_city_id=to;});
+  await logAction('update','orders',{entity_id:p.id,entity_label:pickupLabel(p),
+    meta:{city_sync:true,to:nm,from:was,count:need.length}});
+  toast(`Перенесено на склад «${nm}»: ${need.length}`,6000);
+}
+
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
   const today=defaultPickupDate();
@@ -781,6 +845,8 @@ function pickupModal(id,readonly){
       row.status_history=hist;
       if(id){const before=Object.assign({},p);const u=await dbUpdate('pickups',id,row);if(!u)return false;Object.assign(p,u);
         await logAction('update','pickups',{entity_id:p.id,entity_label:pickupLabel(p),changes:buildChanges(before,p)});
+        // Город поправили у заявки — предлагаем перенести и её заказы (см. ниже).
+        if(before.city_id!==row.city_id)await pickupCitySyncOrders(p,before.city_id);
         // Уведомление курьеру — только когда заявку НА НЕГО назначили: сохранение карточки
         // по другой причине не должно звенеть у него в телефоне (js/20-push.js).
         if(row.courier_id&&before.courier_id!==row.courier_id&&typeof pushPickupAssigned==='function')pushPickupAssigned(p);}
