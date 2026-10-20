@@ -55,6 +55,41 @@ const CALC_BASE_FIELDS=[
 // pricing_settings — её читают все вошедшие (см. priceNorm в js/01-yadro.js).
 // Поэтому они не привязаны к месяцу: правка действует на новые заказы, а уже
 // выставленные суммы не меняются — они записаны в самом заказе.
+/* ПЕРЕВЕС БАРАХОЛКИ — СВОЯ ПАРА СТАВОК, живёт на её вкладке (21.10.2026).
+   Просьба владельца: «за перевес надо так же, как в калькуляции барахолке внести: если
+   больше 2 кг — такая-то сумма накидывается».
+
+   ВАЖНО, ГДЕ ОНА ДЕЙСТВУЕТ: только в КАРТОЧКЕ заказа. Загрузка реестра её не трогает —
+   в файле уже стоит посчитанная цена с перевесом, и начисление второй раз как раз и
+   убирали 10.10 (см. weightSurcharge в js/11-zakazy.js). */
+/* ПАНЕЛЬ ПОКАЗЫВАЕМ, ТОЛЬКО ЕСЛИ КОЛОНКИ РЕАЛЬНО ЕСТЬ В БАЗЕ (`db/30`). Сохранение
+   нормативов шлёт ВСЕ поля `data-pricenorm` одним запросом, и несуществующая колонка
+   отклонила бы его целиком — перестали бы сохраняться и размеры пакетов, и перевес
+   заборов. Те же грабли, что с новым нормативом в `calc_settings` (раздел 8) и с
+   `sales_margin_fixed` (раздел 5b). Сама надбавка при этом считается и без колонок — по
+   значениям из кода (2 кг / 100 ₸). */
+const barWeightReady=()=>!!(S.pricing&&Object.prototype.hasOwnProperty.call(S.pricing,'bar_weight_step_fee'));
+const CALC_BAR_PRICE_FIELDS=[
+  {key:'bar_weight_free_kg', label:'Перевес · с какого веса (кг)', step:'0.001',
+   hint:'Всё до этого веса включительно — без надбавки. Ноль здесь означает «надбавка с любого веса», а не «не начислять»'},
+  {key:'bar_weight_step_fee',label:'Перевес · за каждый кг (₸)',
+   hint:'За каждый НАЧАТЫЙ килограмм сверх порога. Ноль здесь — надбавки нет вовсе'},
+];
+/* Живой пример под панелью. Он здесь не для красоты: ноль в пороге и ноль в цене значат
+   ПРОТИВОПОЛОЖНОЕ, и 10.10.2026 владелец поставил ноль в порог, ожидая «не начислять», —
+   а надбавку получила каждая посылка, включая 400-граммовую. По примеру это видно сразу. */
+function barWeightExampleHtml(){
+  const free=priceNorm('bar_weight_free_kg'), fee=priceNorm('bar_weight_step_fee');
+  if(!fee)return 'Цена за килограмм — 0, значит надбавка за перевес не начисляется вовсе.';
+  const row=w=>{
+    const add=(typeof weightSurcharge==='function')?weightSurcharge(w,false,true):0;
+    return `посылка ${fmtWeight(w)} кг → ${add?('+'+add.toLocaleString('ru-RU')+' ₸'):'без надбавки'}`;
+  };
+  const ex=[0.4,free||0.4,(free||0)+0.2,(free||0)+1.5].filter((v,i,a)=>a.indexOf(v)===i);
+  return `Сейчас: сверх <b>${fmtWeight(free)} кг</b> по <b>${fee.toLocaleString('ru-RU')} ₸</b> за начатый килограмм. `
+    + ex.map(row).join(' · ')
+    + (free===0?' <b style="color:var(--rust)">Порог 0 — надбавку получит любая посылка.</b>':'');
+}
 const CALC_PRICE_FIELDS=[
   {key:'size_mail_m',    label:'Почта · надбавка за M (₸)',   hint:'Сколько прибавить к тарифу партнёра за средний пакет'},
   {key:'size_mail_l',    label:'Почта · надбавка за L (₸)',   hint:'То же за большой пакет'},
@@ -1156,7 +1191,13 @@ function calcPartnerModal(id){
 function renderCalcBarNorms(){
   const P=calcPeriodStr();
   const cs=calcCurrentSettings();
-  const monthsRU=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const monthsRU=CALC_MONTHS_RU;
+  // Строка цены — та же, что в «Расходах компании»: пишется в `pricing_settings`, без
+  // периода, и ловится общим сохранением по `data-pricenorm`.
+  const priceRow=f=>`<div class="calc-norm-row">
+    <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
+    <div class="cn-input"><input type="number" min="0" step="${f.step||'0.01'}" data-pricenorm="${f.key}" value="${(S.pricing&&S.pricing[f.key]!=null&&S.pricing[f.key]!=='')?esc(S.pricing[f.key]):''}" placeholder="${esc(String(PRICING_DEFAULTS[f.key]??''))}"> ${f.key.includes('_kg')?'кг':'₸'}</div>
+  </div>`;
   const fieldRow=f=>`<div class="calc-norm-row">
     <div class="cn-label">${esc(f.label)}<span class="cn-hint">${esc(f.hint)}</span></div>
     <div class="cn-input"><input type="number" min="0" step="0.01" data-calcnorm="${f.key}" value="${cs[f.key]!=null&&cs[f.key]!==''?esc(cs[f.key]):''}" placeholder="0"> ₸</div>
@@ -1178,6 +1219,14 @@ function renderCalcBarNorms(){
           Курьера и межгорода у них нет: посылки сданы в почту готовыми.</p>
         ${CALC_BAR_FIELDS.map(fieldRow).join('')}
       </div>
+      ${barWeightReady()?`<div class="panel calc-panel">
+        <h3 class="calc-h">Барахолка — надбавка за перевес</h3>
+        <p class="calc-note">Действует в КАРТОЧКЕ заказа — там, где заказ заводят руками или
+          сканером ШПИ. Загрузка реестра её не начисляет: в файле уже стоит посчитанная цена
+          доставки вместе с перевесом. Пустое поле — значение по умолчанию (2 кг и 100 ₸).</p>
+        ${CALC_BAR_PRICE_FIELDS.map(priceRow).join('')}
+        <div class="calc-note" style="margin-top:12px">${barWeightExampleHtml()}</div>
+      </div>`:''}
       <div class="panel calc-panel">
         <h3 class="calc-h">Барахолка — распределяемые фонды (в месяц)</h3>
         <p class="calc-note">Делятся на заказы Барахолки за месяц. Общие фонды компании к этим заказам не применяются.</p>

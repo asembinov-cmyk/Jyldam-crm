@@ -2130,10 +2130,15 @@ function packageSizesFor(partner){
 // карточка, «Сортировка» и список «Заполнения» считают надбавку этой же функцией, и
 // порознь они разошлись бы.
 function weightSurcharge(weight, isCourier, bar){
-  if(isCourier || bar) return 0;
-  const free=priceNorm('weight_free_kg'), fee=priceNorm('weight_step_fee');
+  if(isCourier) return 0;                      // у курьерских надбавки нет вовсе
+  /* У БАРАХОЛКИ СВОЯ ПАРА СТАВОК (21.10.2026, возвращено по просьбе владельца). Пара
+     читается ЦЕЛИКОМ — обе ставки из одного набора: смешивать «порог из Барахолки, цену
+     из заборов» нельзя, именно на этом обожглись 10.10, когда пустая цена подхватывалась
+     из соседнего раздела и ноль в пороге начислял надбавку на каждую посылку. */
+  const free=priceNorm(bar?'bar_weight_free_kg':'weight_free_kg');
+  const fee =priceNorm(bar?'bar_weight_step_fee':'weight_step_fee');
   const w = parseFloat(weight);
-  if(isNaN(w) || w <= free) return 0;
+  if(isNaN(w) || !fee || w <= free) return 0;  // цена 0 — значит «не начислять»
   return Math.ceil(w - free) * fee;
 }
 // Пересчёт суммы заказа при смене веса — для мест, где вес вводят ОТДЕЛЬНО от карточки
@@ -2638,7 +2643,34 @@ function orderModal(id,readonly){
       // на другой экран после каждого сохранённого заказа
       if(S.tab==='filling'&&typeof renderFilling==='function')renderFilling();else renderOrders();
       return true;
-    }),{readonly:ro,wide:true});
+    /* ОКНО У БАРАХОЛКИ УЖЕ (просьба владельца 21.10.2026: «сделай её как-то удобнее, не
+       такую большую широкую»). Широкое окно в 1240 px нужно было ради колонки с фото;
+       без фото и без пяти скрытых полей оно просто растягивало четыре поля на весь экран. */
+    }),{readonly:ro,wide:!cardBar,mid:cardBar});
+  /* ДВЕ КОЛОНКИ В КАРТОЧКЕ БАРАХОЛКИ: слева то, что надо заполнить (ФИО, телефон, индекс,
+     адрес, вес), справа — то, что подставилось само. Просьба владельца со скриншотом.
+
+     РАСКЛАДЫВАЕМ УЖЕ ГОТОВУЮ РАЗМЕТКУ, а не пишем вторую. Поля в карточке идут одной
+     сеткой в порядке «по смыслу», и переставлять их в самой разметке значило бы менять
+     порядок и для обычных заказов — то есть чинить одно, ломая другое. Здесь же просто
+     переносим узлы: те же поля, те же id, те же обработчики.
+
+     Порядок внутри колонок задаём СПИСКОМ, а не исходным: менеджер идёт сверху вниз —
+     ФИО, телефон, индекс, адрес, вес, — и это важнее, чем прежняя группировка. */
+  if(cardBar){
+    const grid=document.querySelector('.overlay .oform-col .grid2');
+    if(grid){
+      const FILL=['o_client','o_phone','o_index','o_address','o_weight'];
+      const left=document.createElement('div'), right=document.createElement('div');
+      left.className='bar-col';right.className='bar-col';
+      const fieldOf=id=>{const el=document.getElementById(id);return el?el.closest('.field'):null;};
+      const taken=new Set();
+      FILL.forEach(id=>{const f=fieldOf(id);if(f){left.appendChild(f);taken.add(f);}});
+      [...grid.children].forEach(el=>{if(!taken.has(el)&&el!==left&&el!==right)right.appendChild(el);});
+      grid.appendChild(left);grid.appendChild(right);
+      grid.classList.add('bar-split');
+    }
+  }
   attachPhone('o_phone',d.phone);
   // Пока менеджер правит карточку, захват заказа в «Заполнении» продлевается: иначе
   // через десять минут работы заказ возвращается в общую очередь и достаётся соседу.
@@ -2918,8 +2950,13 @@ function orderModal(id,readonly){
     const updateWeightHint=()=>{
       const wh=$('o_weight_hint');if(!wh)return;
       const extra=weightSurcharge(parseWeight(val('o_weight')),isCourierDelivery(val('o_delivery')),isBaraholkaOrder(d));
+      // Ставки в подписи — ТОГО ЖЕ набора, по которому посчитана надбавка: у Барахолки своя
+      // пара (`bar_weight_*`), и общая подпись называла бы чужие числа.
+      const _bw=isBaraholkaOrder(d);
+      const _fee=priceNorm(_bw?'bar_weight_step_fee':'weight_step_fee');
+      const _free=priceNorm(_bw?'bar_weight_free_kg':'weight_free_kg');
       wh.textContent=extra
-        ? `Перевес: +${extra} ₸ — по ${priceNorm('weight_step_fee')} ₸ за каждый начатый кг свыше ${String(priceNorm('weight_free_kg')).replace('.',',')} кг`
+        ? `Перевес: +${extra} ₸ — по ${_fee} ₸ за каждый начатый кг свыше ${String(_free).replace('.',',')} кг`
         : 'Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.';
     };
     const applySize=()=>{

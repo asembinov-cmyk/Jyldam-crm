@@ -938,6 +938,12 @@
   .modal-body{padding:22px 24px}
   .modal-foot{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;background:var(--paper)}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  /* Карточка Барахолки: две колонки — слева то, что заполняют руками, справа подставленное.
+     Сами колонки раскладывает js/11 (переносит готовые поля), здесь только их вид. */
+  .grid2.bar-split{align-items:start}
+  .grid2.bar-split .bar-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .grid2.bar-split .bar-col .field{margin:0}
+  .grid2.bar-split .bar-col .field.full{grid-column:auto}
 
   .phone-wrap{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:10px;background:var(--paper);overflow:hidden}
   .phone-wrap:focus-within{outline:2px solid rgba(37,70,201,.3);border-color:var(--rust);background:var(--card)}
