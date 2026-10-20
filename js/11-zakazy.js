@@ -2464,7 +2464,16 @@ function orderModal(id,readonly){
            складе, — и молча решать его за человека нельзя. -->
       <div class="field"${barHide}><label>Тип доставки <span style="color:var(--rust)">*</span></label><select id="o_delivery" ${dis}>${d.delivery_id?'':'<option value="">—</option>'}${S.delivery.filter(x=>/курьер|почт/i.test(x.name||'')).map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
-      <div class="field full"><label>Адрес получателя</label><input id="o_address" value="${esc(d.address)}" ${dis}><div id="o_addr_info" class="idx-info"></div></div>
+      <!-- Адрес у Барахолки — в ДВЕ строки (просьба владельца 21.10.2026: «адрес слишком
+           маленький, увеличь эту строку»). В компактной карточке поле живёт в колонке шириной
+           около 330 px, и адрес вроде «Караганды обл. Каркаралы ауд. Теректи ауылы» в одну
+           строку просто не виден — приходилось возить курсором. Поле то же самое (id
+           o_address), меняется только тип: сохранение читает его через val(), а подсказка по
+           индексу пишет в .value — оба работают с textarea без правок. У обычных заказов
+           оставлен input: там колонка вдвое шире, а перенос строки в адресе не нужен. -->
+      <div class="field full"><label>Адрес получателя</label>${cardBar
+        ? `<textarea id="o_address" rows="2" style="resize:vertical;min-height:62px" ${dis}>${esc(d.address)}</textarea>`
+        : `<input id="o_address" value="${esc(d.address)}" ${dis}>`}<div id="o_addr_info" class="idx-info"></div></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Вес (кг)</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint" id="o_weight_hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
