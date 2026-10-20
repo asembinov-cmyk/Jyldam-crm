@@ -594,7 +594,7 @@ function renderOrders(mode){
   const oneType=ordersMode==='courier'||ordersMode==='mail';
   $('main').innerHTML=`
     ${moduleHead({title:head,sub:subText,
-      actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
+      actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&bar)?'<button class="btn primary" id="barNewOrder" title="Отсканировать ШПИ и завести заказ">＋ Создать заказ</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
       hero:{k:'Сумма доставки',v:totalCost.toLocaleString('ru-RU'),unit:'₸'},
       stats:[
         {v:`${list.length}<small> / ${ordersWithPhone(list)}</small>`,k:'всего · сохранено'},
@@ -655,6 +655,12 @@ function renderOrders(mode){
       <div id="orderTable"></div>
     </div>`;
   if($('newOrder'))$('newOrder').onclick=()=>orderModal();
+  /* В Барахолке «Создать заказ» ведёт не прямо в карточку, а в окно сканера: заказы здесь
+     заводят с бланка, и первым делом читают ШПИ (просьба владельца 21.10.2026). */
+  if($('barNewOrder'))$('barNewOrder').onclick=()=>{
+    if(typeof barCreateOrderModal==='function')barCreateOrderModal();
+    else toast('Модуль загрузки ещё не готов — обновите страницу');
+  };
   if($('exportXlsx'))$('exportXlsx').onclick=()=>exportOrdersToExcel();
   // массовая печать бланков «5 нысан - форма 5» по выбранным почтовым заказам
   if($('printMailLabels'))$('printMailLabels').onclick=async()=>{
@@ -2318,11 +2324,29 @@ async function orderHistoryLoad(o){
   const box=$('o_hist');if(box)box.innerHTML=orderHistoryInner(o);
 }
 
+/* ЗАГОТОВКА ДЛЯ НОВОГО ЗАКАЗА (21.10.2026). Ставит её сканер Барахолки
+   (`barCreateOrderModal` в js/17-import-excel.js): трек со сканера, почтовый тип, партнёр,
+   сумма по его тарифу. Карточка при этом обычная — отдельной формы под сканер нет и не
+   нужно, иначе два экрана заказа разошлись бы на первой же правке.
+
+   ЧТО СДЕЛАТЬ ПОСЛЕ СОХРАНЕНИЯ, передаётся В САМОЙ ЗАГОТОВКЕ (`_afterSave`), а не
+   отдельной глобальной переменной. Разница важная: глобальная осталась бы висеть, если
+   карточку закрыли не сохранив, и следующий созданный заказ — хоть из «Заказов заборов» —
+   молча напечатал бы чужой бланк. Внутри заготовки она живёт ровно одну карточку. */
+let orderPrefill=null;
 function orderModal(id,readonly){
   const o=id?S.orders.find(x=>x.id===id):null;
   const today=localToday();
   const code=o?o.code:genOrderCode();
   const d=o||{code,sender:'',partner_id:'',pickup_date:today,weight:'',client:'',phone:'',courier_city_id:'',pickup_city_id:'',address:'',qty:'',status_id:defaultOrderStatusId(),delivery_id:'',index:'',track:'',sales_id:'',processor_id:'',cost:'',pay_date:'',post_ip_id:'',order_courier_id:''};
+  // Заготовка — только для НОВОГО заказа и только один раз: дальше карточка обычная.
+  let afterSave=null;
+  if(!o&&orderPrefill){
+    afterSave=orderPrefill._afterSave||null;
+    delete orderPrefill._afterSave;          // в базу это поле уходить не должно
+    Object.assign(d,orderPrefill);
+    orderPrefill=null;
+  }
   // размеры пакетов — сразу по партнёру из поля «Отправитель», если он уже известен (для первичной
   // отрисовки формы; при смене отправителя/типа доставки дальше пересчитывается через findPartner())
   const _initPartner=d.sender?S.partners.find(pp=>(pp.name||'').trim().toLowerCase()===d.sender.trim().toLowerCase()):null;
@@ -2512,7 +2536,15 @@ function orderModal(id,readonly){
           // берём именно то, что было ДО обнуления (dataset.prevsum) — поле o_sum на момент
           // сохранения уже показывает 0, читать его напрямую сюда нельзя
           const prevSum=$('o_paidorder').dataset.prevsum;
-          if(!o||!o.paid_by_sender){row.order_sum_orig=(prevSum!=null&&prevSum!=='')?(parseFloat(prevSum)||0):0;} // запоминаем при первом включении
+          /* Запоминаем при первом включении. У НОВОГО заказа, открытого с готовой
+             отметкой (сканер Барахолки у партнёра с тарифом 0), `prevsum` взяться неоткуда:
+             галочку никто не переключал. Тогда берём условную выручку из заготовки —
+             иначе заказ ушёл бы в Калькуляцию с нулевой выручкой, то есть чистым убытком. */
+          if(!o||!o.paid_by_sender){
+            const fromPrefill=(!o&&d.order_sum_orig!=null)?d.order_sum_orig:null;
+            row.order_sum_orig=(prevSum!=null&&prevSum!=='')?(parseFloat(prevSum)||0)
+              :(fromPrefill!=null?fromPrefill:0);
+          }
           else{row.order_sum_orig=(o.order_sum_orig!=null?o.order_sum_orig:0);}
           row.paid_by_sender=true;row.order_sum=0;row.cost=0;
         }else{
@@ -2539,7 +2571,9 @@ function orderModal(id,readonly){
         // и в статистике среднее время всегда выходило пустым. Держать заказ занятым
         // это не заставляет: заполненный заказ в очередь всё равно не попадает.
       }
+      let saved=null;
       if(id){const before=Object.assign({},o);const u=await dbUpdate('orders',id,row);if(!u)return false;Object.assign(o,u);
+        saved=o;
         await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:buildChanges(before,o)});}
       else{
         // ── проверка на возможный дубль (только при создании нового заказа) ──
@@ -2551,8 +2585,15 @@ function orderModal(id,readonly){
           if(!proceed)return false; // менеджер передумал — не создаём
         }
         const u=await dbInsert('orders',row);if(!u)return false;S.orders.unshift(u);
+        saved=u;
         await logAction('create','orders',{entity_id:u.id,entity_label:orderLabel(u)});}
       toast(id?'Заказ сохранён':'Заказ создан');
+      /* Печать бланка и прочее «после сохранения» — ПОСЛЕ успешной записи и в try/catch:
+         заказ уже создан, и падение печати не должно выглядеть как несохранённая карточка. */
+      if(afterSave){
+        try{ await afterSave(saved||o); }
+        catch(e){ console.error('afterSave', e); toast('Заказ создан, но следующий шаг не выполнился: '+(e&&e.message||e),7000); }
+      }
       // из «Забивки» карточку открывают там же — renderOrders() увёл бы менеджера
       // на другой экран после каждого сохранённого заказа
       if(S.tab==='filling'&&typeof renderFilling==='function')renderFilling();else renderOrders();

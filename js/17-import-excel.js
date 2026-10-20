@@ -507,3 +507,154 @@ function impPreviewModal(fileName, rows, dbTracks){
   };
   bindImp();
 }
+
+/* ============================================================
+   БАРАХОЛКА: ЗАКАЗ СО СКАНЕРА (21.10.2026)
+
+   Просьба владельца: «хочу, чтобы не только грузили заказы по экселю, но и создавали
+   заказы внутри модуля Барахолка — добавь кнопку „Создать заказ": нажимаешь, сканируешь
+   трек-номер штрих-кодером, заказ создаётся, трек автоматом встаёт в нужное место как
+   карточка заказа, менеджеру надо заполнить только ФИО, индекс, адрес; все заказы
+   почтовые; когда нажимаешь сохранить — надо, чтобы сразу почтовый бланк формировался;
+   плюс добавь выборку партнёра после сканирования ШПИ».
+
+   ШТРИХ-КОДЕР — ЭТО КЛАВИАТУРА. Он печатает код в поле, которое сейчас в фокусе, и жмёт
+   Enter. Поэтому никакой камеры и никакой библиотеки не нужно: нужно лишь поле, которое
+   УЖЕ в фокусе при открытии окна, и обработка Enter. Камеру телефона сюда добавлять не
+   стали — просили именно сканер, а второй способ ввода одного и того же — это второй
+   путь, который потом разойдётся с первым.
+
+   ENTER НЕ СОЗДАЁТ ЗАКАЗ СРАЗУ, А ПЕРЕВОДИТ ФОКУС НА ПАРТНЁРА — ровно в том порядке, как
+   просил владелец («выборку партнёра ПОСЛЕ сканирования»). Партнёр выбран и трек прочитан —
+   второй Enter уже создаёт.
+
+   КАРТОЧКА ОТКРЫВАЕТСЯ ОБЫЧНАЯ, своей формы под сканер нет. Иначе два экрана заказа
+   разошлись бы на первой же правке — ровно как разошлись бы пять копий шапки модуля
+   (раздел 4). Трек, тип доставки, партнёр и сумма приезжают в неё заготовкой
+   (`orderPrefill` в js/11-zakazy.js), остальное менеджер заполняет руками.
+   ============================================================ */
+
+// Похоже ли на ШПИ Казпочты: две буквы, девять цифр, две буквы (QS013822592KZ).
+const BAR_SPI_RE = /^[A-Z]{2}\d{9}[A-Z]{2}$/;
+
+async function barCreateOrderModal(){
+  // Партнёры — только Барахолки, как в загрузке реестра. Если галочек нет ни у кого,
+  // значит db/13 не выполнен: показываем всех, иначе список был бы тупиком.
+  const barPartners = (S.partners || []).filter(p => p.is_baraholka);
+  const onlyBar = barPartners.length > 0;
+  const pool = (onlyBar ? barPartners : (S.partners || []))
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+  if(!pool.length){ toast('Сначала заведите партнёра в разделе «Партнёры»', 6000); return; }
+  const mail = (S.delivery || []).find(d => /почт/i.test(d.name || ''));
+
+  const ov = showModal('Новый заказ Барахолки', `
+    <div class="field full"><label>Трек-номер (ШПИ) <span style="color:var(--rust)">*</span></label>
+      <input id="bscTrack" autocomplete="off" inputmode="text" placeholder="Отсканируйте штрих-код с бланка">
+      <span class="hint">Поле уже в фокусе — просто сканируйте. Сканер сам нажмёт Enter,
+        и фокус перейдёт на партнёра.</span>
+      <div id="bscInfo" class="idx-info"></div></div>
+    <div class="field full"><label>Партнёр <span style="color:var(--rust)">*</span></label>
+      <select id="bscPartner"><option value="">— выберите —</option>
+        ${pool.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <span class="hint">${onlyBar
+        ? 'Только партнёры Барахолки — от партнёра зависят тариф, менеджер и обработчик.'
+        : 'Галочка «Барахолка» не стоит ни у одного партнёра — показаны все.'}</span></div>
+    <div class="hint" style="line-height:1.6">Заказ создастся <b>почтовым</b>. В карточке
+      останется заполнить ФИО, индекс и адрес; после сохранения сразу откроется бланк Казпочты.</div>`,
+    async () => {
+      const el = $('bscTrack'), info = $('bscInfo');
+      const track = impTrackKey(el ? el.value : '');
+      if(!track){ toast('Отсканируйте или введите трек-номер'); if(el) el.focus(); return false; }
+      const partnerId = ($('bscPartner') || {}).value || '';
+      if(!partnerId){ toast('Выберите партнёра'); const ps = $('bscPartner'); if(ps) ps.focus(); return false; }
+      const pt = (S.partners || []).find(p => p.id === partnerId);
+      if(!pt){ toast('Партнёр не найден — обновите страницу'); return false; }
+      if(!mail){ toast('В справочнике нет типа доставки «Почтовая» — заведите его в Настройках', 7000); return false; }
+
+      /* ДУБЛЬ ПРОВЕРЯЕМ ДО СОЗДАНИЯ, запросом к базе и тем же ключом, что в загрузке
+         реестра: один трек на две посылки — это один статус и одна претензия на двоих,
+         а в памяти вкладки после входа лежат только сегодняшние заказы. */
+      if(info) info.innerHTML = '<span class="idx-wait">проверяем трек по базе…</span>';
+      const exists = await impExistingTracks([track]);
+      if(exists === null){ if(info) info.innerHTML = ''; return false; }   // своё сообщение уже показано
+      if(exists.has(track)){
+        if(info) info.innerHTML = '<span class="idx-bad">⚠ Такой трек уже есть у другого заказа — '
+          + 'найдите его поиском и проверьте, какой из них верный</span>';
+        return false;
+      }
+      if(info) info.innerHTML = '';
+
+      /* ЗАРАНЕЕ ВЫДАННЫЙ БЛАНК. Если этот ШПИ мы сами выпустили и отдали партнёру (db/17),
+         заказ обязан сесть НА ТОТ ЖЕ номер: Казпочта выдала ШПИ именно под него, и новый
+         код развёл бы их между собой — у неё один номер заказа, у нас другой. Та же
+         логика, что в загрузке реестра. */
+      let poolRow = null;
+      try{
+        const { data } = await sb.from('track_pool').select('id,code,track,amount,post_ip_id')
+          .eq('track', track).is('order_id', null).limit(1);
+        poolRow = (data || [])[0] || null;
+      }catch(e){ console.error('pool lookup', e); }   // таблицы может не быть — тогда как раньше
+
+      /* СУММА — ПО ТАРИФУ ПАРТНЁРА, как у заказов из заявки. Тариф ровно 0 означает «платит
+         отдельно, по счёту раз в месяц» (раздел 5b): в заказе ноль и отметка «Оплачено
+         отправителем», а в Калькуляцию идёт условная выручка. Файла здесь нет, поэтому
+         условную берём из карточки партнёра (`direct_pay_amount`) — другого источника у
+         ручного заказа и нет. */
+      const zero = typeof isExplicitZero === 'function' && isExplicitZero(pt.tariff_post);
+      const tariff = (pt.tariff_post != null && pt.tariff_post !== '') ? +pt.tariff_post : '';
+      const notional = (pt.direct_pay_amount != null && pt.direct_pay_amount !== '') ? +pt.direct_pay_amount : null;
+      const sum = zero ? 0 : tariff;
+      orderPrefill = {
+        track,
+        delivery_id: mail.id,
+        partner_id: pt.id,
+        sender: pt.name,
+        pickup_city_id: pt.city_id || null,
+        sales_id: pt.sales_id || null,
+        processor_id: pt.processor_id || null,
+        // Карточка читает сумму из `order_sum` (поле «Сумма заказа»), а `cost` — его копия
+        // в базе: пишем оба, иначе поле открылось бы пустым.
+        order_sum: sum, cost: sum, qty: 1, size: 'S',
+        paid_by_sender: zero,
+        ...(zero && notional != null ? { order_sum_orig: notional } : {}),
+        ...(poolRow ? { code: poolRow.code, ...(poolRow.post_ip_id ? { post_ip_id: poolRow.post_ip_id } : {}) } : {}),
+        /* ПОСЛЕ СОХРАНЕНИЯ — СРАЗУ БЛАНК (просьба владельца). Печать идёт по уже
+           СОХРАНЁННОМУ заказу, а не по тому, что набрано в полях: на бланк уходят ФИО,
+           адрес, индекс и сумма, и печатать надо ровно то, что записано в базу.
+           Заодно отмечаем выданный бланк использованным — иначе он остался бы свободным
+           и мог уехать на второй заказ. */
+        _afterSave: async (saved) => {
+          if(poolRow){
+            try{
+              await sb.from('track_pool').update({ order_id: saved.id, used_at: new Date().toISOString() })
+                .eq('id', poolRow.id);
+            }catch(e){ console.error('pool bind', e); toast('Заказ создан, но бланк в пуле не отметился', 6000); }
+          }
+          if(typeof printMailLabelsPdf === 'function') await printMailLabelsPdf([saved]);
+        },
+      };
+      orderModal();
+      return true;
+    }, { saveLabel: 'Далее — карточка заказа' });
+
+  // Фокус на поле трека ставит сам `showModal` (первое поле окна) — сканер печатает туда,
+  // куда смотрит курсор, и ждать нажатия мышью значило бы получить код в пустоту.
+  const tr = ov.querySelector('#bscTrack');
+  if(tr) tr.onkeydown = e => {
+    if(e.key !== 'Enter') return;
+    e.preventDefault();
+    const val = impTrackKey(tr.value);
+    const info = ov.querySelector('#bscInfo');
+    // Не похоже на ШПИ — говорим, но НЕ запрещаем: формат у Казпочты может смениться,
+    // а бланк уже напечатан и посылка сдана.
+    if(info) info.innerHTML = (val && !BAR_SPI_RE.test(val))
+      ? '<span class="idx-type">не похоже на ШПИ Казпочты (QS013822592KZ) — проверьте, что сканер прочитал код целиком</span>'
+      : '';
+    const ps = ov.querySelector('#bscPartner');
+    if(ps && !ps.value){ ps.focus(); return; }     // сначала партнёр — как и просили
+    // Кнопку берём В СВОЁМ окне, а не первую на странице: модалок бывает несколько
+    // (карточка заказа поверх списка), и общий селектор нажал бы чужую.
+    const btn = ov.querySelector('[data-save]');
+    if(btn) btn.click();
+  };
+}
