@@ -2401,7 +2401,23 @@ function orderModal(id,readonly){
   // Пустая колонка под фото забирала половину ширины карточки, поэтому без фото карточка
   // становится одноколоночной: форма во всю ширину, KET и переписка под ней (класс
   // nophoto, правила в CSS рядом с мобильными — там та же перестановка).
-  const cardNoPhoto=isBaraholkaOrder(o);
+  /* ПРИЗНАК БАРАХОЛКИ У НОВОГО ЗАКАЗА БЕРЁТСЯ ИЗ ЗАГОТОВКИ (21.10.2026). `calc_group`
+     проставляется только при СОХРАНЕНИИ (от партнёра), поэтому у свежей карточки со
+     сканера его ещё нет — и карточка открывалась с пустой колонкой под фото, хотя фото у
+     этих заказов не бывает вовсе. Сканер кладёт признак прямо в заготовку, и дальше по
+     нему прячутся и остальные поля (ниже). */
+  const cardBar=isBaraholkaOrder(o)||isBaraholkaOrder(d);
+  const cardNoPhoto=cardBar;
+  /* ЧЕГО В КАРТОЧКЕ БАРАХОЛКИ НЕТ (просьба владельца 21.10.2026, со скриншотом):
+     город забора — там всегда Алматы и ставится сам; размер пакета — надбавок за размер у
+     этой ветки нет; тип доставки — она вся почтовая; ИП для Почты — при создании не нужен;
+     дата оплаты — внутри карточки не нужна.
+
+     ПРЯЧЕМ СТИЛЕМ, А НЕ ВЫРЕЗАЕМ ИЗ РАЗМЕТКИ: сохранение читает эти поля по id
+     (`val('o_delivery')` и прочие), и без них карточка перестала бы сохраняться вовсе —
+     тип доставки там ещё и обязателен. Значения при этом уходят те, что подставила
+     заготовка: почтовая доставка, город и сумма партнёра. */
+  const barHide=cardBar?' style="display:none"':'';
   showModal(id?('Заказ '+code):('Новый заказ '+code),`
     <div class="order-split${cardNoPhoto?' nophoto':''}">
       <div class="ophoto-col">
@@ -2426,13 +2442,13 @@ function orderModal(id,readonly){
       <div class="field"><label>ID заказа ${copyBtn(code)}</label><input value="${esc(code)}" readonly style="font-family:'Fraunces',serif;font-weight:900;letter-spacing:1px"></div>
       <div class="field"><label>Дата забора</label><input type="date" id="o_pickup" value="${esc(d.pickup_date||'')}" ${dis}></div>
       <div class="field"><label>Отправитель</label><input id="o_sender" list="partnersList" autocomplete="off" value="${esc(d.sender)}" ${dis}><datalist id="partnersList">${S.partners.map(p=>`<option value="${esc(p.name)}"></option>`).join('')}</datalist></div>
-      <div class="field"><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"${barHide}><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full" id="fizlicoPickupAddrField" style="${(_initPartner&&isFizlicoPartner(_initPartner))?'':'display:none'}"><label>Адрес откуда забрали (физ. лицо)</label><input id="o_fizlico_pickup_addr" value="${esc(d.fizlico_pickup_address||'')}" placeholder="реальный адрес, где забрали посылку у этого клиента" ${dis}></div>
       <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span><div id="o_index_info" class="idx-info"></div></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
-      <div class="field"><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?(_initPartner.is_protected?' — 🔒 неприкосновенный, фиксированная цена по тарифу '+esc(_initPartner.name):' — по тарифу '+esc(_initPartner.name)):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
+      <div class="field"${barHide}><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?(_initPartner.is_protected?' — 🔒 неприкосновенный, фиксированная цена по тарифу '+esc(_initPartner.name):' — по тарифу '+esc(_initPartner.name)):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
       <!-- ТИП ДОСТАВКИ. Пустой пункт «—» показывается ТОЛЬКО пока тип не выбран (просьба
            владельца 10.10.2026: «пусть будет только курьерская и почтовая»). У заказа с
            выбранным типом он не нужен вовсе — выбрать «ничего» там нельзя, сохранение
@@ -2441,7 +2457,7 @@ function orderModal(id,readonly){
            первый вариант, и заказ сохранится почтовым, хотя тип никто не выбирал. Тип
            тянет за собой всё остальное — город, сумму, трек у Казпочты, видимость на
            складе, — и молча решать его за человека нельзя. -->
-      <div class="field"><label>Тип доставки <span style="color:var(--rust)">*</span></label><select id="o_delivery" ${dis}>${d.delivery_id?'':'<option value="">—</option>'}${S.delivery.filter(x=>/курьер|почт/i.test(x.name||'')).map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field"${barHide}><label>Тип доставки <span style="color:var(--rust)">*</span></label><select id="o_delivery" ${dis}>${d.delivery_id?'':'<option value="">—</option>'}${S.delivery.filter(x=>/курьер|почт/i.test(x.name||'')).map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full"><label>Адрес получателя</label><input id="o_address" value="${esc(d.address)}" ${dis}><div id="o_addr_info" class="idx-info"></div></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
@@ -2453,9 +2469,9 @@ function orderModal(id,readonly){
           ${(o&&o.id&&!ro)?`<button type="button" class="btn ghost sm" id="o_kazpost_btn" style="white-space:nowrap">📮 Получить трек</button>`:''}
         </div>
       </div>
-      <div class="field"><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
+      <div class="field"${barHide}><label>Дата оплаты</label><input type="date" id="o_pay" value="${esc(d.pay_date||'')}" ${dis}></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Дата доставки</label><input type="date" id="o_deliver" min="${localToday()}" value="${esc(d.deliver_date||'')}" ${dis}></div>
-      <div class="field full mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field full mail-only" style="${(cardBar||isCourierDelivery(d.delivery_id))?'display:none':''}"><label>ИП для Почты</label><select id="o_ip" ${dis}><option value="">—</option>${S.post_ips.map(s=>`<option value="${s.id}" ${d.post_ip_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
       ${orderHistoryHtml(o)}
     </div>
       </div>
@@ -2968,6 +2984,10 @@ function orderModal(id,readonly){
       const courier=isCourierDelivery($('o_delivery').value);
       document.querySelectorAll('.mail-only').forEach(el=>el.style.display=courier?'none':'');
       document.querySelectorAll('.courier-only').forEach(el=>el.style.display=courier?'':'none');
+      /* «ИП для Почты» — почтовое поле, и общий переключатель выше снова показал бы его у
+         Барахолки, где его просили убрать. Прячем обратно ПОСЛЕ него, а не вместо: порядок
+         тут и есть всё дело. */
+      if(cardBar&&$('o_ip')){const f=$('o_ip').closest('.field');if(f)f.style.display='none';}
     };
     const ds=$('o_delivery');ds.onchange=()=>{
       const f=$('cityField');

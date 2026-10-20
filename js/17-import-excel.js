@@ -615,6 +615,11 @@ async function barCreateOrderModal(){
         // Карточка читает сумму из `order_sum` (поле «Сумма заказа»), а `cost` — его копия
         // в базе: пишем оба, иначе поле открылось бы пустым.
         order_sum: sum, cost: sum, qty: 1, size: 'S',
+        /* Признак раздела — чтобы карточка СРАЗУ знала, что это Барахолка: по нему она
+           прячет фото, город забора, размер пакета, тип доставки, ИП и дату оплаты. При
+           сохранении он всё равно пересчитывается от партнёра (js/11), так что это не
+           второй источник правды, а подсказка открывающейся карточке. */
+        calc_group: pt.is_baraholka ? 'baraholka' : null,
         paid_by_sender: zero,
         ...(zero && notional != null ? { order_sum_orig: notional } : {}),
         ...(poolRow ? { code: poolRow.code, ...(poolRow.post_ip_id ? { post_ip_id: poolRow.post_ip_id } : {}) } : {}),
