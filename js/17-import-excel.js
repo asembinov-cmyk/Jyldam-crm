@@ -120,10 +120,27 @@ function impNotional(r, pt){
 }
 
 // Что мешает создать заказ. Возвращаем причину или пусто.
-function impProblem(r, seenTracks){
+/* ТРЕК СРАВНИВАЕМ ПО ОДНОМУ ПРАВИЛУ (20.10.2026, просьба владельца «в Барахолке прям
+   сделай так, чтобы исключить дубль в трек-номерах, пусть проверяет прям, что грузим»).
+
+   Из чужих реестров один и тот же номер приходит в разном виде: `qs013822592kz`,
+   `QS013822592KZ`, иногда с пробелом внутри или по краям. Строковое сравнение считало их
+   РАЗНЫМИ номерами, и дубль проходил проверку насквозь. То же правило стоит в поиске
+   повторов по гриду (`tdupKey`, js/14), и расходиться им нельзя. */
+const impTrackKey = t => String(t || '').replace(/\s+/g, '').toUpperCase();
+
+/* Что мешает создать заказ. Возвращаем причину или пусто.
+
+   ДУБЛЬ ВНУТРИ САМОГО ФАЙЛА — ЭТО БЫЛА НАСТОЯЩАЯ ДЫРА, и её не видел никто. Проверка
+   смотрела только в базу: если один трек стоял в реестре ДВАЖДЫ, обе строки проходили
+   «создать», и заказов создавалось два — с одним треком на двоих. Ловил бы это только
+   уникальный индекс `orders_track_uniq` (db/20), а он не выполнен. */
+function impProblem(r, seenTracks, fileSeen){
   if(r.phone.length < 10) return 'телефон неполный: ' + (r.rawPhone || 'пусто');
   if(!r.track) return 'нет трек-номера';
-  if(seenTracks.has(r.track)) return 'такой трек уже есть в системе';
+  const key = impTrackKey(r.track);
+  if(fileSeen && fileSeen.has(key)) return 'такой трек уже есть выше в этом файле (строка ' + fileSeen.get(key) + ')';
+  if(seenTracks.has(key)) return 'такой трек уже есть в системе';
   if(!r.index) return 'нет индекса';
   return '';
 }
@@ -155,13 +172,20 @@ async function importOrdersFromExcel(){
 // Дробим по 100: адрес запроса не резиновый.
 async function impExistingTracks(tracks){
   const out = new Set();
-  const list = [...new Set(tracks.filter(Boolean))];
+  /* Спрашиваем базу СРАЗУ В ТРЁХ ВИДАХ — как в файле, в верхнем и в нижнем регистре.
+     `.in('track', …)` сравнивает строкой, и трек, лежащий в базе прописными, по
+     строчному из файла просто не нашёлся бы: дубль тогда виден только базе, а она о нём
+     молчит, пока не выполнен db/20. */
+  const list = [...new Set(tracks.filter(Boolean).flatMap(t => {
+    const v = String(t).trim();
+    return [v, v.toUpperCase(), v.toLowerCase()];
+  }))];
   for(let i = 0; i < list.length; i += 100){
     const part = list.slice(i, i + 100);
     try{
       const { data, error } = await sb.from('orders').select('track,code').in('track', part);
       if(error) throw error;
-      (data || []).forEach(x => out.add(String(x.track || '').trim()));
+      (data || []).forEach(x => out.add(impTrackKey(x.track)));
     }catch(e){
       console.error('import dup check', e);
       // Проверку не выполнили — молчать нельзя: иначе предпросмотр покажет «создам все»,
@@ -252,13 +276,24 @@ function impPreviewModal(fileName, rows, dbTracks){
   let busy = false;
   // dbTracks — что уже есть в базе (null, если проверку не выполнили). Запасной вариант —
   // по памяти вкладки, как было раньше: лучше неполная проверка, чем никакой.
-  const seen = dbTracks || new Set((S.orders || []).map(o => String(o.track || '').trim()).filter(Boolean));
+  const seen = dbTracks || new Set((S.orders || []).map(o => impTrackKey(o.track)).filter(Boolean));
 
   const body = () => {
     const pt = pool.find(p => p.id === partnerId) || null;
-    const marked = rows.map(r => ({ ...r, problem: impProblem(r, seen) }));
+    /* Набор встреченных в ФАЙЛЕ строится заново на каждую отрисовку: `body()` зовётся
+       при каждой смене партнёра и даты, и накопленный снаружи набор пометил бы дублями
+       все строки подряд уже со второго раза. */
+    const fileSeen = new Map();
+    const marked = rows.map(r => {
+      const problem = impProblem(r, seen, fileSeen);
+      const key = impTrackKey(r.track);
+      if(key && !problem) fileSeen.set(key, r.line);   // запоминаем только принятые
+      return { ...r, problem };
+    });
     const ok = marked.filter(r => !r.problem);
     const bad = marked.filter(r => r.problem);
+    const dupInFile = bad.filter(r => /в этом файле/.test(r.problem)).length;
+    const dupInDb = bad.filter(r => r.problem === 'такой трек уже есть в системе').length;
     return `
       <div class="imp-head">
         <div class="field"><label>Партнёр <span style="color:var(--rust)">*</span></label>
@@ -274,6 +309,11 @@ function impPreviewModal(fileName, rows, dbTracks){
       <p class="imp-note">
         Файл: <b>${esc(fileName)}</b> · строк с ФИО: <b>${rows.length}</b> ·
         создам: <b>${ok.length}</b>${bad.length ? ` · пропущу: <b>${bad.length}</b>` : ''}
+        ${(dupInFile || dupInDb) ? `<br><b style="color:var(--rust)">Дубли трек-кода:</b>${
+          dupInDb ? ` уже в системе — <b>${dupInDb}</b>` : ''}${
+          (dupInDb && dupInFile) ? ' ·' : ''}${
+          dupInFile ? ` повтор внутри файла — <b>${dupInFile}</b>` : ''}. Эти строки не создадутся;
+          какие именно — в таблице ниже и в итоге после загрузки.` : ''}
         ${pt ? `<br>Тип доставки — почтовая. Менеджер продаж и обработчик возьмутся из карточки партнёра${pt.is_baraholka ? ', раздел — Барахолка' : ''}.` : ''}
         ${pt && impSumSource(pt) === 'file'
           ? `<br>Сумма заказа — как в файле: там уже посчитана цена доставки с надбавкой за перевес,
@@ -336,7 +376,13 @@ function impPreviewModal(fileName, rows, dbTracks){
     // Причину пропуска запоминаем по каждой строке — в конце она попадёт в итог.
     // Раньше тут считалась только разница чисел, и четыре разные причины складывались
     // в одно «пропущено: 14».
-    const marked = rows.map(r => ({ ...r, problem: impProblem(r, seen) }));
+    const fileSeen = new Map();
+    const marked = rows.map(r => {
+      const problem = impProblem(r, seen, fileSeen);
+      const key = impTrackKey(r.track);
+      if(key && !problem) fileSeen.set(key, r.line);
+      return { ...r, problem };
+    });
     const ok = marked.filter(r => !r.problem);
     const skipped = marked.filter(r => r.problem);
     if(!ok.length){ toast('Создавать нечего — все строки пропущены'); impResultModal(fileName, 0, skipped); return false; }
@@ -344,8 +390,17 @@ function impPreviewModal(fileName, rows, dbTracks){
     // Проверяем ПО БАЗЕ ещё раз, уже перед записью: между открытием окна и нажатием
     // кнопки реестр мог загрузить кто-то другой.
     const exists = (await impExistingTracks(ok.map(r => r.track))) || new Set();
-    const fresh = ok.filter(r => !exists.has(r.track));
-    ok.filter(r => exists.has(r.track)).forEach(r => skipped.push({ ...r, problem: 'такой трек уже есть в системе' }));
+    /* ПОСЛЕДНИЙ РУБЕЖ ПЕРЕД ЗАПИСЬЮ. Отсеиваем и то, что появилось в базе, пока окно было
+       открыто, и повтор внутри самой пачки — `impProblem` его уже поймал, но этот проход
+       идёт по ключу и не зависит от того, что показали на экране. Дальше в базу уходит
+       заведомо уникальный по треку список, даже если db/20 не выполнен. */
+    const fresh = [], seenNow = new Set();
+    ok.forEach(r => {
+      const key = impTrackKey(r.track);
+      if(exists.has(key)){ skipped.push({ ...r, problem: 'такой трек уже есть в системе' }); return; }
+      if(seenNow.has(key)){ skipped.push({ ...r, problem: 'такой трек уже есть выше в этом файле' }); return; }
+      seenNow.add(key); fresh.push(r);
+    });
     if(!fresh.length){ toast('Все эти заказы уже загружены'); impResultModal(fileName, 0, skipped); return false; }
     busy = true;
     // ЗАРАНЕЕ ВЫДАННЫЕ БЛАНКИ. Если этот трек мы сами выпустили и отдали партнёру
@@ -355,7 +410,7 @@ function impPreviewModal(fileName, rows, dbTracks){
     try{
       const { data } = await sb.from('track_pool').select('id,code,track,amount,post_ip_id')
         .in('track', fresh.map(r => r.track)).is('order_id', null);
-      (data || []).forEach(x => poolByTrack.set(String(x.track || '').trim(), x));
+      (data || []).forEach(x => poolByTrack.set(impTrackKey(x.track), x));
     }catch(e){ console.error('pool lookup', e); } // таблицы может не быть — тогда как раньше
     const mail = (S.delivery || []).find(d => /почт/i.test(d.name || ''));
     const bar = (typeof baraholkaReady === 'function' && baraholkaReady());
@@ -365,7 +420,7 @@ function impPreviewModal(fileName, rows, dbTracks){
     // (js/11) и кабинет партнёра (js/08) — правило в системе должно быть одно.
     const zeroTariff = typeof isExplicitZero === 'function' && isExplicitZero(pt.tariff_post);
     const built = fresh.map(r => {
-      const pool = poolByTrack.get(String(r.track || '').trim());
+      const pool = poolByTrack.get(impTrackKey(r.track));
       const sum = impOrderSum(r, pt);
       return {
       code: pool ? pool.code : genOrderCode(),
@@ -412,7 +467,7 @@ function impPreviewModal(fileName, rows, dbTracks){
       const nowIso = new Date().toISOString();
       let bound = 0;
       for(const o of made){
-        const pool = poolByTrack.get(String(o.track || '').trim());
+        const pool = poolByTrack.get(impTrackKey(o.track));
         if(!pool) continue;
         const { error } = await sb.from('track_pool')
           .update({ order_id: o.id, used_at: nowIso }).eq('id', pool.id);
@@ -423,8 +478,8 @@ function impPreviewModal(fileName, rows, dbTracks){
     }
     // Строки, которые отвалились уже на записи (например уникальный индекс трека),
     // тоже должны попасть в итог — иначе «создано 118 из 120» без объяснения.
-    const madeTracks = new Set(made.map(o => String(o.track || '').trim()));
-    fresh.filter(r => !madeTracks.has(r.track)).forEach(r =>
+    const madeTracks = new Set(made.map(o => impTrackKey(o.track)));
+    fresh.filter(r => !madeTracks.has(impTrackKey(r.track))).forEach(r =>
       skipped.push({ ...r, problem: 'база отклонила запись — проверьте, нет ли такого трека' }));
     logAction('import', 'orders', { entity_label: fileName, meta: { created: made.length, skipped: skipped.length } });
     renderOrders(ordersMode);
