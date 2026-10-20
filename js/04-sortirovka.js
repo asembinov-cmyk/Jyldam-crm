@@ -25,16 +25,27 @@ function sortingPickupCourierId(o){
 // Фильтровать сам справочник по `couriers.city_id` было бы ошибкой: заказы, забранные в
 // ТАЛДЫКОРГАНЕ, физически привозят на склад Алматы (`sortingCityId`), а у того курьера в
 // карточке стоит Талдыкорган — он исчез бы из фильтра, хотя его заказы в списке есть.
+/* СКОЛЬКО ЗАКАЗОВ ЗА НИМ — ПРЯМО В СПИСКЕ (19.10.2026). Вопрос владельца: «в Сортировке
+   Астане почему-то попадается алматинский курьер, почему?». Код тут ни при чём — список
+   собран из заказов, которые человек видит, — но по одному имени этого не объяснить. Число
+   рядом отвечает сразу: курьер здесь потому, что за ним N заказов в этом списке, и его можно
+   выбрать и посмотреть какие.
+
+   ГОРОД В ИМЕНИ — ЭТО ПРОСТО ТЕКСТ. «Шакиров Еркегали (Алматы)» — так набрано поле ФИО в
+   справочнике курьеров (видно по разнобою в скобках: «Асет ( Астана )», «Бабаев Ерлан
+   ( Астана)»). К городу заказа он отношения не имеет, и фильтровать по нему нельзя. */
 function sortingCourierOptions(dayOrders){
+  const cnt={};
+  (dayOrders||[]).forEach(o=>{const id=sortingPickupCourierId(o)||'-';cnt[id]=(cnt[id]||0)+1;});
   const ids=[...new Set((dayOrders||[]).map(sortingPickupCourierId))];
   // Выбранный курьер мог остаться с прошлого дня, а сегодня у него заказов нет. Тогда в
   // списке его нет, выбор не виден, а таблица пуста — выглядит как поломка. Сбрасываем.
   if(sortingListCourier&&sortingListCourier!=='-'&&!ids.includes(sortingListCourier))sortingListCourier='';
   if(sortingListCourier==='-'&&!ids.some(x=>!x))sortingListCourier='';
   const named=ids.filter(Boolean)
-    .map(id=>({id,fio:courierName(id)}))
+    .map(id=>({id,fio:courierName(id),n:cnt[id]||0}))
     .sort((a,b)=>(a.fio||'').localeCompare(b.fio||'','ru'));
-  return {named,hasEmpty:ids.some(x=>!x)};
+  return {named,hasEmpty:ids.some(x=>!x),noneCount:cnt['-']||0,total:(dayOrders||[]).length};
 }
 // Панель печати бланков свёрнута при каждом заходе в раздел: нужна она не всем и не всегда,
 // а занимает место над списком, ради которого в раздел и приходят. Состояние живёт в памяти
@@ -276,9 +287,9 @@ function renderSorting(){
         ${(()=>{const co=sortingCourierOptions(dayOrders);
           if(!co.named.length&&!co.hasEmpty)return '';
           return `<select id="sortListCourierFilter" style="min-width:200px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);flex:1 1 200px">
-            <option value="">Курьер: все</option>
-            ${co.named.map(c=>`<option value="${c.id}" ${sortingListCourier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}
-            ${co.hasEmpty?`<option value="-" ${sortingListCourier==='-'?'selected':''}>— курьер не назначен —</option>`:''}
+            <option value="">Курьер: все — ${co.total}</option>
+            ${co.named.map(c=>`<option value="${c.id}" ${sortingListCourier===c.id?'selected':''}>${esc(c.fio)} — ${c.n}</option>`).join('')}
+            ${co.hasEmpty?`<option value="-" ${sortingListCourier==='-'?'selected':''}>— курьер не назначен — ${co.noneCount}</option>`:''}
           </select>`;})()}
         <input id="sortListSearch" placeholder="Поиск по ФИО или номеру…" value="${esc(sortingListSearch)}" style="flex:2 1 260px;min-width:260px;padding:10px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line)">
       </div>
