@@ -442,10 +442,31 @@ function dbErrText(error){
     for(const key in DB_UNIQUE_MSG)if(m.includes(key))return DB_UNIQUE_MSG[key];
     return 'Такая запись уже есть — повтор не создаётся.';
   }
+  /* 42501 — «new row violates row-level security policy»: база отказала правилом
+     доступа. Сухой английский текст ничего человеку не говорит, а причин ровно две,
+     и лечатся они по-разному. */
+  if(isRlsDenied(error))return 'База не приняла запись: нет прав (правило доступа). Чаще всего это истёкший вход — обновите страницу (Cmd+Shift+R) и войдите заново. Если повторится, скажите администратору: проверить правило записи у таблицы в Supabase.';
   return 'Ошибка: '+(m||'не удалось сохранить');
 }
+/* Правила в базе выданы ВОШЕДШИМ (`to authenticated`, раздел 3). Если токен сессии
+   протух и не обновился, PostgREST считает запрос анонимным: чтение молча отдаёт ноль
+   строк, а запись падает с 42501. Поэтому на такой отказ один раз обновляем сессию и
+   повторяем запрос — ровно как callEdge делает на 401 (раздел 8g). Повтор безопасен:
+   первая попытка ничего не записала. */
+function isRlsDenied(error){
+  return !!error&&(error.code==='42501'||/row-level security/i.test(String((error&&error.message)||'')));
+}
+async function refreshSessionOnce(){
+  try{
+    const {data}=await sb.auth.refreshSession();
+    return !!(data&&data.session);
+  }catch(e){console.error('refreshSession',e);return false;}
+}
 async function dbInsert(table,row){
-  const {data,error}=await sb.from(table).insert(row).select().single();
+  let {data,error}=await sb.from(table).insert(row).select().single();
+  if(isRlsDenied(error)&&await refreshSessionOnce()){
+    ({data,error}=await sb.from(table).insert(row).select().single());
+  }
   if(error){console.error('insert',table,error);toast(dbErrText(error));return null;}
   if(AUTO_LOG_TABLES.has(table))logAction('create',table,{entity_id:data.id,entity_label:recLabel(data)});
   return data;
@@ -453,7 +474,10 @@ async function dbInsert(table,row){
 async function dbUpdate(table,id,row){
   const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
   const beforeCopy=before?Object.assign({},before):null;
-  const {data,error}=await sb.from(table).update(row).eq('id',id).select().single();
+  let {data,error}=await sb.from(table).update(row).eq('id',id).select().single();
+  if(isRlsDenied(error)&&await refreshSessionOnce()){
+    ({data,error}=await sb.from(table).update(row).eq('id',id).select().single());
+  }
   if(error){console.error('update',table,error);toast(dbErrText(error));return null;}
   if(AUTO_LOG_TABLES.has(table)){const ch=buildChanges(beforeCopy,data);if(ch.length)logAction('update',table,{entity_id:id,entity_label:recLabel(data),changes:ch});}
   return data;
