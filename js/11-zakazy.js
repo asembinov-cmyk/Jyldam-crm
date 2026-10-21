@@ -1390,6 +1390,9 @@ function barcodePngBytes(code,height){
     return bytes;
   }catch(e){console.error('штрих-код',e);return null;}
 }
+// штрих-код на бланке — 58×30 мм, тот же размер, что и на этикетке 100×150:
+// так просил владелец, и в миллиметрах это и проверяется
+const A4_BC_W=58*72/25.4, A4_BC_H=30*72/25.4;
 async function generateMailLabelsPdf(items){
   await ensurePdfLib();
   if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
@@ -1441,13 +1444,23 @@ async function generateMailLabelsPdf(items){
     // ровно как на бланке, который печатает KET.
     const trackText=String(it.track||'').trim();
     if(trackText){
-      drawFitText(page,trackText,470,yOf(211),195,fontBold,11);
-      const png=barcodePngBytes(trackText);
+      // НОМЕР СТОИТ НА ЛИНЕЙКЕ, А НЕ ПЕРЕЧЁРКНУТ ЕЮ. Линейка поля «№ ШПИ» лежит на
+      // 208.5 пт от верха (замерено по отрисованному бланку, не на глаз), а база текста
+      // стояла на 211 — то есть линия проходила сквозь нижнюю треть цифр. База 206.5
+      // ставит номер ровно над линией с зазором в 2 пт.
+      drawFitText(page,trackText,470,yOf(206.5),195,fontBold,11);
+      const png=barcodePngBytes(trackText,140);   // выше обычного: код стал крупным
       if(png){
         try{
           const img=await outDoc.embedPng(png);
-          const bw=205,bh=40;
-          page.drawImage(img,{x:455,y:yOf(296)-bh,width:bw,height:bh});
+          // КВАДРАТ «оттиск ПШ места приема» УБРАН (просьба владельца 21.10.2026), и на
+          // его месте стоит штрих-код 58×30 мм. Закрашиваем квадрат вместе с его двумя
+          // подписями: без самого квадрата они повисли бы ни при чём. Рамка бланка на
+          // x≈699 не затрагивается — иначе в ней осталась бы дыра.
+          page.drawRectangle({x:512,y:yOf(292),width:128,height:72,color:rgb(1,1,1)});
+          const bw=A4_BC_W,bh=A4_BC_H;
+          // по центру правой колонки (она идёт от 455 до 699)
+          page.drawImage(img,{x:455+(244-bw)/2,y:yOf(226)-bh,width:bw,height:bh});
         }catch(e){console.error('вставка штрих-кода',e);}
       }
     }
