@@ -990,7 +990,8 @@ function renderOrders(mode){
     applyOrdersFiltersToggle();   // стрелка на кнопке должна смотреть в нужную сторону
   };
   applyOrdersFiltersToggle();
-  $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrdersReset();};
+  // статус перерисовывает панель целиком: от него зависит набор кнопок в «Действии»
+  $('ofstatus').onchange=e=>{of.status=e.target.value;drawOrdersResetFull();};
   if($('ofdelivery'))$('ofdelivery').onchange=e=>{of.delivery=e.target.value;drawOrdersReset();};
   if($('ofpartner'))$('ofpartner').oninput=e=>{
     // Раньше требовалось точное совпадение с названием целиком: набрал часть — список
@@ -2208,6 +2209,16 @@ function drawOrders(){
    против которого заведено и ограничение кнопок по статусу.
    Сброс именно полный, а не «оставить видимые»: человек, сменивший фильтр, набирает
    выборку заново, и тихо оставленная половина прежней — та же ловушка, только тише. */
+/* СБРОС С ПЕРЕРИСОВКОЙ ПАНЕЛИ — для фильтров, от которых зависит сама панель. Обычный
+   `drawOrdersReset` перерисовывает ТОЛЬКО таблицу (`#orderTable`), а меню «⚙ Действие»
+   живёт в строке фильтров: от статуса зависит, какие кнопки рассылки в нём остаются
+   (раздел 12). Жалоба владельца 22.10.2026: «поменял статус на „ожидает в пункте выдачи",
+   а в действии не появилось „Прибыл заказ"» — меню оставалось от прежнего статуса. */
+function drawOrdersResetFull(){
+  ordersPage=1;ordersMobileLimit=MOBILE_STEP;
+  ketSelectAll=false;ketSelected.clear();
+  renderOrders(ordersMode);
+}
 function drawOrdersReset(){
   ordersPage=1;ordersMobileLimit=MOBILE_STEP;
   ketSelectAll=false;ketSelected.clear();
