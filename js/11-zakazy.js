@@ -1374,17 +1374,19 @@ function drawWrappedText(page,text,x,yTop,maxWidth,font,size,lineHeight,maxLines
 // используется для кодов заказов. Самодельные «полоски по цифрам» сканером не читаются.
 // Кэшируем: в одной печати часто десятки бланков, и каждый раз рисовать заново незачем.
 const _barcodePngCache=new Map();
-function barcodePngBytes(code){
-  if(_barcodePngCache.has(code))return _barcodePngCache.get(code);
+function barcodePngBytes(code,height){
+  const h=height||60;
+  const key=code+'|'+h;
+  if(_barcodePngCache.has(key))return _barcodePngCache.get(key);
   if(!window.JsBarcode)return null;
   try{
     const cv=document.createElement('canvas');
-    JsBarcode(cv,code,{format:'CODE128',width:2,height:60,displayValue:false,margin:0});
+    JsBarcode(cv,code,{format:'CODE128',width:2,height:h,displayValue:false,margin:0});
     const dataUrl=cv.toDataURL('image/png');
     const bin=atob(dataUrl.split(',')[1]);
     const bytes=new Uint8Array(bin.length);
     for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
-    _barcodePngCache.set(code,bytes);
+    _barcodePngCache.set(key,bytes);
     return bytes;
   }catch(e){console.error('штрих-код',e);return null;}
 }
@@ -1473,20 +1475,116 @@ function mailLabelItems(orders){
     phone:(String(o.phone||'').replace(/\D/g,'')
       ?(typeof phoneDisplay==='function'?phoneDisplay(o.phone):o.phone):''),
     amount:orderSum(o),
+    weight:o.weight,   // на этикетке 100×150 есть поле «Вес»
   }));
 }
-// ЭТИКЕТКА 100×150 ММ ДЛЯ ТЕРМОПРИНТЕРА.
+// ================= ЭТИКЕТКА 100×150 ММ ДЛЯ ТЕРМОПРИНТЕРА =================
+// Своя разметка, а НЕ повёрнутый A4 (как было до 21.10.2026). Причина — просьба
+// владельца: «бланк почты сделай в таком формате, штрих-код 58×30, кому, ну и главное
+// данные пусть сверху полей стоят верно, не съезжающие». Прежний способ брал готовый
+// A4-бланк и клал его на этикетку с масштабом 0.608 и поворотом: поля формы при этом
+// обрезались, подписи оставались от A4, а значения стояли по координатам, снятым с
+// того бланка, — то есть «съезжали» относительно полей тем сильнее, чем длиннее текст.
 //
-// Отдельного шаблона нет и не нужно: образец владельца оказался нашим же бланком A4,
-// повёрнутым на 90° и уменьшенным. Поэтому берём готовый A4-документ и перекладываем
-// каждую его страницу на этикетку — содержимое гарантированно то же самое, что на A4,
-// и расходиться между форматами ему нечем.
-//
-// Числа взяты из самого образца, а не подобраны: в его потоке стоит
-//   0.608... 0 0 0.608... -9.7529932 -32.4233243 cm
-// при повороте `0 1 -1 0 283.464567 0`. Масштаб больше «вписать целиком» (0.476):
-// поля бланка при этом обрезаются, а сама форма помещается — так и было в образце.
+// ГЛАВНОЕ В НОВОЙ РАЗМЕТКЕ: позиции не зашиты числами, а считаются КУРСОРОМ сверху
+// вниз. Каждое поле возвращает Y, на котором закончилось, и следующее начинается от
+// него. Поэтому длинный адрес не наезжает на соседнее поле, а подпись и значение не
+// могут разойтись: они рисуются из одной точки.
 const LABEL_W=283.464567, LABEL_H=425.19685;   // 100×150 мм в пунктах
+const LBL_MM=72/25.4;                          // миллиметр в пунктах
+const LBL_BC_W=58*LBL_MM, LBL_BC_H=30*LBL_MM;  // штрих-код 58×30 мм — размер задал владелец
+const LBL_M=10;                                // поля этикетки
+function lblRule(page,rgb,x,y,w){
+  page.drawLine({start:{x,y},end:{x:x+w,y},thickness:0.6,color:rgb(0.72,0.72,0.72)});
+}
+function lblCap(page,font,rgb,x,y,t){
+  page.drawText(t,{x,y,size:6.5,font,color:rgb(0.42,0.42,0.42)});
+}
+// одно поле: подпись сверху, значение под ней, линия под значением.
+// Высота поля ПОСТОЯННА (lines строк), даже если текст короче, — тогда соседние поля
+// стоят на своих местах у всех заказов подряд, а не пляшут от длины адреса.
+function lblField(page,fonts,rgb,x,y,w,caption,value,opts){
+  opts=opts||{};
+  const size=opts.size||10, lines=opts.lines||1, lineH=opts.lineH||(size+2.5);
+  const f=opts.bold?fonts.bold:fonts.reg;
+  lblCap(page,fonts.reg,rgb,x,y,caption);
+  const vTop=y-size-2;
+  if(lines>1)drawWrappedText(page,value||'',x,vTop,w,f,size,lineH,lines);
+  else drawFitText(page,value||'',x,vTop,w,f,size);
+  const bottom=vTop-(lines-1)*lineH-3;
+  lblRule(page,rgb,x,bottom,w);
+  return bottom-9;
+}
+async function generateThermalLabelsPdf(items){
+  await ensurePdfLib();
+  if(!window.PDFLib){toast('Библиотека PDF не загрузилась — проверьте интернет и обновите страницу');return null;}
+  const {PDFDocument,rgb}=PDFLib;
+  const assets=await loadMailLabelAssets();   // нужны шрифты с кириллицей
+  const out=await PDFDocument.create();
+  out.registerFontkit(window.fontkit);
+  const fonts={
+    reg:await out.embedFont(assets.regularBytes,{subset:true}),
+    bold:await out.embedFont(assets.boldBytes,{subset:true}),
+  };
+  const common=await loadMailLabelSettings();
+  const X=LBL_M, CW=LABEL_W-LBL_M*2, half=(CW-10)/2;
+  for(const it of items){
+    const page=out.addPage([LABEL_W,LABEL_H]);
+    const cfg=mailLabelCfgFor(it.order,common);
+    let y=LABEL_H-LBL_M-7;
+    // шапка: слева форма, справа код платежа
+    lblCap(page,fonts.reg,rgb,X,y,'АДРЕСНЫЙ ЯРЛЫК · форма 5');
+    const pay=String(cfg.payment_code||'').trim();
+    if(pay){
+      const t='КОД ПЛАТЕЖА '+pay;
+      page.drawText(t,{x:X+CW-fonts.bold.widthOfTextAtSize(t,10),y:y-1.5,size:10,font:fonts.bold});
+    }
+    y-=12;
+    // штрих-код 58×30 мм и номер ШПИ под ним — то, что читает почта
+    const track=String(it.track||'').trim();
+    if(track){
+      const png=barcodePngBytes(track,140);   // выше обычного: тут код крупный
+      if(png){
+        try{
+          const img=await out.embedPng(png);
+          page.drawImage(img,{x:(LABEL_W-LBL_BC_W)/2,y:y-LBL_BC_H,width:LBL_BC_W,height:LBL_BC_H});
+        }catch(e){console.error('штрих-код на этикетке',e);}
+      }
+      y-=LBL_BC_H+12;
+      page.drawText(track,{x:(LABEL_W-fonts.bold.widthOfTextAtSize(track,13))/2,y,size:13,font:fonts.bold});
+      y-=6;
+      lblRule(page,rgb,X,y,CW);
+      y-=12;
+    }
+    // ПОЛУЧАТЕЛЬ — он здесь главный, поэтому крупнее всего и сразу под кодом
+    y=lblField(page,fonts,rgb,X,y,CW,'Кімге / КОМУ',it.client||'',{size:12,bold:true});
+    y=lblField(page,fonts,rgb,X,y,CW,'Қайда / КУДА',it.address||'',{size:9.5,lines:3,lineH:11});
+    const yPhone=lblField(page,fonts,rgb,X,y,half,'Телефон',it.phone||'',{size:10});
+    const yIndex=lblField(page,fonts,rgb,X+half+10,y,half,'Индекс',it.index||'',{size:11,bold:true});
+    y=Math.min(yPhone,yIndex)-2;
+    // ОТПРАВИТЕЛЬ — из настроек бланка (или полей выбранного ИП), как и на A4
+    y=lblField(page,fonts,rgb,X,y,CW,'Кімнен / ОТ КОГО',cfg.sender||'',{size:9});
+    y=lblField(page,fonts,rgb,X,y,CW,'Қайдан / ОТКУДА',
+      [cfg.from_addr,cfg.index_code?('индекс '+cfg.index_code):''].filter(Boolean).join(', '),
+      {size:8.5,lines:2,lineH:10});
+    // обе денежные строки — одна и та же сумма заказа прописью, как на A4
+    const sum=amountForLabel(it.amount);
+    y=lblField(page,fonts,rgb,X,y,CW,'Сумма объявленной ценности',sum,{size:8});
+    y=lblField(page,fonts,rgb,X,y,CW,'Сумма наложенного платежа',sum,{size:8});
+    const yW=lblField(page,fonts,rgb,X,y,half,'Салмағы / Вес, кг',it.weight?fmtWeight(it.weight):'',{size:9});
+    const supp=String(cfg.support||'').replace(/^[^:]*:\s*/,'');
+    const yS=lblField(page,fonts,rgb,X+half+10,y,half,'Тех. поддержка',supp,{size:9});
+    y=Math.min(yW,yS);
+    // договор и предупреждение — всегда у нижнего края, не зависят от длины адреса
+    drawFitText(page,cfg.contract||'',X,LBL_M+14,CW,fonts.reg,7.5);
+    const warn='НЕЛЬЗЯ ВСКРЫВАТЬ ДО ОПЛАТЫ Н/П';
+    page.drawText(warn,{x:(LABEL_W-fonts.bold.widthOfTextAtSize(warn,9))/2,y:LBL_M+2,size:9,font:fonts.bold});
+  }
+  return await out.save();
+}
+// ПРЕЖНИЙ способ — A4, повёрнутый на этикетку. Больше НЕ ВЫЗЫВАЕТСЯ, оставлен на случай,
+// если понадобится вернуть вид «как на A4»: числа в нём сняты из образца владельца
+// (масштаб 0.608..., сдвиг -9.75/-32.42, поворот 90°), подобрать их заново — работа.
 const LABEL_SCALE=0.60834861;
 const LABEL_DX=-9.7529932, LABEL_DY=-32.4233243;
 async function a4LabelsToThermal(a4Bytes){
@@ -1511,13 +1609,11 @@ async function a4LabelsToThermal(a4Bytes){
 // бланки для «своих» заказов (Заказы → Почтовая доставка)
 // fmt: 'a4' (по умолчанию) или 'label' — этикетка 100×150 для термопринтера
 async function printMailLabelsPdf(orders,fmt){
-  let bytes=await generateMailLabelsPdf(mailLabelItems(orders));
+  const items=mailLabelItems(orders);
+  // этикетка собирается своей разметкой, A4 для неё больше не строится вовсе
+  let bytes=fmt==='label'?await generateThermalLabelsPdf(items):await generateMailLabelsPdf(items);
+  if(!bytes&&fmt==='label')bytes=await generateMailLabelsPdf(items); // не собралась — хотя бы A4
   if(!bytes)return;
-  if(fmt==='label'){
-    const conv=await a4LabelsToThermal(bytes);
-    if(!conv){toast('Не удалось собрать этикетки — печатаю A4');}
-    else bytes=conv;
-  }
   await openOrDownloadPdf(bytes,fmt==='label'?'Бланки_100x150.pdf':'Бланки_почта.pdf');
   toast(`Готово: бланков ${orders.length}`);
 }
@@ -1718,6 +1814,17 @@ const BAR_REG = {
   manager:'75747498',       // колонка «Менеджер» — одна и та же во всех строках реестра
   qty:1,                    // колонка «К-во» — в реестре единица у каждой строки
 };
+// ширина столбцов по САМОМУ СОДЕРЖИМОМУ, а не числом на глаз: у заказов адрес бывает
+// и в сорок знаков, и в сто, и подбирать ширину руками значит каждый раз растягивать
+// столбцы в Excel. Считаем по всем строкам листа, включая шапку.
+function xlsxAutoCols(aoa,min,max){
+  const w=[];
+  (aoa||[]).forEach(r=>(r||[]).forEach((v,i)=>{
+    const len=String(v==null?'':v).length;
+    if(!(w[i]>=len))w[i]=len;
+  }));
+  return w.map(n=>({wch:Math.min(max||60,Math.max(min||6,(n||0)+2))}));
+}
 const BAR_REG_COLS=['№ п.п','ФИО','Индекс','Адрес','ШПИ','Вес','Сумма объявленной ценности','Сумма нал. Платежа','К-во','Телефон','Менеджер'];
 // телефон в реестре записан с восьмёрки: 87762980260, а у нас лежит 77762980260
 function barRegPhone(ph){
@@ -1768,7 +1875,7 @@ function exportBaraholkaRegistry(rows){
   aoa.push([]);
   aoa.push(['','','','','','','итог',total]);
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[{wch:7},{wch:24},{wch:10},{wch:38},{wch:16},{wch:8},{wch:12},{wch:12},{wch:7},{wch:15},{wch:12}];
+  ws['!cols']=xlsxAutoCols(aoa,7,60);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'srirmam'); // имя листа как в реестре
   XLSX.writeFile(wb,`Реестр_Барахолка_${localToday()}.xls`,{bookType:'biff8'});
@@ -1808,9 +1915,9 @@ function exportOrdersToExcel(){
     return row;
   });
   const ws=XLSX.utils.json_to_sheet(data);
-  // ширины колонок
+  // ширины колонок — по содержимому
   const cols=Object.keys(data[0]||{});
-  ws['!cols']=cols.map(c=>({wch:(c==='Адрес'||c==='Откуда забрали (физ. лицо)')?28:(c==='Отправитель'||c==='ФИО клиента'||c==='Партнёр'?20:14)}));
+  ws['!cols']=xlsxAutoCols([cols].concat(data.map(r=>cols.map(c=>r[c]))),8,60);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Заказы');
   // имя файла с датой и режимом
