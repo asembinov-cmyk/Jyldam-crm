@@ -607,6 +607,15 @@ function renderOrders(mode){
   // реестром. Кнопка «Загрузить из Excel» ЖИВЁТ ТОЛЬКО ЗДЕСЬ: пока она стояла в «Заказах
   // заборов», реестровые заказы наливали в общий список, и из этого выросла вся мешанина.
   const bar=ordersMode==='baraholka';
+  /* В БАРАХОЛКЕ НЕТ ФИЛЬТРОВ ПО ЗАБОРУ И ДОСТАВКЕ (просьба владельца 22.10.2026): забора
+     как события у этой ветки нет вовсе — дата здесь означает день реестра, а доставка
+     почтовая, и даты доставки у неё не бывает (колонку убрали ещё 21.10).
+     ПРЯЧЕМ — ЗНАЧИТ И СНИМАЕМ: оставленный в памяти фильтр продолжал бы отсекать заказы,
+     а поля, которым его видно, на экране больше нет — вышел бы пустой список без всякого
+     объяснения. */
+  if(bar&&(of.pickFrom||of.pickTo||of.delFrom||of.delTo)){
+    of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';
+  }
   const head=isCourier()?'Мои заказы':(titles[ordersMode]||'Заказы');
   // У Барахолки подписи под заголовком нет вовсе (просьба владельца 02.10.2026): что это
   // за раздел, видно по названию, а про «не попадают в заказы заборов» достаточно один раз
@@ -676,12 +685,12 @@ function renderOrders(mode){
           <span class="fdate-lbl">Создан:</span>
           <input type="date" id="ofcreatefrom" value="${esc(of.createFrom)}" title="Дата создания с">
           <input type="date" id="ofcreateto" value="${esc(of.createTo)}" title="Дата создания по">
-          <span class="fdate-lbl">Забор:</span>
+          ${bar?'':`<span class="fdate-lbl">Забор:</span>
           <input type="date" id="ofpickfrom" value="${esc(of.pickFrom)}" title="Дата забора с">
           <input type="date" id="ofpickto" value="${esc(of.pickTo)}" title="Дата забора по">
           <span class="fdate-lbl">Доставка:</span>
           <input type="date" id="ofdelfrom" value="${esc(of.delFrom)}" title="Дата доставки с">
-          <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">
+          <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">`}
           <span class="fdate-btns">
             <button class="btn sm" id="oftoday">Сегодня</button>
             <button class="btn sm" id="ofdateclear">Все даты</button>
