@@ -1891,7 +1891,10 @@ function barRegPhone(ph){
 function barRegSum(o){
   return Number(orderSum(o))||Number(o.order_sum_orig)||'';
 }
-function exportBaraholkaRegistry(rows){
+/* КНИГА РЕЕСТРА ОТДЕЛЬНО ОТ СКАЧИВАНИЯ: ту же самую книгу берёт рассылка «Реестр
+   партнёра» (js/21-whatsapp.js) — она складывает файл в хранилище и шлёт партнёру ссылку.
+   Разойдись они, партнёр получал бы один файл, а склад выгружал другой. */
+function barRegistryWorkbook(rows){
   // Индекс и ШПИ — СТРОКАМИ: у индекса бывает ведущий ноль (021500), числом он
   // превратился бы в 21500 — ровно та беда, которую при загрузке реестра чиним обратно.
   const aoa=[
@@ -1931,6 +1934,10 @@ function exportBaraholkaRegistry(rows){
   ws['!cols']=xlsxAutoCols(aoa,7,60);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'srirmam'); // имя листа как в реестре
+  return wb;
+}
+function exportBaraholkaRegistry(rows){
+  const wb=barRegistryWorkbook(rows);
   XLSX.writeFile(wb,`Реестр_Барахолка_${localToday()}.xls`,{bookType:'biff8'});
   toast(`Выгружено в реестр заказов: ${rows.length}`);
 }

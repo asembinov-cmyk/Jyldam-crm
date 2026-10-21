@@ -394,8 +394,51 @@ const WA_REG_FIELDS=[
   ['date',    'Дата реестра',           g=>fmtDate(g.date)],
   ['sum',     'Сумма заказов',          g=>{const t=g.orders.reduce((a,o)=>a+(orderSum(o)||0),0);return t?String(Math.round(t)):'';}],
   ['weight',  'Общий вес, кг',          g=>{const t=g.orders.reduce((a,o)=>a+(parseWeight(o.weight)||0),0);return t?fmtWeight(Math.round(t*1000)/1000):'';}],
+  // Ссылка на САМ ФАЙЛ реестра: собирается той же книгой, что выгрузка в Барахолке
+  // (`barRegistryWorkbook`), кладётся в хранилище и подставляется адресом. Значение
+  // появляется ДО сборки подстановок — см. waRegFiles ниже.
+  ['xlsx',    'Excel-реестр — ссылка',  g=>g.fileUrl||''],
 ];
 const waRegFieldFn=key=>(WA_REG_FIELDS.find(f=>f[0]===key)||[,,()=>''])[2];
+/* ФАЙЛ РЕЕСТРА В ХРАНИЛИЩЕ (21.10.2026). Просьба владельца: «тут надо, чтобы эксель-реестр
+   можно было выбрать» — то есть в шаблоне нужен не список номеров, а ссылка на сам файл.
+   WhatsApp в параметр шаблона кладёт только текст, поэтому отправляем именно ссылку.
+   Файл — ТА ЖЕ книга, что выгружает кнопка «Выгрузить Excel» в Барахолке: иначе партнёр
+   получал бы один реестр, а склад выгружал другой.
+   Лежит в бакете Supabase Storage (db/47). Бакет публичный: ссылка уходит в WhatsApp, и
+   закрытая требовала бы входа — партнёр в CRM не входит. Поэтому в имени файла стоит
+   случайный хвост: подобрать чужой реестр перебором нельзя. */
+const WA_REG_BUCKET='wa-registries';
+const WA_TRANSLIT={а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'i',к:'k',л:'l',м:'m',
+  н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'c',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',
+  э:'e',ю:'yu',я:'ya',ә:'a',ғ:'g',қ:'q',ң:'n',ө:'o',ұ:'u',ү:'u',һ:'h',і:'i'};
+function waTranslit(t){
+  const out=String(t||'').toLowerCase().split('').map(ch=>WA_TRANSLIT[ch]!==undefined?WA_TRANSLIT[ch]:ch).join('');
+  return (out.replace(/[^a-z0-9.-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40))||'partner';
+}
+async function waRegFiles(groups){
+  if(!window.XLSX)return {error:'Библиотека Excel ещё загружается — попробуйте снова'};
+  if(typeof barRegistryWorkbook!=='function')return {error:'Сборка реестра недоступна'};
+  const day=localToday();
+  for(const g of groups){
+    try{
+      const wb=barRegistryWorkbook(g.orders);
+      const bytes=XLSX.write(wb,{type:'array',bookType:'biff8'});
+      // ИМЯ ФАЙЛА — ЛАТИНИЦЕЙ: кириллица в адресе ссылки превращается в проценты
+      // (%D0%98%D0%9F…), и партнёру в WhatsApp прилетает нечитаемая строка.
+      const safe=waTranslit(g.name||'partner');
+      const rnd=Math.random().toString(36).slice(2,10);
+      const path=`${day}/${safe}-${rnd}.xls`;
+      const up=await sb.storage.from(WA_REG_BUCKET).upload(path,new Blob([bytes],{type:'application/vnd.ms-excel'}),
+        {contentType:'application/vnd.ms-excel',upsert:true});
+      if(up.error)return {error:(up.error.message||String(up.error))};
+      const {data}=sb.storage.from(WA_REG_BUCKET).getPublicUrl(path);
+      if(!data||!data.publicUrl)return {error:'не получить ссылку на файл'};
+      g.fileUrl=data.publicUrl;
+    }catch(e){return {error:String(e&&e.message||e)};}
+  }
+  return {ok:true};
+}
 /* СПИСОК НОМЕРОВ — ОДНОЙ СТРОКОЙ И С ОГРАНИЧЕНИЕМ. Параметр шаблона у Meta не может
    содержать переводов строки (их чистит waParam), поэтому номера идут через запятую. И
    длина ограничена: в параметр больше ~1024 знаков не влезает, а полторы сотни номеров —
@@ -580,6 +623,22 @@ async function waRegistrySelection(key){
     +`\n\nЭто ${send.length} ПЛАТНЫХ ${waPlural(send.length)} — Meta берёт за каждое.`;
   if(!confirm(msg))return;
 
+  /* Если хоть один параметр шаблона — ссылка на файл, сначала собираем и выкладываем
+     файлы. Делаем это ПОСЛЕ подтверждения: зря гонять выгрузку, если человек отменил. */
+  const needFile=Object.values(pin.params||{}).some(v=>v==='xlsx');
+  if(needFile){
+    waProgress(`📋 Собираю реестры: ${send.length}…`);
+    const made=await waRegFiles(send);
+    waProgress('');
+    if(made.error){
+      waBlockModal('Реестр не выложился',
+        `Файл реестра не удалось положить в хранилище:<br><br><b>${esc(made.error)}</b>`
+        +`<br><br>Если это «Bucket not found» — выполните <b>db/47</b>: он заводит бакет`
+        +` <b>${esc(WA_REG_BUCKET)}</b> в Supabase Storage.`
+        +'<br><br>Без файла сообщение не отправляю: в шаблоне стоит ссылка, и партнёр получил бы прочерк.');
+      return;
+    }
+  }
   const items=send.map(g=>({
     order_id:null,                 // сообщение не про один заказ, а про список
     code:g.name,                   // в журнале видно, какому партнёру ушло
