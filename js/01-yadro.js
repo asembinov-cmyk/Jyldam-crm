@@ -237,6 +237,29 @@ function parseWeight(v){
 // исключения ничего не исключают, то есть система работает как до Барахолки.
 const isBaraholkaOrder=o=>String(o&&o.calc_group||'')==='baraholka';
 // Заказы заборов и всё, что с ними связано. Барахолки здесь нет и быть не должно.
+/* РАЗДЕЛЫ У СТАТУСОВ ЗАКАЗА (21.10.2026, db/46). Статусы заборов и Барахолки «немного
+   разные» — слова владельца, — поэтому у статуса есть раздел: пусто = общий (виден в
+   обоих), 'main' = только заказы заборов, 'baraholka' = только Барахолка. Справочник при
+   этом ОДИН: заказ ссылается на статус оттуда, и вторая таблица заставила бы тянуть
+   вторую связь через всю систему — ровно та же причина, по которой партнёры Барахолки
+   живут галочкой в общем справочнике (раздел 5a).
+   Пока колонки нет (db/46 не выполнен), раздел всегда пуст и предлагаются все статусы
+   подряд, то есть как до этой правки. */
+function statusSectionReady(){
+  const s=(S.orderStatuses||[])[0];
+  return !!s&&Object.prototype.hasOwnProperty.call(s,'section');
+}
+function statusSection(st){return String((st&&st.section)||'').trim();}
+// статусы, которые можно выбрать у ЭТОГО заказа (или в этом разделе грида)
+function orderStatusesFor(bar){
+  const list=S.orderStatuses||[];
+  if(!statusSectionReady())return list;
+  return list.filter(st=>{
+    const sec=statusSection(st);
+    if(!sec)return true;                 // общий — виден везде
+    return bar?sec==='baraholka':sec==='main';
+  });
+}
 const mainOrders=list=>(list||S.orders||[]).filter(o=>!isBaraholkaOrder(o));
 // Только Барахолка — для своего модуля, своей вкладки в Статистике и своей строки в отчёте.
 const barOnlyOrders=list=>(list||S.orders||[]).filter(isBaraholkaOrder);

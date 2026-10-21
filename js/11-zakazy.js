@@ -643,7 +643,7 @@ function renderOrders(mode){
         <input class="search" id="ofq" placeholder="Поиск: ID, трек, клиент…" value="${esc(of.q)}">
         <button type="button" class="btn ghost sm filters-toggle" id="ofFiltersToggle">Фильтры ▾</button>
         <div class="filters-body" id="ofFiltersBody">
-        <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select id="ofstatus"><option value="">Все статусы</option>${orderStatusesFor(bar).map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partnerQ||'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
         ${bar?'':`<select id="ofpickupcity" title="Город, откуда забрали заказ"><option value="">Город забора: все</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${of.pickupCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`}
@@ -2092,7 +2092,7 @@ function drawOrders(){
       <td data-label="Трек-код">${o.track?esc(o.track)+copyBtn(o.track):'—'}</td>
       <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
-        <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${orderStatusesFor(barGrid).map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}${(o.status_id&&!orderStatusesFor(barGrid).some(s=>s.id===o.status_id))?`<option value="${esc(o.status_id)}" selected>${esc((orderStatusObj(o.status_id)||{}).name||'—')}</option>`:''}</select>
       </div></td>
       <td data-label="" class="cell-actions"><div class="row-actions">
         ${canOrder('delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
@@ -2731,7 +2731,7 @@ function orderModal(id,readonly){
         ? `<textarea id="o_address" rows="2" style="resize:vertical;min-height:62px" ${dis}>${esc(d.address)}</textarea>`
         : `<input id="o_address" value="${esc(d.address)}" ${dis}>`}<div id="o_addr_info" class="idx-info"></div></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
-      <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${orderStatusesFor(cardBar).map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}${(d.status_id&&!orderStatusesFor(cardBar).some(s=>s.id===d.status_id))?`<option value="${esc(d.status_id)}" selected>${esc((orderStatusObj(d.status_id)||{}).name||'статус из другого раздела')}</option>`:''}</select></div>
       <div class="field"><label>Вес (кг)${cardBar?' *':''}</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint" id="o_weight_hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label>
         <div style="display:flex;gap:8px">

@@ -25,7 +25,11 @@ const SET_GROUPS=[
   ['География',[['cities','Города','pin'],['districts','Районы','grid'],['courier_cities','Курьерские города','truck']]],
   ['Люди',[['couriers','Курьеры (заборщики)','user'],['order_couriers','Курьеры по заказам','user'],
            ['sales','Менеджеры продаж','users'],['processors','Менеджеры-обработчики','users']]],
+  // «Статусы Барахолки» — отдельный пункт, как третья вкладка у партнёров: справочник
+  // ОДИН, но показывается двумя списками, чтобы было видно, что именно увидит менеджер
+  // каждого раздела. Пункт появляется только после db/46 (есть колонка «раздел»).
   ['Статусы и типы',[['statuses','Статус забора','check'],['order_statuses','Статус заказа','check'],
+                     ['order_statuses_bar','Статусы Барахолки','check'],
                      ['delivery','Тип доставки','bag']]],
   ['Партнёры и склады',[['post_ips','ИП для Почты','box'],['warehouses','Склады отправки','house']]],
   ['Финансы',[['fin_kassa','Кассы','card'],['fin_categories','Категории расходов','out'],
@@ -38,9 +42,13 @@ const SET_GROUPS=[
 ];
 const setAllItems=()=>SET_GROUPS.flatMap(([g,items])=>items.map(it=>[...it,g]));
 function renderSettings(){
+  // пока db/46 не выполнен, раздела у статусов нет — и второй список показывать нечему
+  if(!statusSectionReady()&&S.dir==='order_statuses_bar')S.dir='order_statuses';
   const all=setAllItems();
   if(!all.some(it=>it[0]===S.dir))S.dir='cities'; // в адресе мог остаться справочник, которого уже нет
-  const side=SET_GROUPS.map(([title,items])=>`
+  const groups=SET_GROUPS.map(([title,items])=>[title,items.filter(it=>
+    !(it[0]==='order_statuses_bar'&&!statusSectionReady()))]).filter(([t,items])=>items.length);
+  const side=groups.map(([title,items])=>`
     <div class="set-group">
       <div class="set-group-title">${esc(title)}</div>
       ${items.map(([k,label,ico])=>`<button class="set-item${S.dir===k?' active':''}" data-dir="${k}">
@@ -49,7 +57,7 @@ function renderSettings(){
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
     <div class="set-wrap">
-      <select class="set-mobile" id="setPick">${SET_GROUPS.map(([title,items])=>
+      <select class="set-mobile" id="setPick">${groups.map(([title,items])=>
         `<optgroup label="${esc(title)}">${items.map(([k,label])=>
           `<option value="${k}" ${S.dir===k?'selected':''}>${esc(label)}</option>`).join('')}</optgroup>`).join('')}</select>
       <aside class="set-side">${side}</aside>
@@ -59,6 +67,7 @@ function renderSettings(){
   if($('setPick'))$('setPick').onchange=e=>{S.dir=e.target.value;saveNav();renderSettings();};
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
+    order_statuses_bar:()=>dirOrderStatuses(true),
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
     fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners,
     maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings,
@@ -732,19 +741,40 @@ function statusModal(id){const s=id?S.statuses.find(x=>x.id===id):{name:'',color
       else{const u=await dbInsert('statuses',row);if(!u)return false;S.statuses.push(u);}
       toast('Сохранено');renderSettings();return true;});}
 /* Статус заказа (отдельный справочник) */
-function dirOrderStatuses(){
-  dirGrid({title:'Статусы заказа',arrKey:'orderStatuses',table:'order_statuses',modalFn:orderStatusModal,emptyText:'Нет статусов заказа',
+const STATUS_SECTIONS=[['','Общий — виден в обоих разделах'],['main','Только «Заказы заборов»'],['baraholka','Только Барахолка']];
+const statusSectionLabel=st=>{
+  const sec=statusSection(st);
+  return sec==='baraholka'?'Барахолка':sec==='main'?'Заказы заборов':'общий';
+};
+function dirOrderStatuses(onlyBar){
+  /* ВТОРОЙ СПИСОК ПОКАЗЫВАЕТ РОВНО ТО, ЧТО УВИДИТ МЕНЕДЖЕР БАРАХОЛКИ, — то есть свои
+     статусы И общие (`orderStatusesFor(true)`). Показывать только помеченные было бы
+     враньём: общие в её карточке тоже предлагаются. */
+  const barSet=new Set(orderStatusesFor(true).map(s=>s.id));
+  dirGrid({title:onlyBar?'Статусы Барахолки':'Статусы заказа',arrKey:'orderStatuses',table:'order_statuses',
+    modalFn:id=>orderStatusModal(id,onlyBar?'baraholka':''),
+    filterRows:onlyBar?(rows=>rows.filter(s=>barSet.has(s.id))):(rows=>rows),
+    emptyText:onlyBar?'Нет статусов Барахолки — поставьте раздел в карточке статуса':'Нет статусов заказа',
     cols:[
       {key:'name',label:'Статус',filter:'text',text:s=>s.name||'',cell:s=>orderStatusBadge(s.id)},
+      ...(statusSectionReady()?[{key:'sec',label:'Раздел',filter:'select',text:s=>statusSectionLabel(s),
+        cell:s=>`<span class="pill ${statusSection(s)==='baraholka'?'moss':''}">${esc(statusSectionLabel(s))}</span>`}]:[]),
       {key:'or',label:'Заказов',filter:'none',text:s=>String(S.orders.filter(o=>o.status_id===s.id).length)},
+      ...(statusSectionReady()?[{key:'orbar',label:'из них Барахолки',filter:'none',
+        text:s=>String(S.orders.filter(o=>o.status_id===s.id&&isBaraholkaOrder(o)).length)}]:[]),
     ]});
 }
-function orderStatusModal(id){const s=id?S.orderStatuses.find(x=>x.id===id):{name:'',color:'#3a7d44'};
+function orderStatusModal(id,defSection){const s=id?S.orderStatuses.find(x=>x.id===id):{name:'',color:'#3a7d44',section:defSection||''};
   showModal(id?'Статус заказа':'Новый статус заказа',`
     <div class="field"><label>Название статуса</label><input id="os_name" value="${esc(s.name)}"></div>
-    <div class="field"><label>Цвет метки</label><input type="color" id="os_color" value="${esc(s.color||'#3a7d44')}" style="height:44px;padding:4px;cursor:pointer"></div>`,
+    <div class="field"><label>Цвет метки</label><input type="color" id="os_color" value="${esc(s.color||'#3a7d44')}" style="height:44px;padding:4px;cursor:pointer"></div>
+    ${statusSectionReady()?`<div class="field"><label>Раздел</label><select id="os_section">${STATUS_SECTIONS.map(([v,t])=>
+      `<option value="${v}" ${statusSection(s)===v?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      <span class="hint">Где этот статус предлагать в карточке заказа. «Общий» — и в заборах, и в Барахолке.</span></div>`:''}`,
     async()=>{const name=val('os_name').trim();if(!name){toast('Укажите название');return false;}
-      const row={name,color:val('os_color')||'#3a7d44'};
+      // поле шлём, только когда колонка есть: иначе PostgREST отклонит весь запрос
+      const row={name,color:val('os_color')||'#3a7d44',
+        ...(statusSectionReady()&&$('os_section')?{section:val('os_section')||null}:{})};
       if(id){const u=await dbUpdate('order_statuses',id,row);if(!u)return false;Object.assign(S.orderStatuses.find(x=>x.id===id),u);}
       else{const u=await dbInsert('order_statuses',row);if(!u)return false;S.orderStatuses.push(u);}
       toast('Сохранено');renderSettings();return true;});}
