@@ -1925,6 +1925,12 @@ function syncModalOpenClass(){
 function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.length){ovs[ovs.length-1].remove();syncModalOpenClass();document.querySelectorAll('.orders-pager[data-hidden-by-modal]').forEach(p=>{p.style.display='';delete p.dataset.hiddenByModal;});}}
 
 /* автологин / спец-кабинеты по ссылке */
+// ЗАПУСКАЕМ ПОСЛЕ ЗАГРУЗКИ ВСЕХ ФАЙЛОВ, а не сразу при выполнении этого файла.
+// openPartnerCabinet объявлена в js/08, то есть ПОЗЖЕ, а подъём имён работает только
+// внутри своего скрипта. Ветка кабинета партнёра зовёт её БЕЗ await, то есть прямо
+// во время выполнения js/07 — и падала с ReferenceError. У входа сотрудника ниже await
+// есть, поэтому он доживал до загрузки остальных файлов и работал.
+function bootApp(){
 (async()=>{
   // страховка: если что-то пойдёт не так, сплэш всё равно уйдёт максимум через 12 сек
   setTimeout(()=>{const s=$('splash');if(s&&!s.classList.contains('hide'))hideSplash();},12000);
@@ -1949,3 +1955,6 @@ function closeTopModal(){const ovs=document.querySelectorAll('.overlay');if(ovs.
     else showLogin();
   }catch(e){console.error('init',e);showLogin();}
 })();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bootApp);
+else bootApp();
