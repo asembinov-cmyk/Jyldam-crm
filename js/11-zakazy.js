@@ -1595,9 +1595,10 @@ async function generateThermalLabelsPdf(items){
   }
   return await out.save();
 }
-// ПРЕЖНИЙ способ — A4, повёрнутый на этикетку. Больше НЕ ВЫЗЫВАЕТСЯ, оставлен на случай,
-// если понадобится вернуть вид «как на A4»: числа в нём сняты из образца владельца
-// (масштаб 0.608..., сдвиг -9.75/-32.42, поворот 90°), подобрать их заново — работа.
+// A4, ПОВЁРНУТЫЙ НА ЭТИКЕТКУ 100×150 — это и есть формат 'label' (с 21.10.2026 снова
+// он: на почте ждут форму 5, а термопринтер должен печатать её один в один). Числа сняты
+// из образца владельца: масштаб 0.608..., сдвиг -9.75/-32.42, поворот 90°. Замерено по
+// готовой странице: 100.0×150.0 мм, содержимое с полями 3.2–3.4 мм, печатное не обрезано.
 const LABEL_SCALE=0.60834861;
 const LABEL_DX=-9.7529932, LABEL_DY=-32.4233243;
 async function a4LabelsToThermal(a4Bytes){
@@ -1623,10 +1624,27 @@ async function a4LabelsToThermal(a4Bytes){
 // fmt: 'a4' (по умолчанию) или 'label' — этикетка 100×150 для термопринтера
 async function printMailLabelsPdf(orders,fmt){
   const items=mailLabelItems(orders);
-  // этикетка собирается своей разметкой, A4 для неё больше не строится вовсе
-  let bytes=fmt==='label'?await generateThermalLabelsPdf(items):await generateMailLabelsPdf(items);
-  if(!bytes&&fmt==='label')bytes=await generateMailLabelsPdf(items); // не собралась — хотя бы A4
+  /* ФОРМАТЫ ПЕЧАТИ:
+       'a4' (по умолчанию) — бланк Казпочты, лист A4 альбомный;
+       'label'             — ТОТ ЖЕ бланк, но страницей 100×150 мм: термопринтер
+                             печатает его один в один, без «подогнать по размеру»;
+       'label-own'         — своя компактная разметка (generateThermalLabelsPdf).
+     По умолчанию для этикетки берём именно бланк Казпочты: на почте ждут форму 5,
+     и все правки по ней (квадрат, штрих-код 58×30, номер на линии) живут в одном
+     месте — в A4. Своя разметка оставлена рядом: она крупнее и читается лучше,
+     включается одним словом. */
+  if(fmt==='label-own'){
+    const own=await generateThermalLabelsPdf(items);
+    if(own){await openOrDownloadPdf(own,'Бланки_100x150.pdf');toast(`Готово: бланков ${orders.length}`);return;}
+    toast('Не удалось собрать этикетки — печатаю бланк');
+  }
+  let bytes=await generateMailLabelsPdf(items);
   if(!bytes)return;
+  if(fmt==='label'){
+    const conv=await a4LabelsToThermal(bytes);
+    if(!conv)toast('Не удалось перевести в 100×150 — печатаю A4');
+    else bytes=conv;
+  }
   await openOrDownloadPdf(bytes,fmt==='label'?'Бланки_100x150.pdf':'Бланки_почта.pdf');
   toast(`Готово: бланков ${orders.length}`);
 }

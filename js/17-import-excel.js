@@ -635,7 +635,9 @@ async function barCreateOrderModal(){
                 .eq('id', poolRow.id);
             }catch(e){ console.error('pool bind', e); toast('Заказ создан, но бланк в пуле не отметился', 6000); }
           }
-          if(typeof printMailLabelsPdf === 'function') await printMailLabelsPdf([saved]);
+          /* Печатаем СРАЗУ 100×150: на складе термопринтер с этикеткой 100×150 мм,
+             и лист A4 на нём приходится подгонять масштабом руками. */
+          if(typeof printMailLabelsPdf === 'function') await printMailLabelsPdf([saved],'label');
         },
       };
       orderModal();
