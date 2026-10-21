@@ -462,7 +462,24 @@ async function refreshSessionOnce(){
     return !!(data&&data.session);
   }catch(e){console.error('refreshSession',e);return false;}
 }
+/* КТО ЗАВЁЛ ЗАКАЗ пишется в САМ заказ (`created_by`/`created_by_name`, db/44). Раньше это
+   нигде не хранилось и восстанавливалось из журнала действий (раздел 8w) — по журналу
+   нельзя ни отфильтровать грид, ни показать имя сразу при открытии карточки.
+   Поле уходит в запрос, ТОЛЬКО когда колонка в базе есть: иначе PostgREST отклонит весь
+   insert, и заказы перестанут создаваться вовсе — ровно те же грабли, что с новым
+   нормативом в `calc_settings` (раздел 8). */
+function createdByReady(){
+  const o=(S.orders||[])[0];
+  return !!o&&Object.prototype.hasOwnProperty.call(o,'created_by_name');
+}
+function stampCreatedBy(row){
+  if(!row||!createdByReady())return row;
+  if(row.created_by===undefined)row.created_by=(S.me&&S.me.id)||null;
+  if(row.created_by_name===undefined)row.created_by_name=(S.me&&(S.me.full_name||S.me.email))||null;
+  return row;
+}
 async function dbInsert(table,row){
+  if(table==='orders')stampCreatedBy(row);
   let {data,error}=await sb.from(table).insert(row).select().single();
   if(isRlsDenied(error)&&await refreshSessionOnce()){
     ({data,error}=await sb.from(table).insert(row).select().single());

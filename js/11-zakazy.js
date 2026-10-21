@@ -1,5 +1,5 @@
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:''};
+let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',creator:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -124,6 +124,8 @@ function buildPickupOrderRows(p,count){
    проходе остаётся один запрос на пачку. Загрузка реестра сама покажет, какие строки
    отклонила база (`impResultModal`), поэтому молчать здесь можно — но не про общий сбой. */
 async function insertOrderRows(rows){
+  // кто завёл — и у реестровых заказов тоже: по этому полю фильтруется грид Барахолки
+  if(typeof stampCreatedBy==='function')rows.forEach(r=>stampCreatedBy(r));
   const made=[];
   const CHUNK=200;
   let hardFail='';
@@ -616,6 +618,16 @@ function renderOrders(mode){
   // главное число — сумма доставки, остальные справа. В «Курьерской» и «Почтовой» разбивки
   // по типу доставки нет: там он один и тот же у всех строк, цифра была бы бессмысленной.
   const oneType=ordersMode==='courier'||ordersMode==='mail';
+  /* «МЕНЕДЖЕР» В БАРАХОЛКЕ — ЭТО КТО ЗАВЁЛ ЗАКАЗ, а не менеджер по продажам (просьба
+     владельца 21.10.2026). Список собирается ИЗ САМИХ ЗАКАЗОВ раздела, а не из справочника
+     сотрудников: тот грузится только по праву «Сотрудники», которого у менеджера Барахолки
+     нет — тот же приём, что у фильтра заборщиков в «Сортировке». Рядом с именем стоит число
+     заказов: по одному имени непонятно, почему человек в списке. */
+  const barScope=bar?ordersScopedList():[];
+  const barCreatorCount=n=>barScope.filter(o=>(o.created_by_name||'').trim()===n).length;
+  const barCreators=bar?Array.from(new Set(barScope.map(o=>(o.created_by_name||'').trim()).filter(Boolean)))
+    .sort((a,b)=>a.localeCompare(b,'ru')):[];
+  const barNoCreator=bar&&barScope.some(o=>!(o.created_by_name||'').trim());
   $('main').innerHTML=`
     ${moduleHead({title:head,sub:subText,
       actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(canOrder('create',bar)&&bar)?'<button class="btn primary" id="barNewOrder" title="Отсканировать ШПИ и завести заказ">＋ Создать заказ</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
@@ -634,9 +646,11 @@ function renderOrders(mode){
         <select id="ofstatus"><option value="">Все статусы</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${of.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${ordersMode?'':`<select id="ofdelivery"><option value="">Все типы доставки</option>${S.delivery.map(dx=>`<option value="${dx.id}" ${of.delivery===dx.id?'selected':''}>${esc(dx.name)}</option>`).join('')}</select>`}
         ${isStaff()?`<input id="ofpartner" list="ofPartnersList" placeholder="Партнёр: поиск…" value="${esc(of.partnerQ||'')}" autocomplete="off"><datalist id="ofPartnersList">${S.partners.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>`:''}
-        <select id="ofpickupcity" title="Город, откуда забрали заказ"><option value="">Город забора: все</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${of.pickupCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
-        <select id="ofdestcity" title="Город, куда уходит заказ"><option value="">Город получения: все</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${of.destCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
-        <select id="ofsales" title="Менеджер по продажам"><option value="">Менеджер: все</option>${S.sales.map(s=>`<option value="${s.id}" ${of.sales===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select>
+        ${bar?'':`<select id="ofpickupcity" title="Город, откуда забрали заказ"><option value="">Город забора: все</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${of.pickupCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`}
+        ${bar?'':`<select id="ofdestcity" title="Город, куда уходит заказ"><option value="">Город получения: все</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${of.destCity===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`}
+        ${bar
+          ?`<select id="ofcreator" title="Кто завёл заказ"><option value="">Менеджер: все</option>${barCreators.map(n=>`<option value="${esc(n)}" ${of.creator===n?'selected':''}>${esc(n)} — ${barCreatorCount(n)}</option>`).join('')}${barNoCreator?`<option value="-" ${of.creator==='-'?'selected':''}>— не записан —</option>`:''}</select>`
+          :`<select id="ofsales" title="Менеджер по продажам"><option value="">Менеджер: все</option>${S.sales.map(s=>`<option value="${s.id}" ${of.sales===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select>`}
         <select id="ofmissing" title="Показать заказы с незаполненным полем">
           <option value="">Заполненность: все</option>
           <option value="client" ${of.missing==='client'?'selected':''}>Нет ФИО клиента</option>
@@ -967,6 +981,7 @@ function renderOrders(mode){
   if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
   if($('ofdestcity'))$('ofdestcity').onchange=e=>{of.destCity=e.target.value;drawOrdersReset();};
   if($('ofsales'))$('ofsales').onchange=e=>{of.sales=e.target.value;drawOrdersReset();};
+  if($('ofcreator'))$('ofcreator').onchange=e=>{of.creator=e.target.value;drawOrdersReset();};
   if($('ofcreatefrom'))$('ofcreatefrom').onchange=e=>{of.createFrom=e.target.value;renderOrders(ordersMode);};
   if($('ofcreateto'))$('ofcreateto').onchange=e=>{of.createTo=e.target.value;renderOrders(ordersMode);};
   if($('ofpickfrom'))$('ofpickfrom').onchange=e=>{of.pickFrom=e.target.value;drawOrdersReset();};
@@ -1193,6 +1208,13 @@ function filteredOrders(){
     if(of.pickupCity&&o.pickup_city_id!==of.pickupCity)return false;
     if(of.destCity&&o.courier_city_id!==of.destCity)return false;
     if(of.sales&&o.sales_id!==of.sales)return false;
+    if(of.creator){
+      // «— не записан —» спрашивают отдельно: пустую строку в <option value> не отличить
+      // от «все менеджеры», поэтому у пункта своё значение «-» (как в «Сортировке»).
+      const cb=(o.created_by_name||'').trim();
+      if(of.creator==='-'){if(cb)return false;}
+      else if(cb!==of.creator)return false;
+    }
     // фильтр по оплате отправителем
     if(of.paidBySender==='yes'&&!o.paid_by_sender)return false;
     if(of.paidBySender==='no'&&o.paid_by_sender)return false;
@@ -2033,9 +2055,13 @@ function drawOrders(){
   // В Барахолке колонки «Фото» нет: заказы приходят готовым реестром, бланк никто не
   // фотографирует — столбец был бы пустым на всю страницу.
   const noPhoto=ordersMode==='baraholka';
+  /* В БАРАХОЛКЕ НЕТ КОЛОНОК «Дата доставки» и «Город» (просьба владельца 21.10.2026):
+     доставка там почтовая и даты доставки у неё не бывает, а город — всегда Алматы и
+     ставится заготовкой, то есть обе колонки показывали бы прочерк во всех строках. */
+  const barGrid=ordersMode==='baraholka';
   el.innerHTML=ordersDupBarHtml(allRows.length)+`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th><th>Дата доставки</th><th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th>${ordersMode!=='mail'?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th>':''}<th>Трек-код</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th>${barGrid?'':'<th>Дата доставки</th>'}<th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    <th>Тип доставки</th>${(ordersMode!=='mail'&&!barGrid)?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th>':''}<th>Трек-код</th>
     <th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
@@ -2055,15 +2081,15 @@ function drawOrders(){
         const same=t.slice(0,10)===fmtDate(o.pickup_date);
         return `<small class="cell-time">создан ${esc(same?t.slice(-5):t)}</small>`;
       })():''}</td>
-      <td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>
+      ${barGrid?'':`<td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>`}
       <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
-      ${ordersMode!=='mail'?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
+      ${(ordersMode!=='mail'&&!barGrid)?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
       ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
-      <td data-label="Трек-код">${esc(o.track)||'—'}</td>
+      <td data-label="Трек-код">${o.track?esc(o.track)+copyBtn(o.track):'—'}</td>
       <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
         <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
@@ -2504,15 +2530,26 @@ function ohistRow(ico,k,v,note){
 function ohistWhen(t){return t?esc(fmtDate(t)):'';}
 function orderHistoryInner(o){
   const rows=[];
+  /* В КАРТОЧКЕ БАРАХОЛКИ ИСТОРИЯ — ТОЛЬКО СТРОКА «СОЗДАН» (просьба владельца 21.10.2026).
+     Остальные две там пусты по устройству ветки: «Заполнен» этим заказам проставляется в
+     момент создания (данные уже есть), а на склад их не привозят вовсе, и «Принят на
+     складе» всегда показывал бы «ещё не принят». */
+  const onlyCreated=typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(o);
   // 1. Кто завёл заказ
   const cr=o._histCreate,imp=o._histImport;
-  if(cr)rows.push(ohistRow('＋','Создан',`<b>${esc(cr.user_name||'—')}</b> · ${ohistWhen(cr.created_at)}`));
+  // Имя завёдшего заказ с 21.10.2026 пишется в сам заказ (`created_by_name`, db/44) —
+  // тогда строка видна сразу, без похода в журнал. У заказов до этого поля пусто, и
+  // имя по-прежнему достаётся из журнала (ниже).
+  if((o.created_by_name||'').trim())rows.push(ohistRow('＋','Создан',
+    `<b>${esc(o.created_by_name)}</b> · ${ohistWhen(o.created_at)}`));
+  else if(cr)rows.push(ohistRow('＋','Создан',`<b>${esc(cr.user_name||'—')}</b> · ${ohistWhen(cr.created_at)}`));
   else if(imp)rows.push(ohistRow('⬆','Загружен',
     `<b>${esc(imp.user_name||'—')}</b> · ${ohistWhen(o.created_at)}`,
     `реестр «${esc(imp.entity_label||'Excel')}»`));
   else if(o.pickup_id)rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'по заявке на забор, пачкой'));
   else if(o._histLoaded)rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'кто — не записано'));
   else rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'ищем в журнале…'));
+  if(onlyCreated)return rows.join('');
   // 2. Кто заполнил. Настоящая отметка — из модуля «Заполнение»; у заказов до её появления
   //    имя восстанавливается по журналу правок, и это подписано отдельно (раздел 8c).
   // У заказов из реестра отметка о заполнении ставится при создании, и имени в ней нет:
@@ -2668,9 +2705,9 @@ function orderModal(id,readonly){
       <div class="field"><label>Отправитель</label><input id="o_sender" list="partnersList" autocomplete="off" value="${esc(d.sender)}" ${dis}><datalist id="partnersList">${S.partners.map(p=>`<option value="${esc(p.name)}"></option>`).join('')}</datalist></div>
       <div class="field"${barHide}><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full" id="fizlicoPickupAddrField" style="${(_initPartner&&isFizlicoPartner(_initPartner))?'':'display:none'}"><label>Адрес откуда забрали (физ. лицо)</label><input id="o_fizlico_pickup_addr" value="${esc(d.fizlico_pickup_address||'')}" placeholder="реальный адрес, где забрали посылку у этого клиента" ${dis}></div>
-      <div class="field"><label>ФИО клиента</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
+      <div class="field"><label>ФИО клиента${cardBar?' *':''}</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
-      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span><div id="o_index_info" class="idx-info"></div></div>
+      <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс${cardBar?' *':''}</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span><div id="o_index_info" class="idx-info"></div></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
       <div class="field"${barHide}><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?(_initPartner.is_protected?' — 🔒 неприкосновенный, фиксированная цена по тарифу '+esc(_initPartner.name):' — по тарифу '+esc(_initPartner.name)):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
       <!-- ТИП ДОСТАВКИ. Пустой пункт «—» показывается ТОЛЬКО пока тип не выбран (просьба
@@ -2695,7 +2732,7 @@ function orderModal(id,readonly){
         : `<input id="o_address" value="${esc(d.address)}" ${dis}>`}<div id="o_addr_info" class="idx-info"></div></div>
       <div class="field courier-only" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Курьер по заказам</label><select id="o_ocourier" ${dis}><option value="">—</option>${S.order_couriers.filter(c=>!d.courier_city_id||c.courier_city_id===d.courier_city_id).map(c=>`<option value="${c.id}" ${d.order_courier_id===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select></div>
       <div class="field"><label>Статус отправки</label><select id="o_status" ${dis}><option value="">—</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${d.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Вес (кг)</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint" id="o_weight_hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
+      <div class="field"><label>Вес (кг)${cardBar?' *':''}</label><input type="text" inputmode="decimal" id="o_weight" value="${esc(fmtWeight(d.weight))}" placeholder="0,000" ${dis}><span class="hint" id="o_weight_hint">Три знака после запятой — как на весах. Недостающие нули система допишет сама: 1,3 → 1,300.</span></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Трек-код</label>
         <div style="display:flex;gap:8px">
           <input id="o_track" value="${esc(d.track)}" ${dis} style="flex:1">
@@ -2718,6 +2755,16 @@ function orderModal(id,readonly){
       if(!val('o_delivery')){toast('Выберите тип доставки');const df=$('o_delivery');if(df){df.focus();df.style.borderColor='var(--rust)';}return false;}
       // вес: принимаем и «1,3», и «1.3»; в базу кладём число, округлённое до грамма
       const weightVal=parseWeight(val('o_weight'));
+      /* В БАРАХОЛКЕ ВЕС ОБЯЗАТЕЛЕН (просьба владельца 21.10.2026). ФИО и индекс и так
+         требовались (проверки ниже), а вес — нет: пустое поле давало ноль и проходило.
+         А без веса не посчитать надбавку за перевес и нечего передать в KET полем
+         actual_weight — дослать его потом нечем (раздел 6b). В остальных разделах вес
+         по-прежнему необязателен: там заказ заводят до взвешивания. */
+      if(cardBar&&!val('o_weight').trim()){
+        toast('Укажите вес — например 1,300');
+        const wf=$('o_weight');if(wf){wf.focus();wf.style.borderColor='var(--rust)';}
+        return false;
+      }
       if(isNaN(weightVal)){
         toast('Вес указан неверно — например 1,300');
         const wf=$('o_weight');if(wf){wf.focus();wf.style.borderColor='var(--rust)';}
