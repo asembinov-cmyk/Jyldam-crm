@@ -422,7 +422,9 @@ async function waRegFiles(groups){
   const day=localToday();
   for(const g of groups){
     try{
-      const wb=barRegistryWorkbook(g.orders);
+      // БЕЗ ШАПКИ: в ней наши реквизиты — договор, БИН, контрагент, — и партнёру они
+      // ни к чему (просьба владельца 22.10.2026). Складская выгрузка шапку сохраняет.
+      const wb=barRegistryWorkbook(g.orders,{noHead:true});
       const bytes=XLSX.write(wb,{type:'array',bookType:'biff8'});
       // ИМЯ ФАЙЛА — ЛАТИНИЦЕЙ: кириллица в адресе ссылки превращается в проценты
       // (%D0%98%D0%9F…), и партнёру в WhatsApp прилетает нечитаемая строка.
