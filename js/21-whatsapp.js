@@ -384,6 +384,33 @@ const WA_BUTTONS=[
 const waBtnLabel=key=>((WA_BUTTONS.find(b=>b[0]===key)||[,key])[1]);
 const waBtnKind=key=>((WA_BUTTONS.find(b=>b[0]===key)||[])[2]||'order');
 
+/* ЧТОБЫ НЕ ПЕРЕПУТАТЬ РАССЫЛКИ (просьба владельца 22.10.2026): «при выборе статуса
+   „Ожидает получателя в пункте выдачи" давай нажать только „Прибыл заказ", а в статусе
+   „Получено от отправителя" — только „WhatsApp оповещение"».
+   Статус узнаём ПО НАЗВАНИЮ, а не по id: справочник ведут руками, id там свои (тот же
+   приём, что в подборе статусов у робота Казпочты).
+   Фильтр не выбран или статус не из списка — не ограничиваем: запрещать то, про что
+   уговора не было, значит ломать работу на ровном месте. Кнопка-реестр под правило не
+   попадает вовсе — она уходит партнёру, а не клиенту, и перепутать её не с чем. */
+const WA_STATUS_BTN=[
+  [/ожида[а-я]*\s+(получател|вручен)|в\s+пункте\s+выдачи/i, 'arrived'],
+  [/получено\s+от\s+отправител/i,                            'notify'],
+];
+function waBtnKeysForStatus(statusId){
+  if(!statusId)return null;
+  const st=(S.orderStatuses||[]).find(x=>x.id===statusId);
+  const name=String((st&&st.name)||'');
+  for(const [re,key] of WA_STATUS_BTN)if(re.test(name))return [key];
+  return null;
+}
+// видно ли кнопку при текущем фильтре статуса
+function waBtnAllowed(key,statusId){
+  const allow=waBtnKeysForStatus(statusId);
+  if(!allow)return true;
+  if(waBtnKind(key)!=='order')return true;   // реестр партнёра не ограничиваем
+  return allow.includes(key);
+}
+
 /* ПОДСТАНОВКИ РЕЕСТРА — ПО ПАРТНЁРУ, А НЕ ПО ЗАКАЗУ. Поля заказа (ФИО, адрес, трек) здесь
    бессмысленны: сообщение одно на весь список. Отсюда свой набор. */
 const WA_REG_FIELDS=[

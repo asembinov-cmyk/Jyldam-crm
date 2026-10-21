@@ -677,7 +677,11 @@ function renderOrders(mode){
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
         ${(isStaff()||canOrder('delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
           <span class="act-menu" id="ordersActMenu" style="display:none">
-            ${isStaff()&&typeof WA_BUTTONS!=='undefined'?WA_BUTTONS.map(b=>`<button type="button" class="act-item" data-wabtn="${esc(b[0])}">${esc(b[1])}</button>`).join(''):''}
+            ${isStaff()&&typeof WA_BUTTONS!=='undefined'?WA_BUTTONS
+              .filter(b=>typeof waBtnAllowed!=='function'||waBtnAllowed(b[0],of.status))
+              .map(b=>`<button type="button" class="act-item" data-wabtn="${esc(b[0])}">${esc(b[1])}</button>`).join(''):''}
+            ${(isStaff()&&typeof waBtnKeysForStatus==='function'&&waBtnKeysForStatus(of.status))
+              ?`<span class="act-note">по фильтру статуса доступна одна рассылка — чтобы не перепутать</span>`:''}
             ${(isStaff()&&(bar||!ordersMode))?'<button type="button" class="act-item" id="ordersTrackDup">🔁 Дубль — повторы трек-кода</button>':''}
             ${canOrder('delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
           </span></span>`:''}

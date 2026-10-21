@@ -1911,3 +1911,7 @@ td .ft-dot{margin:0 0 0 8px}
 .act-item:disabled{opacity:.45;cursor:default}
 .act-danger{color:#c0392b}
 .act-danger:hover:not(:disabled){background:#fdeceb}
+
+/* подпись в меню «Действие»: почему там сейчас одна рассылка (раздел 12) */
+.act-menu .act-note{display:block;padding:6px 10px;font-size:11px;line-height:1.4;color:var(--muted);
+  border-top:1px solid var(--line);max-width:240px}
