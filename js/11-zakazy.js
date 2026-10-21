@@ -618,7 +618,7 @@ function renderOrders(mode){
   const oneType=ordersMode==='courier'||ordersMode==='mail';
   $('main').innerHTML=`
     ${moduleHead({title:head,sub:subText,
-      actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(can('orders','create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(can('orders','create')&&bar)?'<button class="btn primary" id="barNewOrder" title="Отсканировать ШПИ и завести заказ">＋ Создать заказ</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
+      actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(canOrder('create',bar)&&bar)?'<button class="btn primary" id="barNewOrder" title="Отсканировать ШПИ и завести заказ">＋ Создать заказ</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
       hero:{k:'Сумма доставки',v:totalCost.toLocaleString('ru-RU'),unit:'₸'},
       stats:[
         {v:`${list.length}<small> / ${ordersWithPhone(list)}</small>`,k:'всего · сохранено'},
@@ -652,11 +652,11 @@ function renderOrders(mode){
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
-        ${(isStaff()||can('orders','delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
+        ${(isStaff()||canOrder('delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
           <span class="act-menu" id="ordersActMenu" style="display:none">
             ${isStaff()&&typeof WA_BUTTONS!=='undefined'?WA_BUTTONS.map(b=>`<button type="button" class="act-item" data-wabtn="${esc(b[0])}">${esc(b[1])}</button>`).join(''):''}
             ${(isStaff()&&(bar||!ordersMode))?'<button type="button" class="act-item" id="ordersTrackDup">🔁 Дубль — повторы трек-кода</button>':''}
-            ${can('orders','delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
+            ${canOrder('delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
           </span></span>`:''}
         <div class="filters filters-dates" style="padding:0;margin:0">
           <span class="fdate-lbl">Создан:</span>
@@ -2051,7 +2051,7 @@ function drawOrders(){
         <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${S.orderStatuses.map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div></td>
       <td data-label="" class="cell-actions"><div class="row-actions">
-        ${can('orders','delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
+        ${canOrder('delete')?`<button class="btn sm danger" data-odel="${o.id}">Удалить</button>`:''}
       </div></td></tr>`;
     }).join('')}</tbody></table></div>`;
   const _tbl=el.querySelector('table');
@@ -2070,7 +2070,7 @@ function drawOrders(){
   // двойной клик по строке открывает заказ: на редактирование, если есть право, иначе просмотр
   el.querySelectorAll('[data-orow]').forEach(tr=>tr.ondblclick=e=>{
     if(e.target.closest('button,select,input,a'))return;
-    orderModal(tr.dataset.orow,!can('orders','edit'));
+    orderModal(tr.dataset.orow,!canOrder('edit'));
   });
   el.querySelectorAll('[data-ostatus]').forEach(sel=>sel.onchange=async()=>{
     const o=S.orders.find(x=>x.id===sel.dataset.ostatus);if(!o)return;
@@ -2595,7 +2595,10 @@ function orderModal(id,readonly){
   // Без этой проверки карточка открывалась заблокированной и заполнить её было нельзя.
   const myClaimed=!!(o&&S.me&&o.claimed_by===S.me.id&&typeof fillClaimAlive==='function'&&fillClaimAlive(o)
     &&typeof canMod==='function'&&canMod('filling'));
-  const ro=readonly||!(can("orders","edit")||myClaimed);const dis=ro?'disabled':'';
+  // Раздел карточки нужен ПРЯМО ЗДЕСЬ: у менеджера Барахолки прав на заказы заборов нет,
+  // и без этого его карточка открывалась бы только на просмотр (см. canOrder).
+  const cardBar=isBaraholkaOrder(o)||isBaraholkaOrder(d);
+  const ro=readonly||!(canOrder('edit',cardBar)||myClaimed);const dis=ro?'disabled':'';
   // Сохранение карточки держим в переменной: им пользуется не только кнопка «Сохранить»,
   // но и «Получить трек» с «Отправить в KET». И трек, и отправка читают заказ на сервере
   // ИЗ БАЗЫ, поэтому перед ними карточку надо сохранить — иначе всё, что человек только
@@ -2610,8 +2613,7 @@ function orderModal(id,readonly){
      сканера его ещё нет — и карточка открывалась с пустой колонкой под фото, хотя фото у
      этих заказов не бывает вовсе. Сканер кладёт признак прямо в заготовку, и дальше по
      нему прячутся и остальные поля (ниже). */
-  const cardBar=isBaraholkaOrder(o)||isBaraholkaOrder(d);
-  const cardNoPhoto=cardBar;
+  const cardNoPhoto=cardBar;   // объявлен выше, рядом с проверкой прав
   /* ЧЕГО В КАРТОЧКЕ БАРАХОЛКИ НЕТ (просьба владельца 21.10.2026, со скриншотом):
      город забора — там всегда Алматы и ставится сам; размер пакета — надбавок за размер у
      этой ветки нет; тип доставки — она вся почтовая; ИП для Почты — при создании не нужен;

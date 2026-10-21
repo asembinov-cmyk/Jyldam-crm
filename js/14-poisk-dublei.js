@@ -174,7 +174,7 @@ function bindDuplicatesPanel(){
   };
   if($('dupAiRun'))$('dupAiRun').onclick=()=>runDuplicatesAI();
   document.querySelectorAll('[data-duporder]').forEach(el=>el.onclick=()=>{
-    try{orderModal(el.dataset.duporder,!can('orders','edit'));}catch(e){}
+    try{orderModal(el.dataset.duporder,!canOrder('edit'));}catch(e){}
   });
 }
 
