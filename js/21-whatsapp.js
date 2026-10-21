@@ -372,12 +372,46 @@ function waResultModal(results, noPhone){
    Ключ (`notify`, `arrived`, `courier`) — это ключ строки в таблице `wa_buttons`, и
    МЕНЯТЬ ЕГО НЕЛЬЗЯ: по нему хранится выбранный шаблон. Переименовать подпись можно
    свободно, ключ — нет. */
+/* Третий элемент строки — ВИД кнопки: 'order' (по умолчанию) шлёт по сообщению на ЗАКАЗ
+   получателю, 'partner' — одно сообщение ПАРТНЁРУ на весь его список за день. Это разные
+   адресаты и разные подстановки, поэтому вид задан прямо здесь, а не угадывается по ключу. */
 const WA_BUTTONS=[
   ['notify',  '💬 WhatsApp оповещение'],
   ['arrived', '📦 Прибыл заказ'],
   ['courier', '🚚 Курьерское оповещение'],
+  ['registry','📋 Реестр партнёра','partner'],
 ];
 const waBtnLabel=key=>((WA_BUTTONS.find(b=>b[0]===key)||[,key])[1]);
+const waBtnKind=key=>((WA_BUTTONS.find(b=>b[0]===key)||[])[2]||'order');
+
+/* ПОДСТАНОВКИ РЕЕСТРА — ПО ПАРТНЁРУ, А НЕ ПО ЗАКАЗУ. Поля заказа (ФИО, адрес, трек) здесь
+   бессмысленны: сообщение одно на весь список. Отсюда свой набор. */
+const WA_REG_FIELDS=[
+  ['partner', 'Партнёр — название',     g=>g.name||''],
+  ['count',   'Сколько заказов',        g=>String(g.orders.length)],
+  ['codes',   'Номера заказов списком', g=>waRegList(g.orders.map(o=>o.code))],
+  ['tracks',  'Трек-коды списком',      g=>waRegList(g.orders.map(o=>o.track))],
+  ['date',    'Дата реестра',           g=>fmtDate(g.date)],
+  ['sum',     'Сумма заказов',          g=>{const t=g.orders.reduce((a,o)=>a+(orderSum(o)||0),0);return t?String(Math.round(t)):'';}],
+  ['weight',  'Общий вес, кг',          g=>{const t=g.orders.reduce((a,o)=>a+(parseWeight(o.weight)||0),0);return t?fmtWeight(Math.round(t*1000)/1000):'';}],
+];
+const waRegFieldFn=key=>(WA_REG_FIELDS.find(f=>f[0]===key)||[,,()=>''])[2];
+/* СПИСОК НОМЕРОВ — ОДНОЙ СТРОКОЙ И С ОГРАНИЧЕНИЕМ. Параметр шаблона у Meta не может
+   содержать переводов строки (их чистит waParam), поэтому номера идут через запятую. И
+   длина ограничена: в параметр больше ~1024 знаков не влезает, а полторы сотни номеров —
+   это вдвое больше, поэтому лишние сворачиваются в «и ещё N». */
+const WA_REG_MAX_CHARS=700;
+function waRegList(arr){
+  const list=(arr||[]).map(v=>String(v||'').trim()).filter(Boolean);
+  if(!list.length)return '';
+  const out=[];let len=0;
+  for(const v of list){
+    if(len+v.length+2>WA_REG_MAX_CHARS)break;
+    out.push(v);len+=v.length+2;
+  }
+  const rest=list.length-out.length;
+  return out.join(', ')+(rest?` и ещё ${rest}`:'');
+}
 let _waCfg=null;                  // настройки кнопок: {ключ:{template,params}}
 
 async function waCfgLoad(force){
@@ -431,22 +465,17 @@ function waBlockModal(title,html){
   if(typeof showInfo==='function')showInfo('💬 '+title,`<div class="hint" style="line-height:1.6">${html}</div>`);
   else alert(title);
 }
-async function waNotifySelection(key){
-  key=key||WA_BUTTONS[0][0];
-  const label=waBtnLabel(key);
-  const list=[...ketSelected].map(id=>(S.orders||[]).find(o=>o.id===id)).filter(Boolean);
-  if(!list.length){
-    waBlockModal('Заказы не отмечены',
-      `Отметьте заказы галочками в первой колонке — рассылка идёт только по отмеченным.`
-      +(ketSelected.size?`<br><br>Отмечено ${ketSelected.size}, но этих заказов нет в загруженном списке: смените фильтр или обновите страницу.`:''));
-    return;
-  }
+/* ПРОВЕРКИ «ЧТО ВООБЩЕ МОЖНО ОТПРАВИТЬ» — ОДНИ НА ВСЕ КНОПКИ: привязан ли шаблон,
+   получен ли список у Kelesu, не переименован ли шаблон, одобрен ли он у Meta. Каждая
+   причина требует СВОЕГО действия, поэтому показывается окном с конкретным шагом, а не
+   тостом (раздел 12). Возвращает {t,pin} либо null — причина уже на экране. */
+async function waResolveForButton(key,label){
   const cfg=await waCfgLoad();
   if(cfg===null){
     waBlockModal('Раздел ещё не включён',
       `Нет таблицы настроек <b>wa_buttons</b> — она хранит, какой шаблон уходит по какой кнопке.
        <br><br>Выполните <b>db/34-WHATSAPP-рассылка.sql</b>, <b>блок 3</b>, и обновите страницу.`);
-    return;
+    return null;
   }
   const pin=cfg[key];
   if(!pin||!pin.template){
@@ -454,7 +483,7 @@ async function waNotifySelection(key){
       `Для кнопки «${esc(label)}» не выбран шаблон WhatsApp, поэтому отправлять нечего.
        <br><br>Откройте <b>Настройки → Оповещения WhatsApp</b>, нажмите чип «${esc(label)}»,
        выберите шаблон и сохраните.`);
-    return;
+    return null;
   }
   const tpls=await waLoadTemplates();
   if(!tpls||tpls.error){
@@ -463,21 +492,157 @@ async function waNotifySelection(key){
        <br><br>Проверьте, что функция <b>kelesu-waba</b> выложена в Supabase и у неё заданы секреты
        <b>KELESU_API_KEY</b> и <b>KELESU_CHANNEL_ID</b>. После правки секретов функцию нужно
        выложить заново — они читаются при запуске.`);
-    return;
+    return null;
   }
   const t=tpls.find(x=>x.name===pin.template);
   if(!t){
     waBlockModal('Шаблона больше нет',
       `Шаблон <b>${esc(pin.template)}</b> у Kelesu не найден — его переименовали или удалили.
        <br><br>Выберите другой в <b>Настройки → Оповещения WhatsApp</b>.`);
-    return;
+    return null;
   }
   if(t.status!=='APPROVED'){
     waBlockModal('Шаблон не одобрен Meta',
       `У шаблона <b>${esc(t.name)}</b> статус <b>${esc(t.status||'—')}</b>. Отправлять можно только
        одобренные — это ограничение Meta, а не Kelesu.`);
+    return null;
+  }
+  return {t,pin};
+}
+
+/* ================= РЕЕСТР ПАРТНЁРА (21.10.2026) =================
+   Просьба владельца: «в Барахолке в „Действие" добавь „Реестр партнёра": нажал — и
+   партнёру уходит реестр его заказов за сегодняшний день».
+
+   ОДНО СООБЩЕНИЕ НА ПАРТНЁРА, А НЕ НА ЗАКАЗ, и уходит оно НА НОМЕР ИЗ КАРТОЧКИ ПАРТНЁРА
+   (`partners.phone`), а не получателю: получателю реестр чужих посылок ни к чему.
+   Поэтому у кнопки свой вид ('partner'), свои подстановки (WA_REG_FIELDS) и своя проверка
+   повторов — по номеру и дню, а не по заказу: заказов в сообщении много, и привязать его
+   к одному из них было бы неправдой. */
+async function waRegistrySelection(key){
+  const label=waBtnLabel(key);
+  const list=[...ketSelected].map(id=>(S.orders||[]).find(o=>o.id===id)).filter(Boolean);
+  if(!list.length){
+    waBlockModal('Заказы не отмечены',
+      'Отметьте галочками заказы партнёров — реестр собирается по отмеченным.'
+      +'<br><br>Обычно это «выбрать все» при фильтре «Создан: сегодня».');
     return;
   }
+  const got=await waResolveForButton(key,label);
+  if(!got)return;
+  const {t,pin}=got;
+
+  /* ГРУППИРУЕМ ПО ПАРТНЁРУ. Партнёр берётся полем заказа, а если пусто — по названию
+     отправителя (`findPartnerByNameLoose`): у заказов, созданных пачкой, `partner_id`
+     часто не заполнен — то же правило, что в Калькуляции (раздел 5b). */
+  const groups=new Map();
+  const noPartner=[];
+  list.forEach(o=>{
+    const p=(o.partner_id?(S.partners||[]).find(x=>x.id===o.partner_id):null)
+      ||(typeof findPartnerByNameLoose==='function'?findPartnerByNameLoose(o.sender):null);
+    if(!p){noPartner.push(o);return;}
+    if(!groups.has(p.id))groups.set(p.id,{id:p.id,name:p.name||'',phone:waPhone(p.phone),orders:[],date:localToday()});
+    groups.get(p.id).orders.push(o);
+  });
+  const all=[...groups.values()];
+  const ok=all.filter(g=>g.phone);
+  const noPhone=all.filter(g=>!g.phone);
+  if(!ok.length){
+    waBlockModal('Некому отправлять',
+      `Среди отмеченных заказов партнёров с телефоном не нашлось.`
+      +(noPhone.length?`<br><br>Без телефона в карточке: ${noPhone.map(g=>esc(g.name)).join(', ')}.`
+        +'<br>Телефон правится в <b>Настройках → Партнёры</b>.':'')
+      +(noPartner.length?`<br><br>Заказов, у которых партнёр не определился: ${noPartner.length}.`:''));
+    return;
+  }
+  // Кому этот реестр сегодня уже уходил — не шлём второй раз: сообщения платные.
+  const seen=await waRegAlreadySent(ok.map(g=>g.phone),t.name);
+  if(seen.error){
+    waBlockModal('Журнал не прочитан',
+      `Не удалось проверить, кому реестр уже уходил: ${esc(seen.error)}`
+      +'<br><br>Без этой проверки отправлять опасно — повтор оплачивается заново.');
+    return;
+  }
+  const again=ok.filter(g=>seen.done.has(g.phone));
+  const send=ok.filter(g=>!seen.done.has(g.phone));
+  if(!send.length){
+    waBlockModal('Уже отправлено',
+      `Всем партнёрам из выборки (${again.length}) реестр сегодня уже уходил.`
+      +'<br><br>Повторно он не идёт: сообщения платные.');
+    return;
+  }
+  const orders=send.reduce((a,g)=>a+g.orders.length,0);
+  const msg=`${label}\n\nОтправить реестр ${send.length} ${send.length===1?'партнёру':'партнёрам'}`
+    +` (${orders} ${orders===1?'заказ':'заказов'})?`
+    +(again.length?`\n\nПропустим ${again.length} — им реестр сегодня уже уходил.`:'')
+    +(noPhone.length?`\n\nБез телефона в карточке: ${noPhone.length}`:'')
+    +(noPartner.length?`\n\nЗаказов без партнёра: ${noPartner.length}`:'')
+    +`\n\nЭто ${send.length} ПЛАТНЫХ ${waPlural(send.length)} — Meta берёт за каждое.`;
+  if(!confirm(msg))return;
+
+  const items=send.map(g=>({
+    order_id:null,                 // сообщение не про один заказ, а про список
+    code:g.name,                   // в журнале видно, какому партнёру ушло
+    phone:g.phone, button:key,
+    section:g.orders.some(o=>typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(o))?'baraholka':'main',
+    components:waRegComponents(t,g,pin.params),
+  }));
+  const r=await callEdge('kelesu-waba',{action:'enqueue',template:t.name,button:key,items});
+  if(!r||r.error){
+    waBlockModal('Не удалось поставить в очередь',`${esc((r&&r.error)||'ошибка вызова')}`
+      +'<br><br>Если это «relation wa_queue does not exist» — выполните <b>db/37</b>,'
+      +' а расписание включает <b>db/38</b>.');
+    return;
+  }
+  callEdge('kelesu-waba',{action:'drain'}).catch(()=>{});
+  waBlockModal('Реестр поставлен в очередь',
+    `В очередь: <b>${r.queued||0}</b> ${waPlural(r.queued||0)} — по одному на партнёра.`
+    +(r.skipped?`<br>Пропущено (уже уходило): ${r.skipped}.`:'')
+    +`<br><br>Заказов в реестрах: ${orders}.`
+    +'<br><br><b>Вкладку можно закрыть</b> — дальше шлёт сервер.'
+    +'<br>Что ушло, видно в <b>Настройки → Оповещения WhatsApp</b>.');
+}
+// подстановки реестра: ключи берём из настроек кнопки, значения — из группы партнёра
+function waRegComponents(t,g,params){
+  const n=t.body_params||0;
+  const ps=[];
+  for(let k=1;k<=n;k++){
+    const key=(params&&(params[k]||params[String(k)]))||'';
+    ps.push({type:'text',text:waParam(waRegFieldFn(key)(g))});
+  }
+  return ps.length?[{type:'body',parameters:ps}]:[];
+}
+/* Повторы у реестра считаются ПО НОМЕРУ И ДНЮ. По заказу нельзя: заказов в сообщении
+   много, и привязка к одному из них была бы неправдой — а в журнале у таких строк
+   `order_id` пуст по той же причине. */
+async function waRegAlreadySent(phones,template){
+  const done=new Set();
+  const dayStart=new Date();dayStart.setHours(0,0,0,0);
+  try{
+    const {data,error}=await sb.from('wa_sends').select('phone,status,created_at')
+      .eq('template',template).is('order_id',null)
+      .gte('created_at',dayStart.toISOString());
+    if(error)return {error:dbErrText?dbErrText(error):(error.message||'ошибка запроса')};
+    (data||[]).forEach(r=>{if(r.phone&&r.status!=='failed')done.add(String(r.phone));});
+  }catch(e){return {error:String(e&&e.message||e)};}
+  return {done};
+}
+
+async function waNotifySelection(key){
+  key=key||WA_BUTTONS[0][0];
+  // кнопка-реестр шлёт партнёрам, а не получателям — у неё своя ветка
+  if(waBtnKind(key)==='partner')return waRegistrySelection(key);
+  const label=waBtnLabel(key);
+  const list=[...ketSelected].map(id=>(S.orders||[]).find(o=>o.id===id)).filter(Boolean);
+  if(!list.length){
+    waBlockModal('Заказы не отмечены',
+      `Отметьте заказы галочками в первой колонке — рассылка идёт только по отмеченным.`
+      +(ketSelected.size?`<br><br>Отмечено ${ketSelected.size}, но этих заказов нет в загруженном списке: смените фильтр или обновите страницу.`:''));
+    return;
+  }
+  const got=await waResolveForButton(key,label);
+  if(!got)return;                       // причина уже показана окном
+  const {t,pin}=got;
 
   const rows=list.map(o=>({o,phone:waPhone(o.phone)}));
   let ok=rows.filter(r=>r.phone);
@@ -628,15 +793,26 @@ async function renderWaSettings(){
       const t=appr.find(x=>x.name===$('waCfgTpl').value);
       if(!t){bodyBox.innerHTML='<div class="hint">Выберите шаблон — тогда покажем его текст и подстановки.</div>';return;}
       const n=t.body_params||0;
-      const fieldOpts=sel=>WA_FIELDS.map(f=>`<option value="${f[0]}" ${sel===f[0]?'selected':''}>${esc(f[1])}</option>`).join('');
+      /* У КНОПКИ-РЕЕСТРА СВОЙ НАБОР ПОЛЕЙ: сообщение одно на партнёра, и поля заказа
+         (ФИО, адрес, трек) в нём бессмысленны. Угадывание по тексту здесь тоже не
+         применяется — оно обучено на полях заказа и подставило бы, например, «трек»
+         там, где нужен список номеров. Поэтому первый пункт пустой: выбрать должен человек. */
+      const isReg=waBtnKind(waCfgBtn)==='partner';
+      const fieldList=isReg?WA_REG_FIELDS:WA_FIELDS;
+      const fieldOpts=sel=>(isReg?`<option value="" ${sel?'':'selected'}>— выберите —</option>`:'')
+        +fieldList.map(f=>`<option value="${f[0]}" ${sel===f[0]?'selected':''}>${esc(f[1])}</option>`).join('');
       // Сохранённые подстановки берём только у СВОЕГО шаблона: выбрали в списке другой —
       // у него и параметры другие, и чужая раскладка подставила бы адрес в дату.
       const saved=(t.name===pin.template&&pin.params)?pin.params:null;
       bodyBox.innerHTML=`
         <div class="panel" style="margin:8px 0"><div class="hint" style="white-space:pre-wrap">${esc(t.body_text||'')}</div></div>
+        ${isReg?`<div class="hint" style="margin:0 0 8px">Это кнопка-реестр: одно сообщение уходит <b>партнёру</b>
+          на номер из его карточки, а не получателю. Подстановки — по партнёру и его заказам за день.
+          Список номеров идёт одной строкой через запятую: переводы строки Meta в параметрах не допускает,
+          а длинный список сворачивается в «и ещё N».</div>`:''}
         ${n?`<table class="resp-table"><thead><tr><th>Параметр</th><th>Что подставить</th></tr></thead><tbody>${
           Array.from({length:n},(_,i)=>i+1).map(k=>{
-            const sel=(saved&&(saved[k]||saved[String(k)]))||waGuessField(waCtx(t.body_text,k),k);
+            const sel=(saved&&(saved[k]||saved[String(k)]))||(isReg?'':waGuessField(waCtx(t.body_text,k),k));
             const ctx=waCtx(t.body_text,k);
             return `<tr class="open"><td data-label="Параметр"><b>{{${k}}}</b>${ctx?`<small class="cell-time">${esc(ctx)}</small>`:''}</td>
               <td data-label="Что подставить"><select class="wa-cfg" data-k="${k}">${fieldOpts(sel)}</select></td></tr>`;
