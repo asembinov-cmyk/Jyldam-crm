@@ -1698,10 +1698,89 @@ async function printInboundWaybillsPdf(orders){
   toast(`Готово: накладных ${orders.length}`);
 }
 
+// ===== РЕЕСТР КАЗПОЧТЫ: выгрузка Барахолки (21.10.2026) =====
+// В Барахолке выгрузка — НЕ колонки грида, а готовый реестр Казпочты: тот самый файл,
+// который и так ходит между нами и почтой. Строки 1-7 — шапка, строка 8 — названия
+// столбцов, данные с 9-й. Шапка ПОСТОЯННАЯ (просьба владельца: «шапка с 1-8 должна
+// быть всегда одинаковая везде»), столбцы — ровно те одиннадцать, что есть в файле;
+// ничего сверх них из заказа не тянем. Значения сверены с «Кенжехан2 9р115 21.10.26».
+const BAR_REG = {
+  napravlenie:1,            // Направление
+  vid:3,                    // Вид РПО
+  ctg:3,                    // Категория РПО
+  sender:'ТОО QP Service (ИП Бэтмен)', // Отправитель
+  region:1,                 // Регион назначения
+  ops:'010000',             // Индекс ОПС места приема — строкой, ведущий ноль
+  dea:'10004943-2024-191272', // Номер договора
+  deaDate:'25.01.2024',     // Дата договора
+  kontragent:'279900.000856', // Контрагент
+  bin:'190140026589',       // БИН
+  manager:'75747498',       // колонка «Менеджер» — одна и та же во всех строках реестра
+  qty:1,                    // колонка «К-во» — в реестре единица у каждой строки
+};
+const BAR_REG_COLS=['№ п.п','ФИО','Индекс','Адрес','ШПИ','Вес','Сумма объявленной ценности','Сумма нал. Платежа','К-во','Телефон','Менеджер'];
+// телефон в реестре записан с восьмёрки: 87762980260, а у нас лежит 77762980260
+function barRegPhone(ph){
+  const d=String(ph||'').replace(/\D/g,'');
+  if(d.length<10)return '';
+  return '8'+d.slice(-10);
+}
+// сумма для реестра: у партнёров с тарифом 0 в самом заказе ноль, а настоящая цена
+// доставки лежит в условной выручке (раздел 5f) — в реестр Казпочты должна уйти ОНА,
+// иначе наложенный платёж уедет нулевым. То же правило, что при отправке в KET.
+function barRegSum(o){
+  return Number(orderSum(o))||Number(o.order_sum_orig)||'';
+}
+function exportBaraholkaRegistry(rows){
+  // Индекс и ШПИ — СТРОКАМИ: у индекса бывает ведущий ноль (021500), числом он
+  // превратился бы в 21500 — ровно та беда, которую при загрузке реестра чиним обратно.
+  const aoa=[
+    ['Направление',BAR_REG.napravlenie,'','','Номер договора',BAR_REG.dea],
+    ['Вид РПО',BAR_REG.vid,'','','Дата договора',BAR_REG.deaDate],
+    ['Категория РПО',BAR_REG.ctg,'','','Контрагент',BAR_REG.kontragent],
+    ['Отправитель',BAR_REG.sender,'','','БИН',BAR_REG.bin],
+    ['Регион назначения',BAR_REG.region],
+    ['Индекс ОПС места приема',BAR_REG.ops],
+    ['Всего РПО',rows.length],
+    BAR_REG_COLS.slice(),
+  ];
+  let total=0;
+  rows.forEach((o,i)=>{
+    const w=parseWeight(o.weight);
+    const sum=barRegSum(o);
+    if(sum)total+=sum;
+    aoa.push([
+      i+1,
+      o.client||'',
+      String(o.index||''),
+      o.address||'',
+      String(o.track||''),
+      w||'',
+      sum,
+      sum,
+      BAR_REG.qty,
+      barRegPhone(o.phone),
+      BAR_REG.manager,
+    ]);
+  });
+  // строка «итог» — как в присланном реестре: подпись в колонке объявленной ценности,
+  // сумма в колонке наложенного платежа
+  aoa.push([]);
+  aoa.push(['','','','','','','итог',total]);
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:7},{wch:24},{wch:10},{wch:38},{wch:16},{wch:8},{wch:12},{wch:12},{wch:7},{wch:15},{wch:12}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'srirmam'); // имя листа как в реестре
+  XLSX.writeFile(wb,`Реестр_Барахолка_${localToday()}.xls`,{bookType:'biff8'});
+  toast(`Выгружено в реестр заказов: ${rows.length}`);
+}
+
 function exportOrdersToExcel(){
   if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
   const rows=filteredOrders(); // те же данные и фильтры, что в гриде
   if(!rows.length){toast('Нет заказов для выгрузки');return;}
+  // Барахолка выгружается реестром Казпочты, а не колонками грида
+  if(ordersMode==='baraholka'){exportBaraholkaRegistry(rows);return;}
   const staff=isStaff();
   // заголовки колонок — как в таблице
   const data=rows.map(o=>{
