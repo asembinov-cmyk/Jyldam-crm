@@ -1,5 +1,14 @@
 /* ================= МОДУЛЬ: СПРАВОЧНИКИ ================= */
 const canEditDir=()=>can('directories','create')||can('directories','edit');
+/* ПРАВА НА СПРАВОЧНИК — ПО УМОЛЧАНИЮ «Справочники», НО У СТРАНИЦЫ МОГУТ БЫТЬ СВОИ.
+   Жалоба владельца 22.10.2026: «почему у кого есть доступ к партнёрам, не может их
+   создать». Потому что «＋ Добавить» и кнопки в строке висели на праве «Справочники», а
+   роли выдан отдельный модуль «Партнёры»: страницу он открывал, а менять ничего не давал.
+   Теперь страница объявляет, какой модуль спрашивать (`dirRight`), а право «Справочники»
+   работает как и раньше — администратору и тем, у кого оно есть, доступно всё. */
+let dirRight='directories';
+const dirCan=act=>can(dirRight,act)||can('directories',act);
+const dirCanEdit=()=>dirCan('create')||dirCan('edit');
 
 // Справочников девятнадцать, и одной лентой наверху они давно перестали читаться:
 // строка переносилась на три ряда, и найти нужное было быстрее поиском по странице.
@@ -40,6 +49,7 @@ const SET_GROUPS=[
 ];
 const setAllItems=()=>SET_GROUPS.flatMap(([g,items])=>items.map(it=>[...it,g]));
 function renderSettings(){
+  dirRight='directories';          // в «Настройках» права как были — по справочникам
   // пункт «Статусы Барахолки» убран 22.10.2026 — в адресе мог остаться он
   if(S.dir==='order_statuses_bar')S.dir='order_statuses';
   const all=setAllItems();
@@ -147,24 +157,34 @@ function renderApiDocsSettings(){
 // отдельная страница «Партнёры» (вынесена из справочников в боковое меню)
 let partnersTab='delivery'; // delivery | baraholka | warehouse
 function renderPartnersPage(){
+  /* НА СТРАНИЦЕ ПАРТНЁРОВ СПРАШИВАЕМ МОДУЛЬ «Партнёры»: её и открывают по нему
+     (`canMod('partners')` в меню), значит и правка должна идти по нему же. */
+  dirRight='partners';
+  /* ВКЛАДКА БАРАХОЛКИ — ТОЛЬКО ПО ПРАВУ НА МОДУЛЬ (просьба владельца 22.10.2026: «чтобы
+     барахолочных партнёров видели только те, кому я даю доступ по Барахолке»). Если право
+     отобрали, пока человек стоял на этой вкладке, он вернётся на «Партнёров доставки» —
+     иначе остался бы смотреть закрытый раздел до перезагрузки (та же механика, что с
+     подвкладкой Барахолки в «Статистике», раздел 5f). */
+  const barTab=baraholkaReady()&&canMod('baraholka');
+  if(partnersTab==='baraholka'&&!barTab)partnersTab='delivery';
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Партнёры</h1><p>Партнёры доставки и партнёры склада</p></div></div>
     <div class="subtabs">
       <button data-ptab="delivery" class="${partnersTab==='delivery'?'active':''}">🚚 Партнёры доставки</button>
-      ${baraholkaReady()?`<button data-ptab="baraholka" class="${partnersTab==='baraholka'?'active':''}">🏷 Барахолка</button>`:''}
+      ${barTab?`<button data-ptab="baraholka" class="${partnersTab==='baraholka'?'active':''}">🏷 Барахолка</button>`:''}
       <button data-ptab="warehouse" class="${partnersTab==='warehouse'?'active':''}">📦 Партнёры склада</button>
     </div>
     <div id="dirContent"></div>`;
   $('main').querySelectorAll('[data-ptab]').forEach(b=>b.onclick=()=>{partnersTab=b.dataset.ptab;renderPartnersPage();});
   if(partnersTab==='delivery')dirPartners();
-  else if(partnersTab==='baraholka')dirPartners(true);
+  else if(partnersTab==='baraholka'&&barTab)dirPartners(true);
   else renderWhPartners();
 }
 
 // справочник партнёров склада (отдельная сущность)
 function renderWhPartners(){
   const arr=[...(S.warehouse_partners||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const canEd=can('directories','create');
+  const canEd=dirCan('create');
   $('dirContent').innerHTML=`<div class="panel">
     <div class="panel-head"><h2>Партнёры склада</h2><span class="count">${arr.length}</span>
       ${canEd?`<button class="btn primary sm" id="whpAdd" style="margin-left:auto">＋ Добавить</button>`:''}</div>
@@ -176,9 +196,9 @@ function renderWhPartners(){
       <td data-label="Контакт">${esc(p.contact||'—')}</td>
       <td data-label="Телефон">${p.phone?phoneLink(p.phone):'—'}</td>
       <td data-label="Комментарий">${esc(p.comment||'—')}</td>
-      <td data-label="" class="cell-actions">${can('directories','edit')||can('directories','delete')?`<div class="row-actions">
-        ${can('directories','edit')?`<button class="btn sm ghost" data-whpe="${p.id}">Изм.</button>`:''}
-        ${can('directories','delete')?`<button class="btn sm danger" data-whpd="${p.id}">✕</button>`:''}
+      <td data-label="" class="cell-actions">${dirCan('edit')||dirCan('delete')?`<div class="row-actions">
+        ${dirCan('edit')?`<button class="btn sm ghost" data-whpe="${p.id}">Изм.</button>`:''}
+        ${dirCan('delete')?`<button class="btn sm danger" data-whpd="${p.id}">✕</button>`:''}
       </div>`:''}</td>
     </tr>`).join(''):`<tr><td colspan="5"><div class="empty"><div class="big">Нет партнёров склада</div>Добавьте бутики/магазины, чьи товары хранятся на складе.</div></td></tr>`}
     </tbody></table></div></div>`;
@@ -210,11 +230,11 @@ function whPartnerModal(id){
 }
 function dirShell(title,count,onAdd,tableHtml){
   $('dirContent').innerHTML=`<div class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span class="count">${count}</span>
-    ${can('directories','create')?`<button class="btn primary sm" id="dirAdd" style="margin-left:auto">＋ Добавить</button>`:''}</div>${tableHtml}</div>`;
+    ${dirCan('create')?`<button class="btn primary sm" id="dirAdd" style="margin-left:auto">＋ Добавить</button>`:''}</div>${tableHtml}</div>`;
   if($('dirAdd'))$('dirAdd').onclick=onAdd;
 }
 function dirActions(id){
-  const e=can('directories','edit'),d=can('directories','delete');
+  const e=dirCan('edit'),d=dirCan('delete');
   if(!e&&!d)return '';
   return `<div class="row-actions">${e?`<button class="btn sm ghost" data-e="${id}">Изм.</button>`:''}${d?`<button class="btn sm danger" data-d="${id}">✕</button>`:''}</div>`;
 }
@@ -294,7 +314,7 @@ function dirGrid(cfg){
   // двойной клик по строке открывает карточку (кроме кликов по кнопкам действий)
   $('dirContent').querySelectorAll('[data-dirrow]').forEach(tr=>tr.ondblclick=e=>{
     if(e.target.closest('button,a,select,input'))return;
-    if(canEditDir())cfg.modalFn(tr.dataset.dirrow);
+    if(dirCanEdit())cfg.modalFn(tr.dataset.dirrow);
   });
   $('dirContent').querySelectorAll('.dir-filter').forEach(el=>{
     const ev=el.tagName==='SELECT'?'onchange':'oninput';
