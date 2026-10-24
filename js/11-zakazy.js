@@ -1983,12 +1983,67 @@ function exportBaraholkaRegistry(rows){
   toast(`Выгружено в реестр заказов: ${rows.length}`);
 }
 
-function exportOrdersToExcel(){
+/* ДОГРУЗИТЬ ЗАКАЗЫ ЗА ОКНО ДАТ ПРЯМО ИЗ БАЗЫ (24.10.2026).
+
+   Зачем: грид рисует из `S.orders`, а это СНИМОК на момент загрузки вкладки плюс то,
+   что донёс Realtime. Заказы, заведённые позже кем-то другим, в памяти могут не
+   появиться вовсе — вкладка в фоне, сеть мигнула (раздел 8r). На экране это незаметно:
+   список просто короче, чем на самом деле.
+
+   Поймано на живом случае: менеджер выбрал 23–24 число, выгрузил реестр, и в файл не
+   попали заказы, заведённые после 12:08 — то есть после того, как открылась его вкладка.
+   Для реестра, который уходит в Казпочту и партнёру, это хуже всего: недостача видна
+   только на почте.
+
+   `S._heavyLoaded` здесь НЕ помогает и проверять его нельзя: он означает «вся история
+   подъехала», а не «данные свежие». Поэтому запрашиваем всегда.
+
+   Границы считаем по МЕСТНОМУ времени: `new Date('2026-10-23T00:00:00')` без Z
+   разбирается как местная полночь, а в базе `created_at` лежит по Гринвичу — тот самый
+   сдвиг, из-за которого фильтр «Создан» подтягивал соседний день (раздел 8яо). */
+async function ordersRefreshCreatedRange(from,to){
+  if(!from&&!to)return 0;
+  const gte=new Date((from||to)+'T00:00:00').toISOString();
+  const lte=new Date((to||from)+'T23:59:59.999').toISOString();
+  if(!S.orders)S.orders=[];
+  const byId=new Map(S.orders.map(o=>[String(o.id),o]));
+  let added=0;
+  for(let page=0;page<20;page++){   // 20 000 строк — в окне на несколько дней больше не бывает
+    const {data,error}=await sb.from('orders').select('*')
+      .gte('created_at',gte).lte('created_at',lte)
+      .order('created_at',{ascending:false}).range(page*1000,page*1000+999);
+    if(error){console.error('orders range',error);return -1;}
+    const rows=data||[];
+    rows.forEach(r=>{
+      const k=String(r.id), had=byId.get(k);
+      if(had)Object.assign(had,r);            // заодно освежаем статусы — их мог сменить робот
+      else{S.orders.push(r);byId.set(k,r);added++;}
+    });
+    if(rows.length<1000)break;
+  }
+  return added;
+}
+
+async function exportOrdersToExcel(){
   if(!window.XLSX){toast('Библиотека Excel ещё загружается, попробуйте снова');return;}
+  // Барахолка выгружается реестром Казпочты, а не колонками грида — и ПЕРЕД выгрузкой
+  // список сверяется с базой, иначе в реестр попадёт только то, что знает вкладка.
+  if(ordersMode==='baraholka'){
+    toast('Сверяю список с базой…',1500);
+    const added=await ordersRefreshCreatedRange(of.createFrom,of.createTo);
+    const fresh=filteredOrders();
+    if(!fresh.length){toast('Нет заказов для выгрузки');return;}
+    exportBaraholkaRegistry(fresh);
+    if(added>0){
+      toast(`В список добавилось ${added} — их завели, пока вкладка была открыта`,7000);
+      renderOrders(ordersMode);
+    }else if(added<0){
+      toast('Не удалось свериться с базой — в реестре только то, что видно на экране',8000);
+    }
+    return;
+  }
   const rows=filteredOrders(); // те же данные и фильтры, что в гриде
   if(!rows.length){toast('Нет заказов для выгрузки');return;}
-  // Барахолка выгружается реестром Казпочты, а не колонками грида
-  if(ordersMode==='baraholka'){exportBaraholkaRegistry(rows);return;}
   const staff=isStaff();
   // заголовки колонок — как в таблице
   const data=rows.map(o=>{
