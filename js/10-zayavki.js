@@ -5,6 +5,13 @@
 // делала очередь «Заполнения» пустой, а статистику нулевой (см. syncServerTime).
 function localToday(){const d=new Date(typeof nowMs==='function'?nowMs():Date.now());
   const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
+// дата N дней назад в том же виде (localDaysAgo(1) — вчера). Считается от ВРЕМЕНИ
+// СЕРВЕРА, как и localToday: иначе сбитые часы ноутбука снова дали бы чужой день.
+function localDaysAgo(n){
+  const d=new Date((typeof nowMs==='function'?nowMs():Date.now())-(n||0)*86400000);
+  const off=d.getTimezoneOffset();
+  return new Date(d.getTime()-off*60000).toISOString().slice(0,10);
+}
 /* МЕСТНАЯ дата отметки времени (YYYY-MM-DD). Нужна там, где дату СРАВНИВАЮТ с тем,
    что человек видит на экране: `created_at` хранится по Гринвичу, а Казахстан +5,
    поэтому срез строки `created_at.slice(0,10)` у всего, что заведено до 05:00,

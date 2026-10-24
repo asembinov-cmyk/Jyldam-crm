@@ -612,6 +612,12 @@ function renderOrders(mode){
   let dayNote='';
   if(of.createFrom&&of.createFrom===of.createTo){const t=localToday();dayNote=of.createFrom===t?'за сегодня':('за '+fmtDate(of.createFrom));}
   else if(of.createFrom||of.createTo){dayNote='за период';}
+  /* Какой день выбран — видно по кнопке, а не только по двум полям дат. Вся эта
+     история и началась с того, что по экрану не понять, какие даты стоят
+     (раздел 8яо). «Вчера» считается от времени СЕРВЕРА, как и «Сегодня». */
+  const dayToday=localToday(), dayYday=localDaysAgo(1);
+  const oneDay=of.createFrom&&of.createFrom===of.createTo;
+  const isToday=oneDay&&of.createFrom===dayToday, isYday=oneDay&&of.createFrom===dayYday;
   // Барахолка: своя кнопка загрузки вместо «Создать заказ» — заказы сюда попадают только
   // реестром. Кнопка «Загрузить из Excel» ЖИВЁТ ТОЛЬКО ЗДЕСЬ: пока она стояла в «Заказах
   // заборов», реестровые заказы наливали в общий список, и из этого выросла вся мешанина.
@@ -705,7 +711,8 @@ function renderOrders(mode){
           <input type="date" id="ofdelfrom" value="${esc(of.delFrom)}" title="Дата доставки с">
           <input type="date" id="ofdelto" value="${esc(of.delTo)}" title="Дата доставки по">`}
           <span class="fdate-btns">
-            <button class="btn sm" id="oftoday">Сегодня</button>
+            <button class="btn sm ghost${isToday?' active':''}" id="oftoday">Сегодня</button>
+            <button class="btn sm ghost${isYday?' active':''}" id="ofyday">Вчера</button>
             <button class="btn sm" id="ofdateclear">Все даты</button>
             <button class="btn sm ghost" id="ofreset" title="Снять все фильтры и показать сегодняшние заказы">✕ Сброс</button>
           </span>
@@ -1012,6 +1019,9 @@ function renderOrders(mode){
   if($('ofdelfrom'))$('ofdelfrom').onchange=e=>{of.delFrom=e.target.value;drawOrdersReset();};
   if($('ofdelto'))$('ofdelto').onchange=e=>{of.delTo=e.target.value;drawOrdersReset();};
   if($('oftoday'))$('oftoday').onclick=()=>{const t=localToday();of.createFrom=t;of.createTo=t;renderOrders(ordersMode);};
+  // «Вчера» ставит ОБЕ границы на вчерашний день — как «Сегодня», только на день назад.
+  // Период «вчера–сегодня» собирается двумя полями дат, отдельной кнопки для него нет.
+  if($('ofyday'))$('ofyday').onclick=()=>{const y=localDaysAgo(1);of.createFrom=y;of.createTo=y;renderOrders(ordersMode);};
   if($('ofdateclear'))$('ofdateclear').onclick=()=>{of.pickFrom='';of.pickTo='';of.delFrom='';of.delTo='';of.createFrom='';of.createTo='';renderOrders(ordersMode);};
   // «Сброс» — снять ВСЕ фильтры и вернуться к обычному виду: сегодняшние заказы, ничего
   // больше не отобрано. Полезно, когда после десятка правок фильтров непонятно, почему
