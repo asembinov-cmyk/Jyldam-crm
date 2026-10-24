@@ -2779,7 +2779,7 @@ function orderModal(id,readonly){
            тянет за собой всё остальное — город, сумму, трек у Казпочты, видимость на
            складе, — и молча решать его за человека нельзя. -->
       <div class="field"${barHide}><label>Тип доставки <span style="color:var(--rust)">*</span></label><select id="o_delivery" ${dis}>${d.delivery_id?'':'<option value="">—</option>'}${S.delivery.filter(x=>/курьер|почт/i.test(x.name||'')).map(x=>`<option value="${x.id}" ${d.delivery_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-      <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская)</label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field" id="cityField" style="${isCourierDelivery(d.delivery_id)?'':'display:none'}"><label>Город (курьерская) <span style="color:var(--rust)">*</span></label><select id="o_city" ${dis}><option value="">—</option>${S.courier_cities.map(c=>`<option value="${c.id}" ${d.courier_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <!-- Адрес у Барахолки — в ДВЕ строки (просьба владельца 21.10.2026: «адрес слишком
            маленький, увеличь эту строку»). В компактной карточке поле живёт в колонке шириной
            около 330 px, и адрес вроде «Караганды обл. Каркаралы ауд. Теректи ауылы» в одну
@@ -2835,6 +2835,22 @@ function orderModal(id,readonly){
       if(!val('o_client').trim()){
         toast('Укажите ФИО клиента');
         const cf=$('o_client');if(cf){cf.focus();cf.style.borderColor='var(--rust)';}
+        return false;
+      }
+      /* ГОРОД ОБЯЗАТЕЛЕН У КУРЬЕРСКИХ (просьба владельца 24.10.2026) — это ровно
+         та же пара, что индекс у почтовых: у каждого типа доставки своё поле
+         назначения, и без него заказ недоделан.
+
+         Почему это не мелочь: по `courier_city_id` «Сортировка» показывает
+         кладовщику, куда класть посылку (orderDestCityId), «Межгород» строит
+         маршрут и делит доли коробок, а Калькуляция берёт городские ставки.
+         Без города заказ проходил сохранение насквозь и всплывал уже на складе —
+         посылка есть, а куда её везти, не знает никто.
+
+         Барахолки это не касается: она вся почтовая, и ветка не срабатывает. */
+      if(isCourierDelivery(val('o_delivery'))&&!val('o_city')){
+        toast('Выберите город (курьерская)');
+        const gf=$('o_city');if(gf){gf.focus();gf.style.borderColor='var(--rust)';}
         return false;
       }
       // Индекс обязателен для ПОЧТОВЫХ заказов: по нему Казпочта выдаёт трек и маршрутизирует
