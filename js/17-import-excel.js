@@ -559,6 +559,14 @@ async function barCreateOrderModal(){
       <span class="hint">${onlyBar
         ? 'Только партнёры Барахолки — от партнёра зависят тариф, менеджер и обработчик.'
         : 'Галочка «Барахолка» не стоит ни у одного партнёра — показаны все.'}</span></div>
+    <div class="field full"><label>Дата заказа</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="date" id="bscDate" value="${localToday()}" max="${localToday()}" style="flex:0 1 180px">
+        <button type="button" class="btn sm ghost" id="bscToday">Сегодня</button>
+        <button type="button" class="btn sm ghost" id="bscYday">Вчера</button>
+      </div>
+      <span class="hint">По ней считается МЕСЯЦ в Калькуляции. По умолчанию сегодняшняя.</span>
+      <div id="bscDateInfo" class="idx-info"></div></div>
     <div class="hint" style="line-height:1.6">Заказ создастся <b>почтовым</b>. В карточке
       останется заполнить ФИО, индекс и адрес; после сохранения сразу откроется бланк Казпочты.</div>`,
     async () => {
@@ -569,6 +577,14 @@ async function barCreateOrderModal(){
       if(!partnerId){ toast('Выберите партнёра'); const ps = $('bscPartner'); if(ps) ps.focus(); return false; }
       const pt = (S.partners || []).find(p => p.id === partnerId);
       if(!pt){ toast('Партнёр не найден — обновите страницу'); return false; }
+      /* ДАТА ЗАКАЗА = МЕСЯЦ РАСЧЁТА. Калькуляция берёт месяц по `pickup_date`
+         (раздел 5a), поэтому чужой месяц здесь — это деньги в уже закрытом периоде.
+         Ровно так 02.10.2026 уехал 51 заказ реестром. Спрашиваем отдельно, но НЕ
+         запрещаем: бывает, что заказ правда нужно отнести к прошлому месяцу. */
+      const orderDate = (($('bscDate') || {}).value || '').slice(0, 10) || localToday();
+      const otherMonth = impOtherMonth(orderDate);
+      if(otherMonth && !confirm(`Дата ${fmtDate(orderDate)} — это ${otherMonth}.\n\n`
+        + `Заказ попадёт в расчёт за ${otherMonth}, а не за текущий месяц. Создать?`)) return false;
       if(!mail){ toast('В справочнике нет типа доставки «Почтовая» — заведите его в Настройках', 7000); return false; }
 
       /* ДУБЛЬ ПРОВЕРЯЕМ ДО СОЗДАНИЯ, запросом к базе и тем же ключом, что в загрузке
@@ -606,6 +622,7 @@ async function barCreateOrderModal(){
       const sum = zero ? 0 : tariff;
       orderPrefill = {
         track,
+        pickup_date: orderDate,
         delivery_id: mail.id,
         partner_id: pt.id,
         sender: pt.name,
@@ -643,6 +660,22 @@ async function barCreateOrderModal(){
       orderModal();
       return true;
     }, { saveLabel: 'Далее — карточка заказа' });
+
+  /* ПОЛЕ ДАТЫ СТОИТ ПОСЛЕ ПАРТНЁРА, И ЭТО НЕ ПОРЯДОК «ПО СМЫСЛУ». `showModal` ставит
+     фокус в ПЕРВОЕ поле окна, а туда печатает сканер: поставь дату первой — и штрих-код
+     уехал бы в неё. По той же причине у кнопок `type="button"`. */
+  const dateEl = ov.querySelector('#bscDate');
+  const dateNote = () => {
+    const box = ov.querySelector('#bscDateInfo'); if(!box) return;
+    const other = impOtherMonth(dateEl ? dateEl.value : '');
+    box.innerHTML = other
+      ? `<span class="idx-bad">⚠ заказ попадёт в расчёт за ${esc(other)}, а не за текущий месяц</span>`
+      : '';
+  };
+  if(dateEl) dateEl.onchange = dateNote;
+  const setDate = d => { if(dateEl){ dateEl.value = d; dateNote(); } };
+  const tdBtn = ov.querySelector('#bscToday'); if(tdBtn) tdBtn.onclick = () => setDate(localToday());
+  const ydBtn = ov.querySelector('#bscYday');  if(ydBtn) ydBtn.onclick  = () => setDate(localDaysAgo(1));
 
   // Фокус на поле трека ставит сам `showModal` (первое поле окна) — сканер печатает туда,
   // куда смотрит курсор, и ждать нажатия мышью значило бы получить код в пустоту.
