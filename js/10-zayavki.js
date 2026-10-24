@@ -5,6 +5,23 @@
 // делала очередь «Заполнения» пустой, а статистику нулевой (см. syncServerTime).
 function localToday(){const d=new Date(typeof nowMs==='function'?nowMs():Date.now());
   const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
+/* МЕСТНАЯ дата отметки времени (YYYY-MM-DD). Нужна там, где дату СРАВНИВАЮТ с тем,
+   что человек видит на экране: `created_at` хранится по Гринвичу, а Казахстан +5,
+   поэтому срез строки `created_at.slice(0,10)` у всего, что заведено до 05:00,
+   показывает ВЧЕРАШНИЙ день. Ровно на этом поймали фильтр «Создан» в гриде заказов
+   (24.10.2026): выставили 23.10–23.10, а в списке подтягивались заказы 24-го.
+
+   Строку вида «2026-10-23» (дата забора, доставки) отдаём как есть: `new Date` разберёт
+   её как полночь по Гринвичу, и в поясах западнее нуля она уехала бы на день назад. */
+function localDay(ts){
+  if(!ts)return '';
+  const str=String(ts);
+  if(!/[T ]\d\d:/.test(str))return str.slice(0,10);
+  const d=new Date(str);
+  if(isNaN(d))return str.slice(0,10);
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
 // дата по умолчанию для новой заявки на забор: после 18:00 предлагаем уже завтрашний день
 function defaultPickupDate(){
   const d=new Date();

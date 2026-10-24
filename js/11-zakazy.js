@@ -1164,13 +1164,16 @@ function ordersScopedList(){
   list=ordersMode==='baraholka'?barOnlyOrders(list):mainOrders(list);
   if(ordersMode==='courier')list=list.filter(o=>isCourierDelivery(o.delivery_id));
   else if(ordersMode==='mail')list=list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id));
-  else if(ordersMode==='today'){const t=localToday();list=list.filter(o=>(o.created_at||'').slice(0,10)===t||(o.pickup_date||'').slice(0,10)===t);}
+  else if(ordersMode==='today'){const t=localToday();list=list.filter(o=>localDay(o.created_at)===t||(o.pickup_date||'').slice(0,10)===t);}
   return list;
 }
 // список с учётом режима вкладки И фильтра по дате создания (для статистики вверху)
 function ordersDateScopedList(){
   return ordersScopedList().filter(o=>{
-    const cd=(o.created_at||'').slice(0,10);
+    // МЕСТНАЯ дата, а не срез строки: `created_at` в UTC, и заказ, заведённый
+    // до 05:00 по Астане, попадал во вчерашний день — фильтр «23.10–23.10»
+    // подтягивал заказы 24-го, хотя в колонке стояло 24-е (жалоба 24.10.2026).
+    const cd=localDay(o.created_at);
     if(of.createFrom&&(!cd||cd<of.createFrom))return false;
     if(of.createTo&&(!cd||cd>of.createTo))return false;
     return true;
