@@ -554,8 +554,10 @@ async function barCreateOrderModal(){
         и фокус перейдёт на партнёра.</span>
       <div id="bscInfo" class="idx-info"></div></div>
     <div class="field full"><label>Партнёр <span style="color:var(--rust)">*</span></label>
-      <select id="bscPartner"><option value="">— выберите —</option>
+      <input id="bscPartnerQ" autocomplete="off" placeholder="Поиск по названию — начните печатать">
+      <select id="bscPartner" size="1"><option value="">— выберите —</option>
         ${pool.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <span class="hint" id="bscPartnerNote"></span>
       <span class="hint">${onlyBar
         ? 'Только партнёры Барахолки — от партнёра зависят тариф, менеджер и обработчик.'
         : 'Галочка «Барахолка» не стоит ни у одного партнёра — показаны все.'}</span></div>
@@ -660,6 +662,39 @@ async function barCreateOrderModal(){
       orderModal();
       return true;
     }, { saveLabel: 'Далее — карточка заказа' });
+
+  /* ПОИСК ПО ПАРТНЁРАМ — ОТДЕЛЬНОЕ ПОЛЕ НАД СПИСКОМ, а сам `<select>` оставлен как был.
+     Партнёров под сотню, и крутить их колесом долго; но привычный порядок «сканировал →
+     Enter → партнёр → Enter → карточка» ломать нельзя, а он держится на том, что значение
+     хранит именно select. Поэтому поиск только ПЕРЕБИРАЕТ его варианты.
+
+     Список ПЕРЕСОБИРАЕТСЯ целиком, а не прячет `<option>` стилем: скрытые варианты в
+     разных браузерах ведут себя по-разному и остаются доступными стрелками.
+
+     Выбор при этом не теряется: если выбранный партнёр остался в выдаче — он остаётся
+     выбранным, а если нашёлся РОВНО ОДИН, он подставляется сам (ради этого поиск и нужен:
+     набрал три буквы — партнёр выбран). */
+  const pq = ov.querySelector('#bscPartnerQ');
+  const psel = ov.querySelector('#bscPartner');
+  const pnote = ov.querySelector('#bscPartnerNote');
+  const drawPartners = () => {
+    if(!psel) return;
+    const q = (pq ? pq.value : '').trim().toLowerCase();
+    const keep = psel.value;
+    const list = q ? pool.filter(p => (p.name || '').toLowerCase().includes(q)) : pool;
+    psel.innerHTML = '<option value="">— выберите —</option>'
+      + list.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    if(list.some(p => p.id === keep)) psel.value = keep;
+    else if(list.length === 1) psel.value = list[0].id;
+    if(pnote) pnote.textContent = !q ? ''
+      : (list.length ? `найдено ${list.length} из ${pool.length}` : 'ничего не найдено — очистите поиск');
+  };
+  if(pq){
+    pq.oninput = drawPartners;
+    // Enter в поиске уводит фокус в список, а НЕ создаёт заказ: иначе набранные буквы
+    // превращались бы в сохранение карточки на полпути.
+    pq.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); if(psel) psel.focus(); } };
+  }
 
   /* ПОЛЕ ДАТЫ СТОИТ ПОСЛЕ ПАРТНЁРА, И ЭТО НЕ ПОРЯДОК «ПО СМЫСЛУ». `showModal` ставит
      фокус в ПЕРВОЕ поле окна, а туда печатает сканер: поставь дату первой — и штрих-код
