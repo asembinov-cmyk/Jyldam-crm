@@ -352,6 +352,198 @@ function nfVolExcel(){
   XLSX.writeFile(wb,`Партнёры_по_городам_${nfVolMonth}.xlsx`);
   toast(`Выгружено строк: ${rows.length}`);
 }
+
+/* ================= КЛАДОВЩИКИ: ПРИЁМКА НА СКЛАДЕ =================
+   Просьба владельца 27.10.2026: «в Центре контроля добавь информацию — кладовщики
+   сколько заказов приняли по дню и по месяцу, разбивку по каждому кладовщику и городу».
+
+   Сделано по образцу соседней панели «Партнёры по городам» (раздел 8яг): те же месяц,
+   поиск, «Итого» по видимым строкам, разбивка по дням по нажатию на число и выгрузка.
+   Второй подход к одному и тому же разошёлся бы с первым на первой же правке.
+
+   ЧТО СЧИТАЕМ ПРИЁМКОЙ: отметку склада `sorted_at` + `sorted_by_name` — их ставит
+   «Сортировка» (раздел 6), когда кладовщик подтвердил «✅ Принял». Другого следа
+   приёмки в системе нет.
+
+   МЕСЯЦ И ДЕНЬ — ПО ДАТЕ ПРИЁМКИ, а не создания заказа: вопрос ровно про работу склада.
+   Посылку, заведённую вчера, могли принять сегодня — и это сегодняшний труд.
+
+   ДАТУ БЕРЁМ МЕСТНУЮ (`localDay`): `sorted_at` лежит по Гринвичу, а склад работает по
+   Астане. Без этого всё, принятое до 05:00, уезжало бы во вчерашний день — ровно та
+   беда, что была у фильтра «Создан» (раздел 8яо).
+
+   ГОРОД — ЭТО СКЛАД, А НЕ НАЗНАЧЕНИЕ. Берём `sortingCityId(o)`, то есть город ЗАБОРА с
+   одной особенностью: Талдыкорган приравнен к Алматы, потому что своего склада там нет
+   и посылки физически привозят в Алматы. Тот же расчёт, по которому кладовщик видит
+   свои заказы в «Сортировке», — иначе панель показывала бы одно, а его экран другое.
+
+   БАРАХОЛКИ ЗДЕСЬ НЕТ (`mainOrders`): её посылки на склад не привозят вовсе, отметки
+   приёмки у них не бывает, и строки были бы пустыми. */
+let nfWhMonth='';   // YYYY-MM; пусто — самый свежий месяц с приёмкой
+let nfWhQ='';       // поиск по кладовщику и городу
+let nfWhCity='';    // фильтр склада; '' — все, '-' — склад не определён
+const NF_WH_LIMIT=300;
+const NF_WH_NONAME='— имя не записано —';
+const nfWhDay=o=>(typeof localDay==='function'?localDay(o.sorted_at):String(o.sorted_at||'').slice(0,10));
+function nfWhAccepted(){
+  return mainOrders().filter(o=>o.sorted_at);
+}
+function nfWhMonths(){
+  const set=new Set();
+  nfWhAccepted().forEach(o=>{const d=nfWhDay(o);if(d)set.add(d.slice(0,7));});
+  return [...set].sort((a,b)=>b.localeCompare(a));
+}
+function nfWhRows(month){
+  const by={};
+  nfWhAccepted().forEach(o=>{
+    const day=nfWhDay(o);
+    if(!day||day.slice(0,7)!==month)return;
+    const who=(o.sorted_by_name||'').trim()||NF_WH_NONAME;
+    const cityId=(typeof sortingCityId==='function'?sortingCityId(o):o.pickup_city_id)||'';
+    const key=who+'|'+cityId;
+    if(!by[key])by[key]={key,who,cityId,total:0,courier:0,mail:0,byDay:{}};
+    const g=by[key];
+    g.total++;
+    if(o.delivery_id&&isCourierDelivery(o.delivery_id))g.courier++;
+    else if(o.delivery_id)g.mail++;
+    g.byDay[day]=(g.byDay[day]||0)+1;
+  });
+  const rows=Object.values(by).map(g=>{
+    const days=Object.keys(g.byDay).length;
+    const max=days?Math.max(...Object.values(g.byDay)):0;
+    return {...g,days,max,avg:days?g.total/days:0,today:g.byDay[localToday()]||0};
+  });
+  rows.sort((a,b)=>b.total-a.total||a.who.localeCompare(b.who,'ru'));
+  return rows;
+}
+function nfWhFiltered(rows){
+  const q=nfWhQ.trim().toLowerCase();
+  return rows.filter(r=>{
+    if(nfWhCity==='-'&&r.cityId)return false;
+    if(nfWhCity&&nfWhCity!=='-'&&r.cityId!==nfWhCity)return false;
+    if(!q)return true;
+    return (r.who||'').toLowerCase().includes(q)||(cityName(r.cityId)||'').toLowerCase().includes(q);
+  });
+}
+function warehouseAcceptPanelHtml(){
+  const months=nfWhMonths();
+  if(!nfWhMonth||!months.includes(nfWhMonth))nfWhMonth=months[0]||localToday().slice(0,7);
+  const all=nfWhRows(nfWhMonth);
+  const rows=nfWhFiltered(all);
+  const shown=rows.slice(0,NF_WH_LIMIT);
+  const sum=k=>rows.reduce((s,r)=>s+r[k],0);
+  const ids=[...new Set(all.map(r=>r.cityId))];
+  const named=ids.filter(Boolean).sort((a,b)=>(cityName(a)||'').localeCompare(cityName(b)||'','ru'));
+  const hasEmpty=ids.some(x=>!x);
+  // Колонка «Сегодня» имеет смысл только в текущем месяце: в прошлом там были бы нули
+  // во всех строках, а пустая колонка читается как поломка.
+  const cur=nfWhMonth===localToday().slice(0,7);
+  const peopleCnt=new Set(rows.map(r=>r.who)).size;
+  const scopeLabel=nfWhCity?(nfWhCity==='-'?'склад не определён':cityName(nfWhCity)):'все склады';
+  const loading=!S._heavyLoaded&&S._heavyLoading;
+  const cols=cur?9:8;
+  return `
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>🏷 Кладовщики — приёмка на складе</h2><span class="count">${rows.length}</span></div>
+      <div class="hint" style="margin:0 20px 10px;color:var(--muted)">
+        Сколько заказов принял каждый кладовщик, по складам. Месяц и дни считаются по дате
+        ПРИЁМКИ, а не создания заказа. Склад — город забора; Талдыкорган относится к Алматы,
+        как в «Сортировке». «В среднем» — по дням, когда приёмка реально была.
+        Нажмите на число, чтобы увидеть разбивку по дням.</div>
+      ${loading?'<div class="loading" style="padding:30px">Загружаем историю заказов…</div>':`
+      <div class="nf-vol-sum">
+        <div class="nfv-i"><span>Кладовщиков</span><b>${peopleCnt}</b></div>
+        <div class="nfv-i"><span>Принято</span><b>${sum('total')}</b></div>
+        ${cur?`<div class="nfv-i"><span>Сегодня</span><b>${sum('today')}</b></div>`:''}
+        <div class="nfv-i"><span>Курьерских</span><b>${sum('courier')}</b></div>
+        <div class="nfv-i"><span>Почтовых</span><b>${sum('mail')}</b></div>
+        <div class="nfv-i nfv-scope"><span>${esc(nfVolMonthLabel(nfWhMonth))}</span><b>${esc(scopeLabel)}</b></div>
+      </div>
+      <div class="filters" style="padding:0 20px 14px">
+        <select id="nfWhMonth">${months.map(m=>`<option value="${m}" ${nfWhMonth===m?'selected':''}>${esc(nfVolMonthLabel(m))}</option>`).join('')}</select>
+        <select id="nfWhCity"><option value="">Склад: все</option>
+          ${named.map(id=>`<option value="${id}" ${nfWhCity===id?'selected':''}>${esc(cityName(id))}</option>`).join('')}
+          ${hasEmpty?`<option value="-" ${nfWhCity==='-'?'selected':''}>— склад не определён —</option>`:''}
+        </select>
+        <input class="search" id="nfWhQ" placeholder="Поиск: кладовщик или склад" value="${esc(nfWhQ)}">
+        <button class="btn btn-excel sm" id="nfWhExcel">⬇ Выгрузить Excel</button>
+      </div>
+      <div class="table-scroll" style="max-height:60vh;overflow-y:auto"><table class="resp-table"><thead><tr>
+        <th style="width:44px">№</th><th>Кладовщик</th><th>Склад</th><th>Принято</th>
+        ${cur?'<th>Сегодня</th>':''}<th>В среднем в день</th><th>Макс за день</th><th>Дней</th><th>Курьерских · почтовых</th>
+      </tr></thead><tbody>
+      ${shown.length?shown.map((r,i)=>`<tr>
+        <td data-label="№" style="color:var(--muted)">${i+1}</td>
+        <td data-label="Кладовщик">${esc(r.who)}</td>
+        <td data-label="Склад">${esc(cityName(r.cityId)||'— не определён —')}</td>
+        <td data-label="Принято"><a href="#" data-nfwhday="${esc(r.key)}"><b>${r.total}</b></a></td>
+        ${cur?`<td data-label="Сегодня">${r.today||'—'}</td>`:''}
+        <td data-label="В среднем в день">${r.avg.toFixed(1).replace('.',',')}</td>
+        <td data-label="Макс за день">${r.max}</td>
+        <td data-label="Дней">${r.days}</td>
+        <td data-label="Курьерских · почтовых">${r.courier} · ${r.mail}</td>
+      </tr>`).join(''):`<tr><td colspan="${cols}"><div class="empty" style="padding:24px"><div class="big">Ничего не найдено</div>${all.length?'Сузился поиск — очистите поле.':'За '+esc(nfVolMonthLabel(nfWhMonth))+' приёмки не было.'}</div></td></tr>`}
+      </tbody>${all.length?`<tfoot><tr>
+        <td></td><td><b>Итого за ${esc(nfVolMonthLabel(nfWhMonth))}</b></td>
+        <td>${nfWhCity?esc(nfWhCity==='-'?'склад не определён':cityName(nfWhCity)):rows.length+' строк'}</td>
+        <td><b>${sum('total')}</b></td>${cur?`<td><b>${sum('today')}</b></td>`:''}
+        <td>—</td><td>—</td><td>—</td><td><b>${sum('courier')} · ${sum('mail')}</b></td>
+      </tr></tfoot>`:''}</table></div>
+      ${rows.length>NF_WH_LIMIT?`<div class="hint" style="margin:10px 20px 14px;color:var(--rust)">
+        Показаны первые ${NF_WH_LIMIT} строк из ${rows.length} — сузьте поиском или выгрузите в Excel.</div>`:''}
+      `}
+    </div>`;
+}
+function bindWarehouseAcceptPanel(){
+  const re=()=>{render();};
+  if($('nfWhMonth'))$('nfWhMonth').onchange=e=>{nfWhMonth=e.target.value;re();};
+  if($('nfWhCity'))$('nfWhCity').onchange=e=>{nfWhCity=e.target.value;re();};
+  // поиск перерисовывает ТОЛЬКО свою панель — иначе фокус уходит из поля на каждой букве
+  if($('nfWhQ'))$('nfWhQ').oninput=e=>{nfWhQ=e.target.value;nfWhRedraw();};
+  if($('nfWhExcel'))$('nfWhExcel').onclick=()=>nfWhExcel();
+  $('main').querySelectorAll('[data-nfwhday]').forEach(a=>a.onclick=ev=>{
+    ev.preventDefault();nfWhDayModal(a.dataset.nfwhday);
+  });
+}
+function nfWhRedraw(){
+  const panels=[...$('main').querySelectorAll('.panel')];
+  const panel=panels.find(p=>{const h=p.querySelector('.panel-head h2');return h&&h.textContent.indexOf('Кладовщики')>=0;});
+  if(!panel)return;
+  const tmp=document.createElement('div');
+  tmp.innerHTML=warehouseAcceptPanelHtml();
+  panel.replaceWith(tmp.firstElementChild);
+  bindWarehouseAcceptPanel();
+  const inp=$('nfWhQ');
+  if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}
+}
+// Разбивка по дням для одного кладовщика на одном складе — это и есть «по дню»
+function nfWhDayModal(key){
+  const row=nfWhRows(nfWhMonth).find(r=>r.key===key);
+  if(!row){toast('Строка не найдена');return;}
+  const days=Object.entries(row.byDay).sort((a,b)=>a[0].localeCompare(b[0]));
+  showInfo(`${esc(row.who)} · ${esc(cityName(row.cityId)||'склад не определён')}`,`
+    <div class="hint" style="margin-bottom:10px">${esc(nfVolMonthLabel(nfWhMonth))} · принято ${row.total} ·
+      в среднем ${row.avg.toFixed(1).replace('.',',')} в день · максимум ${row.max}</div>
+    <div class="table-scroll" style="max-height:52vh;overflow-y:auto"><table class="resp-table"><thead><tr>
+      <th>День</th><th>Принято</th></tr></thead><tbody>
+      ${days.map(([d,n])=>`<tr><td data-label="День">${esc(fmtDate(d))}</td><td data-label="Принято">${n}</td></tr>`).join('')}
+    </tbody></table></div>`,{wide:true});
+}
+function nfWhExcel(){
+  const rows=nfWhFiltered(nfWhRows(nfWhMonth));
+  if(!rows.length){toast('Нечего выгружать');return;}
+  const data=rows.map((r,i)=>({
+    '№':i+1,'Кладовщик':r.who,'Склад':cityName(r.cityId)||'',
+    'Принято':r.total,'Сегодня':r.today,'В среднем в день':Math.round(r.avg*10)/10,
+    'Макс за день':r.max,'Дней с приёмкой':r.days,'Курьерских':r.courier,'Почтовых':r.mail,
+  }));
+  const ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=[{wch:5},{wch:28},{wch:16},{wch:10},{wch:10},{wch:16},{wch:12},{wch:16},{wch:12},{wch:11}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Кладовщики');
+  XLSX.writeFile(wb,`Кладовщики_приёмка_${nfWhMonth}.xlsx`);
+  toast(`Выгружено строк: ${rows.length}`);
+}
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const trash=S.deletedItems||[];
@@ -403,12 +595,14 @@ function renderNotify(){
     </div>`:''}
 
     ${isStaff()?partnerVolumePanelHtml():''}
+    ${isStaff()?warehouseAcceptPanelHtml():''}
 
     ${isStaff()?duplicatesPanelHtml():''}`;
   if($('nfSetPartner'))$('nfSetPartner').onclick=()=>setPartnerBulkModal();
   if($('nfAiRun'))$('nfAiRun').onclick=()=>loadAiInsights();
   bindDuplicatesPanel();
   if(isStaff())bindPartnerVolumePanel();
+  if(isStaff())bindWarehouseAcceptPanel();
   // переходы по клику на задачу
   $('main').querySelectorAll('[data-nfgo]').forEach(el=>el.onclick=()=>{
     const tab=el.dataset.nfgo;
