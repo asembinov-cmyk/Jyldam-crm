@@ -329,8 +329,8 @@ function ketSendResultModal(res){
           </tbody></table></div>
         </div>`).join('')}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn ghost sm" id="ketFailCopy">📋 Скопировать список</button>
-        <button class="btn ghost sm" id="ketFailSelect">☑ Отметить только неотправленные (${failed.length})</button>
+        <button class="btn ghost" id="ketFailCopy">📋 Скопировать список</button>
+        <button class="btn ghost" id="ketFailSelect">☑ Отметить только неотправленные (${failed.length})</button>
       </div>
       <div class="hint" style="margin-top:8px">Отметить и нажать «Отправить в KET» снова —
         уйдут только эти, остальные второй раз не поедут.</div>`}`,{wide:true});
