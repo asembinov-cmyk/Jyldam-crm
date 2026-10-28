@@ -910,16 +910,20 @@ function renderOrders(mode){
       toast('Отметьте галочками заказы или выберите фильтр «Город забора»');return;
     }
     if(!list.length){toast('Нет заказов для отправки');return;}
-    const already=list.filter(o=>o.ket_id).length;
-    let msg=`Отправить в KET заказов: ${list.length} (${source})?`;
-    if(already)msg+=`\n(из них ${already} уже были отправлены — будут отправлены повторно)`;
-    // трек уходит в KET только при отправке: метода обновления у них нет
-    msg+=ketSendWarnNoTrack(list);
-    if(!confirm(msg))return;
     const b=$('ketSendSel');b.disabled=true;const origLabel=b.textContent;
-    // отправка одного заказа → {ok, reason, retry}
+    // Сверяемся с базой, ПОТОМ спрашиваем: «уже отправлен» — это и есть то число,
+    // по которому человек решает, слать ли повторно, а в памяти вкладки оно устаревает.
+    b.textContent='Сверяем…';
+    const synced=await ketRefreshSentFlags(list);
+    b.textContent=origLabel;
+    const all=list;
+    // Окно, а не confirm: решений три, и одно из них создаёт у KET второй заказ.
+    list=await ketSendPlanModal(all,source,synced);
+    if(!list||!list.length){b.disabled=false;return;}
+    const skipped=all.length-list.length;
+    // отправка одного заказа → {ok, why, retry}
     const sendOne=async(o)=>{
-      if(!o.phone||o.phone.length<10)return {ok:false,reason:`${o.code}: нет телефона`};
+      if(!o.phone||o.phone.length<10)return {ok:false,why:'нет телефона клиента'};
       try{
         const payload=orderToKet(o);
         // Аккаунт = пара uid+secret = МЕНЕДЖЕР, под которым заказ появится у KET.
@@ -933,7 +937,7 @@ function renderOrders(mode){
         // «success TRUE» с нулевым id — заказ НЕ создан (разбор 19.10.2026). Считаем это
         // неудачей: иначе в итоге стоит «отправлено 40», а у KET нет ни одного.
         if(!r.error&&(result.success||'').toUpperCase()==='TRUE'&&!ketId)
-          return {ok:false,reason:`${o.code}: KET принял, но заказа не создал (id 0)`
+          return {ok:false,why:'KET принял запрос, но заказа не создал (id 0)'
             +(result.message?' · '+result.message:''),retry:false};
         if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
           const u=await dbUpdate('orders',o.id,{ket_id:ketId,ket_synced_at:new Date().toISOString()});
@@ -942,11 +946,11 @@ function renderOrders(mode){
           return {ok:true,sentAs:ketSentAs(acc,r)};
         }
         const reason=r.error||result.message||(r&&r.raw)||(r&&JSON.stringify(r.ket))||'неизвестно';
-        return {ok:false,reason:`${o.code}: ${reason}`,retry:true};
-      }catch(e){return {ok:false,reason:`${o.code}: ${String(e&&e.message||e)}`,retry:true};}
+        return {ok:false,why:String(reason),retry:true};
+      }catch(e){return {ok:false,why:String(e&&e.message||e),retry:true};}
     };
     const BATCH=10; // отправляем по 10 заказов параллельно
-    let ok=0,fail=0;const errs=[];let failedOrders=[];
+    let ok=0;let failed=[];
     // Чем прокси РЕАЛЬНО отправил — по каждой пачке, с подсчётом. В одиночной отправке это
     // пишется в сообщении об успехе, а здесь не писалось вовсе: после «отправлено 40»
     // узнать, к какому менеджеру они ушли, было негде, а метода обновления у KET нет.
@@ -958,15 +962,17 @@ function renderOrders(mode){
         const results=await Promise.all(chunk.map(o=>sendOne(o).then(res=>({o,res}))));
         results.forEach(({o,res})=>{
           if(res.ok){ok++;if(res.sentAs)sentAs[res.sentAs]=(sentAs[res.sentAs]||0)+1;}
-          else{fail++;errs.push(res.reason);if(res.retry)failedOrders.push(o);}
+          else failed.push({o,why:res.why,retry:res.retry});
         });
       }
     };
     await runBatches(list);
-    // автоповтор неудачных (одна попытка)
-    if(failedOrders.length){
-      const retryList=failedOrders.slice();failedOrders=[];
-      fail-=retryList.length;errs.length=Math.max(0,errs.length-retryList.length);
+    // Автоповтор неудачных, одна попытка. Берём только те, где повтор имеет смысл:
+    // у «id 0» и «нет телефона» ответ не изменится, а каждая попытка — заказ в чужой
+    // системе без метода обновления.
+    const retryList=failed.filter(f=>f.retry).map(f=>f.o);
+    if(retryList.length){
+      failed=failed.filter(f=>!f.retry);
       b.textContent=`Повтор ${retryList.length}…`;
       await runBatches(retryList);
     }
@@ -974,18 +980,12 @@ function renderOrders(mode){
     // Аккаунтов в одной отправке может быть несколько: Барахолка идёт под своим менеджером,
     // алматинские заказы — под алматинским. Поэтому перечисляем все, с числами.
     const accLines=Object.entries(sentAs).map(([k,n])=>`${k} — ${n}`);
-    toast(`Отправлено в KET: ${ok}${fail?(', с ошибкой: '+fail):''}`
-      +(accLines.length?' · '+accLines.join(' · '):''),8000);
-    if(errs.length)alert('Не отправлены:\n\n'+errs.join('\n'));
-    // Просили один аккаунт, а ушло другим — это значит, что в ket-proxy нужный аккаунт не
-    // выложен, и заказы появились у ЧУЖОГО менеджера. Переделать нечем: метода обновления
-    // у KET нет. Поэтому не тост, а окно — такое нельзя пролистать мимо.
-    if(accLines.some(l=>/^просили|не сказал/.test(l)))
-      alert('ЗАКАЗЫ УШЛИ НЕ ПОД ТЕМ АККАУНТОМ KET:\n\n'+accLines.join('\n')
-        +'\n\nЗначит в ket-proxy этот аккаунт не выложен. Исправить уже отправленные нечем —'
-        +'\nу KET нет метода обновления. Выложите функцию и отправьте заново.');
     ketSelected.clear();ketSelectAll=false;
     renderOrders();
+    // Итог — ОКНО, а не тост с alert-ом: сюда попадает и перечень не ушедших заказов
+    // (его просили отдельно), и предупреждение о чужом аккаунте KET, которое нельзя
+    // пролистать мимо. Рисуем ПОСЛЕ renderOrders, иначе перерисовка снесёт окно.
+    ketSendResultModal({ok,failed,skipped,accLines});
   };
   $('ofq').oninput=e=>{of.q=e.target.value;drawOrdersReset();};
   if($('ofFiltersToggle'))$('ofFiltersToggle').onclick=()=>{

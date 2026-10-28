@@ -211,6 +211,144 @@ function ketSendWarnNoTrack(list){
     +`\nВ KET трек передаётся только при отправке, дослать его потом нечем.`
     +`\nЗаказы уйдут в любом случае — но трек лучше получать до отправки.`;
 }
+// СВЕРКА «УЖЕ ОТПРАВЛЕН» С БАЗОЙ, а не по памяти вкладки.
+// Отметку ket_id ставит тот, кто отправлял, и Realtime её донесёт не всегда (вкладка в
+// фоне, сеть мигнула) — те же грабли, что с реестром Барахолки и с очередью «Заполнения».
+// Здесь это дороже обычного: у KET НЕТ МЕТОДА ОБНОВЛЕНИЯ, и отправка «на всякий случай»
+// создаёт у них второй заказ, который нечем убрать. Поэтому перед массовой отправкой
+// спрашиваем базу: ошиблись в сторону «не отправлен» — заплатим дублем.
+// Возвращает true, если сверка прошла; false — работаем по памяти вкладки.
+async function ketRefreshSentFlags(list){
+  const ids=list.map(o=>o.id).filter(Boolean);
+  if(!ids.length)return true;
+  try{
+    for(let i=0;i<ids.length;i+=200){
+      const chunk=ids.slice(i,i+200);
+      const {data,error}=await sb.from('orders').select('id,ket_id').in('id',chunk);
+      if(error)throw error;
+      const by=new Map((data||[]).map(r=>[r.id,r.ket_id]));
+      list.forEach(o=>{if(by.has(o.id))o.ket_id=by.get(o.id);});
+    }
+    return true;
+  }catch(e){
+    // Колонки ket_id может не быть вовсе (db/35) — тогда отправка работает как раньше,
+    // просто «уже отправлен» никто не знает. Молчать об этом нельзя: решение о повторе
+    // человек принимает по этому самому числу.
+    console.warn('KET: не удалось сверить ket_id с базой',e);
+    return false;
+  }
+}
+
+// Окно ПЕРЕД массовой отправкой. Простого confirm тут не хватает: решений три, а у него
+// только «да/нет». И главное — одно из них (повторная отправка) создаёт у KET ВТОРОЙ
+// заказ с тем же содержимым, потому что метода обновления у них нет (раздел 6b).
+// Отдаёт список к отправке или null, если человек отказался.
+function ketSendPlanModal(list,source,synced){
+  const fresh=list.filter(o=>!o.ket_id);
+  const already=list.length-fresh.length;
+  const warn=ketSendWarnNoTrack(list);
+  return new Promise(resolve=>{
+    const ov=showInfo('Отправка в KET',`
+      <p style="margin:0 0 12px">Отмечено заказов: <b>${list.length}</b>
+        <span style="color:var(--muted)">(${esc(source)})</span></p>
+      <div class="panel" style="margin-bottom:12px"><div style="padding:14px 18px">
+        <div style="margin-bottom:4px">Ещё не отправлялись: <b>${fresh.length}</b></div>
+        <div>Уже отправлены в KET: <b${already?' style="color:var(--rust)"':''}>${already}</b></div>
+        ${already?`<div class="hint" style="margin-top:10px">У KET нет метода обновления заказа.
+          Повторная отправка не исправит прежний, а создаст у них <b>второй заказ</b> с тем же
+          содержимым — убрать его потом нечем.</div>`:''}
+        ${synced?'':`<div class="hint" style="margin-top:10px;color:var(--rust)">Сверить с базой не
+          удалось — числа посчитаны по тому, что загружено в эту вкладку, и могут быть неполными.</div>`}
+      </div></div>
+      ${warn?`<div class="hint" style="color:var(--rust);white-space:pre-line">${esc(warn.trim())}</div>`:''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+        <button class="btn primary" id="ketPlanFresh"${fresh.length?'':' disabled'}>Отправить${
+          already?' только неотправленные':''} (${fresh.length})</button>
+        ${already?`<button class="btn ghost" id="ketPlanAll">Отправить все ${list.length},
+          включая ${already} повторно</button>`:''}
+      </div>`,{closeLabel:'Отмена',wide:true});
+    let done=false;
+    const onEsc=e=>{if(e.key==='Escape')finish(null);};
+    function finish(arr){
+      if(done)return;done=true;
+      document.removeEventListener('keydown',onEsc);
+      // Крестик, Escape и щелчок мимо окно убирают САМИ (showModal), и тогда снимать нечего.
+      if(document.body.contains(ov))closeTopModal();
+      resolve(arr);
+    }
+    document.addEventListener('keydown',onEsc);
+    if($('ketPlanFresh'))$('ketPlanFresh').onclick=()=>finish(fresh);
+    if($('ketPlanAll'))$('ketPlanAll').onclick=()=>finish(list);
+    ov.querySelector('.x').addEventListener('click',()=>finish(null));
+    const cl=ov.querySelector('[data-close]');
+    if(cl)cl.addEventListener('click',()=>finish(null));
+    ov.addEventListener('click',e=>{if(e.target===ov)finish(null);});
+  });
+}
+
+// Окно ПОСЛЕ отправки: какие заказы не ушли и почему, с группировкой по причине.
+// Раньше это был alert со строками «номер: причина» — на полутора тысячах заказов его
+// нельзя ни прочитать, ни скопировать, а браузер такой текст ещё и обрезает.
+function ketSendResultModal(res){
+  const {ok,failed,skipped,accLines}=res;
+  const byReason={};
+  failed.forEach(f=>{(byReason[f.why]=byReason[f.why]||[]).push(f.o);});
+  const plain=failed.map(f=>[f.o.code||'',f.o.client||'',f.o.phone||'',f.o.track||'',f.why]
+    .join('\t')).join('\n');
+  // Просили один аккаунт, а ушло другим — значит в ket-proxy нужный не выложен, и заказы
+  // появились у ЧУЖОГО менеджера. Переделать нечем, поэтому строка стоит первой и красным.
+  const wrongAcc=accLines.filter(l=>/^просили|не сказал/.test(l));
+  showInfo('Отправка в KET завершена',`
+    ${wrongAcc.length?`<div class="panel" style="margin-bottom:12px;border-color:var(--rust)">
+      <div style="padding:14px 18px;color:var(--rust)">
+        <b>ЗАКАЗЫ УШЛИ НЕ ПОД ТЕМ АККАУНТОМ KET</b>
+        <div style="margin-top:6px">${wrongAcc.map(esc).join('<br>')}</div>
+        <div class="hint" style="margin-top:8px">Значит в ket-proxy этот аккаунт не выложен.
+          Исправить уже отправленные нечем — у KET нет метода обновления. Выложите функцию
+          и отправьте заново.</div>
+      </div></div>`:''}
+    <p style="margin:0 0 12px">Отправлено: <b style="color:var(--green,#2e7d32)">${ok}</b>${
+      failed.length?` · не ушло: <b style="color:var(--rust)">${failed.length}</b>`:''}${
+      skipped?` · пропущено как уже отправленные: <b>${skipped}</b>`:''}</p>
+    ${accLines.length?`<div class="hint" style="margin-bottom:12px">Аккаунты KET: ${
+      accLines.map(esc).join(' · ')}</div>`:''}
+    ${!failed.length?'<div class="hint">Все заказы ушли.</div>':`
+      ${Object.entries(byReason).map(([why,arr])=>`
+        <div class="panel" style="margin-bottom:12px">
+          <div class="panel-head"><h2 style="font-size:15px">${esc(why)}</h2>
+            <span class="count">${arr.length}</span></div>
+          <div class="table-scroll"><table class="resp-table"><thead><tr>
+            <th>№ заказа</th><th>ФИО</th><th>Телефон</th><th>Трек</th>
+          </tr></thead><tbody>
+            ${arr.map(o=>`<tr>
+              <td data-label="№ заказа">${esc(o.code||'—')}</td>
+              <td data-label="ФИО">${esc(o.client||'—')}</td>
+              <td data-label="Телефон">${esc(o.phone||'—')}</td>
+              <td data-label="Трек">${esc(o.track||'—')}</td>
+            </tr>`).join('')}
+          </tbody></table></div>
+        </div>`).join('')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ghost sm" id="ketFailCopy">📋 Скопировать список</button>
+        <button class="btn ghost sm" id="ketFailSelect">☑ Отметить только неотправленные (${failed.length})</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Отметить и нажать «Отправить в KET» снова —
+        уйдут только эти, остальные второй раз не поедут.</div>`}`,{wide:true});
+  // copyText печатает скопированное в тост целиком — на сотне строк это полэкрана,
+  // поэтому здесь свой короткий ответ.
+  if($('ketFailCopy'))$('ketFailCopy').onclick=async()=>{
+    try{await navigator.clipboard.writeText(plain);toast('Скопировано строк: '+failed.length);}
+    catch(e){toast('Не удалось скопировать — выделите таблицу вручную');}
+  };
+  // Отметить неудачные — чтобы повтор не тянул за собой уже отправленные. Делаем ПО КНОПКЕ,
+  // а не молча: иначе человек закроет окно и увидит в гриде чужой набор галочек.
+  if($('ketFailSelect'))$('ketFailSelect').onclick=()=>{
+    ketSelected.clear();ketSelectAll=false;
+    failed.forEach(f=>ketSelected.add(f.o.id));
+    closeTopModal();renderOrders();
+    toast('Отмечено заказов: '+failed.length);
+  };
+}
 // отправить один заказ в KET
 async function sendOrderToKet(o){
   if(!o.phone||o.phone.length<10){toast('У заказа нет телефона клиента');return false;}
