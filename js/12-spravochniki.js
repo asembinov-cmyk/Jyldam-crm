@@ -348,6 +348,8 @@ function dirPartners(onlyBar){
       {key:'tpost',label:'Тариф почта',filter:'select',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
       {key:'tcour',label:'Тариф курьер',filter:'select',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
       // видно сразу, у кого доля менеджера зафиксирована, а у кого считается разницей
+      ...(dailyPickupReady()?[{key:'daily',label:'Ежедн. забор',filter:'select',
+        text:p=>p.daily_pickup?'каждый день':'—'}]:[]),
       ...(salesFixedReady()?[{key:'smpost',label:'Доля · почта',filter:'select',
         text:p=>p.sales_margin_fixed!=null&&p.sales_margin_fixed!==''?(+p.sales_margin_fixed).toLocaleString('ru-RU')+' ₸':'по разнице'}]:[]),
       ...(salesCourierReady()?[{key:'smcour',label:'Доля · курьер',filter:'select',
@@ -448,6 +450,7 @@ function partnerModal(id){
       Поля нужны и партнёрам с тарифом 0, которые платят раз в месяц по счёту: по ним разница не насчитает ничего никогда.</small>`:''}
     ${baraholkaReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_bar" ${p.is_baraholka?'checked':''}> Барахолка <span class="pom-paidhint">(заказы считаются по своим нормативам; на уже созданные не влияет)</span></label>`:''}
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
+    ${dailyPickupReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_daily" ${p.daily_pickup?'checked':''}> Ежедневный забор <span class="pom-paidhint">(каждое утро в 07:00 на этот магазин сама создаётся заявка на забор — без курьера и без заказов, курьера назначает менеджер)</span></label>`:''}
     <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
     <div class="field"><label>Доступ в кабинет партнёра</label>
       <input id="p_qr" value="${esc(p.qr_code||'')}" readonly placeholder="код ещё не выдан"
@@ -497,6 +500,7 @@ function partnerModal(id){
         direct_pay_amount:val('p_direct_pay')!==''?parseFloat(val('p_direct_pay')):null,
         is_protected:!!($('p_protected')&&$('p_protected').checked),
         ...($('p_bar')?{is_baraholka:!!$('p_bar').checked}:{}),
+        ...($('p_daily')?{daily_pickup:!!$('p_daily').checked}:{}),
         // поля шлём, только когда колонки в базе есть: иначе PostgREST отклонит ВЕСЬ
         // запрос, и карточка перестанет сохраняться вместе со всеми остальными полями
         ...($('p_smargin')?{sales_margin_fixed:val('p_smargin')!==''?parseFloat(val('p_smargin')):null}:{}),

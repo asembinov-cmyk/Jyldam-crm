@@ -30,6 +30,13 @@ function localDay(ts){
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
 }
 // дата по умолчанию для новой заявки на забор: после 18:00 предлагаем уже завтрашний день
+/* РАЗМЕР ПАКЕТА, который курьер завозит партнёру (просьба владельца 28.10.2026:
+   «при создании заявки добавь, чтобы менеджер заявок могла указывать, какой пакет нужно
+   занести S M L партнёру»). Лежит в самой ЗАЯВКЕ (`pickups.pack_size`, db/54), а не в
+   заказе: пакеты везут В МАГАЗИН под будущие отправления, к конкретному заказу это
+   отношения не имеет. Пусто — завозить не надо. */
+const PACK_SIZES=['S','M','L'];
+
 function defaultPickupDate(){
   const d=new Date();
   if(d.getHours()>=18)d.setDate(d.getDate()+1);
@@ -236,7 +243,7 @@ function drawPickups(){
     <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer" class="${p.partner_id?'pickup-row-qr':''}" title="${p.partner_id?'Пришла от партнёра через кабинет (QR)':''}">
       <td data-label="Дата">${esc(fmtDate(p.pickup_date))}${p.created_at?`<small class="cell-time">создана ${esc(fmtDateTime(p.created_at))}</small>`:''}</td>
       <td data-label="Город">${cityPill(p.city_id)}</td>
-      <td data-label="Наименование"><strong>${esc(p.name)}</strong></td>
+      <td data-label="Наименование"><strong>${esc(p.name)}</strong>${(p.pack_size||p.auto_created)?`<small class="cell-time">${p.pack_size?('📦 пакет '+esc(p.pack_size)):''}${(p.pack_size&&p.auto_created)?' · ':''}${p.auto_created?'создана автоматом':''}</small>`:''}</td>
       <td data-label="Адрес">${esc(p.address)||'—'}</td>
       <td data-label="Номер">${phoneLink(p.phone)}</td>
       <td data-label="Район">${esc(districtName(p.district_id))}</td>
@@ -365,7 +372,7 @@ function drawCourierPickupCards(el,rows){
           <div class="cc-client">${esc(p.name)||'Без названия'}${_courierRouteDist[p.id]!=null?` <span class="cc-dist">📍 ${_courierRouteDist[p.id]<1?Math.round(_courierRouteDist[p.id]*1000)+' м':_courierRouteDist[p.id].toFixed(1)+' км'}</span>`:''}</div>
           <div class="cc-addr-row">${address2gis(p.address,cityName(p.city_id),p.name)}</div>
           ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}</div>`:''}
-          ${(p.give_packets||p.give_invoices)?`<div class="cc-give">${p.give_packets?'<span class="cc-give-tag">📦 Пакеты для партнёра</span>':''}${p.give_invoices?'<span class="cc-give-tag">📄 Накладные для партнёра</span>':''}</div>`:''}
+          ${(p.give_packets||p.give_invoices||p.pack_size)?`<div class="cc-give">${(p.give_packets||p.pack_size)?`<span class="cc-give-tag">📦 Пакеты для партнёра${p.pack_size?' · размер '+esc(p.pack_size):''}</span>`:''}${p.give_invoices?'<span class="cc-give-tag">📄 Накладные для партнёра</span>':''}</div>`:''}
         </div>
         <div class="cc-right"><span class="cc-grip" data-grip title="Потяните, чтобы переставить">⠿</span><span class="cc-chev">▾</span></div>
       </div>
@@ -754,6 +761,7 @@ function readPickupForm(){
     phone:phoneVal('m_phone'),district_id:val('m_district'),courier_id:val('m_courier'),
     give_packets:$('m_packets')?$('m_packets').checked:false,
     give_invoices:$('m_invoices')?$('m_invoices').checked:false,
+    pack_size:$('m_pack')?val('m_pack'):'',
     sales_id:val('m_sales'),processor_id:val('m_proc')};
 }
 /* ГОРОД ЗАЯВКИ ПОПРАВИЛИ ПОСЛЕ СОЗДАНИЯ ЗАКАЗОВ (20.10.2026).
@@ -823,7 +831,7 @@ async function pickupCitySyncOrders(p, oldCityId){
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
   const today=defaultPickupDate();
-  const base=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',give_packets:false,give_invoices:false,status_id:(S.statuses[0]?S.statuses[0].id:'')};
+  const base=p||{pickup_date:today,city_id:'',name:'',address:'',phone:'',district_id:'',courier_id:'',orders:'',sales_id:'',processor_id:'',give_packets:false,give_invoices:false,pack_size:'',status_id:(S.statuses[0]?S.statuses[0].id:'')};
   const ro=readonly||!can("pickups","edit");
   // если есть несохранённый черновик для этой заявки — подставляем его (только при редактировании)
   const draft=!ro?pickupDrafts[pickupDraftKey(id)]:null;
@@ -849,6 +857,10 @@ function pickupModal(id,readonly){
         <label style="margin-bottom:6px">Для партнёра</label>
         <label class="chk-line"><input type="checkbox" id="m_packets" ${d.give_packets?'checked':''} ${dis}> Пакеты для партнёра</label>
         <label class="chk-line"><input type="checkbox" id="m_invoices" ${d.give_invoices?'checked':''} ${dis}> Накладные для партнёра</label>
+        ${packSizeReady()?`<select id="m_pack" ${dis} style="margin-top:8px">
+          <option value="">— размер пакета не нужен —</option>
+          ${PACK_SIZES.map(s=>`<option value="${s}" ${d.pack_size===s?'selected':''}>Пакет ${s}</option>`).join('')}
+        </select>`:''}
       </div>
     </div>`,
     ro?null:async()=>{
@@ -862,6 +874,7 @@ function pickupModal(id,readonly){
         phone:phoneVal('m_phone'),district_id:val('m_district')||null,courier_id:val('m_courier')||null,
         orders:(p?(parseInt(p.orders||'0',10)||0):0),sales_id:val('m_sales')||null,processor_id:val('m_proc')||null,
         give_packets:$('m_packets')?$('m_packets').checked:false,
+        ...($('m_pack')?{pack_size:val('m_pack')||null}:{}),
         give_invoices:$('m_invoices')?$('m_invoices').checked:false,
         status_id:newStatus||null};
       let hist=p&&Array.isArray(p.status_history)?p.status_history.slice():[];
@@ -891,7 +904,7 @@ function pickupModal(id,readonly){
     },{readonly:ro,clearBtn:ro?null:(ov)=>{
       // очистить все поля кроме даты
       ['m_name','m_address'].forEach(fid=>{const el=$(fid);if(el)el.value='';});
-      ['m_city','m_district','m_courier','m_sales','m_proc'].forEach(fid=>{const el=$(fid);if(el)el.value='';});
+      ['m_city','m_district','m_courier','m_sales','m_proc','m_pack'].forEach(fid=>{const el=$(fid);if(el)el.value='';});
       // телефон
       const ph=$('m_phone');if(ph){ph.value='';ph.dataset.phone='';}
       // сбросить подсветку обязательных полей
@@ -916,9 +929,17 @@ function pickupModal(id,readonly){
   if(!ro){
     // автозапоминание: при любом изменении поля пишем черновик (не теряется при закрытии)
     const saveDraft=()=>{pickupDrafts[pickupDraftKey(id)]=readPickupForm();};
-    ['m_date','m_city','m_name','m_address','m_phone','m_district','m_courier','m_sales','m_proc'].forEach(fid=>{
+    ['m_date','m_city','m_name','m_address','m_phone','m_district','m_courier','m_sales','m_proc','m_pack','m_packets','m_invoices'].forEach(fid=>{
       const el=$(fid);if(el){el.addEventListener('input',saveDraft);el.addEventListener('change',saveDraft);}
     });
+    // Размер пакета и галочка «Пакеты для партнёра» — об ОДНОМ И ТОМ ЖЕ, и расходиться
+    // им нельзя: выбрали размер — значит пакеты нужны; сняли галочку — значит не нужны.
+    // Иначе в карточке стояло бы «пакеты не нужны · размер M», а курьер вёз бы по второму.
+    const packSel=$('m_pack'),packChk=$('m_packets');
+    if(packSel&&packChk){
+      packSel.addEventListener('change',()=>{if(packSel.value&&!packChk.checked){packChk.checked=true;saveDraft();}});
+      packChk.addEventListener('change',()=>{if(!packChk.checked&&packSel.value){packSel.value='';saveDraft();}});
+    }
     const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
       $('m_district').innerHTML='<option value="">—</option>'+dOpts(cid).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
       $('m_courier').innerHTML='<option value="">— выберите курьера —</option>'+cOpts(cid).map(x=>`<option value="${x.id}">${esc(x.fio)}</option>`).join('');saveDraft();};

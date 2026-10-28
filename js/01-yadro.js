@@ -501,6 +501,19 @@ function stampCreatedBy(row){
   if(row.created_by_name===undefined)row.created_by_name=(S.me&&(S.me.full_name||S.me.email))||null;
   return row;
 }
+/* ЕЖЕДНЕВНЫЙ ЗАБОР и РАЗМЕР ПАКЕТА (db/54) — те же проверки готовности, что у
+   `createdByReady` выше и у `salesFixedReady` в Калькуляции: поле уходит в запрос,
+   только когда колонка в базе есть. Иначе PostgREST отклонит ВЕСЬ запрос, и карточка
+   партнёра (или заявки) перестанет сохраняться целиком, вместе со всеми полями. */
+function dailyPickupReady(){
+  const p=(S.partners||[])[0];
+  return !!p&&Object.prototype.hasOwnProperty.call(p,'daily_pickup');
+}
+function packSizeReady(){
+  const p=(S.pickups||[])[0];
+  return !!p&&Object.prototype.hasOwnProperty.call(p,'pack_size');
+}
+
 async function dbInsert(table,row){
   if(table==='orders')stampCreatedBy(row);
   let {data,error}=await sb.from(table).insert(row).select().single();
@@ -600,6 +613,8 @@ const FIELD_LABEL={
   full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
   tariff_courier:'Тариф курьер',qr_code:'QR-код',id_doc:'Уд. личности',paid_by_sender:'Оплачено отправителем',
   give_packets:'Пакеты для партнёра',give_invoices:'Накладные для партнёра',
+  pack_size:'Размер пакета для партнёра',daily_pickup:'Ежедневный забор',
+  auto_created:'Создана автоматически',
   region:'Область',city_text:'Нас. пункт',comment:'Комментарий',base_type:'Базовый тип',perms:'Права',
   order_paid:'Оплачен заказ'
 };
