@@ -938,7 +938,8 @@ function renderOrders(mode){
         // неудачей: иначе в итоге стоит «отправлено 40», а у KET нет ни одного.
         if(!r.error&&(result.success||'').toUpperCase()==='TRUE'&&!ketId)
           return {ok:false,why:'KET принял запрос, но заказа не создал (id 0)'
-            +(result.message?' · '+result.message:''),retry:false};
+            +(result.message?' · '+result.message:'')
+            +(String(payload.price||'0')==='0'?' · у нас цена 0':''),retry:false};
         if(!r.error&&(result.success||'').toUpperCase()==='TRUE'){
           const u=await dbUpdate('orders',o.id,{ket_id:ketId,ket_synced_at:new Date().toISOString()});
           if(u)Object.assign(o,u);
