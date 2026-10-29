@@ -2193,7 +2193,10 @@ function drawOrders(){
       ${(ordersMode!=='mail'&&!barGrid)?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
       ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
-      <td data-label="Трек-код">${o.track?esc(o.track)+copyBtn(o.track):'—'}</td>
+      <td data-label="Трек-код">${o.track?esc(o.track)+copyBtn(o.track):'—'}${
+        (o.ket_last_error&&!(o.ket_id&&String(o.ket_id)!=='0'))
+          ? `<small class="cell-time" style="color:var(--rust)" title="${esc(o.ket_last_error)}">KET: ${esc(String(o.ket_last_error).slice(0,60))}</small>`
+          : ''}</td>
       <td data-label="Статус"><div class="status-cell" onclick="event.stopPropagation()">
         <span class="status-badge" style="color:${(orderStatusObj(o.status_id)||{}).color||'var(--muted)'};background:${(orderStatusObj(o.status_id)||{}).color?(orderStatusObj(o.status_id).color+'1a'):'transparent'};border-color:${(orderStatusObj(o.status_id)||{}).color||'var(--line)'}">${o.status_id?esc((orderStatusObj(o.status_id)||{}).name||'—'):'— нет —'}</span>
         <select class="status-overlay" data-ostatus="${o.id}"><option value="">— нет —</option>${orderStatusesFor(barGrid).map(s=>`<option value="${s.id}" ${o.status_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}${(o.status_id&&!orderStatusesFor(barGrid).some(s=>s.id===o.status_id))?`<option value="${esc(o.status_id)}" selected>${esc((orderStatusObj(o.status_id)||{}).name||'—')}</option>`:''}</select>
