@@ -90,7 +90,7 @@ function renderPickups(){
         <input class="search" id="pfq" placeholder="Поиск: наименование, адрес, номер…" value="${esc(pf.q)}">
         ${isStaff()?`<select id="pfcity"><option value="">Все города</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:''}
         ${isStaff()?`<select id="pfcourier"><option value="">Все курьеры</option>${S.couriers.map(c=>`<option value="${c.id}" ${pf.courier===c.id?'selected':''}>${esc(c.fio)}</option>`).join('')}</select>`:''}
-        <select id="pfstatus"><option value="">Все статусы</option>${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select id="pfstatus"><option value="">Все статусы</option>${isStaff()?`<option value="-nocourier" ${pf.status==='-nocourier'?'selected':''}>— курьер не назначен —</option>`:''}${S.statuses.map(s=>`<option value="${s.id}" ${pf.status===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         ${isStaff()?`<label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
         <label class="date-field"><span>Дата по</span><input type="date" id="pfdateto" value="${esc(pf.dateTo)}"></label>
         <button class="btn sm" id="pftoday" style="align-self:flex-end">Сегодня</button>
@@ -176,7 +176,13 @@ function filteredPickups(){
   const rows=visiblePickups().filter(p=>{
     if(pf.city&&p.city_id!==pf.city)return false;
     if(pf.courier&&p.courier_id!==pf.courier)return false;
-    if(pf.status&&p.status_id!==pf.status)return false;
+    // «— курьер не назначен —» стоит в ТОМ ЖЕ списке, что статусы (просьба владельца
+    // 30.10.2026: «добавь статус не назначенный курьер где все статусы»). Это не статус
+    // из справочника, а условие по заявке, поэтому значение заведомо не может совпасть
+    // с id статуса. Пустую строку сюда поставить нельзя — её не отличить от «все статусы»
+    // (та же причина, что у «— курьер не назначен —» в «Сортировке», раздел 6).
+    if(pf.status==='-nocourier'){ if(p.courier_id)return false; }
+    else if(pf.status&&p.status_id!==pf.status)return false;
     if(pf.qr&&!p.partner_id)return false;
     const pd=(p.pickup_date||'').slice(0,10);
     if(pf.dateFrom&&(!pd||pd<pf.dateFrom))return false;
