@@ -415,8 +415,20 @@ async function syncPartnerSalesMargin(partnerId,sides){
   if(err)return err;
   return ` · доля менеджера пересчитана в ${done} ${skl(done,['заказе','заказах','заказах'])} за ${mon}`;
 }
+// ДОЛЯ МЕНЕДЖЕРА У НОВОГО ПАРТНЁРА — ПОЛИТИКА 02.11.2026: «на почтовых заказах у всех
+// менеджеров 110, на курьерских надбавки нет». `db/56` проставил это существующим
+// партнёрам разом, но у НОВОГО карточка открывалась с пустыми полями, а пустое поле
+// уходит в базу как null — и его почтовые заказы молча несли бы ноль (так и вышло у
+// трёх заказов 02.11.2026). Значение по умолчанию в самой базе тут не спасает:
+// сохранение шлёт null ЯВНО, и default не применяется.
+//
+// Это ПОДСТАВКА В ФОРМУ, а не второй источник суммы: человек видит числа в полях и
+// может их изменить, а считается по-прежнему то, что записано у партнёра.
+const SALES_MARGIN_NEW_POST=110;   // почтовая доля у нового партнёра
+const SALES_MARGIN_NEW_COUR=0;     // курьерская — надбавки нет
 function partnerModal(id){
-  const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:'',tariff_post:'',tariff_courier:''};
+  const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:'',tariff_post:'',tariff_courier:'',
+    sales_margin_fixed:SALES_MARGIN_NEW_POST,sales_margin_courier:SALES_MARGIN_NEW_COUR};
   const dOpts=cid=>S.districts.filter(d=>!cid||d.city_id===cid);
   // «Физ лицо Алматы» и «Физ лицо Астана» — не магазины, а разовые клиенты: адрес и район
   // у каждого заказа свои (для этого в карточке заказа есть отдельное поле
