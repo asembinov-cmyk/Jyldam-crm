@@ -164,6 +164,11 @@ function partnerFixedMargin(pt,courier){
 function salesMarginFor(o,P){
   if(o.sales_margin!=null&&o.sales_margin!=='')return parseFloat(o.sales_margin)||0;
   if(!o.sales_id)return 0;
+  // ОТМЕТКА У МЕНЕДЖЕРА СИЛЬНЕЕ КАРТОЧКИ ПАРТНЁРА, НО СЛАБЕЕ СНИМКА В ЗАКАЗЕ.
+  // Снимок уже закрыл прошлые месяцы, и менять их задним числом нельзя (требование
+  // владельца от 01.10.2026: «считать с октября, старые не трогать»). Текущий месяц
+  // пересчитывается отдельным запросом — db/56.
+  if(salesManagerNoMargin(o.sales_id))return 0;
   const pt=orderPartnerObj(o);if(!pt)return 0;
   const courier=isCourierDelivery(o.delivery_id);
   // ФИКСИРОВАННАЯ ДОЛЯ из карточки партнёра — СВОЯ НА КАЖДЫЙ ТИП ДОСТАВКИ и сильнее

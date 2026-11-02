@@ -725,19 +725,29 @@ function courierAccountField(fieldId,current,kind){
     <span class="hint">${noteEmpty}</span></div>`;
 }
 /* Менеджеры */
-function managerCols(){return [
+function managerCols(sales){return [
   {key:'fio',label:'ФИО',filter:'text',text:m=>m.fio||'',cell:m=>`<strong>${esc(m.fio)}</strong>`},
   {key:'phone',label:'Номер телефона',filter:'text',text:m=>phoneDisplay(m.phone),cell:m=>phoneLink(m.phone)},
+  // Колонка только у менеджеров ПО ПРОДАЖАМ: у обработчиков надбавки нет вовсе, и
+  // колонки `no_margin` в их таблице тоже нет. Видно, у кого начисление выключено,
+  // не открывая карточек — как «Доля менеджера» в списке партнёров.
+  ...((sales&&salesNoMarginReady())?[{key:'nomg',label:'Надбавка',filter:'select',
+    text:m=>m.no_margin?'не начисляется':'начисляется'}]:[]),
 ];}
-function dirSales(){dirGrid({title:'Менеджеры по продажам',arrKey:'sales',table:'sales_managers',modalFn:id=>managerModal('sales','sales_managers',id),emptyText:'Список пуст',sort:(a,b)=>(a.fio||'').localeCompare(b.fio||''),cols:managerCols()});}
+function dirSales(){dirGrid({title:'Менеджеры по продажам',arrKey:'sales',table:'sales_managers',modalFn:id=>managerModal('sales','sales_managers',id),emptyText:'Список пуст',sort:(a,b)=>(a.fio||'').localeCompare(b.fio||''),cols:managerCols(true)});}
 function dirProcessors(){dirGrid({title:'Менеджеры-обработчики',arrKey:'processors',table:'processors',modalFn:id=>managerModal('processors','processors',id),emptyText:'Список пуст',sort:(a,b)=>(a.fio||'').localeCompare(b.fio||''),cols:managerCols()});}
 function managerModal(arrKey,table,id){
   const m=id?S[arrKey].find(x=>x.id===id):{fio:'',phone:''};
+  // ОКНО ОДНО НА ДВА СПРАВОЧНИКА — менеджеров по продажам и обработчиков. Поэтому
+  // отметка показывается только у продаж: у обработчиков надбавки нет, а колонки
+  // `no_margin` в их таблице нет вовсе, и поле в запросе отклонило бы ВЕСЬ update.
+  const noMg=table==='sales_managers'&&salesNoMarginReady();
   showModal(id?'Изменить':'Новая запись',`
     <div class="field"><label>ФИО</label><input id="mg_fio" value="${esc(m.fio)}"></div>
-    <div class="field"><label>Номер телефона</label><input id="mg_phone" inputmode="numeric"></div>`,
+    <div class="field"><label>Номер телефона</label><input id="mg_phone" inputmode="numeric"></div>
+    ${noMg?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="mg_nomargin" ${m.no_margin?'checked':''}> Надбавка с заказов НЕ начисляется <span class="pom-paidhint">(сумма доли берётся из карточки партнёра; с этой отметкой по заказам этого менеджера надбавка не считается вовсе — ни по почте, ни по курьеру. На уже созданные заказы не действует: там доля записана снимком)</span></label>`:''}`,
     async()=>{const fio=val('mg_fio').trim();if(!fio){toast('Укажите ФИО');return false;}
-      const row={fio,phone:phoneVal('mg_phone')};
+      const row={fio,phone:phoneVal('mg_phone'),...(noMg?{no_margin:!!$('mg_nomargin').checked}:{})};
       if(id){const u=await dbUpdate(table,id,row);if(!u)return false;Object.assign(S[arrKey].find(x=>x.id===id),u);}
       else{const u=await dbInsert(table,row);if(!u)return false;S[arrKey].push(u);}
       toast('Сохранено');renderSettings();return true;});

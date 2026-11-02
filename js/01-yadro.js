@@ -513,6 +513,22 @@ function packSizeReady(){
   const p=(S.pickups||[])[0];
   return !!p&&Object.prototype.hasOwnProperty.call(p,'pack_size');
 }
+function salesNoMarginReady(){
+  const m=(S.sales||[])[0];
+  return !!m&&Object.prototype.hasOwnProperty.call(m,'no_margin');
+}
+/* «НАДБАВКА НЕ НАЧИСЛЯЕТСЯ» — ОТМЕТКА У САМОГО МЕНЕДЖЕРА, а сумма по-прежнему живёт
+   в карточке партнёра. Политика владельца 02.11.2026: «на почтовых заказах у всех
+   менеджеров 110, кроме Жылдам — у него 0; на курьерских надбавки нет вовсе».
+   Первые две части — это ДАННЫЕ (110 в почтовом поле и 0 в курьерском у всех
+   партнёров), а «кроме Жылдам» через карточку партнёра не выразить вовсе: его заказы
+   идут у тех же партнёров, что и у остальных менеджеров. Отсюда отметка на менеджере.
+   Второго источника суммы она не создаёт — только отключает начисление целиком. */
+function salesManagerNoMargin(id){
+  if(!id)return false;
+  const m=(S.sales||[]).find(s=>s.id===id);
+  return !!(m&&m.no_margin);
+}
 
 async function dbInsert(table,row){
   if(table==='orders')stampCreatedBy(row);
