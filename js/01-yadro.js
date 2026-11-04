@@ -355,6 +355,11 @@ function loadNav(){
 function clearNav(){try{sessionStorage.removeItem(NAV_KEY);}catch(e){}}
 
 /* ---------- DATA LAYER ---------- */
+// Предохранитель постраничной загрузки. 51 страница по 1000 строк — это 51 000 строк:
+// больше dbList не отдаст, и при таблице крупнее САМЫЕ СТАРЫЕ строки в память не попадут
+// вовсе (порядок «новые сверху»). Отсюда же правило для сверки целостности: если в базе
+// строк больше предохранителя, сравнивать её число с длиной массива бессмысленно.
+const DBLIST_PAGE_CAP=51,DBLIST_MAX_ROWS=DBLIST_PAGE_CAP*1000;
 async function dbList(table,opts={}){
   // Supabase отдаёт максимум 1000 строк за запрос. При большой таблице нужно много страниц —
   // но запускать их ВСЕ параллельно нельзя: браузер держит открытыми только ~6 соединений к
@@ -395,7 +400,7 @@ async function dbList(table,opts={}){
     const total=firstRes.count||0;
     let all=firstRes.data||[];
     if(!total||all.length>=total)return all;
-    const pageCount=Math.min(Math.ceil(total/PAGE),51); // предохранитель — максимум ~51000 строк
+    const pageCount=Math.min(Math.ceil(total/PAGE),DBLIST_PAGE_CAP); // предохранитель, см. DBLIST_MAX_ROWS
     if(pageCount<=1)return all;
     const rest=await fetchInBatches(1,pageCount);
     return all.concat(rest);
@@ -418,6 +423,52 @@ async function dbList(table,opts={}){
       return all;
     }catch(e2){console.error('dbList',table,e2&&e2.message);return [];}
   }
+}
+
+/* ── СКОЛЬКО СТРОК В ТАБЛИЦЕ: один запрос, ни одной строки данных ──
+   PostgREST умеет отдать только счётчик: `head:true` не тянет сами строки, а число
+   приходит заголовком Content-Range. Нужно, чтобы отличать «данные в памяти вкладки
+   совпадают с базой» от «кто-то добавил или удалил заказы, пока Realtime молчал», НЕ
+   перекачивая таблицу целиком (см. rtReconcile в js/02-ket.js).
+
+   ПРИ ОШИБКЕ ВОЗВРАЩАЕМ null, А НЕ 0. «Не смогли спросить» и «таблица пустая» —
+   разное, и спутать их нельзя: на нуле проверка целостности решила бы, что удалили
+   всё, и вычистила бы память вкладки. */
+async function dbCount(table,opts={}){
+  try{
+    let q=sb.from(table).select('id',{count:'exact',head:true});
+    if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val);
+    const {count,error}=await q;
+    if(error){console.warn('dbCount',table,error.message);return null;}
+    return typeof count==='number'?count:null;
+  }catch(e){console.warn('dbCount',table,e&&e.message);return null;}
+}
+
+/* ── ВЛИТЬ СТРОКИ В МАССИВ, НЕ ПЛОДЯ ДУБЛЕЙ ──
+   Докачка изменений приносит и новые строки, и правки уже лежащих. Простое `concat`
+   создало бы второй экземпляр того же заказа, и грид показал бы его дважды — поэтому
+   сверяем по id: нашли — обновляем НА МЕСТЕ через Object.assign (ссылку терять нельзя,
+   на ней может висеть открытая карточка), не нашли — ставим в начало, порядок у нас
+   «новые сверху». Возвращает, сколько добавлено и сколько обновлено: по этим числам
+   решаем, нужно ли вообще перерисовывать экран. */
+function mergeRows(arr,rows){
+  let added=0,updated=0;
+  if(!Array.isArray(arr)||!Array.isArray(rows))return {added,updated};
+  const idx=new Map();
+  for(let i=0;i<arr.length;i++)if(arr[i]&&arr[i].id!=null)idx.set(arr[i].id,i);
+  const fresh=[];
+  for(const row of rows){
+    if(!row||row.id==null)continue;
+    const i=idx.get(row.id);
+    if(i!=null){Object.assign(arr[i],row);updated++;}
+    else fresh.push(row);
+  }
+  // Пачками по тысяче: `unshift(...fresh)` на десятках тысяч строк роняет стек.
+  // Последнюю пачку вставляем первой, тогда итоговый порядок равен порядку выдачи.
+  const CH=1000;
+  for(let i=Math.ceil(fresh.length/CH)-1;i>=0;i--)arr.unshift(...fresh.slice(i*CH,(i+1)*CH));
+  added=fresh.length;
+  return {added,updated};
 }
 // точечная загрузка строк таблицы по значению одного поля, мимо общего кэша S — используется там,
 // где важна свежесть данных именно сейчас (например, подсчёт заказов по заявке перед массовым созданием)

@@ -342,7 +342,10 @@ function renderPickupsPager(total,totalPages,startIdx,shownCount){
   const ppRefreshBtn=bar.querySelector('#ppRefreshBtn');
   if(ppRefreshBtn)ppRefreshBtn.onclick=async()=>{
     ppRefreshBtn.disabled=true;ppRefreshBtn.textContent='…';
-    try{await refreshForTab(S.tab);drawPickups();toast('Обновлено');}
+    // Заявки доносит Realtime, а кнопка сверяется с базой: дельта плюс сверка окна.
+    // refreshForTab заявок больше не грузит, и без этого вызова кнопка только
+    // показывала бы «Обновлено», ничего не загрузив.
+    try{await rtManualRefresh();await refreshForTab(S.tab);drawPickups();toast('Обновлено');}
     finally{if(ppRefreshBtn){ppRefreshBtn.disabled=false;ppRefreshBtn.textContent='🔄';}}
   };
   const ppBtn=bar.querySelector('#ppPerPageBtn'), ppMenu=bar.querySelector('#ppPerPageMenu');

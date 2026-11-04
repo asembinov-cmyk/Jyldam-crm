@@ -2381,7 +2381,8 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
   const opRefreshBtn=bar.querySelector('#opRefreshBtn');
   if(opRefreshBtn)opRefreshBtn.onclick=async()=>{
     opRefreshBtn.disabled=true;opRefreshBtn.textContent='…';
-    try{await refreshForTab(S.tab);drawOrders();toast('Обновлено');}
+    // То же, что в заявках: заказы грузит не refreshForTab, а сверка с базой.
+    try{await rtManualRefresh();await refreshForTab(S.tab);drawOrders();toast('Обновлено');}
     finally{if(opRefreshBtn){opRefreshBtn.disabled=false;opRefreshBtn.textContent='🔄';}}
   };
   // выбор количества на странице

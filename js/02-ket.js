@@ -681,11 +681,14 @@ async function loadAll(){
     S.pickups=pickupsToday;S.orders=ordersToday;
     try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav({skipTabFix:true});}catch(e){}
   }).catch(e=>console.error('quick today load',e));
+  // Метку для дельта-синхронизации берём ДО запросов: всё, что запишут пока история
+  // грузится, попадёт в первую же дельту. Наоборот — эти правки потерялись бы.
+  const _syncMark=new Date(nowMs()-60000).toISOString();
   S._heavyLoading=Promise.all([
     dbList('pickups',{order:'created_at',asc:false}),
     dbList('orders',{order:'created_at',asc:false}),
   ]).then(([pickups,orders])=>{
-    S.pickups=pickups;S.orders=orders;S._heavyLoaded=true;
+    S.pickups=pickups;S.orders=orders;S._heavyLoaded=true;S._deltaSince=_syncMark;
     // перерисуем текущий экран, когда тяжёлые данные пришли
     try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav({skipTabFix:true});}catch(e){}
   }).catch(e=>{console.error('heavy load',e);});
@@ -694,24 +697,13 @@ async function loadAll(){
 // Подтягивает свежие данные с сервера для выбранной вкладки (без перезагрузки страницы)
 async function refreshForTab(tab){
   try{
-    if(tab==='pickups'){
-      const [pickups,orders]=await Promise.all([
-        dbList('pickups',{order:'created_at',asc:false}),
-        dbList('orders',{order:'created_at',asc:false}),
-      ]);
-      // защита: если раньше заявки уже были, а сейчас вдруг пришёл пустой список — почти наверняка
-      // сбой сети (частое дело на мобильном у курьеров в дороге), а не то, что все заявки правда
-      // исчезли. Не затираем то, что уже показано, — подождём следующего успешного обновления.
-      if(pickups.length||!S.pickups.length)S.pickups=pickups;
-      if(orders.length||!S.orders.length)S.orders=orders;
-    }else if(tab==='orders'||tab==='courier'||tab==='mail'||tab==='today'||tab==='dashboard'||tab==='sorting'){
-      const [orders,pickups]=await Promise.all([
-        dbList('orders',{order:'created_at',asc:false}),
-        dbList('pickups',{order:'created_at',asc:false}),
-      ]);
-      if(orders.length||!S.orders.length)S.orders=orders;
-      if(pickups.length||!S.pickups.length)S.pickups=pickups;
-    }else if(tab==='ket_orders'){
+    // ЗАКАЗЫ И ЗАЯВКИ ЗДЕСЬ БОЛЬШЕ НЕ ПЕРЕЗАГРУЖАЮТСЯ (05.11.2026).
+    // Раньше на вкладках «Заявки», «Заказы заборов», «Курьерская», «Почтовая»,
+    // «Сегодня», «Статистика» и «Сортировка» тут шла полная перекачка ОБЕИХ таблиц —
+    // каждые три минуты, у каждого открытого экрана. Теперь изменения доносит
+    // Realtime, а целостность проверяет rtIntegrityCheck двумя запросами без строк
+    // данных. Защита от пустого ответа при сбое сети переехала в rtReload.
+    if(tab==='ket_orders'){
       // Фоновое обновление НЕ должно перетягивать всю историю заказов партнёров.
       // Раньше здесь вызывался loadInbound() без параметров, а он наследует режим от
       // прошлого вызова: стоило один раз применить фильтр (он грузит всё), и каждый
@@ -750,8 +742,8 @@ async function refreshForTab(tab){
         try{S.deletedItems=await dbList('deleted_items',{order:'deleted_at',asc:false});}catch(e){S.deletedItems=[];}
       }
     }else if(tab==='intercity'){
+      // Отправок немного — их перезагружаем. Заказы не трогаем: их доносит Realtime.
       try{S.shipments=await dbList('shipments',{});}catch(e){}
-      try{S.orders=await dbList('orders',{order:'created_at',asc:false});}catch(e){}
     }else if(tab==='calc'){
       // нормативы грузим параллельно (быстрее, чем по очереди)
       try{
@@ -797,15 +789,47 @@ async function enterApp(){
 
 // ── ФОНОВОЕ АВТООБНОВЛЕНИЕ ДАННЫХ (каждые 30 сек, безопасно) ──
 let _autoRefreshTimer=null;
+let _rtVisBound=false;
 function startAutoRefresh(){
   if(_autoRefreshTimer)clearInterval(_autoRefreshTimer);
-  _autoRefreshTimer=setInterval(autoRefreshTick,180000); // 3 минуты — просто подстраховка, если Realtime отвалится (сам Realtime обновляет мгновенно)
+  // Раз в три минуты — ДЕШЁВАЯ сверка (два запроса без строк данных), а не перекачка
+  // таблиц, как было до 05.11.2026. Сами изменения доносит Realtime.
+  _autoRefreshTimer=setInterval(autoRefreshTick,180000);
   startRealtime(); // мгновенные обновления
   startPresence(); // кто сейчас в системе
+  // ВОЗВРАЩЕНИЕ НА ВКЛАДКУ. Телефон и ноутбук, уснув, рвут websocket молча: статус
+  // канала может остаться SUBSCRIBED, а события за это время потеряны. Фоновый
+  // таймер при этом не работает вовсе — canAutoRefresh выходит на document.hidden.
+  // Поэтому долгое отсутствие — отдельный поводом догнать.
+  if(!_rtVisBound){
+    _rtVisBound=true;
+    document.addEventListener('visibilitychange',()=>{
+      if(document.hidden){_rtHiddenAt=nowMs();return;}
+      const away=_rtHiddenAt?nowMs()-_rtHiddenAt:0;
+      _rtHiddenAt=0;
+      if(away>RT_HIDDEN_CATCHUP_MS)rtCatchUp('вкладка вернулась через '+Math.round(away/60000)+' мин');
+    });
+  }
 }
 
 /* ── REALTIME: мгновенное обновление статусов и данных ── */
 let _rtChannel=null,_rtPending=false,_rtTimer=null;
+
+/* ── ЗДОРОВЬЕ КАНАЛА (05.11.2026) ──
+   До этой правки `.subscribe()` звали БЕЗ колбэка: приложение не знало, работает
+   Realtime или отвалился. Поэтому рядом стояла СЛЕПАЯ страховка — раз в три минуты
+   заново скачивалась вся таблица заказов (до 51 запроса с растущим OFFSET, по работе
+   базы примерно чтение таблицы целиком), и так у каждого открытого экрана 20 раз в час.
+
+   Теперь состояние канала известно, и перекачивать данные «на всякий случай» больше
+   не нужно: полная сверка идёт только когда канал реально падал или когда число строк
+   в базе разошлось с памятью вкладки. */
+let _rtOk=false,_rtDownSince=null,_rtSyncing=false,_lastFullSync=0,_rtHiddenAt=0,_rtCatchUpPending=null;
+const RT_FULL_RESYNC_MS=1800000;   // 30 минут — жёсткая страховка, пока нет updated_at (db/57)
+const RT_DELTA_OVERLAP_MS=60000;   // перехлёст метки дельты: часы клиента и базы не совпадают до секунды
+const RT_HIDDEN_CATCHUP_MS=120000; // вернулись на вкладку позже этого — догоняем
+const RT_RECONCILE_DAYS=7;         // окно сверки числа строк, см. rtReconcile
+const rtHealthy=()=>_rtOk&&_rtDownSince==null;
 function startRealtime(){
   try{
     if(_rtChannel){sb.removeChannel(_rtChannel);_rtChannel=null;}
@@ -816,8 +840,217 @@ function startRealtime(){
       .on('postgres_changes',{event:'*',schema:'public',table:'orders'},payload=>applyRealtime('orders',payload))
       // изменения статусов заказов КЕТ (send_status/status_kz/call_status) — приходят от вебхука KET
       .on('postgres_changes',{event:'*',schema:'public',table:'inbound_orders'},payload=>applyRealtime('inbound_orders',payload))
-      .subscribe();
+      // СТАТУС КАНАЛА. Realtime историю НЕ досылает — он транслирует только то, что
+      // происходит сейчас. Значит за время простоя изменения потеряны безвозвратно,
+      // и единственный способ их не упустить — узнать о простое и догнать.
+      .subscribe(status=>{
+        if(status==='SUBSCRIBED'){
+          const wasDown=_rtDownSince!=null;
+          _rtOk=true;_rtDownSince=null;
+          if(!_lastFullSync)_lastFullSync=nowMs();
+          if(wasDown)rtCatchUp('Realtime переподключился');
+          return;
+        }
+        // CHANNEL_ERROR, TIMED_OUT, CLOSED — события не доставляются.
+        // Момент падения запоминаем ОДИН раз, чтобы повторные колбэки его не сдвигали.
+        _rtOk=false;
+        if(_rtDownSince==null)_rtDownSince=nowMs();
+      });
   }catch(e){console.warn('realtime',e);}
+}
+
+/* Есть ли в заказах колонка updated_at (её заводит db/57). С ней «что изменилось
+   после момента X» спрашивается одним дешёвым запросом. Без неё остаётся только
+   полная перекачка — поэтому до выполнения db/57 страховка работает по-старому,
+   но РЕДКО (RT_FULL_RESYNC_MS), а не каждые три минуты. Проверяем так же, как
+   fillReady и createdByReady: по наличию поля в уже загруженной строке. */
+function rtDeltaReady(){
+  const o=(S.orders||[])[0];
+  return !!o&&Object.prototype.hasOwnProperty.call(o,'updated_at');
+}
+
+/* Докачать изменения после метки и влить БЕЗ ДУБЛЕЙ (mergeRows сверяет по id). */
+async function rtSyncDelta(){
+  const since=S._deltaSince;
+  if(!since)return 0;
+  // Новую метку берём ДО запросов: всё, что запишут пока они идут, попадёт в
+  // следующую дельту. Наоборот — потеряли бы правки, сделанные в эти секунды.
+  const mark=new Date(nowMs()-RT_DELTA_OVERLAP_MS).toISOString();
+  let changed=0;
+  for(const t of ['orders','pickups']){
+    if(!Array.isArray(S[t]))continue;
+    let rows=[];
+    try{rows=await dbList(t,{order:'updated_at',asc:false,gte:{col:'updated_at',val:since}});}
+    catch(e){console.warn('rtSyncDelta',t,e&&e.message);return changed;} // метку НЕ сдвигаем
+    const r=mergeRows(S[t],rows);
+    changed+=r.added+r.updated;
+  }
+  S._deltaSince=mark;
+  return changed;
+}
+
+/* Полная перекачка одной таблицы. Нужна, когда дельты нет или в базе строк больше,
+   чем в памяти. С той же защитой от сбоя сети, что была в прежнем refreshForTab:
+   пустой ответ при непустой памяти почти наверняка обрыв, а не «всё удалили». */
+async function rtReload(table){
+  try{
+    const rows=await dbList(table,{order:'created_at',asc:false});
+    if(!rows.length&&(S[table]||[]).length)return 0;
+    S[table]=rows;
+    return 1;
+  }catch(e){console.warn('rtReload',table,e&&e.message);return 0;}
+}
+
+/* Убрать из памяти строки, которых в базе больше нет.
+   Удаление по updated_at поймать НЕЛЬЗЯ — удалённой строки просто не существует.
+   Поэтому спрашиваем только id (сорок байт вместо всей записи) и вычищаем лишнее. */
+async function rtDropDeleted(table,since){
+  let rows=[];
+  try{rows=await dbList(table,{select:'id',order:'created_at',asc:false,gte:{col:'created_at',val:since}});}
+  catch(e){console.warn('rtDropDeleted',table,e&&e.message);return 0;}
+  if(!rows.length)return 0; // пустой ответ — скорее сбой, чем «удалили всё»
+  const live=new Set(rows.map(r=>r.id));
+  const arr=S[table]||[];
+  let n=0;
+  for(let i=arr.length-1;i>=0;i--){
+    const r=arr[i];
+    if(!r||!(r.created_at>=since))continue; // вне окна сверки — не наше дело
+    if(!live.has(r.id)){arr.splice(i,1);n++;}
+  }
+  return n;
+}
+
+/* Дотянуть окно целиком и влить без дублей. Нужно, когда строк в базе больше, чем
+   в памяти: значит событие Realtime потерялось. Перекачиваем ТОЛЬКО окно, а не
+   таблицу — на неделю это несколько тысяч строк вместо шестидесяти. */
+async function rtPullWindow(table,since){
+  try{
+    const rows=await dbList(table,{order:'created_at',asc:false,gte:{col:'created_at',val:since}});
+    if(!rows.length)return 0;
+    const r=mergeRows(S[table],rows);
+    return r.added+r.updated;
+  }catch(e){console.warn('rtPullWindow',table,e&&e.message);return 0;}
+}
+
+/* ── СВЕРКА ЧИСЛА СТРОК: один запрос на таблицу, ни одной строки данных ──
+   Если Realtime донёс всё, число строк в базе равно числу строк в памяти:
+   добавленный кем-то заказ пришёл событием и уже лежит. Меньше в базе — что-то
+   удалили, пока мы не слышали; больше — потеряли событие о добавлении.
+
+   СРАВНИВАЕМ НЕ ВСЮ ТАБЛИЦУ, А ОКНО ПОСЛЕДНИХ ДНЕЙ, и это не осторожность, а
+   необходимость: в памяти лежит максимум DBLIST_MAX_ROWS строк (предохранитель
+   dbList), а заказов в базе уже больше — равенства не было бы НИКОГДА, и проверка
+   молча не делала бы ничего. Первая версия так и работала: на 60 000 заказов она
+   не ловила ни удалений, ни пропущенных добавлений. Окно же целиком лежит внутри
+   загруженной части, поэтому сравнивается честно.
+
+   СРАВНИВАЕМ С ДЛИНОЙ, А НЕ С ПРОШЛЫМ СЧЁТЧИКОМ: иначе каждый новый заказ, честно
+   доставленный Realtime, выглядел бы расхождением и запускал перекачку.
+
+   ЧЕГО ОКНО НЕ ЛОВИТ: удаление заказа старше RT_RECONCILE_DAYS, случившееся пока
+   канал молчал. Такое правится перезагрузкой страницы; расширять окно незачем —
+   починка тянет окно целиком, а это уже тысячи строк. */
+async function rtReconcile(){
+  if(!S._heavyLoaded)return 0;
+  const since=new Date(nowMs()-RT_RECONCILE_DAYS*86400000).toISOString();
+  let changed=0;
+  for(const t of ['orders','pickups']){
+    const arr=S[t];
+    if(!Array.isArray(arr))continue;
+    const cnt=await dbCount(t,{gte:{col:'created_at',val:since}});
+    if(cnt==null)continue;              // не смогли спросить — выводов не делаем
+    let mine=0;
+    for(const r of arr)if(r&&r.created_at>=since)mine++;
+    if(cnt===mine)continue;             // сходится
+    changed+=cnt<mine?await rtDropDeleted(t,since):await rtPullWindow(t,since);
+  }
+  return changed;
+}
+
+/* Перерисовка с сохранением прокрутки — только если человек сейчас не работает. */
+function rtRedraw(){
+  if(!canAutoRefresh())return;
+  const sx=window.scrollX,sy=window.scrollY;
+  try{render();}catch(e){console.error('rtRedraw',e);}
+  requestAnimationFrame(()=>{try{window.scrollTo(sx,sy);}catch(e){}});
+}
+
+/* Догнать пропущенное: после переподключения канала или возвращения на вкладку. */
+async function rtCatchUp(reason){
+  // ДОГОН НЕ ОТБРАСЫВАЕМ, А СТАВИМ В ОЧЕРЕДЬ. Канал может переподключиться ровно
+  // во время сверки; раньше такой догон просто терялся, а вместе с ним — изменения
+  // за время простоя, и на экране оставались неполные данные до следующего тика.
+  if(_rtSyncing){_rtCatchUpPending=reason;return;}
+  _rtSyncing=true;
+  try{
+    console.log('[sync] догоняем:',reason);
+    let changed=0;
+    if(rtDeltaReady()){
+      changed+=await rtSyncDelta();
+      changed+=await rtReconcile(); // удаления дельтой не видны
+    }else{
+      changed+=await rtReload('orders');
+      changed+=await rtReload('pickups');
+    }
+    _lastFullSync=nowMs();
+    if(changed)rtRedraw();
+  }catch(e){console.error('rtCatchUp',e);}
+  finally{_rtSyncing=false;rtRunPendingCatchUp();}
+}
+
+/* ── КНОПКА «ОБНОВИТЬ» ──
+   Её жмут именно тогда, когда подозревают, что экран устарел, поэтому молчать
+   нельзя: раньше она звала refreshForTab, а тот перекачивал таблицы целиком.
+   Теперь делает то же, что догон после переподключения — дельту и сверку окна, —
+   но НЕ перерисовывает сам: вызывающий рисует своим drawOrders/drawPickups.
+   Возвращает число изменённых строк, чтобы кнопка могла сказать честно. */
+async function rtManualRefresh(){
+  if(_rtSyncing)return 0;
+  _rtSyncing=true;
+  try{
+    let changed=0;
+    if(rtDeltaReady()){
+      changed+=await rtSyncDelta();
+      changed+=await rtReconcile();
+    }else{
+      changed+=await rtReload('orders');
+      changed+=await rtReload('pickups');
+    }
+    _lastFullSync=nowMs();
+    return changed;
+  }catch(e){console.error('rtManualRefresh',e);return 0;}
+  finally{_rtSyncing=false;rtRunPendingCatchUp();}
+}
+
+/* Отложенный догон: канал переподключился, пока шла сверка. */
+function rtRunPendingCatchUp(){
+  if(!_rtCatchUpPending)return;
+  const reason=_rtCatchUpPending;
+  _rtCatchUpPending=null;
+  rtCatchUp(reason);
+}
+
+/* Дешёвая периодическая проверка — то, что заменило перекачку таблиц. */
+async function rtIntegrityCheck(){
+  if(_rtSyncing)return;
+  if(!rtHealthy()){await rtCatchUp('Realtime не на связи');return;}
+  _rtSyncing=true;
+  try{
+    let changed=0;
+    const delta=rtDeltaReady();
+    if(delta)changed+=await rtSyncDelta();
+    changed+=await rtReconcile();
+    // Без updated_at пропущенную ПРАВКУ по счётчику не увидеть (число строк не
+    // меняется), поэтому раз в полчаса всё-таки перекачиваем. С db/57 эта ветка
+    // не нужна: дельта ловит правки каждый тик и почти ничего не стоит.
+    if(!delta&&nowMs()-_lastFullSync>RT_FULL_RESYNC_MS){
+      changed+=await rtReload('orders');
+      changed+=await rtReload('pickups');
+      _lastFullSync=nowMs();
+    }
+    if(changed)rtRedraw();
+  }catch(e){console.error('rtIntegrityCheck',e);}
+  finally{_rtSyncing=false;rtRunPendingCatchUp();}
 }
 /* ── КТО СЕЙЧАС В СИСТЕМЕ ──
    Presence у Supabase Realtime: каждая открытая вкладка сообщает в канал, кто за
@@ -986,13 +1219,15 @@ function canAutoRefresh(){
   return true;
 }
 async function autoRefreshTick(){
-  if(!canAutoRefresh())return; // занят — пропускаем этот цикл, попробуем через 30 сек
+  if(!canAutoRefresh())return; // человек работает или вкладка скрыта — пропускаем цикл
   try{
-    // запоминаем позицию прокрутки, чтобы не «дёргать» экран при перерисовке
+    // 1. Заказы и заявки: проверка целостности, а не перекачка.
+    await rtIntegrityCheck();
+    // 2. Справочники текущего экрана — мелкие таблицы, их перезагрузка дешёвая.
     const sx=window.scrollX, sy=window.scrollY;
-    await refreshForTab(S.tab);   // тихо тянем свежие данные для текущего раздела
+    await refreshForTab(S.tab);
     if(canAutoRefresh()){
-      render(); // перерисовываем, только если за время загрузки никто не начал работать
+      render();
       requestAnimationFrame(()=>{try{window.scrollTo(sx,sy);}catch(e){}});
     }
   }catch(e){console.error('autoRefresh',e);}
