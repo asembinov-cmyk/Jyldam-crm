@@ -544,6 +544,71 @@ function nfWhExcel(){
   XLSX.writeFile(wb,`Кладовщики_приёмка_${nfWhMonth}.xlsx`);
   toast(`Выгружено строк: ${rows.length}`);
 }
+/* ── ВОПРОСЫ КЛИЕНТОВ БЕЗ ОТВЕТА (05.11.2026) ───────────────────────────────
+   Робот автоответа отвечает только по скрипту, а всё остальное МОЛЧА оставляет
+   человеку (решение владельца). Метка без экрана, на котором её видно, —
+   бесполезна: менеджеру пришлось бы открывать карточки по одной. Здесь он видит
+   список и уходит отвечать в сам WhatsApp.
+
+   Грузим ЛЕНИВО и только по заходу в раздел: переписка растёт с каждым
+   сообщением, и держать её в памяти вкладки незачем. */
+let nfWaRows=null;      // null — ещё не грузили, [] — грузили и пусто
+let nfWaCfg=null;       // состояние робота из wa_ai_settings
+let nfWaErr='';         // текст беды, если таблицы или колонок ещё нет
+const NF_WA_LIMIT=50;
+
+async function nfWaLoad(){
+  nfWaErr='';
+  try{
+    const {data,error}=await sb.from('kelesu_messages')
+      .select('id,phone_norm,body_text,created_at,ai_intent,ai_note')
+      .eq('direction','inbound').eq('ai_status','flagged')
+      .order('created_at',{ascending:false}).limit(NF_WA_LIMIT);
+    if(error)throw error;
+    nfWaRows=data||[];
+  }catch(e){
+    nfWaRows=[];
+    // 42703 — такой колонки нет: db/58 ещё не выполнен. Это не поломка, а «ещё не
+    // включено», и говорить надо именно так, с именем файла.
+    nfWaErr=/42703|ai_status|does not exist/i.test(String(e&&(e.message||e.code)||e))
+      ? 'Автоответ ещё не включён — выполните db/58, блок 1'
+      : 'Не удалось прочитать переписку: '+String(e&&e.message||e);
+  }
+  try{
+    const {data}=await sb.from('wa_ai_settings').select('enabled,dry').limit(1);
+    nfWaCfg=(data&&data[0])||null;
+  }catch(e){nfWaCfg=null;}
+}
+
+function nfWaStateText(){
+  if(!nfWaCfg)return 'состояние неизвестно — нет таблицы настроек (db/58, блок 2)';
+  if(!nfWaCfg.enabled)return 'робот выключен — клиентам ничего не уходит';
+  if(nfWaCfg.dry)return 'робот только показывает, что ответил бы, и ничего не отправляет';
+  return 'робот отвечает клиентам по скрипту';
+}
+
+function nfWaHtml(){
+  if(nfWaRows===null)return '<div class="hint" style="margin:0 20px 14px">Загружаем…</div>';
+  if(nfWaErr)return `<div class="hint" style="margin:0 20px 14px;color:var(--rust)">${esc(nfWaErr)}</div>`;
+  const head=`<div class="hint" style="margin:0 20px 12px;color:var(--muted)">${esc(nfWaStateText())}</div>`;
+  if(!nfWaRows.length)return head+'<div class="empty" style="padding:28px"><div class="big">Пусто</div>Все вопросы клиентов разобраны.</div>';
+  return head+nfWaRows.map(m=>{
+    const ph=String(m.phone_norm||'');
+    const t=(fmtLogTime(m.created_at)||{});
+    return `<div class="nf-issue">
+      <div class="nf-i-ico">💬</div>
+      <div class="nf-i-body">
+        <div class="nf-i-title">${esc(m.body_text||'—')}</div>
+        <div class="nf-i-desc">${esc(phoneDisplay('7'+ph))} · ${esc((t.date||'')+' '+(t.time||''))}${m.ai_note?' · '+esc(m.ai_note):''}</div>
+      </div>
+      ${ph?`<a class="btn sm primary" target="_blank" rel="noopener" href="https://wa.me/7${esc(ph)}">Ответить</a>`:''}
+      <button class="btn sm ghost" data-wadone="${esc(m.id)}">✓ Решено</button>
+    </div>`;
+  }).join('');
+}
+
+function nfWaRedraw(){const box=$('nfWaBox');if(box)box.innerHTML=nfWaHtml();}
+
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const trash=S.deletedItems||[];
@@ -566,6 +631,14 @@ function renderNotify(){
           <button class="btn sm primary" data-restore="${it.id}">↩ Восстановить</button>
         </div>`).join(''):'<div class="empty" style="padding:28px"><div class="big">Пусто</div>За последние 30 дней ничего не удаляли.</div>'}`}
     </div>
+
+    ${isStaff()?`
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>💬 Вопросы клиентов без ответа</h2>
+        <span class="count">${nfWaRows?nfWaRows.length:''}</span>
+      </div>
+      <div id="nfWaBox">${nfWaHtml()}</div>
+    </div>`:''}
 
     ${isStaff()?`
     <div class="panel nf-ai-panel" style="margin-bottom:18px">
@@ -617,6 +690,23 @@ function renderNotify(){
   $('main').querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>restoreDeletedItem(b.dataset.restore));
   const trashToggle=$('main').querySelector('[data-trashtoggle]');
   if(trashToggle)trashToggle.onclick=()=>{notifyTrashCollapsed=!notifyTrashCollapsed;renderNotify();};
+
+  // Вопросы клиентов: грузим один раз за заход в раздел и рисуем ТОЛЬКО свою
+  // панель (nfWaRedraw), а не весь экран — иначе перерисовка собьёт работу
+  // с остальными панелями раздела.
+  if(isStaff()&&nfWaRows===null)nfWaLoad().then(nfWaRedraw).catch(()=>{});
+  $('main').querySelectorAll('[data-wadone]').forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.wadone;
+    b.disabled=true;
+    try{
+      // Метим разобранным мимо dbUpdate: это служебная отметка, и в истории
+      // изменений ей делать нечего — там утонули бы правки заказов.
+      const {error}=await sb.from('kelesu_messages').update({ai_status:'done'}).eq('id',id);
+      if(error)throw error;
+      nfWaRows=(nfWaRows||[]).filter(m=>String(m.id)!==String(id));
+      nfWaRedraw();
+    }catch(e){b.disabled=false;toast('Не удалось отметить: '+String(e&&e.message||e));}
+  });
 }
 
 function renderHistory(){
