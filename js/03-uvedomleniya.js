@@ -590,7 +590,7 @@ function nfWaStateText(){
 function nfWaHtml(){
   if(nfWaRows===null)return '<div class="hint" style="margin:0 20px 14px">Загружаем…</div>';
   if(nfWaErr)return `<div class="hint" style="margin:0 20px 14px;color:var(--rust)">${esc(nfWaErr)}</div>`;
-  const head=`<div class="hint" style="margin:0 20px 12px;color:var(--muted)">${esc(nfWaStateText())}</div>`;
+  const head=`<div class="hint" style="margin:0 20px 12px;color:var(--muted)">${esc(nfWaStateText())}<br>Включение и остановка — <b>Настройки → Оповещения WhatsApp</b>.</div>`;
   if(!nfWaRows.length)return head+'<div class="empty" style="padding:28px"><div class="big">Пусто</div>Все вопросы клиентов разобраны.</div>';
   return head+nfWaRows.map(m=>{
     const ph=String(m.phone_norm||'');

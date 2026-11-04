@@ -817,18 +817,114 @@ async function waNotifySelection(key){
    перерисовывает панель: иначе каждое нажатие ходило бы к Kelesu, а там лимит 100 запросов
    в минуту на ключ. */
 let waCfgBtn = WA_BUTTONS[0][0];
+/* ── УПРАВЛЕНИЕ АВТООТВЕТОМ КЛИЕНТАМ (05.11.2026) ───────────────────────────
+   Выключатель лежит в базе (`wa_ai_settings`), и сначала трогать его можно было
+   ТОЛЬКО запросом в SQL-редакторе Supabase. Для стоп-крана у робота, который
+   говорит живым клиентам, это недопустимо — вынесено сюда.
+
+   ПАНЕЛЬ РИСУЕТСЯ ПЕРВОЙ И НЕЗАВИСИМО от шаблонов и очереди. Ниже по функции
+   два досрочных выхода (нет таблицы настроек рассылки, не получены шаблоны у
+   Kelesu), и при любом из них стоп-кран пропал бы ровно тогда, когда что-то
+   уже сломалось. */
+let waAiCfg=null;          // null — не грузили или таблицы нет
+let waAiErr='';
+let waAiStats=null;        // {answered, flagged, failed} за сегодня
+
+async function waAiLoad(){
+  waAiErr='';
+  try{
+    const {data,error}=await sb.from('wa_ai_settings').select('enabled,dry,updated_at').limit(1);
+    if(error)throw error;
+    waAiCfg=(data&&data[0])||null;
+    if(!waAiCfg)waAiErr='Строки настроек нет — выполните db/58, блок 2';
+  }catch(e){
+    waAiCfg=null;
+    waAiErr=/wa_ai_settings|does not exist|42P01/i.test(String(e&&(e.message||e.code)||e))
+      ? 'Автоответ ещё не включён — выполните db/58, блоки 1 и 2'
+      : 'Не удалось прочитать настройки: '+String(e&&e.message||e);
+  }
+  // Счётчики за сегодня — три запроса БЕЗ строк данных (head:true).
+  try{
+    const since=new Date(localToday()+'T00:00:00').toISOString();
+    const one=async st=>{
+      const {count}=await sb.from('kelesu_messages').select('id',{count:'exact',head:true})
+        .eq('ai_status',st).gte('ai_handled_at',since);
+      return count||0;
+    };
+    waAiStats={answered:await one('answered'),flagged:await one('flagged'),failed:await one('failed')};
+  }catch(e){waAiStats=null;}
+}
+
+async function waAiSet(patch,btn){
+  if(!isAdmin()){toast('Менять автоответ может только администратор');return;}
+  if(btn)btn.disabled=true;
+  try{
+    const {error}=await sb.from('wa_ai_settings').update({...patch,updated_at:new Date().toISOString()}).eq('id',1);
+    if(error)throw error;
+    await waAiLoad();waAiRender();
+    toast(patch.enabled===false?'Автоответ остановлен':'Сохранено');
+  }catch(e){
+    if(btn)btn.disabled=false;
+    toast('Не удалось сохранить: '+String(e&&e.message||e));
+  }
+}
+
+function waAiRender(){
+  const box=$('waAiBox');if(!box)return;
+  const st=waAiStats;
+  const nums=st?`<div class="hint" style="margin:0 20px 12px;color:var(--muted)">За сегодня: ответил ${st.answered} · ушло человеку ${st.flagged} · не отправилось ${st.failed}</div>`:'';
+  if(!waAiCfg){
+    box.innerHTML=`<div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><h2>🤖 Автоответ клиентам</h2></div>
+      <div class="hint" style="margin:0 20px 14px;color:var(--rust)">${esc(waAiErr||'Загружаем…')}</div>
+    </div>`;
+    return;
+  }
+  const on=!!waAiCfg.enabled, dry=!!waAiCfg.dry;
+  // Три состояния, и путать их нельзя: выключен / считает, но молчит / говорит клиентам.
+  const state=!on?['⏸ Выключен','клиентам ничего не уходит','var(--muted)']
+    :dry?['👀 Только показывает','разбирает вопросы, но не отправляет','var(--rust)']
+    :['🟢 Отвечает клиентам','сообщения уходят живым клиентам по скрипту','#1b7f3b'];
+  box.innerHTML=`<div class="panel" style="margin-bottom:18px">
+    <div class="panel-head"><h2>🤖 Автоответ клиентам</h2>
+      <span class="count" style="color:${state[2]}">${esc(state[0])}</span></div>
+    <div class="hint" style="margin:0 20px 10px;color:var(--muted)">${esc(state[1])}</div>
+    ${nums}
+    ${isAdmin()?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 20px 16px">
+      ${on&&!dry?`<button class="btn sm" id="waAiStop" style="background:var(--rust);color:#fff">⛔ Остановить немедленно</button>`:''}
+      ${!on?`<button class="btn sm primary" id="waAiOn">Включить</button>`:''}
+      ${on?`<button class="btn sm ghost" id="waAiDry">${dry?'Начать отправлять по-настоящему':'Перевести в «только показывать»'}</button>`:''}
+      ${on&&dry?`<button class="btn sm ghost" id="waAiOff">Выключить совсем</button>`:''}
+    </div>`:`<div class="hint" style="margin:0 20px 16px;color:var(--muted)">Включает и останавливает администратор.</div>`}
+  </div>`;
+  const b=id=>$(id);
+  if(b('waAiStop'))b('waAiStop').onclick=()=>waAiSet({enabled:false},b('waAiStop'));
+  if(b('waAiOff'))b('waAiOff').onclick=()=>waAiSet({enabled:false},b('waAiOff'));
+  // Включаем ВСЕГДА сначала в режиме «только показывает»: сообщение клиенту
+  // отозвать нечем, поэтому первым шагом «сразу говори» быть не может.
+  if(b('waAiOn'))b('waAiOn').onclick=()=>waAiSet({enabled:true,dry:true},b('waAiOn'));
+  if(b('waAiDry'))b('waAiDry').onclick=()=>{
+    if(!dry){waAiSet({dry:true},b('waAiDry'));return;}
+    if(!confirm('Робот начнёт отправлять ответы ЖИВЫМ клиентам.\n\nОтозвать отправленное сообщение нечем. Продолжить?'))return;
+    waAiSet({dry:false},b('waAiDry'));
+  };
+}
+
 async function renderWaSettings(){
   const box=$('dirContent');if(!box)return;
-  box.innerHTML='<div class="loading" style="padding:40px">Загружаем шаблоны…</div>';
+  box.innerHTML='<div id="waAiBox"></div><div id="waRest"><div class="loading" style="padding:40px">Загружаем шаблоны…</div></div>';
+  waAiRender();                                    // сразу, по тому что уже знаем
+  waAiLoad().then(waAiRender).catch(()=>{});       // и освежаем, не задерживая остальное
   const cfg=await waCfgLoad(true);
+  const rest=$('waRest');if(!rest)return;          // ушли с вкладки, пока грузили
   if(cfg===null){
-    box.innerHTML=`<div class="empty"><div class="big">Раздел ещё не включён</div>
+    rest.innerHTML=`<div class="empty"><div class="big">Рассылка ещё не включена</div>
       <p>Нет таблицы настроек. Выполните <b>db/34-WHATSAPP-рассылка.sql</b>, блок 3, и обновите страницу.</p></div>`;
     return;
   }
   const tpls=await waLoadTemplates(true);
   if(!tpls||tpls.error){
-    box.innerHTML=`<div class="empty"><div class="big">Шаблоны не получены</div>
+    rest.innerHTML=`<div class="empty"><div class="big">Шаблоны не получены</div>
       <p>${esc((tpls&&tpls.error)||'ошибка')}</p>
       <p class="hint">Проверьте функцию <b>kelesu-waba</b> и секреты <b>KELESU_API_KEY</b>, <b>KELESU_CHANNEL_ID</b>.</p></div>`;
     return;
@@ -849,7 +945,7 @@ async function renderWaSettings(){
 
   // Две панели в разных контейнерах: чип переключают часто, а отчёт читает журнал за две
   // недели — перечитывать его на каждое нажатие чипа незачем.
-  box.innerHTML='<div id="waCfgPanel"></div><div id="waQueueBox"></div><div id="waRepBox"></div>';
+  rest.innerHTML='<div id="waCfgPanel"></div><div id="waQueueBox"></div><div id="waRepBox"></div>';
   const drawBtn=()=>{
     const pin=cfg[waCfgBtn]||{template:'',params:null};
     // У НЕПРИВЯЗАННОЙ кнопки в списке стоит «— не выбран —», а не первый шаблон по порядку.
