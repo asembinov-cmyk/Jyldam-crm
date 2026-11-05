@@ -381,12 +381,12 @@ function waModListHtml(){
   const list=waModDialogsFiltered();
   if(!list.length)return `<div class="hint" style="padding:14px">${waModRows.length?'Ничего не нашлось — снимите фильтр или поиск.':'Переписки пока нет.'}</div>`;
   return list.map(d=>{
-    const m=d.last,t=(fmtLogTime(m.created_at)||{});
+    const m=d.last;
     const prev=String(m.body_text||(m.message_type&&m.message_type!=='text'?'['+m.message_type+']':'—')).slice(0,70);
     return `<div class="wam-item${d.norm===waModPhone?' on':''}" data-wadlg="${esc(d.norm)}">
       <div class="wam-i-top">
         <span class="wam-i-ph">${esc(phoneDisplay('7'+d.norm))}</span>
-        <span class="wam-i-time">${esc(t.time||t.date||'')}</span>
+        <span class="wam-i-time">${esc(waModWhen(m.created_at))}</span>
       </div>
       <div class="wam-i-prev">${m.direction==='outbound'?'<span class="wam-i-you">вы: </span>':''}${esc(prev)}</div>
       <div class="wam-i-tags">
@@ -449,6 +449,21 @@ const waModSettingsSub=()=>waModSub==='autoreply'||waModSub==='broadcast';
 
 /* Режим обновления виден человеку. «Не подтягивает свежие» иначе невозможно отличить от
    «сообщений и не было», и выяснять это приходится по базе — так и вышло 05.11.2026. */
+/* В СПИСКЕ ДИАЛОГОВ НУЖЕН ДЕНЬ, А НЕ ТОЛЬКО ВРЕМЯ. Список отсортирован по свежести, но
+   если у всех строк показано одно время суток, порядок выглядит случайным: «11:48, 22:32,
+   19:10» читается как сбой, хотя 22:32 — это вчера. Поймано на живом экране 05.11.2026.
+   День считаем МЕСТНЫЙ (`localDay`): `created_at` в базе по Гринвичу, и всё, что пришло
+   до 05:00 по Астане, иначе уехало бы во вчера. */
+function waModWhen(ts){
+  const t=(fmtLogTime(ts)||{});
+  if(typeof localDay!=='function'||typeof localToday!=='function')return t.time||t.date||'';
+  const d=localDay(ts);
+  if(d===localToday())return t.time||'';
+  if(typeof localDaysAgo==='function'&&d===localDaysAgo(1))return 'вчера '+(t.time||'');
+  const p=String(d||'').split('-');
+  return p.length===3?p[2]+'.'+p[1]:(t.date||'');
+}
+
 function waModSyncText(){
   const t=waModLastSync?new Date(waModLastSync):null;
   const hh=t?String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0'):'—';

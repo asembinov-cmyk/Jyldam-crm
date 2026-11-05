@@ -1926,9 +1926,13 @@ td .ft-dot{margin:0 0 0 8px}
 .wam-chk{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);cursor:pointer}
 /* `.field` в этой CRM — ОБЁРТКА (стилизует `.field input`), а не класс самого поля,
    поэтому свои поля описываем по образцу `.filters input`. */
-.wam-filters input,.wam-send textarea{font:inherit;font-size:13px;padding:8px 11px;
+/* `input:not([type=checkbox])`, а НЕ просто `input`: галочка «только ждущие ответа»
+   живёт в том же блоке, и общее правило растягивало её на всю ширину — подпись
+   уезжала вправо и ломалась в три строки (поймано на живом экране 05.11.2026). */
+.wam-filters input:not([type=checkbox]),.wam-send textarea{font:inherit;font-size:13px;padding:8px 11px;
   border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);width:100%}
-.wam-filters input:focus,.wam-send textarea:focus{outline:none;border-color:var(--ink)}
+.wam-filters input:not([type=checkbox]):focus,.wam-send textarea:focus{outline:none;border-color:var(--ink)}
+.wam-chk input{flex:0 0 auto;width:16px;height:16px;margin:0}
 .wam-list{overflow-y:auto;max-height:620px}
 .wam-item{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
 .wam-item:hover{background:rgba(0,0,0,.03)}
@@ -1977,5 +1981,7 @@ td .ft-dot{margin:0 0 0 8px}
   .wam-wrap.chat .wam-back{display:inline-flex}
   .wam-scroll{max-height:none;min-height:50vh}
   .wam-bub{max-width:88%}
-  .wam-filters input,.wam-send textarea{font-size:16px;min-height:44px}
+  /* Галочку из правила 44 px тоже исключаем: ей это дало бы полосу в палец высотой. */
+  .wam-filters input:not([type=checkbox]),.wam-send textarea{font-size:16px;min-height:44px}
+  .wam-chk{min-height:44px}
 }
