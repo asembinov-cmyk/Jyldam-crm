@@ -42,9 +42,11 @@ const SET_GROUPS=[
   ['Финансы',[['fin_kassa','Кассы','card'],['fin_categories','Категории расходов','out'],
               ['fin_income_categories','Категории приходов','out'],['fin_partners','Партнёры (финансы)','user']]],
   ['Казпочта',[['maillabel','Бланк Казпочты','env'],['blanks','Бланки заранее','label']]],
-  // «Оповещения WhatsApp» ПЕРЕЕХАЛИ в модуль «WhatsApp» (05.11.2026, просьба владельца):
-  // настройка шаблонов, очередь, отчёт и автоответ теперь там же, где переписка.
-  // Сохранённый в адресе `S.dir='wa'` сам сбросится на «Города» — пункта больше нет.
+  // РАССЫЛКА ЖИВЁТ ЗДЕСЬ, А АВТООТВЕТ — В МОДУЛЕ «WhatsApp» (решение владельца
+  // 05.11.2026). Делит их не прихоть, а то, как ими пользуются: шаблоны кнопок, очередь
+  // и отчёт настраивают один раз, а автоответ — про те же диалоги, что и переписка,
+  // и стоп-кран к нему должен быть под рукой у того, кто в ней сидит.
+  ['Оповещения',[['wa','Рассылка WhatsApp','env']]],
   ['Разработка',[['apidocs','Документация API','code']]],
 ];
 const setAllItems=()=>SET_GROUPS.flatMap(([g,items])=>items.map(it=>[...it,g]));
@@ -76,7 +78,10 @@ function renderSettings(){
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
     fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners,
-    maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings};
+    maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings,
+    // ТОЛЬКО часть 'rest': автоответ рисует модуль «WhatsApp», и показывать его в двух
+    // местах нельзя — два стоп-крана у одной машины это способ нажать не тот.
+    wa:()=>renderWaSettings('dirContent','rest')};
   (map[S.dir]||dirCities)();
 }
 // вкладка «Документация API» в Настройках — две ссылки на документацию по интеграциям,

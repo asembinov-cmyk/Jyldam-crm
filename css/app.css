@@ -1960,6 +1960,16 @@ td .ft-dot{margin:0 0 0 8px}
 .wam-bub.bot{background:#e8f0fe}
 .wam-who{font-size:10px;color:var(--muted);margin-bottom:2px}
 .wam-txt{white-space:pre-wrap;word-break:break-word}
+/* ВЛОЖЕНИЯ. Ширину картинки ограничиваем самим пузырём, высоту — 260 px: иначе одно
+   вертикальное фото занимает весь экран и переписку приходится листать мимо него. */
+.wam-att{display:block;margin:0 0 5px}
+.wam-att.none{font-size:12px;color:var(--muted);font-style:italic}
+.wam-img{display:block;max-width:100%;max-height:260px;border-radius:8px;object-fit:cover}
+.wam-att.dead{font-size:12px;color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--muted)}
+/* Плеер в пузырь шириной 76 % не влезает своими стандартными ~300 px — задаём свою. */
+.wam-audio{display:block;width:240px;max-width:100%;height:34px}
+.wam-video{display:block;max-width:100%;max-height:260px;border-radius:8px}
+.wam-dl{display:inline-block;margin-top:3px;font-size:11px;color:var(--muted)}
 .wam-meta{font-size:10px;color:var(--muted);margin-top:3px;text-align:right}
 .wam-foot{padding:12px 14px;border-top:1px solid var(--line)}
 .wam-send{display:flex;gap:8px;align-items:flex-end}
@@ -1981,6 +1991,10 @@ td .ft-dot{margin:0 0 0 8px}
   .wam-wrap.chat .wam-back{display:inline-flex}
   .wam-scroll{max-height:none;min-height:50vh}
   .wam-bub{max-width:88%}
+  /* НЕ `width:100%`: пузырь шириной по содержимому, а содержимое — этот же плеер.
+     Процент разрешался в ширину схлопнувшегося родителя, и плеер выходил 42 px
+     (замерено на 375 px). Нужна определённая ширина — 240 px в пузырь влезают. */
+  .wam-audio{width:240px;max-width:100%}
   /* Галочку из правила 44 px тоже исключаем: ей это дало бы полосу в палец высотой. */
   .wam-filters input:not([type=checkbox]),.wam-send textarea{font-size:16px;min-height:44px}
   .wam-chk{min-height:44px}

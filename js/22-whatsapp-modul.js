@@ -54,13 +54,20 @@ let waModRtOk=false;       // канал подписан
 let waModRtSeen=false;     // и ХОТЬ ОДНО событие по нему реально пришло
 let waModRtDraw=null;      // отложенная перерисовка на пачку событий
 let waModLastSync=0;       // когда последний раз спрашивали базу
+/* «Человек смотрит конец переписки». Нужен из-за картинок: они грузятся ПОСЛЕ отрисовки
+   и растягивают ленту уже после того, как мы прокрутили её вниз, — и чат оставался
+   где-то наверху. Поймано на стенде. Флаг ведёт сама прокрутка, а по загрузке каждой
+   картинки мы доезжаем до низа ещё раз, но только если человек не ушёл читать выше. */
+let waModStick=true;
 /* ЧЕРНОВИК ОТВЕТА ЖИВЁТ ПО НОМЕРАМ, а не в самом поле. Опрос перерисовывает
    переписку раз в 25 секунд и стёр бы набранное; а один черновик на всех уехал бы
    ЧУЖОМУ человеку при переключении диалога — это хуже потери текста. */
 let waModDrafts={};
 
 // поля перечислены по именам: `raw` в переписке — тяжёлый jsonb на каждое сообщение
-const WA_MSG_COLS='id,phone,phone_norm,direction,body_text,message_type,created_at,status,ai_status,ai_intent,ai_note';
+/* `media_url` — ССЫЛКА, а не сам файл, поэтому её брать можно. Колонку `raw` (целый
+   ответ Kelesu в jsonb на каждое сообщение) по-прежнему НЕ берём. */
+const WA_MSG_COLS='id,phone,phone_norm,direction,body_text,message_type,media_url,created_at,status,ai_status,ai_intent,ai_note';
 
 const WA_INTENT_RU={
   status:'где посылка',track:'трек-номер',when:'когда доставят',sum:'сколько платить',
@@ -389,6 +396,38 @@ async function waModBackfill(btn){
   }
 }
 
+/* ---------- ВЛОЖЕНИЯ ----------
+
+   Фото показываем картинкой, голосовые и видео — плеером браузера. До этого в переписке
+   стояло «[image]» и «[audio]», то есть менеджер видел, что файл есть, и не мог его
+   посмотреть — приходилось открывать WhatsApp.
+
+   ССЫЛКА МОЖЕТ НЕ ОТКРЫТЬСЯ: `media_url` даёт Kelesu, и это чужой адрес — он может быть
+   с ограничением по времени или по доступу. Поэтому у картинки есть запасной путь: не
+   загрузилась — на её месте появляется обычная ссылка (вешаем обработчик в waModBind, а
+   не инлайном). У плеера запасного пути нет — браузер сам покажет, что не воспроизводит,
+   и рядом стоит ссылка на файл. */
+const WA_MEDIA_RU={image:'фото',audio:'голосовое',voice:'голосовое',video:'видео',
+  document:'документ',sticker:'стикер',location:'геометка',contacts:'контакт'};
+
+function waModMedia(m){
+  const t=String(m.message_type||'').toLowerCase();
+  if(!t||t==='text')return '';
+  const url=String(m.media_url||'');
+  const name=WA_MEDIA_RU[t]||t;
+  if(!url)return `<div class="wam-att none">[${esc(name)} — файла нет]</div>`;
+  if(t==='image'||t==='sticker')
+    return `<a class="wam-att" href="${esc(url)}" target="_blank" rel="noopener"
+      ><img class="wam-img" src="${esc(url)}" alt="${esc(name)}" loading="lazy" data-waimg="${esc(url)}"></a>`;
+  if(t==='audio'||t==='voice')
+    return `<div class="wam-att"><audio class="wam-audio" controls preload="none" src="${esc(url)}"></audio>
+      <a class="wam-dl" href="${esc(url)}" target="_blank" rel="noopener">скачать</a></div>`;
+  if(t==='video')
+    return `<div class="wam-att"><video class="wam-video" controls preload="none" src="${esc(url)}"></video>
+      <a class="wam-dl" href="${esc(url)}" target="_blank" rel="noopener">скачать</a></div>`;
+  return `<div class="wam-att"><a href="${esc(url)}" target="_blank" rel="noopener">📎 ${esc(name)}</a></div>`;
+}
+
 /* ---------- разметка ---------- */
 
 function waModBubbles(){
@@ -404,11 +443,15 @@ function waModBubbles(){
     // Ответ робота отличаем от ответа человека: робот ставит себе ai_status='robot',
     // а kelesu-send (менеджер) не ставит ничего.
     const byRobot=out&&m.ai_status==='robot';
-    const body=m.body_text||(m.message_type&&m.message_type!=='text'?'['+m.message_type+']':'—');
+    const att=waModMedia(m);
+    // У вложения подпись бывает пустой — тогда и строку с текстом не рисуем вовсе,
+    // иначе под фото висел бы прочерк.
+    const body=m.body_text||(att?'':'—');
     return sep+`<div class="wam-row ${out?'out':'in'}">
       <div class="wam-bub ${out?'out':'in'}${byRobot?' bot':''}">
         ${byRobot?'<div class="wam-who">🤖 робот</div>':''}
-        <div class="wam-txt">${esc(body)}</div>
+        ${att}
+        ${body?`<div class="wam-txt">${esc(body)}</div>`:''}
         <div class="wam-meta">${esc(t.time||'')}${out&&m.status?' · '+esc(m.status):''}</div>
       </div>
     </div>`;
@@ -422,7 +465,6 @@ function waModChatHtml(){
   const head=`<div class="wam-chead">
     <button class="btn sm ghost wam-back" id="waModBack">← к списку</button>
     <div class="wam-ctitle">${esc(phoneDisplay('7'+waModPhone))}</div>
-    <a class="btn sm ghost" target="_blank" rel="noopener" href="https://wa.me/7${esc(waModPhone)}">Открыть в WhatsApp</a>
   </div>`;
   let foot;
   if(!canSend){
@@ -516,7 +558,7 @@ function waModHistHtml(){
 /* ВКЛАДКИ НАСТРОЕК РИСУЕТ renderWaSettings из js/21, а своей копии панелей здесь нет:
    автоответ и рассылка связаны одной загрузкой шаблонов и одним набором состояний, и две
    копии разошлись бы на первой же правке — как разошлись бы пять копий шапки модуля. */
-const waModSettingsSub=()=>waModSub==='autoreply'||waModSub==='broadcast';
+const waModSettingsSub=()=>waModSub==='autoreply';
 
 /* Режим обновления виден человеку. «Не подтягивает свежие» иначе невозможно отличить от
    «сообщений и не было», и выяснять это приходится по базе — так и вышло 05.11.2026. */
@@ -557,7 +599,7 @@ function waModRedraw(){
   const sFocus=!!(sIn&&document.activeElement===sIn);
   // «Внизу» с запасом в 40 px: при точном сравнении достаточно пары пикселей отката,
   // чтобы новые сообщения перестали подкручиваться сами.
-  const atBottom=sc?(sc.scrollTop+sc.clientHeight>=sc.scrollHeight-40):true;
+  const atBottom=sc?(sc.scrollTop+sc.clientHeight>=sc.scrollHeight-40):waModStick;
   const keepTop=sc?sc.scrollTop:0;
   box.innerHTML=waModBodyHtml();
   waModBind();
@@ -565,6 +607,7 @@ function waModRedraw(){
   if(ta2&&taFocus){ta2.focus();try{ta2.setSelectionRange(ta2.value.length,ta2.value.length);}catch(_e){}}
   const s2=$('waModSearch');
   if(s2&&sFocus){s2.focus();try{s2.setSelectionRange(s2.value.length,s2.value.length);}catch(_e){}}
+  waModStick=atBottom;
   const sc2=$('waModScroll');
   if(sc2)sc2.scrollTop=atBottom?sc2.scrollHeight:keepTop;
   waModSyncLabel();
@@ -590,13 +633,27 @@ function waModBodyHtml(){
 
 function waModBind(){
   const main=$('main');if(!main)return;
+  // Картинка не загрузилась (ссылка Kelesu протухла или закрыта) — показываем ссылку
+  // вместо битого значка: так видно, что файл есть, и его можно открыть руками.
+  main.querySelectorAll('[data-waimg]').forEach(img=>{
+    img.onload=()=>{const sc=$('waModScroll');if(sc&&waModStick)sc.scrollTop=sc.scrollHeight;};
+    img.onerror=()=>{
+      const a=img.parentElement;
+      if(!a)return;
+      a.classList.add('dead');
+      a.textContent='📎 файл не открылся — нажмите, чтобы попробовать';
+    };
+  });
+
   main.querySelectorAll('[data-wadlg]').forEach(el=>el.onclick=async()=>{
     const norm=el.dataset.wadlg;
     if(!norm)return;
-    waModPhone=norm;waModChat=null;waModRedraw();
+    waModPhone=norm;waModChat=null;waModStick=true;waModRedraw();
     await waModChatLoad(norm);waModRedraw();
   });
-  const back=$('waModBack');if(back)back.onclick=()=>{waModPhone='';waModChat=null;waModRedraw();};
+  const back=$('waModBack');if(back)back.onclick=()=>{waModPhone='';waModChat=null;waModStick=true;waModRedraw();};
+  const scb=$('waModScroll');
+  if(scb)scb.onscroll=()=>{waModStick=scb.scrollTop+scb.clientHeight>=scb.scrollHeight-40;};
   const s=$('waModSearch');
   if(s)s.oninput=()=>{
     waModSearch=s.value;
@@ -632,8 +689,10 @@ function renderWhatsapp(){
      правом «Справочники»; теперь это модуль WhatsApp, и логично спрашивать его же.
      Просмотр переписки при этом остаётся у всех, кому выдан модуль. */
   const canCfg=(typeof isAdmin==='function'&&isAdmin())||can('whatsapp','edit');
+  // «Рассылка» вернулась в «Настройки» по просьбе владельца 05.11.2026 — её настраивают
+  // один раз, а сидят здесь каждый день. Автоответ остался: он про эти же диалоги.
   const subs=[['dialogs','Диалоги'],['history','История робота']]
-    .concat(canCfg?[['autoreply','Автоответ'],['broadcast','Рассылка']]:[]);
+    .concat(canCfg?[['autoreply','Автоответ']]:[]);
   // Право могли отобрать, пока человек стоял на вкладке настроек — иначе он смотрел бы
   // закрытый раздел до перезагрузки (та же механика, что у вкладки Барахолки в Статистике).
   if(!subs.some(x=>x[0]===waModSub))waModSub='dialogs';
@@ -662,7 +721,7 @@ function renderWhatsapp(){
   };
   if(waModSettingsSub()){
     // Своего содержимого у этих вкладок нет — его кладёт renderWaSettings в наш контейнер.
-    renderWaSettings('waModBox',waModSub==='autoreply'?'ai':'rest');
+    renderWaSettings('waModBox','ai');
     waModStopPoll();
     return;
   }
