@@ -27,7 +27,9 @@
 const WA_MOD_PAGE   = 300;    // сообщений за один запрос списка диалогов
 const WA_MOD_CHAT   = 200;    // сообщений в открытом диалоге
 const WA_MOD_HIST   = 200;    // строк в истории робота
-const WA_MOD_POLL_MS= 25000;  // опрос, пока модуль открыт
+const WA_MOD_TICK_MS= 10000;  // как часто тикает таймер (сам запрос — реже, см. ниже)
+const WA_MOD_SYNC_MS= 20000;  // сверка с базой, когда Realtime молчит
+const WA_MOD_SYNC_RT= 60000;  // и когда он работает: тогда это страховка, а не доставка
 const WA_WINDOW_H   = 24;     // окно Meta для свободного текста
 
 let waModSub='dialogs';   // dialogs | history | autoreply | broadcast
@@ -44,6 +46,11 @@ let waModHistFilter='';   // '' | answered | flagged | failed
 let waModStats=null;
 let waModTimer=null;
 let waModSending=false;
+let waModRtCh=null;        // канал Realtime по переписке
+let waModRtOk=false;       // канал подписан
+let waModRtSeen=false;     // и ХОТЬ ОДНО событие по нему реально пришло
+let waModRtDraw=null;      // отложенная перерисовка на пачку событий
+let waModLastSync=0;       // когда последний раз спрашивали базу
 /* ЧЕРНОВИК ОТВЕТА ЖИВЁТ ПО НОМЕРАМ, а не в самом поле. Опрос перерисовывает
    переписку раз в 25 секунд и стёр бы набранное; а один черновик на всех уехал бы
    ЧУЖОМУ человеку при переключении диалога — это хуже потери текста. */
@@ -129,24 +136,97 @@ function waModTableErr(e){
   return 'Не удалось прочитать переписку: '+s;
 }
 
+/* ---------- Realtime ---------- */
+
+/* СООБЩЕНИЯ ПРИХОДЯТ СОБЫТИЕМ, А НЕ ОПРОСОМ. Канал свой (`wa-live`) и живёт ТОЛЬКО пока
+   модуль открыт: в общий `jyldam-live` эту таблицу класть нельзя — тогда каждое сообщение
+   клиента летело бы во все открытые вкладки компании, включая склад и курьеров, а платим
+   мы за каждое такое сообщение Realtime.
+
+   У `.subscribe()` ОБЯЗАТЕЛЬНО колбэк статуса — без него приложение не знает, работает
+   канал или отвалился, и единственной честной страховкой осталась бы постоянная
+   перекачка. Этим мы уже обожглись на заказах (раздел «Фоновый опрос»).
+
+   ПОДПИСКА МОЖЕТ СКАЗАТЬ «SUBSCRIBED» И НЕ ПРИВЕЗТИ НИЧЕГО — если таблица не добавлена в
+   публикацию (`db/59`). Поэтому «в реальном времени» показываем не по статусу канала, а
+   только после того, как ХОТЬ ОДНО событие реально пришло (`waModRtSeen`). */
+function waModRtStart(){
+  if(waModRtCh||typeof sb?.channel!=='function')return;
+  try{
+    waModRtCh=sb.channel('wa-live')
+      .on('postgres_changes',{event:'*',schema:'public',table:'kelesu_messages'},p=>{
+        waModRtSeen=true;
+        waModApplyRow(p&&p.new);
+      })
+      .subscribe(st=>{waModRtOk=(st==='SUBSCRIBED');});
+  }catch(e){waModRtCh=null;waModRtOk=false;}
+}
+
+function waModRtStop(){
+  if(waModRtDraw){clearTimeout(waModRtDraw);waModRtDraw=null;}
+  if(!waModRtCh)return;
+  try{sb.removeChannel(waModRtCh);}catch(e){}
+  waModRtCh=null;waModRtOk=false;
+}
+
+/* Кладём пришедшую строку в память и перерисовываем. Берём ТОЛЬКО нужные поля: в событии
+   приезжает вся строка вместе с `raw` (ответ Kelesu в jsonb), и за долгую смену сотни
+   таких накопились бы в памяти вкладки зря. */
+function waModApplyRow(row){
+  if(!row||!row.id)return;
+  const m={};
+  WA_MSG_COLS.split(',').forEach(k=>{m[k]=row[k];});
+  const put=(arr,desc)=>{
+    if(!arr)return;
+    const i=arr.findIndex(x=>String(x.id)===String(m.id));
+    if(i>=0){Object.assign(arr[i],m);return;}
+    if(desc)arr.unshift(m); else arr.push(m);
+  };
+  put(waModRows,true);                                   // список — свежие сверху
+  if(waModPhone&&String(m.phone_norm||'')===waModPhone)
+    put(waModChat,false);                                // переписка — свежие снизу
+  // Пачку событий (клиент шлёт реплики подряд) рисуем одним разом.
+  if(waModRtDraw)return;
+  waModRtDraw=setTimeout(()=>{waModRtDraw=null;if(S.tab==='whatsapp'&&!waModSettingsSub())waModRedraw();},300);
+}
+
 /* ---------- опрос ---------- */
 
-/* Опрос живёт ТОЛЬКО пока модуль открыт и вкладка на экране. Таймер снимается из
-   самого render() — как плавающие панели пагинации: иначе он продолжал бы ходить в
-   базу с других разделов и из свёрнутого окна. */
-function waModStopPoll(){ if(waModTimer){clearInterval(waModTimer);waModTimer=null;} }
+/* СВЕРКА С БАЗОЙ — СТРАХОВКА, А НЕ ДОСТАВКА. Realtime историю не досылает: за время
+   обрыва или сна ноутбука события теряются безвозвратно, и догнать их можно только
+   запросом. Пока события идут — спрашиваем раз в минуту, когда молчат — раз в 20 секунд.
+
+   ⚠️ ТАЙМЕР НЕ ПЕРЕЗАПУСКАЕТСЯ НА КАЖДОЙ ПЕРЕРИСОВКЕ, и это не мелочь. Первая версия
+   снимала и заводила его заново из render(), а render() зовёт КАЖДОЕ событие Realtime по
+   заказам (`scheduleRtRender`, задержка 400 мс). В рабочей CRM события идут постоянно —
+   робот Казпочты, автоответ, KET, — поэтому отсчёт сбрасывался раньше, чем успевал
+   дойти до конца, и свежие сообщения не подтягивались ВООБЩЕ. Снаружи это выглядело как
+   «модуль не обновляется». Теперь таймер один на сеанс работы с модулем: завести его
+   повторно нельзя, а снимается он только при УХОДЕ из модуля. */
+function waModStopPoll(){
+  if(waModTimer){clearInterval(waModTimer);waModTimer=null;}
+}
 
 function waModStartPoll(){
-  waModStopPoll();
-  waModTimer=setInterval(async()=>{
-    if(S.tab!=='whatsapp'||document.hidden)return;
-    if(waModSending)return;              // не дёргаем экран, пока уходит сообщение
-    if(waModSettingsSub())return;        // там нечего обновлять, а перерисовка сбила бы набранное
-    if(waModSub==='history'){await waModHistLoad();waModRedraw();return;}
-    await waModLoad();
-    if(waModPhone)await waModChatLoad(waModPhone);
-    waModRedraw();
-  },WA_MOD_POLL_MS);
+  if(waModTimer)return;                  // уже идёт — перезаводить нельзя
+  waModTimer=setInterval(waModTick,WA_MOD_TICK_MS);
+}
+
+async function waModTick(){
+  if(S.tab!=='whatsapp'||document.hidden)return;
+  if(waModSending)return;                // не дёргаем экран, пока уходит сообщение
+  if(waModSettingsSub())return;          // там нечего обновлять, а перерисовка сбила бы набранное
+  const need=waModRtSeen?WA_MOD_SYNC_RT:WA_MOD_SYNC_MS;
+  if(Date.now()-waModLastSync<need)return;
+  await waModSync();
+}
+
+async function waModSync(){
+  waModLastSync=Date.now();
+  if(waModSub==='history'){await waModHistLoad();waModRedraw();return;}
+  await waModLoad();
+  if(waModPhone)await waModChatLoad(waModPhone);
+  waModRedraw();
 }
 
 /* ---------- диалоги ---------- */
@@ -367,6 +447,20 @@ function waModHistHtml(){
    копии разошлись бы на первой же правке — как разошлись бы пять копий шапки модуля. */
 const waModSettingsSub=()=>waModSub==='autoreply'||waModSub==='broadcast';
 
+/* Режим обновления виден человеку. «Не подтягивает свежие» иначе невозможно отличить от
+   «сообщений и не было», и выяснять это приходится по базе — так и вышло 05.11.2026. */
+function waModSyncText(){
+  const t=waModLastSync?new Date(waModLastSync):null;
+  const hh=t?String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0'):'—';
+  if(waModRtSeen)return '⚡ в реальном времени · сверка '+hh;
+  if(waModRtOk)return 'жду событий · сверка раз в 20 с, последняя '+hh;
+  return 'обновление раз в 20 с · последнее '+hh;
+}
+
+function waModSyncLabel(){
+  const el=$('waModSync');if(el)el.textContent=waModSyncText();
+}
+
 function waModRedraw(){
   // Эти вкладки рисует чужая функция и перерисовывает себя сама: наш redraw затёр бы их
   // содержимое пустотой (waModBodyHtml про них ничего не знает).
@@ -387,6 +481,7 @@ function waModRedraw(){
   if(s2&&sFocus){s2.focus();try{s2.setSelectionRange(s2.value.length,s2.value.length);}catch(_e){}}
   const sc2=$('waModScroll');
   if(sc2)sc2.scrollTop=atBottom?sc2.scrollHeight:keepTop;
+  waModSyncLabel();
 }
 
 function waModScrollDown(){
@@ -458,7 +553,7 @@ function renderWhatsapp(){
   if(!subs.some(x=>x[0]===waModSub))waModSub='dialogs';
   $('main').innerHTML=`
     <div class="page-head"><div><h1>WhatsApp</h1><p>Переписка с получателями и то, что ответил робот</p></div>
-      <div class="head-actions"><button class="btn ghost" id="waModReload">⟳ Обновить</button></div>
+      <div class="head-actions"><span class="hint" id="waModSync" style="margin-right:10px">${esc(waModSyncText())}</span><button class="btn ghost" id="waModReload">⟳ Обновить</button></div>
     </div>
     <div class="filters" style="margin-bottom:14px">
       ${subs.map(([k,l])=>`<button class="btn ghost${waModSub===k?' active':''}" data-wasub="${k}">${esc(l)}</button>`).join('')}
@@ -474,9 +569,7 @@ function renderWhatsapp(){
   if(r)r.onclick=async()=>{
     r.disabled=true;
     try{
-      if(waModSub==='history')await waModHistLoad();
-      else{await waModLoad();if(waModPhone)await waModChatLoad(waModPhone);}
-      waModRedraw();
+      await waModSync();
     }finally{r.disabled=false;}
   };
   if(waModSettingsSub()){
@@ -490,7 +583,8 @@ function renderWhatsapp(){
 
   // Первая загрузка — лениво и только по заходу в модуль: переписка большая, и в общей
   // загрузке при входе ей делать нечего (курьеру и складу она не нужна вовсе).
-  if(waModSub==='dialogs'&&waModRows===null)waModLoad().then(waModRedraw).catch(()=>{});
-  if(waModSub==='history'&&waModHist===null)waModHistLoad().then(waModRedraw).catch(()=>{});
+  if(waModSub==='dialogs'&&waModRows===null)waModLoad().then(()=>{waModLastSync=Date.now();waModRedraw();}).catch(()=>{});
+  if(waModSub==='history'&&waModHist===null)waModHistLoad().then(()=>{waModLastSync=Date.now();waModRedraw();}).catch(()=>{});
+  waModRtStart();
   waModStartPoll();
 }
