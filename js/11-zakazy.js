@@ -923,7 +923,9 @@ function renderOrders(mode){
     const skipped=all.length-list.length;
     // отправка одного заказа → {ok, why, retry}
     const sendOne=async(o)=>{
-      if(!o.phone||o.phone.length<10)return {ok:false,why:'нет телефона клиента'};
+      // по ЦИФРАМ, а не по длине строки — см. ketPhoneProblem в js/02-ket.js
+      const phProblem=ketPhoneProblem(o.phone);
+      if(phProblem)return {ok:false,why:phProblem,retry:false};
       try{
         const payload=orderToKet(o);
         // Аккаунт = пара uid+secret = МЕНЕДЖЕР, под которым заказ появится у KET.
