@@ -1310,7 +1310,11 @@ async function loadPhoneChat(phone,boxId){
   const norm=normPhone(phone);
   if(!norm){box.innerHTML='<div class="hint">Нет телефона для поиска переписки</div>';return;}
   try{
-    const {data,error}=await sb.from('kelesu_messages').select('*').eq('phone_norm',norm).order('created_at',{ascending:true}).limit(200);
+    // Поля ПО ИМЕНАМ, а не '*': в kelesu_messages есть колонка `raw` — целый ответ
+    // Kelesu в jsonb на каждое сообщение, и двести таких тянулись сюда зря.
+    const {data,error}=await sb.from('kelesu_messages')
+      .select('id,direction,body_text,message_type,created_at,status,ai_status')
+      .eq('phone_norm',norm).order('created_at',{ascending:true}).limit(200);
     if(error)throw error;
     const box2=$(boxId);if(!box2)return; // модалка могла уже закрыться, пока грузили
     if(!data||!data.length){box2.innerHTML='<div class="hint">Переписки пока нет</div>';return;}

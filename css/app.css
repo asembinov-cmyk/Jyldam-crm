@@ -1915,3 +1915,67 @@ td .ft-dot{margin:0 0 0 8px}
 /* подпись в меню «Действие»: почему там сейчас одна рассылка (раздел 12) */
 .act-menu .act-note{display:block;padding:6px 10px;font-size:11px;line-height:1.4;color:var(--muted);
   border-top:1px solid var(--line);max-width:240px}
+
+/* ================= МОДУЛЬ WHATSAPP =================
+   Две колонки: список номеров и сама переписка. На телефоне колонки НЕ делят экран —
+   показывается что-то одно: список, а по нажатию переписка с кнопкой «к списку».
+   Делить 375 px на две колонки нельзя, в каждой осталось бы по полтора слова. */
+.wam-wrap{display:flex;gap:0;min-height:520px}
+.wam-side{width:320px;flex:0 0 320px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.wam-filters{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.wam-chk{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);cursor:pointer}
+/* `.field` в этой CRM — ОБЁРТКА (стилизует `.field input`), а не класс самого поля,
+   поэтому свои поля описываем по образцу `.filters input`. */
+.wam-filters input,.wam-send textarea{font:inherit;font-size:13px;padding:8px 11px;
+  border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);width:100%}
+.wam-filters input:focus,.wam-send textarea:focus{outline:none;border-color:var(--ink)}
+.wam-list{overflow-y:auto;max-height:620px}
+.wam-item{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.wam-item:hover{background:rgba(0,0,0,.03)}
+.wam-item.on{background:rgba(180,83,9,.08);box-shadow:inset 3px 0 0 var(--rust)}
+.wam-i-top{display:flex;align-items:baseline;gap:8px}
+.wam-i-ph{font-weight:600;font-size:13px}
+.wam-i-time{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.wam-i-prev{font-size:12px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wam-i-you{color:var(--rust)}
+.wam-i-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.wam-tag{font-size:10px;padding:2px 7px;border-radius:999px;background:rgba(0,0,0,.06);color:var(--muted)}
+.wam-tag.warn{background:rgba(180,83,9,.14);color:#b45309;font-weight:600}
+.wam-tag.mute{background:transparent;color:var(--muted);padding-left:0}
+.wam-chat{flex:1;display:flex;flex-direction:column;min-width:0}
+.wam-chead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.wam-ctitle{font-weight:600;font-size:14px;margin-right:auto}
+.wam-back{display:none}
+.wam-scroll{flex:1;overflow-y:auto;max-height:520px;padding:14px;background:rgba(0,0,0,.02)}
+.wam-day{text-align:center;font-size:11px;color:var(--muted);margin:10px 0 8px}
+.wam-row{display:flex;margin-bottom:7px}
+.wam-row.out{justify-content:flex-end}
+.wam-bub{max-width:76%;padding:8px 12px;border-radius:12px;border:1px solid var(--line);font-size:13px}
+.wam-bub.in{background:#fff;border-bottom-left-radius:4px}
+.wam-bub.out{background:#dcf8c6;border-bottom-right-radius:4px}
+.wam-bub.bot{background:#e8f0fe}
+.wam-who{font-size:10px;color:var(--muted);margin-bottom:2px}
+.wam-txt{white-space:pre-wrap;word-break:break-word}
+.wam-meta{font-size:10px;color:var(--muted);margin-top:3px;text-align:right}
+.wam-foot{padding:12px 14px;border-top:1px solid var(--line)}
+.wam-send{display:flex;gap:8px;align-items:flex-end}
+.wam-send textarea{flex:1;resize:vertical;min-height:44px}
+.wam-stats{display:flex;align-items:baseline;gap:22px;padding:14px 20px 4px;flex-wrap:wrap}
+.wam-st{display:flex;flex-direction:column}
+.wam-st b{font-size:22px;line-height:1.1}
+.wam-st span{font-size:11px;color:var(--muted)}
+.wam-st-note{font-size:11px;color:var(--muted);margin-left:auto}
+@media (max-width:760px),(pointer:coarse){
+  .wam-wrap{flex-direction:column;min-height:0}
+  .wam-side{width:auto;flex:none;border-right:0;border-bottom:1px solid var(--line)}
+  .wam-list{max-height:none}
+  /* Показывается что-то ОДНО: пока диалог не открыт — только список, открыли —
+     только переписка. Иначе заглушка «Выберите диалог» занимала на телефоне
+     лишние 147 px под списком (замерено). */
+  .wam-wrap:not(.chat) .wam-chat{display:none}
+  .wam-wrap.chat .wam-side{display:none}
+  .wam-wrap.chat .wam-back{display:inline-flex}
+  .wam-scroll{max-height:none;min-height:50vh}
+  .wam-bub{max-width:88%}
+  .wam-filters input,.wam-send textarea{font-size:16px;min-height:44px}
+}

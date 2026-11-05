@@ -848,6 +848,9 @@ function render(){
   // сворачивать нельзя — перерисовка там случается от фото и от Realtime, и панель
   // закрывалась бы под руками. Стоит ДО цепочки if/else ниже, чтобы её не разорвать.
   if(S.tab==='sorting'&&_lastTab!=='sorting'&&typeof sortPrintOpen!=='undefined')sortPrintOpen=false;
+  // Опрос переписки живёт только пока модуль WhatsApp открыт — снимаем его при любой
+  // смене раздела, как плавающие панели пагинации выше.
+  if(typeof waModStopPoll==='function')waModStopPoll();
   if(S.tab==='dashboard'){
     // Таблицы по дням при входе всегда свёрнуты: они длинные, и из-за них не видно
     // карточек наверху. Раскрывает их человек сам, и только на время этого захода.
@@ -872,5 +875,6 @@ function render(){
   else if(S.tab==='finance')renderFinance();
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
+  else if(S.tab==='whatsapp')renderWhatsapp();
   _lastTab=S.tab;
 }
