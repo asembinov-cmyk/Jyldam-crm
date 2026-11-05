@@ -555,7 +555,8 @@ function nfWhExcel(){
 let nfWaRows=null;      // null — ещё не грузили, [] — грузили и пусто
 let nfWaCfg=null;       // состояние робота из wa_ai_settings
 let nfWaErr='';         // текст беды, если таблицы или колонок ещё нет
-const NF_WA_LIMIT=50;
+const NF_WA_LIMIT=50;      // людей на экране
+const NF_WA_FETCH=400;     // строк из базы: у одного человека их бывает десяток
 
 async function nfWaLoad(){
   nfWaErr='';
@@ -563,7 +564,7 @@ async function nfWaLoad(){
     const {data,error}=await sb.from('kelesu_messages')
       .select('id,phone_norm,body_text,created_at,ai_intent,ai_note')
       .eq('direction','inbound').eq('ai_status','flagged')
-      .order('created_at',{ascending:false}).limit(NF_WA_LIMIT);
+      .order('created_at',{ascending:false}).limit(NF_WA_FETCH);
     if(error)throw error;
     nfWaRows=data||[];
   }catch(e){
@@ -580,6 +581,24 @@ async function nfWaLoad(){
   }catch(e){nfWaCfg=null;}
 }
 
+/* ОДИН ЧЕЛОВЕК — ОДНА СТРОКА. Робот метит ВСЮ пачку сообщений человека (иначе
+   непрочитанные реплики достались бы ему вторым ответом), поэтому один
+   раздражённый клиент даёт в таблице одиннадцать строк с одним номером, а
+   «Решено» убирало бы их по одной. Группируем по номеру: вопрос показываем по
+   САМОЙ СВЕЖЕЙ реплике — список отсортирован по убыванию даты, значит первая
+   встреченная и есть последняя по времени. */
+function nfWaGroups(){
+  const by=new Map();
+  (nfWaRows||[]).forEach(m=>{
+    // У сообщения без номера своя строка: сцеплять такие между собой нельзя.
+    const key=String(m.phone_norm||'')||('id:'+m.id);
+    let g=by.get(key);
+    if(!g){g={ph:String(m.phone_norm||''),ids:[],last:m};by.set(key,g);}
+    g.ids.push(String(m.id));
+  });
+  return [...by.values()].slice(0,NF_WA_LIMIT);
+}
+
 function nfWaStateText(){
   if(!nfWaCfg)return 'состояние неизвестно — нет таблицы настроек (db/58, блок 2)';
   if(!nfWaCfg.enabled)return 'робот выключен — клиентам ничего не уходит';
@@ -591,18 +610,20 @@ function nfWaHtml(){
   if(nfWaRows===null)return '<div class="hint" style="margin:0 20px 14px">Загружаем…</div>';
   if(nfWaErr)return `<div class="hint" style="margin:0 20px 14px;color:var(--rust)">${esc(nfWaErr)}</div>`;
   const head=`<div class="hint" style="margin:0 20px 12px;color:var(--muted)">${esc(nfWaStateText())}<br>Включение и остановка — <b>Настройки → Оповещения WhatsApp</b>.</div>`;
-  if(!nfWaRows.length)return head+'<div class="empty" style="padding:28px"><div class="big">Пусто</div>Все вопросы клиентов разобраны.</div>';
-  return head+nfWaRows.map(m=>{
-    const ph=String(m.phone_norm||'');
+  const groups=nfWaGroups();
+  if(!groups.length)return head+'<div class="empty" style="padding:28px"><div class="big">Пусто</div>Все вопросы клиентов разобраны.</div>';
+  return head+groups.map(g=>{
+    const m=g.last,ph=g.ph;
     const t=(fmtLogTime(m.created_at)||{});
+    const more=g.ids.length>1?` · реплик в разговоре: ${g.ids.length}`:'';
     return `<div class="nf-issue">
       <div class="nf-i-ico">💬</div>
       <div class="nf-i-body">
         <div class="nf-i-title">${esc(m.body_text||'—')}</div>
-        <div class="nf-i-desc">${esc(phoneDisplay('7'+ph))} · ${esc((t.date||'')+' '+(t.time||''))}${m.ai_note?' · '+esc(m.ai_note):''}</div>
+        <div class="nf-i-desc">${esc(phoneDisplay('7'+ph))} · ${esc((t.date||'')+' '+(t.time||''))}${more}${m.ai_note?' · '+esc(m.ai_note):''}</div>
       </div>
       ${ph?`<a class="btn sm primary" target="_blank" rel="noopener" href="https://wa.me/7${esc(ph)}">Ответить</a>`:''}
-      <button class="btn sm ghost" data-wadone="${esc(m.id)}">✓ Решено</button>
+      <button class="btn sm ghost" data-wadone="${esc(g.ids.join(','))}">✓ Решено</button>
     </div>`;
   }).join('');
 }
@@ -635,7 +656,7 @@ function renderNotify(){
     ${isStaff()?`
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-head"><h2>💬 Вопросы клиентов без ответа</h2>
-        <span class="count">${nfWaRows?nfWaRows.length:''}</span>
+        <span class="count">${nfWaRows?nfWaGroups().length:''}</span>
       </div>
       <div id="nfWaBox">${nfWaHtml()}</div>
     </div>`:''}
@@ -696,14 +717,17 @@ function renderNotify(){
   // с остальными панелями раздела.
   if(isStaff()&&nfWaRows===null)nfWaLoad().then(nfWaRedraw).catch(()=>{});
   $('main').querySelectorAll('[data-wadone]').forEach(b=>b.onclick=async()=>{
-    const id=b.dataset.wadone;
+    // Разбирают РАЗГОВОР, а не одну реплику: снимаем все сообщения человека,
+    // иначе его номер остался бы в списке ещё десять раз.
+    const ids=String(b.dataset.wadone||'').split(',').filter(Boolean);
+    if(!ids.length)return;
     b.disabled=true;
     try{
       // Метим разобранным мимо dbUpdate: это служебная отметка, и в истории
       // изменений ей делать нечего — там утонули бы правки заказов.
-      const {error}=await sb.from('kelesu_messages').update({ai_status:'done'}).eq('id',id);
+      const {error}=await sb.from('kelesu_messages').update({ai_status:'done'}).in('id',ids);
       if(error)throw error;
-      nfWaRows=(nfWaRows||[]).filter(m=>String(m.id)!==String(id));
+      nfWaRows=(nfWaRows||[]).filter(m=>!ids.includes(String(m.id)));
       nfWaRedraw();
     }catch(e){b.disabled=false;toast('Не удалось отметить: '+String(e&&e.message||e));}
   });
