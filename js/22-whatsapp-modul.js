@@ -407,15 +407,19 @@ async function waModBackfill(btn){
    загрузилась — на её месте появляется обычная ссылка (вешаем обработчик в waModBind, а
    не инлайном). У плеера запасного пути нет — браузер сам покажет, что не воспроизводит,
    и рядом стоит ссылка на файл. */
+/* ТИПЫ ПЕРЕЧИСЛЕНЫ СПИСКОМ, а не «всё, что не текст». У сообщений бывает тип `template`
+   (наш шаблон рассылки), `interactive`, `button` — файла там нет и не было, а первая
+   версия честно писала под каждым «[template — файла нет]». Незнакомый тип считаем
+   обычным сообщением: лишняя подпись хуже её отсутствия. */
 const WA_MEDIA_RU={image:'фото',audio:'голосовое',voice:'голосовое',video:'видео',
-  document:'документ',sticker:'стикер',location:'геометка',contacts:'контакт'};
+  document:'документ',sticker:'стикер'};
 
 function waModMedia(m){
   const t=String(m.message_type||'').toLowerCase();
-  if(!t||t==='text')return '';
+  const name=WA_MEDIA_RU[t];
+  if(!name)return '';
   const url=String(m.media_url||'');
-  const name=WA_MEDIA_RU[t]||t;
-  if(!url)return `<div class="wam-att none">[${esc(name)} — файла нет]</div>`;
+  if(!url)return `<div class="wam-att none">[${esc(name)} — файл не передан]</div>`;
   if(t==='image'||t==='sticker')
     return `<a class="wam-att" href="${esc(url)}" target="_blank" rel="noopener"
       ><img class="wam-img" src="${esc(url)}" alt="${esc(name)}" loading="lazy" data-waimg="${esc(url)}"></a>`;
