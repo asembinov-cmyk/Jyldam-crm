@@ -31,6 +31,9 @@ const WA_MOD_TICK_MS= 10000;  // как часто тикает таймер (с
 const WA_MOD_SYNC_MS= 20000;  // сверка с базой, когда Realtime молчит
 const WA_MOD_SYNC_RT= 60000;  // и когда он работает: тогда это страховка, а не доставка
 const WA_WINDOW_H   = 24;     // окно Meta для свободного текста
+const WA_BACK_DAYS  = 7;      // за какой срок берём номера для добора
+const WA_BACK_GAP   = 300;    // пауза между номерами, мс
+const WA_BACK_MAX   = 400;    // сколько номеров спрашиваем за один добор
 
 let waModSub='dialogs';   // dialogs | history | autoreply | broadcast
 let waModRows=null;       // последние сообщения — из них собираются диалоги
@@ -318,6 +321,74 @@ async function waModSend(){
   }
 }
 
+/* ---------- ДОБОР ПРОПУЩЕННОЙ ПЕРЕПИСКИ ----------
+
+   Нужен, когда вебхук Kelesu молчал. Так уже было 05.11.2026: Kelesu отключил нашу
+   подписку сам («ваш сервер не отвечал, 10 ошибок подряд» — он падал на событии
+   `message.sent`), и за 17 часов в базу не легло ни одного входящего. Вебхук историю
+   задним числом не досылает — догнать можно только запросом по каждому номеру.
+
+   СПРАШИВАЕМ ПО НОМЕРАМ, КОТОРЫЕ УЖЕ ЗНАЕМ, и это главное ограничение: `kelesu-sync-history`
+   принимает телефон, а списка «кто писал за это время» у нас нет — он и есть то, что
+   потерялось. Поэтому берём всех, с кем переписывались за последние дни. Клиент,
+   написавший ВПЕРВЫЕ во время простоя, так не найдётся: его сообщение лежит только у
+   Kelesu и появится, когда он напишет снова. Об этом сказано прямо в итоге, а не
+   умолчано — иначе «добрали» читалось бы как «вернули всё». */
+
+async function waModCount(){
+  try{
+    const {count,error}=await sb.from('kelesu_messages').select('id',{count:'exact',head:true});
+    if(error)throw error;
+    return typeof count==='number'?count:null;
+  }catch(e){return null;}
+}
+
+async function waModBackfill(btn){
+  const label=btn?btn.textContent:'';
+  if(!confirm('Добрать переписку у Kelesu?\n\nСпросим по каждому номеру, с кем переписывались за последние '
+    +WA_BACK_DAYS+' дней, и дольём то, чего нет в базе. Займёт пару минут, вкладку закрывать нельзя.'))return;
+  if(btn){btn.disabled=true;}
+  try{
+    // 1. кого спрашивать
+    const since=new Date(Date.now()-WA_BACK_DAYS*86400000).toISOString();
+    const {data,error}=await sb.from('kelesu_messages').select('phone_norm')
+      .gte('created_at',since).limit(5000);
+    if(error)throw error;
+    const all=[...new Set((data||[]).map(r=>String(r.phone_norm||'')).filter(Boolean))];
+    const phones=all.slice(0,WA_BACK_MAX);
+    if(!phones.length){alert('Не нашлось ни одного номера за последние '+WA_BACK_DAYS+' дней — добирать нечего.');return;}
+
+    // 2. сколько было — по нему и считаем, что прибавилось
+    const before=await waModCount();
+
+    let done=0,failed=0;
+    for(let i=0;i<phones.length;i++){
+      if(S.tab!=='whatsapp')break;        // ушли из модуля — не держим цикл
+      if(btn)btn.textContent='Добираю '+(i+1)+' из '+phones.length+'…';
+      try{
+        const r=await callKelesuSyncHistory({phone:phones[i]});
+        if(r&&r.error)failed++; else done++;
+      }catch(e){failed++;}
+      if(i<phones.length-1)await new Promise(r=>setTimeout(r,WA_BACK_GAP));
+    }
+
+    const after=await waModCount();
+    const added=(before!=null&&after!=null)?Math.max(0,after-before):null;
+    await waModSync();
+
+    alert('Добор закончен.\n\n'
+      +'Опрошено номеров: '+done+(failed?' · не ответили: '+failed:'')
+      +(all.length>phones.length?'\nПоказаны первые '+WA_BACK_MAX+' из '+all.length+' — повторите, чтобы добрать остальные.':'')
+      +'\nНовых сообщений в базе: '+(added==null?'не смогли посчитать':added)
+      +'\n\nКлиенты, написавшие ВПЕРВЫЕ за время простоя, так не находятся: их номеров у нас нет. '
+      +'Их сообщения останутся в Kelesu и придут сами, когда человек напишет снова.');
+  }catch(e){
+    alert('Добор не удался: '+String(e&&e.message||e));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=label||'⟲ Добрать переписку';}
+  }
+}
+
 /* ---------- разметка ---------- */
 
 function waModBubbles(){
@@ -568,7 +639,7 @@ function renderWhatsapp(){
   if(!subs.some(x=>x[0]===waModSub))waModSub='dialogs';
   $('main').innerHTML=`
     <div class="page-head"><div><h1>WhatsApp</h1><p>Переписка с получателями и то, что ответил робот</p></div>
-      <div class="head-actions"><span class="hint" id="waModSync" style="margin-right:10px">${esc(waModSyncText())}</span><button class="btn ghost" id="waModReload">⟳ Обновить</button></div>
+      <div class="head-actions"><span class="hint" id="waModSync" style="margin-right:10px">${esc(waModSyncText())}</span>${waModSub==='dialogs'&&canCfg?'<button class="btn ghost" id="waModBack24" style="margin-right:8px">⟲ Добрать переписку</button>':''}<button class="btn ghost" id="waModReload">⟳ Обновить</button></div>
     </div>
     <div class="filters" style="margin-bottom:14px">
       ${subs.map(([k,l])=>`<button class="btn ghost${waModSub===k?' active':''}" data-wasub="${k}">${esc(l)}</button>`).join('')}
@@ -580,6 +651,8 @@ function renderWhatsapp(){
     renderWhatsapp();
     if(waModSub==='history'&&waModHist===null){await waModHistLoad();waModRedraw();}
   });
+  const bf=$('waModBack24');
+  if(bf)bf.onclick=()=>waModBackfill(bf);
   const r=$('waModReload');
   if(r)r.onclick=async()=>{
     r.disabled=true;
