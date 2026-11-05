@@ -910,11 +910,22 @@ function waAiRender(){
   };
 }
 
-async function renderWaSettings(){
-  const box=$('dirContent');if(!box)return;
-  box.innerHTML='<div id="waAiBox"></div><div id="waRest"><div class="loading" style="padding:40px">Загружаем шаблоны…</div></div>';
-  waAiRender();                                    // сразу, по тому что уже знаем
-  waAiLoad().then(waAiRender).catch(()=>{});       // и освежаем, не задерживая остальное
+/* Рисует настройки WhatsApp в ЛЮБОЙ контейнер и ЛЮБОЙ частью: с 05.11.2026 автоответ и
+   рассылка живут вкладками модуля «WhatsApp», а не в «Настройках». Разделять функцию на
+   две было бы хуже: панели связаны одной загрузкой шаблонов и одним набором состояний,
+   и две копии разошлись бы на первой же правке.
+     boxId — куда рисовать (по умолчанию «Настройки»)
+     only  — 'ai' только автоответ, 'rest' только рассылка, пусто — всё вместе */
+async function renderWaSettings(boxId,only){
+  const box=$(boxId||'dirContent');if(!box)return;
+  const wantAi=only!=='rest', wantRest=only!=='ai';
+  box.innerHTML=(wantAi?'<div id="waAiBox"></div>':'')
+    +(wantRest?'<div id="waRest"><div class="loading" style="padding:40px">Загружаем шаблоны…</div></div>':'');
+  if(wantAi){
+    waAiRender();                                  // сразу, по тому что уже знаем
+    waAiLoad().then(waAiRender).catch(()=>{});     // и освежаем, не задерживая остальное
+  }
+  if(!wantRest)return;
   const cfg=await waCfgLoad(true);
   const rest=$('waRest');if(!rest)return;          // ушли с вкладки, пока грузили
   if(cfg===null){

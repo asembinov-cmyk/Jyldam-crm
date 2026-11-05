@@ -30,7 +30,7 @@ const WA_MOD_HIST   = 200;    // строк в истории робота
 const WA_MOD_POLL_MS= 25000;  // опрос, пока модуль открыт
 const WA_WINDOW_H   = 24;     // окно Meta для свободного текста
 
-let waModSub='dialogs';   // dialogs | history
+let waModSub='dialogs';   // dialogs | history | autoreply | broadcast
 let waModRows=null;       // последние сообщения — из них собираются диалоги
 let waModErr='';
 let waModPhone='';        // открытый диалог (phone_norm)
@@ -141,6 +141,7 @@ function waModStartPoll(){
   waModTimer=setInterval(async()=>{
     if(S.tab!=='whatsapp'||document.hidden)return;
     if(waModSending)return;              // не дёргаем экран, пока уходит сообщение
+    if(waModSettingsSub())return;        // там нечего обновлять, а перерисовка сбила бы набранное
     if(waModSub==='history'){await waModHistLoad();waModRedraw();return;}
     await waModLoad();
     if(waModPhone)await waModChatLoad(waModPhone);
@@ -361,7 +362,15 @@ function waModHistHtml(){
 /* ПЕРЕРИСОВКА НЕ ДОЛЖНА МЕШАТЬ РАБОТЕ. Опрос зовёт её каждые 25 секунд, и без этих
    трёх мелочей менеджер терял бы фокус посреди слова, а переписка прыгала бы вниз
    ровно тогда, когда он отлистал наверх и читает начало разговора. */
+/* ВКЛАДКИ НАСТРОЕК РИСУЕТ renderWaSettings из js/21, а своей копии панелей здесь нет:
+   автоответ и рассылка связаны одной загрузкой шаблонов и одним набором состояний, и две
+   копии разошлись бы на первой же правке — как разошлись бы пять копий шапки модуля. */
+const waModSettingsSub=()=>waModSub==='autoreply'||waModSub==='broadcast';
+
 function waModRedraw(){
+  // Эти вкладки рисует чужая функция и перерисовывает себя сама: наш redraw затёр бы их
+  // содержимое пустотой (waModBodyHtml про них ничего не знает).
+  if(waModSettingsSub())return;
   const box=$('waModBox');if(!box)return;
   const ta=$('waModText'), sIn=$('waModSearch'), sc=$('waModScroll');
   const taFocus=!!(ta&&document.activeElement===ta);
@@ -438,7 +447,15 @@ function renderWhatsapp(){
     $('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div>Право выдаётся в «Сотрудники» → «Роли и права», столбец «WhatsApp».</div>';
     return;
   }
-  const subs=[['dialogs','Диалоги'],['history','История робота']];
+  /* Настройки — только тем, кто вправе их менять. Раньше они жили в «Настройках» под
+     правом «Справочники»; теперь это модуль WhatsApp, и логично спрашивать его же.
+     Просмотр переписки при этом остаётся у всех, кому выдан модуль. */
+  const canCfg=(typeof isAdmin==='function'&&isAdmin())||can('whatsapp','edit');
+  const subs=[['dialogs','Диалоги'],['history','История робота']]
+    .concat(canCfg?[['autoreply','Автоответ'],['broadcast','Рассылка']]:[]);
+  // Право могли отобрать, пока человек стоял на вкладке настроек — иначе он смотрел бы
+  // закрытый раздел до перезагрузки (та же механика, что у вкладки Барахолки в Статистике).
+  if(!subs.some(x=>x[0]===waModSub))waModSub='dialogs';
   $('main').innerHTML=`
     <div class="page-head"><div><h1>WhatsApp</h1><p>Переписка с получателями и то, что ответил робот</p></div>
       <div class="head-actions"><button class="btn ghost" id="waModReload">⟳ Обновить</button></div>
@@ -446,7 +463,7 @@ function renderWhatsapp(){
     <div class="filters" style="margin-bottom:14px">
       ${subs.map(([k,l])=>`<button class="btn ghost${waModSub===k?' active':''}" data-wasub="${k}">${esc(l)}</button>`).join('')}
     </div>
-    <div class="panel"><div id="waModBox">${waModBodyHtml()}</div></div>`;
+    ${waModSettingsSub()?'<div id="waModBox"></div>':`<div class="panel"><div id="waModBox">${waModBodyHtml()}</div></div>`}`;
 
   $('main').querySelectorAll('[data-wasub]').forEach(b=>b.onclick=async()=>{
     waModSub=b.dataset.wasub;
@@ -462,6 +479,12 @@ function renderWhatsapp(){
       waModRedraw();
     }finally{r.disabled=false;}
   };
+  if(waModSettingsSub()){
+    // Своего содержимого у этих вкладок нет — его кладёт renderWaSettings в наш контейнер.
+    renderWaSettings('waModBox',waModSub==='autoreply'?'ai':'rest');
+    waModStopPoll();
+    return;
+  }
   waModBind();
   waModScrollDown();
 
