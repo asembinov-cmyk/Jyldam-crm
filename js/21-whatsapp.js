@@ -910,6 +910,268 @@ function waAiRender(){
   };
 }
 
+/* ═══════════ СКРИПТЫ РОБОТА: «пишут такие слова — отвечай так» ═══════════
+   Просьба владельца 06.11.2026: «в автоответе сделай шаблон к роботу — если пишут
+   такие вот слова, отвечай вот так, скрипты я сам пропишу».
+
+   Правила лежат в `wa_ai_rules` (db/61) и проверяются ПЕРЕД встроенным разбором.
+   Текст пишет владелец, код только выполняет.
+
+   ⚠️ СОВПАДЕНИЕ СЧИТАЕТСЯ ДВАЖДЫ — здесь и в functions/wa-autoreply. Второй копии
+   быть не хотелось, но робот работает без открытой вкладки, а проверка фразы нужна
+   в браузере: иначе владелец узнавал бы об ошибке в скрипте по ответам клиентам.
+   Правила совпадения ровно два, они ниже — МЕНЯЕТЕ ЗДЕСЬ, ПОМЕНЯЙТЕ И ТАМ. */
+
+/* Слово ищется С НАЧАЛА СЛОВА: «оплат» ловит «оплата» и «оплатить», но не «неоплата».
+   Так же устроен встроенный разбор, и для человека это предсказуемее, чем поиск
+   подстроки где угодно («ок» иначе совпадал бы с «документ»). */
+function waRuleWords(kw){
+  return String(kw||'').split(/[,;\n]+/).map(w=>w.trim().toLowerCase()).filter(Boolean);
+}
+function waRuleNorm(t){
+  return ' '+String(t||'').toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu,' ').replace(/\s+/g,' ').trim()+' ';
+}
+function waRuleHit(rule,text){
+  const t=waRuleNorm(text);
+  return waRuleWords(rule&&rule.keywords).find(w=>t.includes(' '+w))||'';
+}
+
+/* КОПИЯ списка «только человеку» из functions/wa-autoreply. Нужна не для отбора —
+   отбирает функция, — а чтобы в редакторе было видно: это правило на претензию,
+   и по умолчанию оно не сработает. */
+const WA_STOP_WORDS=['почему','зачем','неге','қайтар','болдырмау','шағым','ауыстыр',
+  'отмен','верн','возврат','жалоб','претенз','обман','сломан','брак','поменя','измен',
+  'перенес','счет','счёт','реквизит','договор','накладн','акт','суд'];
+function waStopHit(text){
+  const t=waRuleNorm(text);
+  return WA_STOP_WORDS.find(w=>t.includes(' '+w))||'';
+}
+
+/* Поля заказа, которые можно подставить в ответ. Имён БОЛЬШЕ НЕ ДОБАВЛЯТЬ в одном
+   месте: список продублирован в функции, и забытое имя уйдёт клиенту как «{имя}».
+   `{имя}` получателя здесь намеренно нет — пишет нам не обязательно он сам
+   (родственник, курьер магазина), и обращение к чужому человеку по имени хуже. */
+const WA_RULE_VARS=[['{номер}','номер заказа'],['{трек}','трек Казпочты'],
+  ['{статус}','статус у Казпочты'],['{отделение}','отделение выдачи'],
+  ['{хранение}','сколько дней хранится'],['{дата}','дата доставки'],
+  ['{сумма}','сумма к оплате'],['{адрес}','адрес'],['{индекс}','индекс']];
+function waRuleVarsIn(text){
+  return WA_RULE_VARS.map(v=>v[0]).filter(v=>String(text||'').includes(v));
+}
+
+let waRules=null, waRulesErr='', waRulesSql=false;
+
+async function waRulesLoad(){
+  waRulesErr='';waRulesSql=false;
+  try{
+    const {data,error}=await sb.from('wa_ai_rules')
+      .select('id,enabled,sort,title,keywords,reply_ru,reply_kz,over_stop')
+      .order('sort',{ascending:true}).limit(200);
+    if(error)throw error;
+    waRules=data||[];
+  }catch(e){
+    waRules=[];
+    waRulesSql=/wa_ai_rules|does not exist|42P01/i.test(String((e&&(e.message||e.code))||e));
+    waRulesErr=waRulesSql?'Таблицы скриптов ещё нет — выполните db/61, блок 1. Пока её нет, робот отвечает встроенным скриптом.'
+      :String((e&&e.message)||e);
+  }
+}
+
+function waRuleModal(r){
+  const isNew=!r;
+  const d=r||{enabled:true,sort:(waRules||[]).length?Math.max(...waRules.map(x=>x.sort||0))+10:10,
+    title:'',keywords:'',reply_ru:'',reply_kz:'',over_stop:false};
+  const vars=WA_RULE_VARS.map(v=>`<code class="wa-var">${esc(v[0])}</code> — ${esc(v[1])}`).join(' · ');
+  showModal(isNew?'Новое правило робота':'Правило робота',`
+    <div class="field"><label>О чём правило (видно только своим)</label>
+      <input id="wrTitle" value="${esc(d.title||'')}" placeholder="Например: спрашивают график работы"></div>
+    <div class="field"><label>Слова клиента — через запятую или с новой строки *</label>
+      <textarea id="wrKw" rows="3" placeholder="режим, график, во сколько работаете, жұмыс">${esc(d.keywords||'')}</textarea>
+      <div class="hint">Слово ищется с начала слова: «оплат» поймает «оплата» и «оплатить», но не «неоплата». Регистр и знаки препинания не важны.<br>
+        <b>Фраза ищется целиком, слово в слово:</b> «во сколько работаете» НЕ поймает «во сколько вы работаете».
+        Поэтому надёжнее одно-два слова («график», «режим», «работаете»), чем целая фраза. Проверьте внизу страницы.</div></div>
+    <div class="field"><label>Ответ по-русски *</label>
+      <textarea id="wrRu" rows="4" placeholder="Мы работаем с 9:00 до 18:00, без выходных.">${esc(d.reply_ru||'')}</textarea></div>
+    <div class="field"><label>Ответ по-казахски</label>
+      <textarea id="wrKz" rows="4" placeholder="Пусто — казахоязычному клиенту ответим по-русски">${esc(d.reply_kz||'')}</textarea></div>
+    <div class="hint" style="margin:-4px 0 12px">Можно подставить поля заказа: ${vars}.<br>
+      Если у заказа такого поля нет — робот НЕ отвечает вовсе и отдаёт вопрос человеку: ответ с пустотой хуже молчания.
+      Текст без подстановок уходит и тогда, когда заказ по телефону не нашёлся.</div>
+    <div class="field"><label>Порядок</label><input id="wrSort" type="number" value="${esc(String(d.sort||10))}">
+      <div class="hint">Правила проверяются по возрастанию, побеждает первое совпавшее.</div></div>
+    <label class="wa-chk"><input type="checkbox" id="wrOn"${d.enabled?' checked':''}> правило включено</label>
+    <label class="wa-chk"><input type="checkbox" id="wrStop"${d.over_stop?' checked':''}> отвечать, даже если в сообщении есть слова для человека</label>
+    <div class="hint" style="color:var(--rust)">Без этой галочки сообщение со словами «почему», «возврат», «жалоба», «счёт», «суд» и подобными уходит человеку, даже если правило совпало. Это претензии, и автоответ на них дороже молчания.</div>
+  `,async()=>{
+    const kw=val('wrKw').trim(), ru=val('wrRu').trim();
+    if(!kw){toast('Без слов клиента правило не сработает');return false;}
+    if(!ru){toast('Нужен хотя бы русский ответ');return false;}
+    const row={enabled:$('wrOn').checked,sort:Number(val('wrSort'))||10,title:val('wrTitle').trim(),
+      keywords:kw,reply_ru:ru,reply_kz:val('wrKz').trim()||null,over_stop:$('wrStop').checked,
+      updated_at:new Date().toISOString()};
+    try{
+      if(isNew){const {error}=await sb.from('wa_ai_rules').insert(row);if(error)throw error;}
+      else{const {error}=await sb.from('wa_ai_rules').update(row).eq('id',r.id);if(error)throw error;}
+      await waRulesLoad();waRulesRender();
+      toast(isNew?'Правило добавлено':'Правило сохранено');
+    }catch(e){toast(dbErrText(e));return false;}
+  },{mid:true});
+}
+
+/* ПРОВЕРКА ФРАЗЫ — не украшение. Скрипты пишет человек, а ошибка в слове меняет то,
+   что увидят тысячи клиентов; увидеть это иначе можно только по их ответам. */
+function waRuleTestRun(){
+  const box=$('waRuleTestOut');if(!box)return;
+  const t=val('waRuleTestIn').trim();
+  if(!t){box.innerHTML='';return;}
+  const stop=waStopHit(t);
+  const list=(waRules||[]).filter(r=>r.enabled).slice().sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id);
+  let hitRule=null,hitWord='';
+  for(const r of list){const w=waRuleHit(r,t);if(w){hitRule=r;hitWord=w;break;}}
+  if(!hitRule){
+    box.innerHTML=`<div class="hint">Ни одно правило не совпало — вопрос уйдёт встроенному скрипту робота${stop?` (а в сообщении есть слово «${esc(stop)}» — он отдаст его человеку)`:''}.</div>
+      <div class="hint">Ждали совпадения? Фраза в правиле ищется целиком, слово в слово: «во сколько работаете» не поймает «во сколько вы работаете». Разбейте её на отдельные слова.</div>`;
+    return;
+  }
+  if(stop&&!hitRule.over_stop){
+    box.innerHTML=`<div class="hint" style="color:var(--rust)">Правило «${esc(hitRule.title||hitWord)}» совпало по слову «${esc(hitWord)}», но в сообщении есть «${esc(stop)}» — робот промолчит и отдаст вопрос человеку.<br>Чтобы он всё-таки отвечал, включите в правиле галочку «отвечать, даже если есть слова для человека».</div>`;
+    return;
+  }
+  const vars=waRuleVarsIn(hitRule.reply_ru);
+  box.innerHTML=`<div class="hint" style="color:#16a34a">Сработает правило «${esc(hitRule.title||'без названия')}» по слову «${esc(hitWord)}».</div>
+    <div class="wa-test-txt">${esc(hitRule.reply_ru)}</div>
+    ${vars.length?`<div class="hint">Подставятся поля: ${vars.map(v=>esc(v)).join(', ')}. Если у заказа их нет — робот промолчит и отдаст вопрос человеку.</div>`:''}
+    ${hitRule.reply_kz?'<div class="hint">Казахоязычному клиенту уйдёт казахский вариант.</div>'
+      :'<div class="hint">Казахского варианта нет — казахоязычному клиенту уйдёт этот же русский текст.</div>'}`;
+}
+
+function waRulesRender(){
+  const box=$('waRulesBox');if(!box)return;
+  const canEdit=(typeof isAdmin==='function'&&isAdmin())||can('whatsapp','edit');
+  if(waRules===null){box.innerHTML='<div class="panel" style="margin-bottom:18px"><div class="panel-head"><h2>📜 Скрипты робота</h2></div><div class="hint" style="margin:0 20px 14px">Загружаем…</div></div>';return;}
+  const rows=waRules.length?waRules.map(r=>{
+    const kw=waRuleWords(r.keywords);
+    return `<tr${r.enabled?'':' style="opacity:.5"'}>
+      <td data-label="Правило"><b>${esc(r.title||'без названия')}</b>${r.enabled?'':' <span class="wam-tag">выключено</span>'}${r.over_stop?' <span class="wam-tag warn">отвечает на претензии</span>':''}</td>
+      <td data-label="Слова">${kw.slice(0,6).map(w=>`<code class="wa-var">${esc(w)}</code>`).join(' ')}${kw.length>6?' и ещё '+(kw.length-6):''}</td>
+      <td data-label="Ответ">${esc(String(r.reply_ru||'').slice(0,90))}${String(r.reply_ru||'').length>90?'…':''}${r.reply_kz?'':' <span class="hint" style="display:inline">(только по-русски)</span>'}</td>
+      <td data-label="Порядок">${esc(String(r.sort||0))}</td>
+      ${canEdit?`<td data-label=""><button class="btn sm ghost" data-wre="${r.id}">Изменить</button>
+        <button class="btn sm ghost" data-wrd="${r.id}">Удалить</button></td>`:''}
+    </tr>`;
+  }).join(''):`<tr><td colspan="${canEdit?5:4}" class="hint">Правил пока нет — робот отвечает встроенным скриптом (где посылка, трек, когда доставят, сколько платить, где забрать, спасибо).</td></tr>`;
+  box.innerHTML=`<div class="panel" style="margin-bottom:18px">
+    <div class="panel-head"><h2>📜 Скрипты робота</h2><span class="count">${waRules.length}</span>
+      ${canEdit&&!waRulesSql?'<button class="btn sm primary" id="waRuleAdd" style="margin-left:auto">＋ Правило</button>':''}</div>
+    <div class="hint" style="margin:0 20px 10px">Пишут такие слова — робот отвечает так. Проверяются ПЕРЕД встроенным скриптом, по порядку; побеждает первое совпавшее.</div>
+    ${waRulesErr?`<div class="hint" style="margin:0 20px 12px;color:var(--rust)">${esc(waRulesErr)}</div>`:''}
+    <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Правило</th><th>Слова клиента</th><th>Ответ</th><th>Порядок</th>${canEdit?'<th></th>':''}
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="wa-test">
+      <label>🔎 Проверить фразу — что ответит робот</label>
+      <div style="display:flex;gap:8px"><input id="waRuleTestIn" placeholder="Например: во сколько вы работаете">
+        <button class="btn sm ghost" id="waRuleTestBtn">Проверить</button></div>
+      <div id="waRuleTestOut"></div>
+    </div>
+  </div>`;
+  const add=$('waRuleAdd');if(add)add.onclick=()=>waRuleModal(null);
+  box.querySelectorAll('[data-wre]').forEach(b=>b.onclick=()=>{
+    const r=(waRules||[]).find(x=>String(x.id)===b.dataset.wre);if(r)waRuleModal(r);
+  });
+  box.querySelectorAll('[data-wrd]').forEach(b=>b.onclick=async()=>{
+    const r=(waRules||[]).find(x=>String(x.id)===b.dataset.wrd);if(!r)return;
+    if(!confirm(`Удалить правило «${r.title||'без названия'}»?\n\nРобот перестанет отвечать на эти слова по скрипту.`))return;
+    try{
+      const {error}=await sb.from('wa_ai_rules').delete().eq('id',r.id);
+      if(error)throw error;
+      await waRulesLoad();waRulesRender();toast('Правило удалено');
+    }catch(e){toast(dbErrText(e));}
+  });
+  const tb=$('waRuleTestBtn');if(tb)tb.onclick=waRuleTestRun;
+  const ti=$('waRuleTestIn');if(ti)ti.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();waRuleTestRun();}};
+}
+
+/* ═══════════ БЫСТРЫЕ ОТВЕТЫ менеджера ═══════════
+   Кнопки над полем ответа в диалоге. Они НИЧЕГО НЕ ОТПРАВЛЯЮТ — только подставляют
+   текст в поле, дальше его правит и отправляет человек. */
+
+let waQr=null, waQrErr='';
+
+async function waQrLoad(){
+  waQrErr='';
+  try{
+    const {data,error}=await sb.from('wa_quick_replies').select('id,enabled,sort,label,body')
+      .order('sort',{ascending:true}).limit(100);
+    if(error)throw error;
+    waQr=data||[];
+  }catch(e){
+    waQr=[];
+    waQrErr=/wa_quick_replies|does not exist|42P01/i.test(String((e&&(e.message||e.code))||e))
+      ? 'Таблицы быстрых ответов ещё нет — выполните db/61, блок 2.'
+      : String((e&&e.message)||e);
+  }
+}
+
+function waQrModal(q){
+  const isNew=!q;
+  const d=q||{enabled:true,sort:(waQr||[]).length?Math.max(...waQr.map(x=>x.sort||0))+10:10,label:'',body:''};
+  showModal(isNew?'Новая кнопка быстрого ответа':'Быстрый ответ',`
+    <div class="field"><label>Подпись на кнопке *</label>
+      <input id="wqLabel" value="${esc(d.label||'')}" placeholder="Посылка в пути"></div>
+    <div class="field"><label>Текст, который подставится в поле *</label>
+      <textarea id="wqBody" rows="4" placeholder="Ваша посылка в пути. Как только она придёт в отделение, мы напишем.">${esc(d.body||'')}</textarea>
+      <div class="hint">Кнопка только подставляет текст — отправку по-прежнему нажимает менеджер, и перед отправкой текст можно поправить.</div></div>
+    <div class="field"><label>Порядок</label><input id="wqSort" type="number" value="${esc(String(d.sort||10))}"></div>
+    <label class="wa-chk"><input type="checkbox" id="wqOn"${d.enabled?' checked':''}> показывать кнопку</label>
+  `,async()=>{
+    const label=val('wqLabel').trim(), body=val('wqBody').trim();
+    if(!label||!body){toast('Нужны и подпись, и текст');return false;}
+    const row={enabled:$('wqOn').checked,sort:Number(val('wqSort'))||10,label,body,
+      updated_at:new Date().toISOString()};
+    try{
+      if(isNew){const {error}=await sb.from('wa_quick_replies').insert(row);if(error)throw error;}
+      else{const {error}=await sb.from('wa_quick_replies').update(row).eq('id',q.id);if(error)throw error;}
+      await waQrLoad();waQrRender();toast('Сохранено');
+    }catch(e){toast(dbErrText(e));return false;}
+  },{mid:true});
+}
+
+function waQrRender(){
+  const box=$('waQrBox');if(!box)return;
+  const canEdit=(typeof isAdmin==='function'&&isAdmin())||can('whatsapp','edit');
+  if(waQr===null){box.innerHTML='';return;}
+  const rows=waQr.length?waQr.map(q=>`<tr${q.enabled?'':' style="opacity:.5"'}>
+      <td data-label="Кнопка"><b>${esc(q.label||'')}</b>${q.enabled?'':' <span class="wam-tag">скрыта</span>'}</td>
+      <td data-label="Текст">${esc(String(q.body||'').slice(0,110))}${String(q.body||'').length>110?'…':''}</td>
+      <td data-label="Порядок">${esc(String(q.sort||0))}</td>
+      ${canEdit?`<td data-label=""><button class="btn sm ghost" data-wqe="${q.id}">Изменить</button>
+        <button class="btn sm ghost" data-wqd="${q.id}">Удалить</button></td>`:''}
+    </tr>`).join(''):`<tr><td colspan="${canEdit?4:3}" class="hint">Кнопок нет — менеджер печатает ответ руками.</td></tr>`;
+  box.innerHTML=`<div class="panel" style="margin-bottom:18px">
+    <div class="panel-head"><h2>⚡ Быстрые ответы</h2><span class="count">${waQr.length}</span>
+      ${canEdit&&!waQrErr?'<button class="btn sm primary" id="waQrAdd" style="margin-left:auto">＋ Кнопка</button>':''}</div>
+    <div class="hint" style="margin:0 20px 10px">Кнопки над полем ответа в диалоге. Нажал — текст подставился в поле; отправку нажимает человек.</div>
+    ${waQrErr?`<div class="hint" style="margin:0 20px 12px;color:var(--rust)">${esc(waQrErr)}</div>`:''}
+    <div class="table-scroll"><table class="resp-table"><thead><tr>
+      <th>Кнопка</th><th>Текст</th><th>Порядок</th>${canEdit?'<th></th>':''}
+    </tr></thead><tbody>${rows}</tbody></table></div>
+  </div>`;
+  const add=$('waQrAdd');if(add)add.onclick=()=>waQrModal(null);
+  box.querySelectorAll('[data-wqe]').forEach(b=>b.onclick=()=>{
+    const q=(waQr||[]).find(x=>String(x.id)===b.dataset.wqe);if(q)waQrModal(q);
+  });
+  box.querySelectorAll('[data-wqd]').forEach(b=>b.onclick=async()=>{
+    const q=(waQr||[]).find(x=>String(x.id)===b.dataset.wqd);if(!q)return;
+    if(!confirm(`Удалить кнопку «${q.label}»?`))return;
+    try{
+      const {error}=await sb.from('wa_quick_replies').delete().eq('id',q.id);
+      if(error)throw error;
+      await waQrLoad();waQrRender();toast('Удалено');
+    }catch(e){toast(dbErrText(e));}
+  });
+}
+
 /* Рисует настройки WhatsApp в ЛЮБОЙ контейнер и ЛЮБОЙ частью: с 05.11.2026 автоответ и
    рассылка живут вкладками модуля «WhatsApp», а не в «Настройках». Разделять функцию на
    две было бы хуже: панели связаны одной загрузкой шаблонов и одним набором состояний,
@@ -919,11 +1181,16 @@ function waAiRender(){
 async function renderWaSettings(boxId,only){
   const box=$(boxId||'dirContent');if(!box)return;
   const wantAi=only!=='rest', wantRest=only!=='ai';
-  box.innerHTML=(wantAi?'<div id="waAiBox"></div>':'')
+  box.innerHTML=(wantAi?'<div id="waAiBox"></div><div id="waRulesBox"></div><div id="waQrBox"></div>':'')
     +(wantRest?'<div id="waRest"><div class="loading" style="padding:40px">Загружаем шаблоны…</div></div>':'');
   if(wantAi){
     waAiRender();                                  // сразу, по тому что уже знаем
     waAiLoad().then(waAiRender).catch(()=>{});     // и освежаем, не задерживая остальное
+    // Скрипты и быстрые ответы — своими контейнерами, чтобы переключатель робота мог
+    // перерисовываться сам (waAiSet → waAiLoad → waAiRender) и не стирать их.
+    waRulesRender();waQrRender();
+    waRulesLoad().then(waRulesRender).catch(()=>{});
+    waQrLoad().then(waQrRender).catch(()=>{});
   }
   if(!wantRest)return;
   const cfg=await waCfgLoad(true);

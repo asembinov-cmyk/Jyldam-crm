@@ -1979,8 +1979,112 @@ td .ft-dot{margin:0 0 0 8px}
 .wam-st b{font-size:22px;line-height:1.1}
 .wam-st span{font-size:11px;color:var(--muted)}
 .wam-st-note{font-size:11px;color:var(--muted);margin-left:auto}
+/* ── редакторы скриптов робота и быстрых ответов ── */
+.wa-var{font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:5px;
+  background:rgba(0,0,0,.06)}
+.wa-chk{display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 10px;cursor:pointer}
+.wa-chk input{width:16px;height:16px;margin:0;flex:0 0 auto}
+.wa-test{margin:4px 20px 18px;padding:12px 14px;border-radius:11px;background:rgba(0,0,0,.03)}
+.wa-test label{display:block;font-size:12px;font-weight:600;margin-bottom:7px}
+.wa-test input{flex:1;font:inherit;font-size:13px;padding:8px 11px;border-radius:9px;
+  border:1px solid var(--line);background:#fff}
+.wa-test input:focus{outline:none;border-color:var(--ink)}
+.wa-test-txt{margin-top:7px;padding:9px 12px;border-radius:9px;background:#fff;
+  border:1px solid var(--line);font-size:13px;white-space:pre-wrap}
+
+/* ── модуль WhatsApp: три колонки, чипы, карточка заказа (06.11.2026) ── */
+.wam-tabs{align-items:center}
+.wam-nums{display:flex;align-items:baseline;gap:18px;margin-left:auto;flex-wrap:wrap}
+.wam-num{font-size:11px;color:var(--muted);white-space:nowrap}
+.wam-num b{font-size:17px;font-weight:700;margin-right:3px}
+.wam-chips{display:flex;gap:6px;flex-wrap:wrap}
+.wam-chip{font:inherit;font-size:11px;padding:4px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:#fff;color:var(--muted)}
+.wam-chip:hover{border-color:var(--ink)}
+.wam-chip.on{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600}
+.wam-av{flex:0 0 auto;width:34px;height:34px;border-radius:50%;display:inline-flex;
+  align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;letter-spacing:.5px}
+.wam-item{display:flex;gap:10px;align-items:flex-start}
+.wam-i-body{flex:1;min-width:0}
+.wam-tag.soon{background:rgba(220,38,38,.12);color:#dc2626;font-weight:600}
+.wam-ctitle{display:flex;flex-direction:column;line-height:1.25}
+.wam-ctitle span{font-size:11px;color:var(--muted);font-weight:400}
+.wam-pill{font-size:11px;padding:4px 11px;border-radius:999px;white-space:nowrap}
+.wam-pill.ok{background:rgba(22,163,74,.12);color:#16a34a;font-weight:600}
+.wam-pill.off{background:rgba(0,0,0,.06);color:var(--muted)}
+.wam-wait{margin:10px 0 2px;padding:9px 12px;border-radius:10px;font-size:12px;
+  background:rgba(180,83,9,.10);color:#92400e}
+.wam-quick{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.wam-qr{font:inherit;font-size:11px;padding:5px 11px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:#fff;color:var(--ink);max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wam-qr:hover{border-color:var(--ink);background:rgba(0,0,0,.03)}
+/* правая колонка */
+.wam-info{width:300px;flex:0 0 300px;border-left:1px solid var(--line);padding:14px;
+  overflow-y:auto;max-height:620px}
+.wam-i-sec{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  margin:16px 0 7px}
+.wam-i-sec:first-child{margin-top:0}
+.wam-ord{border:1px solid var(--line);border-radius:12px;padding:12px}
+.wam-ord-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wam-ord-top b{font-size:16px}
+.wam-badge{font-size:10px;padding:3px 9px;border-radius:999px;background:rgba(180,83,9,.14);
+  color:#b45309;font-weight:600}
+.wam-ord-sub{font-size:11px;color:var(--muted);margin-top:3px}
+.wam-flow{display:flex;margin:14px 0 10px}
+.wam-step{flex:1;text-align:center;position:relative;font-size:10px;color:var(--muted)}
+.wam-step i{display:block;width:11px;height:11px;border-radius:50%;margin:0 auto 5px;
+  background:#fff;border:2px solid var(--line)}
+.wam-step:not(:last-child):after{content:'';position:absolute;top:5px;left:50%;right:-50%;
+  height:2px;background:var(--line)}
+.wam-step.done i{background:#16a34a;border-color:#16a34a}
+.wam-step.done:after{background:#16a34a}
+.wam-step.now i{border-color:#b45309;background:#fff;width:13px;height:13px;margin-top:-1px}
+.wam-step.now span{color:#b45309;font-weight:700}
+.wam-track{display:flex;align-items:center;gap:8px;margin-top:10px;padding:8px 10px;
+  border-radius:9px;background:rgba(0,0,0,.04)}
+.wam-track span{font-size:10px;color:var(--muted)}
+.wam-track b{font-size:12px;margin-left:auto;font-family:ui-monospace,Menlo,monospace}
+.wam-kv{display:flex;gap:10px;align-items:baseline;font-size:12px;padding:5px 0;
+  border-bottom:1px solid var(--line)}
+.wam-kv span{color:var(--muted);flex:0 0 auto}
+.wam-kv b{margin-left:auto;text-align:right;font-weight:600;word-break:break-word}
+.wam-ord .wam-kv:last-of-type{border-bottom:0}
+.wam-open{width:100%;margin-top:10px}
+.wam-oday{font-size:10px;color:var(--muted);margin:9px 0 4px}
+.wam-oitem{display:flex;gap:8px;align-items:baseline;padding:7px 9px;border-radius:8px;
+  cursor:pointer;font-size:12px;border:1px solid transparent}
+.wam-oitem:hover{background:rgba(0,0,0,.03)}
+.wam-oitem.on{border-color:var(--rust);background:rgba(180,83,9,.07)}
+.wam-oitem span{margin-left:auto;color:var(--muted);font-size:11px;text-align:right}
+.wam-info textarea{width:100%;font:inherit;font-size:12px;padding:8px 10px;border-radius:9px;
+  border:1px solid var(--line);background:#fff;resize:vertical;box-sizing:border-box}
+.wam-info textarea:focus{outline:none;border-color:var(--ink)}
+.wam-done{width:100%;margin-top:18px}
+
 @media (max-width:760px),(pointer:coarse){
   .wam-wrap{flex-direction:column;min-height:0}
+  /* Правая колонка на телефоне идёт НАД перепиской и в сжатом виде: заказ нужен
+     сразу, а «Диалог» и заметка там только отодвигают сообщения вниз. */
+  .wam-info{width:auto;flex:none;border-left:0;border-bottom:1px solid var(--line);
+    max-height:32vh;order:-1;padding:10px 12px}
+  /* Шапка переписки на телефоне ломалась в три строки, а плашка окна уезжала за край.
+     Номер занимает строку, плашка — свою. */
+  .wam-chead{flex-wrap:wrap;gap:8px;padding:8px 12px}
+  .wam-ctitle{flex:1 1 120px;min-width:0}
+  .wam-pill{order:3;width:100%;text-align:center}
+  #waModSync{font-size:10px}
+  .wam-deskonly{display:none}
+  .wam-wrap:not(.chat) .wam-info{display:none}
+  /* Вкладки модуля — В СТРОКУ. Общее правило .filters на телефоне ставит их в
+     столбик, и три кнопки съедали около 200 px: переписка уезжала за нижний край
+     экрана (замерено на 375 px). */
+  .wam-tabs{flex-direction:row;align-items:center;flex-wrap:wrap;gap:6px;padding:10px 12px}
+  .wam-tabs .btn{flex:1 1 auto;min-width:0;width:auto}
+  .wam-nums{gap:12px;width:100%;margin:6px 0 0;font-size:10px}
+  .wam-num b{font-size:14px}
+  .wam-chip,.wam-qr{min-height:32px}
+  .wa-test input{font-size:16px;min-height:44px}
   .wam-side{width:auto;flex:none;border-right:0;border-bottom:1px solid var(--line)}
   .wam-list{max-height:none}
   /* Показывается что-то ОДНО: пока диалог не открыт — только список, открыли —
