@@ -854,6 +854,11 @@ const pickupDayKey=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
    пробелы, и другой регистр, чего eq по самому полю не поймал бы. */
 async function pickupDayTwin(name,date,selfId){
   if(!name||!date)return null;
+  /* «ФИЗ ЛИЦО АЛМАТЫ/АСТАНА» ИЗ ПРАВИЛА ИСКЛЮЧЕНЫ, и это не поблажка. Это не партнёр,
+     а корзина для разовых отправителей: у каждой такой заявки СВОЙ человек и свой адрес
+     забора (`fizlico_pickup_address`). По данным на 06.11.2026 у них по 3–9 заявок в
+     день каждый день — для них это норма, и запрет просто остановил бы работу. */
+  if(typeof isFizlicoName==='function'&&isFizlicoName(name))return null;
   try{
     const {data,error}=await sb.from('pickups')
       .select('id,name,pickup_date,orders,courier_id,status_id,partner_id,auto_created')
