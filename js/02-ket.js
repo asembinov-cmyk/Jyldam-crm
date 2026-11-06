@@ -699,6 +699,10 @@ async function loadAll(){
     dbList('orders',{order:'created_at',asc:false}),
   ]).then(([pickups,orders])=>{
     S.pickups=pickups;S.orders=orders;S._heavyLoaded=true;S._deltaSince=_syncMark;
+    /* Данные только что прочитаны целиком — отмечаем это, иначе первый же догон
+       (возврат на вкладку через пару минут) перекачал бы их заново: `_lastFullSync`
+       стартует с нуля, и без отметки условие «прошло полчаса» выполняется сразу. */
+    _lastFullSync=nowMs();
     // перерисуем текущий экран, когда тяжёлые данные пришли
     try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav({skipTabFix:true});}catch(e){}
   }).catch(e=>{console.error('heavy load',e);});
@@ -998,11 +1002,28 @@ async function rtCatchUp(reason){
     if(rtDeltaReady()){
       changed+=await rtSyncDelta();
       changed+=await rtReconcile(); // удаления дельтой не видны
+      _lastFullSync=nowMs();
     }else{
-      changed+=await rtReload('orders');
-      changed+=await rtReload('pickups');
+      /* БЕЗ `db/57` ДОГОН НЕ ИМЕЕТ ПРАВА ПЕРЕКАЧИВАТЬ ТАБЛИЦЫ КАЖДЫЙ РАЗ.
+         Поводов для догона три, и два из них частые: возвращение на вкладку (чаще
+         двух минут отсутствия) и переподключение канала. Полная перекачка — это
+         полсотни запросов и все заказы разом; человек, который ходит между CRM и
+         WhatsApp, получал её по десятку раз за смену, причём ровно в тот момент,
+         когда вернулся работать. Жалоба «сегодня всё долго грузится» (06.11.2026) —
+         про это.
+
+         Поэтому дорогой путь идёт НЕ ЧАЩЕ `RT_FULL_RESYNC_MS`, как в тике, а в
+         остальных случаях хватает сверки окна: она ловит и новые строки, и
+         удалённые, и стоит двух запросов `head:true`. Пропущенной остаётся только
+         ПРАВКА старой строки — её без `updated_at` по числу строк не увидеть, и
+         ровно для этого и нужен `db/57`. */
+      changed+=await rtReconcile();
+      if(nowMs()-_lastFullSync>RT_FULL_RESYNC_MS){
+        changed+=await rtReload('orders');
+        changed+=await rtReload('pickups');
+        _lastFullSync=nowMs();
+      }
     }
-    _lastFullSync=nowMs();
     if(changed)rtRedraw();
   }catch(e){console.error('rtCatchUp',e);}
   finally{_rtSyncing=false;rtRunPendingCatchUp();}
