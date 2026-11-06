@@ -837,6 +837,59 @@ async function pickupCitySyncOrders(p, oldCityId){
   toast(`Перенесено на склад «${nm}»: ${need.length}`,6000);
 }
 
+/* ═══════════ ОДНА ЗАЯВКА НА ПАРТНЁРА В ДЕНЬ (06.11.2026) ═══════════
+   Просьба владельца. Партнёр отгружает раз в день, и вторая заявка на тот же день —
+   это почти всегда недосмотр: заказы расходятся по двум карточкам, курьер едет
+   дважды, а в «Сортировке» и счётчиках они выглядят как разные заборы.
+
+   ПАРТНЁР ОПОЗНАЁТСЯ ПО НАЗВАНИЮ, а не по `partner_id`. Непустой `partner_id`
+   означает «заявка пришла ОТ ПАРТНЁРА через кабинет по QR» — у заявок, заведённых
+   менеджером и роботом, он пуст. Общее у всех трёх — только название, и по нему же
+   ищет дубль ежедневный робот (db/54) и стоит индекс pickups_date_name_idx. */
+const pickupDayKey=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+
+/* Спрашиваем БАЗУ, а не S.pickups: заявку мог завести другой менеджер минуту назад,
+   и Realtime донесёт это не всегда (вкладка в фоне, сеть мигнула). За день заявок
+   десятки, поэтому берём весь день и сверяем ключ на месте — так ловятся и лишние
+   пробелы, и другой регистр, чего eq по самому полю не поймал бы. */
+async function pickupDayTwin(name,date,selfId){
+  if(!name||!date)return null;
+  try{
+    const {data,error}=await sb.from('pickups')
+      .select('id,name,pickup_date,orders,courier_id,status_id,partner_id,auto_created')
+      .eq('pickup_date',date).limit(300);
+    if(error)throw error;
+    const key=pickupDayKey(name);
+    return (data||[]).find(x=>String(x.id)!==String(selfId||'')&&pickupDayKey(x.name)===key)||null;
+  }catch(e){
+    // Спросить не смогли — НЕ мешаем работать. Настоящая защита стоит в базе (db/62),
+    // а здесь задача объяснить по-человечески, пока человек ещё в карточке.
+    console.warn('pickupDayTwin',e&&e.message);
+    return null;
+  }
+}
+
+function pickupDayWhen(d){
+  if(d===localToday())return 'сегодня, '+fmtDate(d);
+  if(d===localDaysAgo(-1))return 'завтра, '+fmtDate(d);
+  if(d===localDaysAgo(1))return 'вчера, '+fmtDate(d);
+  return fmtDate(d);
+}
+
+function pickupTwinText(t){
+  const c=(S.couriers||[]).find(x=>x.id===t.courier_id);
+  const st=(S.statuses||[]).find(x=>x.id===t.status_id);
+  const bits=['заказов: '+(parseInt(t.orders||'0',10)||0)];
+  if(c&&c.fio)bits.unshift('курьер: '+c.fio);
+  if(st&&st.name)bits.push('статус: '+st.name);
+  if(t.partner_id)bits.push('создана партнёром по QR');
+  if(t.auto_created)bits.push('создана автоматом');
+  return 'Заявка на «'+(t.name||'')+'» на '+pickupDayWhen(t.pickup_date)+' уже есть.\n\n'
+    +bits.join(' · ')+'\n\n'
+    +'На одного партнёра в день создаётся одна заявка. Добавьте заказы в существующую '
+    +'или выберите другую дату.';
+}
+
 function pickupModal(id,readonly){
   const p=id?S.pickups.find(x=>x.id===id):null;
   const today=defaultPickupDate();
@@ -875,6 +928,20 @@ function pickupModal(id,readonly){
     ro?null:async()=>{
       const name=val('m_name').trim();if(!name){toast('Укажите наименование');return false;}
       if(!val('m_courier')){toast('Выберите курьера');const cf=$('m_courier');if(cf){cf.focus();cf.style.borderColor='var(--rust)';}return false;}
+      /* ОДНА ЗАЯВКА НА ПАРТНЁРА В ДЕНЬ. У СУЩЕСТВУЮЩЕЙ заявки проверяем, только если
+         имя или дату РЕАЛЬНО меняли: иначе пара дублей, которая уже накопилась в базе,
+         сделала бы обе карточки несохраняемыми — и поправить их стало бы нечем.
+         Та же осторожность, что в запрете дубля трека (db/42). */
+      const pdate=val('m_date')||null;
+      const keyChanged=!p||pickupDayKey(p.name)!==pickupDayKey(name)||(p.pickup_date||'')!==(pdate||'');
+      if(keyChanged){
+        const twin=await pickupDayTwin(name,pdate,id);
+        if(twin){
+          alert(pickupTwinText(twin));
+          const df=$('m_date');if(df)df.style.borderColor='var(--rust)';
+          return false;
+        }
+      }
       const prevStatus=p?(p.status_id||''):'';
       // статус: у новой заявки — «Новый»; у существующей — сохраняем текущий
       const newStatus=p?(p.status_id||defaultPickupStatusId()):defaultPickupStatusId();
