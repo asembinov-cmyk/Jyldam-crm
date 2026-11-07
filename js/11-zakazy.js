@@ -1,5 +1,5 @@
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',creator:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:''};
+let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',creator:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:'',ready:false};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -31,6 +31,35 @@ function isExplicitZero(v){return v!=null&&v!==''&&+v===0;}
 // «Физ лицо Астана» / «Физ лицо Алматы» — проверка по самому названию (строкой), не только по
 // объекту партнёра — пригодится там, где имя вводится текстом (например, в заявке на забор),
 // не обязательно выбрано из справочника партнёров
+/* ═══════════ «ГОТОВ К ОТПРАВКЕ»: склад принял и вес проставлен ═══════════
+   Просьба владельца 07.11.2026: «нажал — и выйдут только они, и я смело в KET скину
+   и бланки кидать». Беда была в том, что из-за пары недоделанных заказов нельзя было
+   отправить пачку целиком, а пока ждёшь — партнёры грузят новые.
+
+   «Исключить партнёров» эту задачу не решает, и владелец объяснил почему: партнёр
+   отгружает и днём, и вечером — исключив его, потеряешь и утренние, уже готовые заказы.
+   Значит отбирать надо по ГОТОВНОСТИ заказа, а не по тому, чей он.
+
+   УСЛОВИЯ РОВНО ДВА, те самые, что он назвал: склад отметил приёмку и есть вес.
+   Ни трека, ни типа доставки сюда НЕ добавлено намеренно: скрытое третье условие молча
+   убрало бы из списка заказы, которые человек ждёт увидеть. Курьерские отсеиваются и
+   так — их не взвешивают (раздел 6b), и веса у них не бывает. */
+function isOrderReadyForKet(o){
+  if(!o||!o.sorted_at)return false;
+  const w=parseFloat(o.weight);
+  return !isNaN(w)&&w>0;
+}
+
+/* Число на кнопке считаем ПРИ ВЫКЛЮЧЕННОМ флаге: иначе, нажав её, человек увидел бы
+   на ней длину уже отфильтрованного списка — то есть она перестала бы отвечать на
+   вопрос «сколько всего готово». */
+function ordersReadyCount(){
+  const prev=of.ready;
+  of.ready=false;
+  try{return filteredOrders().filter(isOrderReadyForKet).length;}
+  finally{of.ready=prev;}
+}
+
 function isFizlicoName(name){
   const n=(name||'').trim().toLowerCase().replace(/["«»‘’'']/g,'').replace(/\s+/g,' ').trim();
   return n==='физ лицо астана'||n==='физ лицо алматы';
@@ -689,6 +718,7 @@ function renderOrders(mode){
           <option value="yes" ${of.paidBySender==='yes'?'selected':''}>Оплачено отправителем</option>
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
         </select>
+        ${(isStaff()&&!bar)?`<button type="button" class="filters-btn${of.ready?' on':''}" id="ordersReadyBtn" title="Только заказы, которые склад принял и у которых проставлен вес — их можно смело отправлять в KET и печатать бланки">✅ Готовы: склад + вес (${ordersReadyCount()})</button>`:''}
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
         ${(isStaff()||canOrder('delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
           <span class="act-menu" id="ordersActMenu" style="display:none">
@@ -1038,6 +1068,19 @@ function renderOrders(mode){
   };
   const impBtn=$('importXlsx');
   if(impBtn)impBtn.onclick=()=>importOrdersFromExcel();
+  const readyBtn=$('ordersReadyBtn');
+  if(readyBtn)readyBtn.onclick=()=>{
+    of.ready=!of.ready;
+    /* «Нет веса» и «Не принятые складом» — это ПРЯМО ОБРАТНЫЕ условия: вместе с
+       «Готовы» они дали бы заведомо пустой список, и кнопка выглядела бы сломанной.
+       Снимаем такой фильтр и говорим об этом вслух, а не молча. */
+    if(of.ready&&(of.missing==='weight'||of.missing==='unsorted')){
+      of.missing='';
+      toast('Фильтр «Заполненность» снят — он требовал обратного');
+    }
+    // Перерисовываем панель целиком: на самой кнопке её состояние и число готовых.
+    drawOrdersResetFull();
+  };
   const exclBtn=$('ordersExclPartners');
   if(exclBtn)exclBtn.onclick=()=>ordersExcludePartnersModal();
 
@@ -1219,6 +1262,8 @@ function filteredOrders(){
     const dd=(o.deliver_date||'').slice(0,10);
     if(of.delFrom&&(!dd||dd<of.delFrom))return false;
     if(of.delTo&&(!dd||dd>of.delTo))return false;
+    // «Готовы к отправке»: склад принял И вес проставлен
+    if(of.ready&&!isOrderReadyForKet(o))return false;
     // фильтр незаполненных полей: показать заказы, где выбранное поле пустое
     if(of.missing){
       // «Нет индекса» относится только к почтовым заказам (у курьерских индекса нет)
