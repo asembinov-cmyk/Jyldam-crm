@@ -1590,8 +1590,6 @@
   cursor:pointer;white-space:nowrap;text-align:left}
 .filters .filters-btn:hover{border-color:var(--ink)}
 .filters .filters-btn:disabled{opacity:.5;cursor:default}
-/* нажатый фильтр-кнопка: видно, что список сейчас сужен */
-.filters .filters-btn.on{border-color:var(--rust);color:var(--rust);font-weight:700;background:rgba(180,83,9,.07)}
 .filters .filters-btn.is-armed{border-color:#1f8a4c;color:#1f8a4c;background:#eaf7ef}
 .filters .filters-btn.is-armed:hover{background:#dcf1e4}
 
