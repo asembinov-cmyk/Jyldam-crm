@@ -2058,6 +2058,19 @@ td .ft-dot{margin:0 0 0 8px}
 .wam-oitem.on{border-color:var(--rust);background:rgba(180,83,9,.07)}
 .wam-oitem span{margin-left:auto;color:var(--muted);font-size:11px;text-align:right}
 .wam-done{width:100%;margin-top:18px}
+/* «Где посылка»: главное — одна строка словами, остальное под ней парами */
+.wam-where{border:1px solid var(--line);border-left-width:3px;border-radius:11px;padding:10px 12px}
+.wam-where>b{display:block;font-size:13px;margin-bottom:6px}
+.wam-where.wait{border-left-color:#b45309}
+.wam-where.wait>b{color:#b45309}
+.wam-where.go{border-left-color:#2563eb}
+.wam-where.go>b{color:#2563eb}
+.wam-where.done{border-left-color:#16a34a}
+.wam-where.done>b{color:#16a34a}
+.wam-where.none{border-left-color:var(--line)}
+.wam-where.none>b{color:var(--muted)}
+.wam-where .wam-kv:last-of-type{border-bottom:0}
+.wam-checked{font-size:10px;color:var(--muted);margin-top:6px}
 
 @media (max-width:760px),(pointer:coarse){
   .wam-wrap{flex-direction:column;min-height:0}

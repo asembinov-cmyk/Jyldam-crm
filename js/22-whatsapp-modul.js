@@ -651,8 +651,9 @@ function waModOrderCardHtml(o){
     <div class="wam-kv"><span>Сумма заказа</span><b>${sum?esc(Math.round(sum).toLocaleString('ru-RU'))+' ₸':'—'}</b></div>
     ${pcity?`<div class="wam-kv"><span>Город забора</span><b>${esc(pcity)}</b></div>`:''}
     ${o.track?`<div class="wam-track"><span>Трек Казпочты</span><b>${esc(o.track)}</b>${copyBtn(o.track)}</div>`:''}
-    ${o.kz_dep_name?`<div class="wam-kv"><span>Отделение</span><b>${esc(o.kz_dep_name)}</b></div>`:''}
-    ${o.kz_storage_left!=null&&o.kz_storage_left!==''?`<div class="wam-kv"><span>Хранение</span><b>${esc(String(o.kz_storage_left))} дн.</b></div>`:''}
+    ${/* Отделение и срок хранения переехали в блок «Где посылка» ниже: там они стоят
+          рядом с положением посылки и адресом, а здесь были вторым местом про то же. */''
+     +''}
     ${o.deliver_date?`<div class="wam-kv"><span>Доставка</span><b>${esc(fmtDate(o.deliver_date))}</b></div>`:''}
     ${o.address?`<div class="wam-kv"><span>Адрес</span><b>${esc(o.address)}</b></div>`:''}
     <button class="btn sm ghost wam-open" data-waord="${esc(String(o.id))}">Открыть заказ в CRM</button>
@@ -678,6 +679,102 @@ function waModOrdersListHtml(){
   ).join('');
 }
 
+/* ═══════════ «ГДЕ ПОСЫЛКА» — готовый ответ клиенту ═══════════
+   Просьба владельца 07.11.2026: «если почтовый заказ — показывай, где он; если в пути —
+   что в пути, если прибыл — адрес, откуда забирать». Это самый частый вопрос в переписке,
+   и до этого менеджер собирал ответ из трёх мест карточки сам.
+
+   АДРЕС ОТДЕЛЕНИЯ БЕРЁТСЯ ИЗ ДВУХ ИСТОЧНИКОВ, и второй важнее, чем кажется:
+   робот Казпочты пишет `kz_dep_addr` (db/63), но у части отправлений Казпочта отдаёт
+   пустой адрес и ОДИН ЛИШЬ ИНДЕКС — так было у всех QE-треков. Тогда адрес достаём из
+   нашего же офлайн-справочника отделений (`kpIndexTable`, раздел 6f), по которому уже
+   работает подсказка индекса в карточке заказа. Второго списка адресов не заводим. */
+let waModOffice={};        // индекс отделения → адрес из справочника
+let waModOfficeWait={};    // чтобы не просить один и тот же индекс дважды
+
+function waModOfficeAddr(o){
+  const own=String((o&&o.kz_dep_addr)||'').trim();
+  if(own)return own;
+  const idx=String((o&&o.kz_dep_index)||'').replace(/\D/g,'');
+  if(idx.length!==6)return '';
+  if(waModOffice[idx]!==undefined)return waModOffice[idx];
+  if(!waModOfficeWait[idx]&&typeof kpIndexTable==='function'){
+    waModOfficeWait[idx]=true;
+    kpIndexTable().then(tbl=>{
+      const rec=tbl&&tbl[idx];
+      waModOffice[idx]=rec&&typeof kpOfficeAddress==='function'?kpOfficeAddress(rec):'';
+      waModRedraw();
+    }).catch(()=>{waModOffice[idx]='';});
+  }
+  return '';
+}
+
+/* Где посылка — словами, по коду Казпочты. Коды те же, что у робота статусов (раздел 13).
+   Чего НЕ знаем, то и НЕ пишем: пустой адрес лучше придуманного. */
+function waModWhereParts(o){
+  const code=String((o&&o.kz_status_code)||'').toUpperCase();
+  const dep=String((o&&o.kz_dep_name)||'').trim();
+  const addr=waModOfficeAddr(o);
+  const idx=String((o&&o.kz_dep_index)||'').replace(/\D/g,'');
+  const left=(o&&o.kz_storage_left!=null&&o.kz_storage_left!=='')?Number(o.kz_storage_left):null;
+  const st=String((o&&o.kz_status)||'').trim();
+  if(code==='BOXISS')return {head:'Вручена получателю',cls:'done',lines:[]};
+  if(code==='STR'){
+    const lines=[];
+    if(dep)lines.push(['Отделение',dep]);
+    if(addr)lines.push(['Адрес',addr]);
+    else if(idx)lines.push(['Индекс отделения',idx]);
+    if(left!=null&&!isNaN(left))lines.push(['Хранится ещё',left+' дн.']);
+    return {head:'Ждёт получателя в отделении',cls:'wait',lines};
+  }
+  if(code)return {head:'В пути',cls:'go',lines:st?[['Статус Казпочты',st]]:[]};
+  return {head:'Казпочта ещё не видела отправление',cls:'none',
+    lines:[['Что это значит','трек присвоен, но посылку пока не приняли в отделении']]};
+}
+
+/* Готовый текст для клиента. Он попадает В ПОЛЕ ОТВЕТА, а не уходит сразу: менеджер
+   дочитывает и правит. Отправку по-прежнему нажимает человек — как у быстрых ответов. */
+function waModWhereText(o){
+  const code=String((o&&o.kz_status_code)||'').toUpperCase();
+  const num=o&&o.code?'№'+o.code:'';
+  const tr=String((o&&o.track)||'').trim();
+  const dep=String((o&&o.kz_dep_name)||'').trim();
+  const addr=waModOfficeAddr(o);
+  const left=(o&&o.kz_storage_left!=null&&o.kz_storage_left!=='')?Number(o.kz_storage_left):null;
+  const t=[];
+  if(code==='BOXISS'){
+    t.push(`Ваш заказ ${num} вручён получателю.`);
+  }else if(code==='STR'){
+    const where=[dep,addr].filter(Boolean).join(', ');
+    t.push(`Ваш заказ ${num} уже в отделении Казпочты${where?': '+where:''}.`);
+    if(left!=null&&!isNaN(left))t.push(`Хранится ещё ${left} дн. — заберите, пожалуйста, с документом.`);
+  }else if(code){
+    t.push(`Ваш заказ ${num} в пути.`);
+    if(o.kz_status)t.push(`Статус Казпочты: ${o.kz_status}.`);
+  }else{
+    t.push(`Ваш заказ ${num} передан на Казпочту, отслеживание появится в ближайшее время.`);
+  }
+  if(tr)t.push(`Трек для отслеживания: ${tr}`);
+  return t.join('\n');
+}
+
+function waModWhereHtml(o){
+  // Только почтовые и только с треком: у курьерского заказа Казпочта его не ведёт вовсе.
+  if(!o||waModIsCourier(o)||!o.track)return '';
+  const w=waModWhereParts(o);
+  const checked=o.kz_checked_at?((fmtLogTime(o.kz_checked_at)||{}).time||''):'';
+  return `<div class="wam-i-sec">Где посылка</div>
+    <div class="wam-where ${w.cls}">
+      <b>${esc(w.head)}</b>
+      ${w.lines.map(([k,v])=>`<div class="wam-kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}
+      ${/* Трек не повторяем: он стоит выше в карточке заказа, и там у него кнопка
+            копирования. В текст для клиента он попадает отдельно (waModWhereText). */''
+       +''}
+      ${checked?`<div class="wam-checked">проверено у Казпочты в ${esc(checked)}</div>`:''}
+      <button class="btn sm ghost wam-open" data-wawhere="${esc(String(o.id))}">📋 Текст для клиента</button>
+    </div>`;
+}
+
 function waModInfoHtml(){
   if(!waModPhone)return '';
   let ord;
@@ -686,7 +783,7 @@ function waModInfoHtml(){
   else if(!waModOrders.length)ord='<div class="hint">Заказов по этому номеру не нашли. Возможно, клиент писал с другого телефона — спросите у него номер заказа.</div>';
   else{
     const pick=waModOrders.find(o=>o.id===waModOrdPick)||waModOrders[0];
-    ord=waModOrderCardHtml(pick)+waModOrdersListHtml();
+    ord=waModOrderCardHtml(pick)+waModWhereHtml(pick)+waModOrdersListHtml();
   }
   const msgs=waModChat||[];
   const robot=msgs.filter(m=>m.direction==='outbound'&&m.ai_status==='robot').length;
@@ -987,6 +1084,17 @@ function waModBind(){
     waModRedraw();
   });
   main.querySelectorAll('[data-waord]').forEach(b=>b.onclick=()=>waModOpenOrder(b.dataset.waord));
+  /* Текст про посылку кладём В ПОЛЕ, а не отправляем: менеджер дочитывает и правит. */
+  main.querySelectorAll('[data-wawhere]').forEach(b=>b.onclick=()=>{
+    const o=(waModOrders||[]).find(x=>String(x.id)===b.dataset.wawhere);
+    const ta=$('waModText');
+    if(!o||!ta){toast('Ответить этому клиенту сейчас нельзя — окно 24 часа закрыто');return;}
+    const txt=waModWhereText(o);
+    ta.value=ta.value.trim()?ta.value.replace(/\s*$/,'')+'\n'+txt:txt;
+    waModDrafts[waModPhone]=ta.value;
+    ta.focus();
+    try{ta.setSelectionRange(ta.value.length,ta.value.length);}catch(_e){}
+  });
   /* Быстрый ответ ПОДСТАВЛЯЕТСЯ в поле, а не отправляется: отправку нажимает человек. */
   main.querySelectorAll('[data-waqr]').forEach(b=>b.onclick=()=>{
     const q=(waModQuick||[]).find(x=>String(x.id)===b.dataset.waqr);
