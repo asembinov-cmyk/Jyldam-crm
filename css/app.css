@@ -2057,9 +2057,6 @@ td .ft-dot{margin:0 0 0 8px}
 .wam-oitem:hover{background:rgba(0,0,0,.03)}
 .wam-oitem.on{border-color:var(--rust);background:rgba(180,83,9,.07)}
 .wam-oitem span{margin-left:auto;color:var(--muted);font-size:11px;text-align:right}
-.wam-info textarea{width:100%;font:inherit;font-size:12px;padding:8px 10px;border-radius:9px;
-  border:1px solid var(--line);background:#fff;resize:vertical;box-sizing:border-box}
-.wam-info textarea:focus{outline:none;border-color:var(--ink)}
 .wam-done{width:100%;margin-top:18px}
 
 @media (max-width:760px),(pointer:coarse){

@@ -76,12 +76,6 @@ let waModOrdPhone='';       // для какого номера они загр�
 let waModOrdPick=null;      // какой заказ раскрыт карточкой
 let waModQuick=null;        // быстрые ответы (null — не грузили, [] — таблицы нет)
 let waModRobotToday=null;   // сколько робот ответил сегодня — ТОЧНЫМ запросом, см. ниже
-let waModNote='';           // заметка по номеру, как она лежит в базе
-let waModNoteOk=true;       // есть ли таблица заметок (db/61)
-let waModNoteBusy=false;
-/* Черновик заметки — по номерам и по той же причине, что черновик ответа: опрос
-   перерисовывает панель, а один черновик на всех уехал бы ЧУЖОМУ клиенту. */
-let waModNoteDraft={};
 
 // поля перечислены по именам: `raw` в переписке — тяжёлый jsonb на каждое сообщение
 /* `media_url` — ССЫЛКА, а не сам файл, поэтому её брать можно. Колонку `raw` (целый
@@ -162,38 +156,6 @@ async function waModQuickLoad(){
     if(error)throw error;
     waModQuick=data||[];
   }catch(e){waModQuick=[];}
-}
-
-async function waModNoteLoad(norm){
-  waModNote='';
-  try{
-    const {data,error}=await sb.from('wa_notes').select('note').eq('phone_norm',norm).limit(1);
-    if(error)throw error;
-    if(waModPhone!==norm)return;
-    waModNote=(data&&data[0]&&data[0].note)||'';
-    waModNoteOk=true;
-  }catch(e){
-    waModNote='';
-    waModNoteOk=!/wa_notes|does not exist|42P01/i.test(String((e&&(e.message||e.code))||e));
-  }
-}
-
-async function waModNoteSave(btn){
-  const norm=waModPhone;if(!norm||waModNoteBusy)return;
-  const v=String(waModNoteDraft[norm]!=null?waModNoteDraft[norm]:waModNote);
-  waModNoteBusy=true;if(btn){btn.disabled=true;btn.textContent='Сохраняю…';}
-  try{
-    const {error}=await sb.from('wa_notes').upsert({
-      phone_norm:norm,note:v,updated_at:new Date().toISOString(),
-      updated_by:(S.me&&(S.me.full_name||S.me.email))||''},{onConflict:'phone_norm'});
-    if(error)throw error;
-    waModNote=v;delete waModNoteDraft[norm];
-    toast('Заметка сохранена');
-    waModRedraw();
-  }catch(e){
-    toast('Не удалось сохранить заметку: '+String((e&&e.message)||e));
-    if(btn){btn.disabled=false;btn.textContent='Сохранить заметку';}
-  }finally{waModNoteBusy=false;}
 }
 
 /* «Ответил робот сегодня» считаем ТОЧНЫМ запросом (head:true — ни одной строки
@@ -351,18 +313,22 @@ function waModDialogs(){
   (waModRows||[]).forEach(m=>{
     const key=String(m.phone_norm||'')||('id:'+m.id);
     let d=by.get(key);
-    if(!d){d={norm:String(m.phone_norm||''),last:m,lastIn:null,cnt:0,flagged:0,waiting:false,voice:false};by.set(key,d);}
+    if(!d){d={norm:String(m.phone_norm||''),last:m,lastIn:null,cnt:0,unread:0,closed:false,waiting:false,voice:false};by.set(key,d);}
     d.cnt++;
+    /* ХВОСТ БЕЗ ОТВЕТА. Список идёт по убыванию даты, поэтому идём от свежих к старым и
+       считаем входящие, пока не упрёмся в наш ответ или в отметку «разобрано». */
+    if(!d.closed){
+      if(m.direction==='outbound'||m.ai_status==='done')d.closed=true;
+      else d.unread++;
+    }
     if(m.direction==='inbound'){
-      // список идёт по убыванию даты, значит первое встреченное входящее — самое свежее
-      if(!d.lastIn)d.lastIn=m;
-      if(m.ai_status==='flagged')d.flagged++;
+      if(!d.lastIn)d.lastIn=m;              // самое свежее входящее
       if(/^(audio|voice)$/.test(String(m.message_type||'')))d.voice=true;
     }
     by.set(key,d);
   });
   const list=[...by.values()];
-  list.forEach(d=>{ d.waiting=d.last.direction==='inbound'; });
+  list.forEach(d=>{ d.waiting=d.unread>0; });
   return list;
 }
 
@@ -391,7 +357,7 @@ function waModWaitMin(d){
 function waModCounters(){
   let wait=0,soon=0;
   waModDialogs().forEach(d=>{
-    if(d.flagged)wait++;
+    if(d.waiting)wait++;
     const l=waModDlgLeft(d);
     if(l>0&&l<=WA_SOON_MIN)soon++;
   });
@@ -405,7 +371,7 @@ const WA_FILTERS=[['wait','Ждут ответа'],['all','Все'],['voice','Г
 
 function waModDialogsFiltered(){
   let list=waModDialogs();
-  if(waModFilter==='wait')list=list.filter(d=>d.flagged>0);
+  if(waModFilter==='wait')list=list.filter(d=>d.waiting);
   else if(waModFilter==='voice')list=list.filter(d=>d.voice);
   else if(waModFilter==='soon')list=list.filter(d=>{const l=waModDlgLeft(d);return l>0&&l<=WA_SOON_MIN;});
   const q=waModSearch.trim().toLowerCase();
@@ -657,6 +623,13 @@ function waModOrderCardHtml(o){
   const courier=waModIsCourier(o);
   const sum=typeof orderSum==='function'?orderSum(o):(Number(o.order_sum)||Number(o.cost)||0);
   const st=waModOrderStatus(o);
+  /* Партнёр и город забора — просьба владельца 07.11.2026. Партнёр берётся полем
+     «Отправитель», а если оно пустое — по `partner_id`: у заказов, созданных пачкой из
+     заявки, заполнено обычно одно из двух. Город забора лежит в `pickup_city_id` и
+     означает «где посылку ЗАБРАЛИ» — это НЕ город назначения (раздел 3). */
+  const partner=(o.sender||'').trim()
+    ||(((S.partners||[]).find(x=>x.id===o.partner_id)||{}).name||'');
+  const pcity=((S.cities||[]).find(c=>c.id===o.pickup_city_id)||{}).name||'';
   // Лесенка Казпочты — только у почтовых с треком. У курьерского заказа её шагов не
   // существует вовсе, и рисовать «Принят → Вручён» по пустым данным значило бы врать.
   let flow='';
@@ -672,8 +645,11 @@ function waModOrderCardHtml(o){
       <b>№${esc(o.code||'—')}</b>
       ${st?`<span class="wam-badge">${esc(st)}</span>`:''}
     </div>
-    <div class="wam-ord-sub">${courier?'Курьерская доставка':'Почтовая доставка'}${sum?' · '+esc(Math.round(sum).toLocaleString('ru-RU'))+' ₸':''}</div>
+    <div class="wam-ord-sub">${courier?'Курьерская доставка':'Почтовая доставка'}</div>
     ${flow}
+    ${partner?`<div class="wam-kv"><span>Партнёр</span><b>${esc(partner)}</b></div>`:''}
+    <div class="wam-kv"><span>Сумма заказа</span><b>${sum?esc(Math.round(sum).toLocaleString('ru-RU'))+' ₸':'—'}</b></div>
+    ${pcity?`<div class="wam-kv"><span>Город забора</span><b>${esc(pcity)}</b></div>`:''}
     ${o.track?`<div class="wam-track"><span>Трек Казпочты</span><b>${esc(o.track)}</b>${copyBtn(o.track)}</div>`:''}
     ${o.kz_dep_name?`<div class="wam-kv"><span>Отделение</span><b>${esc(o.kz_dep_name)}</b></div>`:''}
     ${o.kz_storage_left!=null&&o.kz_storage_left!==''?`<div class="wam-kv"><span>Хранение</span><b>${esc(String(o.kz_storage_left))} дн.</b></div>`:''}
@@ -719,18 +695,11 @@ function waModInfoHtml(){
     <div class="wam-kv wam-deskonly"><span>Сообщений</span><b>${msgs.length}</b></div>
     <div class="wam-kv wam-deskonly"><span>Ответов робота</span><b>${robot}</b></div>
     <div class="wam-kv wam-deskonly"><span>Первое сообщение</span><b>${esc(first)}</b></div>`:'';
-  const noteVal=waModNoteDraft[waModPhone]!=null?waModNoteDraft[waModPhone]:waModNote;
-  const dirty=waModNoteDraft[waModPhone]!=null&&waModNoteDraft[waModPhone]!==waModNote;
-  const note=waModNoteOk?`<div class="wam-i-sec wam-deskonly">Заметка для команды</div>
-    <div class="wam-deskonly">
-      <textarea id="waModNote" rows="3" placeholder="Например: клиент просит оставить у соседей">${esc(noteVal||'')}</textarea>
-      ${dirty?'<button class="btn sm ghost" id="waModNoteSave" style="margin-top:6px">Сохранить заметку</button>':''}
-    </div>`:'';
-  // Кнопки «Передать оператору» на макете нет чем подкрепить: списка операторов и
-  // назначения в системе не существует, и кнопка была бы обманом. Её работу делают
-  // заметка и «Решено» — обе настоящие.
-  const canDone=(waModChat||[]).some(m=>m.direction==='inbound'&&m.ai_status==='flagged');
-  return `<div class="wam-i-sec">Заказ</div>${ord}${dlg}${note}
+  /* «Заметка для команды» убрана по просьбе владельца 07.11.2026 — на её месте данные
+     заказа: партнёр, сумма и город забора. Кнопки «Передать оператору» с макета тоже нет:
+     списка операторов и назначения в системе не существует, и она была бы обманом. */
+  const canDone=(waModChat||[]).some(m=>m.direction==='inbound'&&m.ai_status!=='done');
+  return `<div class="wam-i-sec">Заказ</div>${ord}${dlg}
     ${canDone?'<button class="btn primary wam-done" id="waModDone">✓ Отметить решённым</button>':''}`;
 }
 
@@ -812,8 +781,7 @@ function waModListHtml(){
         </div>
         <div class="wam-i-prev">${m.direction==='outbound'?'<span class="wam-i-you">вы: </span>':''}${d.voice?'🎤 ':''}${esc(prev)}</div>
         <div class="wam-i-tags">
-          ${d.flagged?`<span class="wam-tag warn">ждёт ответа · ${d.flagged}</span>`:''}
-          ${!d.flagged&&d.waiting?'<span class="wam-tag">последнее от клиента</span>':''}
+          ${d.waiting?`<span class="wam-tag warn">ждёт ответа · ${d.unread}</span>`:''}
           ${left>0&&left<=WA_SOON_MIN?`<span class="wam-tag soon">окно ${esc(waModLeftText(left))}</span>`:''}
           <span class="wam-tag mute">${d.cnt} сообщ.</span>
         </div>
@@ -905,10 +873,9 @@ function waModRedraw(){
   // содержимое пустотой (waModBodyHtml про них ничего не знает).
   if(waModSettingsSub())return;
   const box=$('waModBox');if(!box)return;
-  const ta=$('waModText'), sIn=$('waModSearch'), sc=$('waModScroll'), nt=$('waModNote');
+  const ta=$('waModText'), sIn=$('waModSearch'), sc=$('waModScroll');
   const taFocus=!!(ta&&document.activeElement===ta);
   const sFocus=!!(sIn&&document.activeElement===sIn);
-  const nFocus=!!(nt&&document.activeElement===nt);
   // «Внизу» с запасом в 40 px: при точном сравнении достаточно пары пикселей отката,
   // чтобы новые сообщения перестали подкручиваться сами.
   const atBottom=sc?(sc.scrollTop+sc.clientHeight>=sc.scrollHeight-40):waModStick;
@@ -919,8 +886,6 @@ function waModRedraw(){
   if(ta2&&taFocus){ta2.focus();try{ta2.setSelectionRange(ta2.value.length,ta2.value.length);}catch(_e){}}
   const s2=$('waModSearch');
   if(s2&&sFocus){s2.focus();try{s2.setSelectionRange(s2.value.length,s2.value.length);}catch(_e){}}
-  const n2=$('waModNote');
-  if(n2&&nFocus){n2.focus();try{n2.setSelectionRange(n2.value.length,n2.value.length);}catch(_e){}}
   waModStick=atBottom;
   const sc2=$('waModScroll');
   if(sc2)sc2.scrollTop=atBottom?sc2.scrollHeight:keepTop;
@@ -1032,15 +997,6 @@ function waModBind(){
     ta.focus();
     try{ta.setSelectionRange(ta.value.length,ta.value.length);}catch(_e){}
   });
-  const nt=$('waModNote');
-  if(nt)nt.oninput=()=>{
-    waModNoteDraft[waModPhone]=nt.value;
-    // кнопка «Сохранить» появляется только когда есть что сохранять — перерисовываем
-    // панель целиком лишь в момент её появления, иначе фокус прыгал бы на каждой букве
-    const has=!!$('waModNoteSave');
-    if(has!==(nt.value!==waModNote))waModRedraw();
-  };
-  const ns=$('waModNoteSave');if(ns)ns.onclick=()=>waModNoteSave(ns);
   const dn=$('waModDone');if(dn)dn.onclick=()=>waModMarkDone(dn);
 }
 
@@ -1054,7 +1010,6 @@ async function waModOpenDialog(norm){
   await Promise.all([
     waModChatLoad(norm),
     waModOrdersLoad(norm),
-    waModNoteLoad(norm),
   ]);
   if(waModPhone!==norm)return;   // пока грузили, открыли другой диалог
   waModRedraw();
@@ -1070,14 +1025,22 @@ function waModOpenOrder(id){
 }
 
 /* «Решено» — та же отметка, что в «Центре контроля» (ai_status='done'), и ставится
-   она СРАЗУ ВСЕМ непрочитанным репликам номера: робот метит пачку целиком. */
+   она СРАЗУ ВСЕМ репликам номера без ответа: робот метит пачку целиком, да и человек
+   разбирает разговор, а не отдельное сообщение. */
 async function waModMarkDone(btn){
-  const ids=(waModChat||[]).filter(m=>m.direction==='inbound'&&m.ai_status==='flagged').map(m=>m.id);
+  const ids=(waModChat||[]).filter(m=>m.direction==='inbound'&&m.ai_status!=='done').map(m=>m.id);
   if(!ids.length)return;
   if(btn){btn.disabled=true;btn.textContent='Отмечаю…';}
   try{
     const {error}=await sb.from('kelesu_messages').update({ai_status:'done'}).in('id',ids);
     if(error)throw error;
+    /* И закрываем вопрос для робота — но ТОЛЬКО там, где он его ещё не брал
+       (`ai_handled_at is null`). Иначе робот через минуту ответил бы на то, что человек
+       уже разобрал; а перезаписывать чужую отметку нельзя — по ней строится «История
+       робота», и старые разборы уехали бы на сегодняшнее число. */
+    await sb.from('kelesu_messages')
+      .update({ai_handled_at:new Date().toISOString(),ai_note:'разобрал менеджер'})
+      .in('id',ids).is('ai_handled_at',null);
     (waModChat||[]).forEach(m=>{if(ids.includes(m.id))m.ai_status='done';});
     (waModRows||[]).forEach(m=>{if(ids.includes(m.id))m.ai_status='done';});
     toast('Отмечено решённым: '+ids.length);
@@ -1105,7 +1068,7 @@ function renderWhatsapp(){
   // закрытый раздел до перезагрузки (та же механика, что у вкладки Барахолки в Статистике).
   if(!subs.some(x=>x[0]===waModSub))waModSub='dialogs';
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>WhatsApp</h1><p>Переписка с получателями и то, что ответил робот</p></div>
+    <div class="page-head"><div><h1>WhatsApp</h1></div>
       <div class="head-actions"><span class="hint" id="waModSync" style="margin-right:10px">${esc(waModSyncText())}</span>${waModSub==='dialogs'&&canCfg?'<button class="btn ghost" id="waModBack24" style="margin-right:8px">⟲ Добрать переписку</button>':''}<button class="btn ghost" id="waModReload">⟳ Обновить</button></div>
     </div>
     <div class="filters wam-tabs" style="margin-bottom:14px">
