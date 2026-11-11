@@ -23,6 +23,75 @@ const IMP_COLS = {
 };
 const impNorm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
 
+/* ЧИСЛО ИЗ ЯЧЕЙКИ С ДЕНЬГАМИ: null — пусто, NaN — написано, но не число, иначе число.
+   Ячейки читаются КАК ПОКАЗАНЫ в Excel (raw:false), а формат с разделителем тысяч
+   показывает две тысячи как «2,000» или «2 000,00». Прежний разбор менял запятую на
+   точку и получал 2 ₸ вместо 2000 — молча. Правила: есть и точка, и запятая — дробный
+   знак тот, что правее; группы ровно по три цифры — это тысячи; иначе запятая дробная. */
+function impNum(v){
+  let t = String(v == null ? '' : v).replace(/[\s\u00a0\u202f]/g, '').replace(/(₸|тг\.?|тенге|kzt)$/i, '');
+  if(!t) return null;
+  if(t.includes(',') && t.includes('.')){
+    t = t.lastIndexOf(',') > t.lastIndexOf('.') ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+  } else if(/^\d{1,3}([.,]\d{3})+$/.test(t)) t = t.replace(/[.,]/g, '');
+  else t = t.replace(',', '.');
+  return /^\d+(\.\d+)?$/.test(t) ? parseFloat(t) : NaN;
+}
+
+/* ПОИСК ПАРТНЁРА В ОКНАХ ЗАГРУЗКИ (просьба владельца 11.11.2026: «имя партнёра сделай,
+   чтобы можно было писать и был поиск»). Тот же приём, что в окне сканера Барахолки:
+   поле поиска НАД списком, сам <select> остаётся источником выбора. Нашёлся ровно один —
+   подставляется сам; выбранный, выпавший из выдачи, снимается (иначе список показывал бы
+   «— выберите —», а разбор ниже считался бы по невидимому партнёру).
+
+   Один набор функций на оба окна — реестр Барахолки и заказы заборов. */
+const impPartnerFind = (list, q) => {
+  const n = String(q || '').trim().toLowerCase();
+  return n ? list.filter(p => (p.name || '').toLowerCase().includes(n)) : list;
+};
+const impPartnerOptions = (list, partnerId, tag) => '<option value="">— выберите —</option>'
+  + list.map(p => `<option value="${p.id}" ${partnerId === p.id ? 'selected' : ''}>${esc(p.name)}${tag ? tag(p) : ''}</option>`).join('');
+const impPartnerNote = (q, found, total) => !String(q || '').trim() ? ''
+  : (found ? `найдено ${found} из ${total}.` : 'ничего не найдено — очистите поиск.');
+function impPartnerFieldHtml(ids, sorted, partnerId, q, tag, hint){
+  const list = impPartnerFind(sorted, q);
+  return `<div class="field"><label>Партнёр <span style="color:var(--rust)">*</span></label>
+          <input id="${ids.q}" autocomplete="off" placeholder="Поиск по названию — начните печатать" value="${esc(q || '')}" style="margin-bottom:6px">
+          <select id="${ids.sel}">${impPartnerOptions(list, partnerId, tag)}</select>
+          <small style="color:var(--muted);font-size:12px"><b id="${ids.note}">${esc(impPartnerNote(q, list.length, sorted.length))}</b> ${hint || ''}</small></div>`;
+}
+/* st — доступ к состоянию окна: getId/setId (выбранный партнёр), getQ/setQ (текст поиска).
+   onPick зовётся, когда партнёр СМЕНИЛСЯ, и перерисовывает разбор целиком; пока он тот
+   же, обновляем только список — таблица на сотни строк на каждую букву не пересобирается. */
+function impPartnerBind(ids, sorted, st, onPick, tag){
+  const q = $(ids.q), sel = $(ids.sel), note = $(ids.note);
+  if(sel) sel.onchange = () => { st.setId(sel.value); onPick(); };
+  if(!q) return;
+  q.oninput = () => {
+    st.setQ(q.value);
+    const list = impPartnerFind(sorted, q.value);
+    let next = list.some(p => p.id === st.getId()) ? st.getId() : '';
+    if(list.length === 1) next = list[0].id;
+    if(next !== st.getId()){ st.setId(next); onPick(); return; }
+    if(sel) sel.innerHTML = impPartnerOptions(list, next, tag);
+    if(note) note.textContent = impPartnerNote(q.value, list.length, sorted.length);
+  };
+  // Enter в поиске уводит фокус в список, а НЕ создаёт заказы: иначе набранные буквы
+  // превращались бы в загрузку на полпути.
+  q.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); e.stopPropagation(); if(sel) sel.focus(); } };
+}
+/* Перерисовка тела окна С СОХРАНЕНИЕМ ФОКУСА: тело пересобирается целиком, и без этого
+   поиск терял бы курсор на той букве, после которой партнёр подставился сам. */
+function impRedrawBody(html){
+  const box = document.querySelector('.modal-body'); if(!box) return false;
+  const a = document.activeElement, id = (a && box.contains(a)) ? a.id : '';
+  let pos = null; try{ pos = (id && typeof a.selectionStart === 'number') ? a.selectionStart : null; }catch(e){}
+  box.innerHTML = html;
+  const n = id ? $(id) : null;
+  if(n){ n.focus(); if(pos != null){ try{ n.setSelectionRange(pos, pos); }catch(e){} } }
+  return true;
+}
+
 // Ведущий ноль индекса в Excel превращается в букву «O» — визуально неотличимо,
 // а для Казпочты это другой символ. Возвращаем ноль и дополняем до шести знаков.
 function impIndex(v){
@@ -68,7 +137,7 @@ function impReadSheet(wb){
       address: get(map.address),
       track: get(map.track),
       weight: parseWeight(get(map.weight)),
-      sum: parseFloat(String(get(map.sum) || get(map.sum2)).replace(',', '.')) || 0,
+      sum: impNum(get(map.sum) || get(map.sum2)) || 0,
       phone: impPhone(get(map.phone)),
       rawIndex: get(map.index),
       rawPhone: get(map.phone),
@@ -276,6 +345,10 @@ function impPreviewModal(fileName, rows, dbTracks){
   // Ищем в том же списке, что показываем, — иначе угадали бы того, кого в списке нет.
   const guess = pool.find(p => normName(fileName).includes(normName(p.name))) || null;
   let partnerId = guess ? guess.id : '';
+  let pq = '';                 // текст в поиске партнёра
+  const sortedPool = pool.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru'));
+  const pIds = { q: 'impPartnerQ', sel: 'impPartner', note: 'impPartnerN' };
+  const pTag = p => (!onlyBar && p.is_baraholka) ? ' · Барахолка' : '';
   let date = localToday();
   let busy = false;
   // dbTracks — что уже есть в базе (null, если проверку не выполнили). Запасной вариант —
@@ -300,14 +373,9 @@ function impPreviewModal(fileName, rows, dbTracks){
     const dupInDb = bad.filter(r => r.problem === 'такой трек уже есть в системе').length;
     return `
       <div class="imp-head">
-        <div class="field"><label>Партнёр <span style="color:var(--rust)">*</span></label>
-          <select id="impPartner"><option value="">— выберите —</option>
-            ${pool.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''))
-              .map(p => `<option value="${p.id}" ${partnerId === p.id ? 'selected' : ''}>${esc(p.name)}${(!onlyBar && p.is_baraholka) ? ' · Барахолка' : ''}</option>`).join('')}
-          </select>
-          <small style="color:var(--muted);font-size:12px">${onlyBar
+        ${impPartnerFieldHtml(pIds, sortedPool, partnerId, pq, pTag, onlyBar
             ? 'Только партнёры Барахолки. Нет нужного — поставьте галочку «Барахолка» в его карточке.'
-            : 'Галочка «Барахолка» не стоит ни у одного партнёра — показаны все.'}</small></div>
+            : 'Галочка «Барахолка» не стоит ни у одного партнёра — показаны все.')}
         <div class="field"><label>Дата забора</label><input type="date" id="impDate" value="${esc(date)}"></div>
       </div>
       <p class="imp-note">
@@ -494,12 +562,9 @@ function impPreviewModal(fileName, rows, dbTracks){
   // Смена партнёра перерисовывает разбор: от партнёра зависит раздел калькуляции
   // и подпись под таблицей. Поля после перерисовки — новые узлы, привязываем заново.
   const bindImp = () => {
-    const p2 = $('impPartner');
-    if(p2) p2.onchange = () => {
-      partnerId = p2.value;
-      const box = document.querySelector('.modal-body');
-      if(box){ box.innerHTML = body(); bindImp(); }
-    };
+    impPartnerBind(pIds, sortedPool,
+      { getId: () => partnerId, setId: v => { partnerId = v; }, getQ: () => pq, setQ: v => { pq = v; } },
+      () => { if(impRedrawBody(body())) bindImp(); }, pTag);
     const d2 = $('impDate');
     // Перерисовываем тело: предупреждение о чужом месяце должно появиться сразу, а не
     // всплыть только при нажатии «Создать заказы».
@@ -770,6 +835,9 @@ const PICK_COLS = {
   delivery: ['тип доставки', 'доставка', 'тип'],
   paid:     ['оплачено отправителем', 'оплачено', 'оплата'],
   city:     ['город'],          // необязательная: город назначения у курьерских
+  // необязательная: цена заказа. «Сумма нал. платежа» раньше общей «суммы» — в файлах
+  // по образцу реестра колонок с суммой две, и нужна именно она.
+  sum:      ['сумма заказа', 'сумма нал', 'сумма', 'стоимость', 'цена'],
 };
 
 /* ТИП ДОСТАВКИ ИЗ ЯЧЕЙКИ. '' — пусто, '?' — написано что-то, чего мы не поняли.
@@ -841,27 +909,44 @@ function impPickReadSheet(wb){
       paid: impPickPaid(get(map.paid)),
       rawPaid: get(map.paid),
       rawCity: get(map.city),
+      // null — ячейка пуста (считаем по тарифу), NaN — написано не число, иначе число.
+      // Ноль — это ЧИСЛО: «в файле стоит 0» и «в файле пусто» — разные вещи.
+      sum: impNum(get(map.sum)),
+      rawSum: get(map.sum),
     });
   }
   return { rows: out, cols: map };
 }
 
-/* ДЕНЬГИ ЗАКАЗА. Цены в файле нет — считаем как карточка и как болванки из заявки
-   (`buildPickupOrderRows`): размер S по тарифу партнёра для ЭТОГО типа доставки.
+/* ДЕНЬГИ ЗАКАЗА.
 
-   Нулём сумма становится в двух случаях, и условная выручка у них разная:
-     • тариф партнёра по этому типу ровно 0 — он платит по счёту раз в месяц (раздел 5b),
-       в Калькуляцию идёт «условная сумма» из его карточки;
-     • в файле стоит «оплачено отправителем» — тогда условная выручка это сам тариф:
-       ровно то, что запомнила бы карточка при постановке этой галочки руками. */
+   СУММА ИЗ ФАЙЛА ГЛАВНЕЕ ТАРИФА (жалоба владельца 11.11.2026: «в файле сумма стояла 0,
+   а загрузилось по 2 000»). Первая версия колонку суммы не читала вовсе и всегда ставила
+   тариф партнёра. Теперь: в ячейке число — берём его, В ТОМ ЧИСЛЕ НОЛЬ; ячейка пуста или
+   колонки нет — размер S по тарифу партнёра для ЭТОГО типа доставки, как у болванок из
+   заявки (`buildPickupOrderRows`).
+
+   Нулём сумма становится ещё в двух случаях, и условная выручка у них разная:
+     • тариф партнёра по этому типу ровно 0 — он платит по счёту раз в месяц (раздел 5b):
+       в заказе ноль, что бы ни стояло в файле; в Калькуляцию идёт сумма из файла, а при
+       её отсутствии «условная сумма» из карточки — то же правило, что у реестра Барахолки;
+     • в файле «оплачено отправителем» — условная выручка это сумма из файла, а если её
+       нет (или там ноль) — сам тариф: ровно то, что запомнила бы карточка.
+
+   Ноль из файла БЕЗ отметки «оплачено» — это просто ноль, как если бы его вписали в
+   карточку руками: условной выручки нет, и об этом сказано в предпросмотре. */
 function impPickMoney(r, pt, type){
   const sizes = packageSizesFor(pt);
   const tariff = type === 'courier' ? sizes.S.courier : sizes.S.mail;
+  const given = typeof r.sum === 'number' && !Number.isNaN(r.sum);
   if(isExplicitZero(type === 'courier' ? pt.tariff_courier : pt.tariff_post))
-    return { sum: 0, paid: true, why: 'тариф 0',
-      orig: (pt.direct_pay_amount != null && pt.direct_pay_amount !== '') ? +pt.direct_pay_amount : null };
-  if(r.paid) return { sum: 0, paid: true, orig: tariff, why: 'оплачено отправителем' };
-  return { sum: tariff, paid: false, orig: null, why: '' };
+    return { sum: 0, paid: true, why: 'тариф 0', src: 'zero',
+      orig: (given && r.sum > 0) ? r.sum
+        : ((pt.direct_pay_amount != null && pt.direct_pay_amount !== '') ? +pt.direct_pay_amount : null) };
+  if(r.paid) return { sum: 0, paid: true, src: 'paid', why: 'оплачено отправителем',
+    orig: (given && r.sum > 0) ? r.sum : tariff };
+  if(given) return { sum: r.sum, paid: false, orig: null, src: 'file', why: r.sum ? 'из файла' : 'в файле 0' };
+  return { sum: tariff, paid: false, orig: null, src: 'tariff', why: '' };
 }
 
 /* Что уже заведено у этого партнёра на эту дату — защита от повторной загрузки того же
@@ -897,6 +982,7 @@ function impPickProblem(r, type, exist){
   if(r.del === '?') return 'тип доставки не распознан: «' + r.rawDel + '»';
   if(!type) return 'тип доставки не указан';
   if(r.paid === null) return 'не понял «оплачено отправителем»: «' + r.rawPaid + '»';
+  if(Number.isNaN(r.sum)) return 'не понял сумму: «' + r.rawSum + '»';
   if(type === 'mail' && !r.index) return 'нет индекса (почтовая)';
   if(exist && exist.has(impPickKey(r.phone, r.client)))
     return 'такой получатель у этого партнёра на эту дату уже есть (заказ ' + exist.get(impPickKey(r.phone, r.client)) + ')';
@@ -907,9 +993,9 @@ function impPickProblem(r, type, exist){
 function impPickSample(){
   if(!window.XLSX){ toast('Библиотека Excel ещё загружается, попробуйте снова'); return; }
   const aoa = [
-    ['ФИО', 'Адрес', 'Номер телефона', 'Индекс', 'Тип доставки', 'Оплачено отправителем', 'Город'],
-    ['Иванов Иван', 'Алматы, Абая 10, кв 5', '87011234567', '', 'курьерская', 'нет', 'Алматы'],
-    ['Ахметова Айгуль', 'Караганда, Бухар-Жырау 20', '87059876543', '100000', 'почтовая', 'да', ''],
+    ['ФИО', 'Адрес', 'Номер телефона', 'Индекс', 'Тип доставки', 'Оплачено отправителем', 'Город', 'Сумма'],
+    ['Иванов Иван', 'Алматы, Абая 10, кв 5', '87011234567', '', 'курьерская', 'нет', 'Алматы', ''],
+    ['Ахметова Айгуль', 'Караганда, Бухар-Жырау 20', '87059876543', '100000', 'почтовая', 'да', '', ''],
   ];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   // индекс и телефон — текстом: числом Excel съел бы ведущий ноль
@@ -938,8 +1024,8 @@ async function importPickupOrdersFromExcel(){
         <p class="imp-note" style="color:var(--rust)">${esc(parsed.error || 'В файле нет строк с ФИО.')}</p>
         <p class="imp-note">Первая строка таблицы — названия колонок:
           <b>ФИО · Адрес · Номер телефона · Индекс · Тип доставки · Оплачено отправителем</b>.
-          Порядок колонок не важен, лишние не мешают. Необязательная — <b>Город</b>
-          (город назначения у курьерских).</p>
+          Порядок колонок не важен, лишние не мешают. Необязательные — <b>Город</b>
+          (город назначения у курьерских) и <b>Сумма</b> (пусто — по тарифу партнёра).</p>
         <button class="btn ghost sm" id="impPickSampleBtn">⬇ Скачать образец</button>`);
       const sb2 = $('impPickSampleBtn'); if(sb2) sb2.onclick = impPickSample;
       return;
@@ -954,6 +1040,9 @@ function impPickPreviewModal(fileName, rows, cols){
   const pool = (S.partners || []).filter(p => !p.is_baraholka);
   const guess = pool.find(p => normName(fileName).includes(normName(p.name))) || null;
   let partnerId = guess ? guess.id : '';
+  let pq = '';                 // текст в поиске партнёра
+  const sortedPool = pool.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru'));
+  const pIds = { q: 'impPickPartnerQ', sel: 'impPickPartner', note: 'impPickPartnerN' };
   let date = localToday();
   let defType = '';            // что делать со строками БЕЗ типа доставки: '' — пропускать
   let busy = false;
@@ -982,8 +1071,8 @@ function impPickPreviewModal(fileName, rows, cols){
     impPickExisting(pt, date).then(m => {
       if(existFor !== key) return;        // пока ждали, выбрали другое
       exist = m;
-      const box = document.querySelector('.modal-body');
-      if(box && $('impPickPartner')){ box.innerHTML = body(); bind(); }
+      // с сохранением фокуса: ответ приходит, пока человек ещё печатает в поиске
+      if($('impPickPartner') && impRedrawBody(body())) bind();
     });
   };
 
@@ -1002,14 +1091,12 @@ function impPickPreviewModal(fileName, rows, cols){
     const sums = pt ? ok.map(r => impPickMoney(r, pt, r.type)) : [];
     const total = sums.reduce((a, m) => a + m.sum, 0);
     const nPaid = sums.filter(m => m.paid).length;
+    const nFile = sums.filter(m => m.src === 'file').length;
+    const nFileZero = sums.filter(m => m.src === 'file' && !m.sum).length;
     return `
       <div class="imp-head">
-        <div class="field"><label>Партнёр <span style="color:var(--rust)">*</span></label>
-          <select id="impPickPartner"><option value="">— выберите —</option>
-            ${pool.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru'))
-              .map(p => `<option value="${p.id}" ${partnerId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
-          </select>
-          <small style="color:var(--muted);font-size:12px">Партнёров Барахолки здесь нет — их реестры грузят в её модуле.</small></div>
+        ${impPartnerFieldHtml(pIds, sortedPool, partnerId, pq, null,
+            'Партнёров Барахолки здесь нет — их реестры грузят в её модуле.')}
         <div class="field"><label>Дата забора</label><input type="date" id="impPickDate" value="${esc(date)}"></div>
         ${noTypeRows ? `<div class="field"><label>Строки без типа доставки (${noTypeRows})</label>
           <select id="impPickDef">
@@ -1022,7 +1109,9 @@ function impPickPreviewModal(fileName, rows, cols){
         Файл: <b>${esc(fileName)}</b> · строк с ФИО: <b>${rows.length}</b> ·
         создам: <b>${ok.length}</b>${ok.length ? ` (курьерских ${nCour}, почтовых ${nMail})` : ''}${
           bad.length ? ` · пропущу: <b style="color:var(--rust)">${bad.length}</b>` : ''}
-        ${pt ? `<br>Сумма — по тарифу партнёра для типа доставки, всего <b>${money(total)}</b>${
+        ${pt ? `<br>Сумма — ${cols.sum >= 0
+            ? `из колонки файла там, где она заполнена (<b>${nFile}</b>), у остальных по тарифу партнёра`
+            : 'по тарифу партнёра для типа доставки (колонки «Сумма» в файле нет)'}, всего <b>${money(total)}</b>${
           nPaid ? `; с нулём и отметкой «Оплачено отправителем»: <b>${nPaid}</b>` : ''}.
           Менеджер продаж и обработчик возьмутся из карточки партнёра.` : ''}
         ${cols.paid < 0 ? '<br>Колонки «Оплачено отправителем» в файле нет — считаю, что не оплачено.' : ''}
@@ -1034,6 +1123,9 @@ function impPickPreviewModal(fileName, rows, cols){
         ⚠️ Курьерских без города назначения: <b>${noCity}</b>${badCity ? ` (у ${badCity} город из файла не нашёлся в справочнике)` : ''}.
         Они создадутся, но склад не увидит, куда их класть, а карточка не сохранится, пока город не выберут.
         Чтобы город встал сразу — добавьте в файл колонку «Город» с названием как в справочнике.</div>` : ''}
+      ${nFileZero ? `<div class="hint" style="margin:-4px 0 10px">В файле сумма <b>0</b> у строк: <b>${nFileZero}</b> —
+        так и создам, с нулём. В Калькуляции выручки по ним не будет. Если партнёр за них платит сам —
+        поставьте в файле «Оплачено отправителем» = да: в заказе тоже будет 0, а в Калькуляцию пойдёт тариф.</div>` : ''}
       ${twins ? `<div class="hint" style="margin:-4px 0 10px">В файле есть одинаковые получатели (ФИО + телефон): <b>${twins}</b>.
         Создам все — проверьте, что это разные посылки, а не задвоенные строки.</div>` : ''}
       ${impOtherMonth(date) ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
@@ -1054,7 +1146,8 @@ function impPickPreviewModal(fileName, rows, cols){
             (r.type && !r.del) ? '<small class="cell-time">по умолчанию</small>' : ''}${
             r.type === 'courier' ? `<small class="cell-time">${r.city ? esc(r.city.name) : 'город не указан'}</small>` : ''}</td>
           <td data-label="Сумма">${m ? `${m.sum ? esc(money(m.sum)) : '<b>0 ₸</b>'}${
-            m.paid ? `<small class="cell-time">${esc(m.why)}${m.orig != null ? ' · в Калькуляцию ' + esc(money(m.orig)) : ''}</small>` : ''}` : '—'}</td>
+            m.paid ? `<small class="cell-time">${esc(m.why)}${m.orig != null ? ' · в Калькуляцию ' + esc(money(m.orig)) : ''}</small>`
+              : (m.why ? `<small class="cell-time">${esc(m.why)}</small>` : '')}` : '—'}</td>
           <td data-label="Что будет">${r.problem ? `<span class="imp-skip">пропуск · ${esc(r.problem)}</span>` : '<span class="imp-ok">создать</span>'}</td>
         </tr>`; }).join('')}
       </tbody></table></div>
@@ -1062,9 +1155,10 @@ function impPickPreviewModal(fileName, rows, cols){
   };
 
   const bind = () => {
-    const redraw = () => { const box = document.querySelector('.modal-body'); if(box){ box.innerHTML = body(); bind(); } };
-    const p2 = $('impPickPartner');
-    if(p2) p2.onchange = () => { partnerId = p2.value; loadExist(); redraw(); };
+    const redraw = () => { if(impRedrawBody(body())) bind(); };
+    impPartnerBind(pIds, sortedPool,
+      { getId: () => partnerId, setId: v => { partnerId = v; }, getQ: () => pq, setQ: v => { pq = v; } },
+      () => { loadExist(); redraw(); });
     const d2 = $('impPickDate');
     if(d2) d2.onchange = () => { date = d2.value || localToday(); loadExist(); redraw(); };
     const t2 = $('impPickDef');
