@@ -605,6 +605,11 @@ function impPreviewModal(fileName, rows, dbTracks){
 
 // Похоже ли на ШПИ Казпочты: две буквы, девять цифр, две буквы (QS013822592KZ).
 const BAR_SPI_RE = /^[A-Z]{2}\d{9}[A-Z]{2}$/;
+/* БЛАНК ПОСЛЕ СОХРАНЕНИЯ КАРТОЧКИ СО СКАНЕРА — ВЫКЛЮЧЕН (просьба владельца 11.11.2026:
+   «убери, чтобы бланк выходил автоматом, пока не нужна эта функция»). Печать не вырезана:
+   вернуть её — поставить здесь true. Отметка выданного бланка в пуле от этого флага
+   НЕ зависит и остаётся: она про учёт номеров, а не про печать. */
+const BAR_PRINT_AFTER_SAVE = false;
 
 async function barCreateOrderModal(){
   // Партнёры — только Барахолки, как в загрузке реестра. Если галочек нет ни у кого,
@@ -639,7 +644,7 @@ async function barCreateOrderModal(){
       <span class="hint">По ней считается МЕСЯЦ в Калькуляции. По умолчанию сегодняшняя.</span>
       <div id="bscDateInfo" class="idx-info"></div></div>
     <div class="hint" style="line-height:1.6">Заказ создастся <b>почтовым</b>. В карточке
-      останется заполнить ФИО, индекс и адрес; после сохранения сразу откроется бланк Казпочты.</div>`,
+      останется заполнить ФИО, индекс и адрес${BAR_PRINT_AFTER_SAVE ? '; после сохранения сразу откроется бланк Казпочты' : ''}.</div>`,
     async () => {
       const el = $('bscTrack'), info = $('bscInfo');
       const track = impTrackKey(el ? el.value : '');
@@ -725,7 +730,7 @@ async function barCreateOrderModal(){
           }
           /* Печатаем СРАЗУ 100×150: на складе термопринтер с этикеткой 100×150 мм,
              и лист A4 на нём приходится подгонять масштабом руками. */
-          if(typeof printMailLabelsPdf === 'function') await printMailLabelsPdf([saved],'label');
+          if(BAR_PRINT_AFTER_SAVE && typeof printMailLabelsPdf === 'function') await printMailLabelsPdf([saved],'label');
         },
       };
       orderModal();

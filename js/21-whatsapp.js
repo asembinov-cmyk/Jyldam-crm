@@ -636,21 +636,27 @@ async function waRegistrySelection(key){
     return;
   }
   const again=ok.filter(g=>seen.done.has(g.phone));
-  const send=ok.filter(g=>!seen.done.has(g.phone));
-  if(!send.length){
-    waBlockModal('Уже отправлено',
-      `Всем партнёрам из выборки (${again.length}) реестр сегодня уже уходил.`
-      +'<br><br>Повторно он не идёт: сообщения платные.');
-    return;
+  let send=ok.filter(g=>!seen.done.has(g.phone));
+  let force=false;                       // явный повтор — см. waRepeatChoice
+  if(again.length){
+    const pick=await waRepeatChoice({label,fresh:send.length,again:again.length,
+      who:'партнёр',whoAgain:'партнёра',
+      extra:['Счёт идёт по партнёрам: одно сообщение — один реестр за сегодня.',
+        noPhone.length?`Без телефона в карточке: ${noPhone.length}.`:'',
+        noPartner.length?`Заказов без партнёра: ${noPartner.length}.`:''].filter(Boolean).join(' ')});
+    if(!pick)return;
+    if(pick==='all'){send=send.concat(again);force=true;}
+    else if(!send.length)return;
   }
   const orders=send.reduce((a,g)=>a+g.orders.length,0);
-  const msg=`${label}\n\nОтправить реестр ${send.length} ${send.length===1?'партнёру':'партнёрам'}`
-    +` (${orders} ${orders===1?'заказ':'заказов'})?`
-    +(again.length?`\n\nПропустим ${again.length} — им реестр сегодня уже уходил.`:'')
-    +(noPhone.length?`\n\nБез телефона в карточке: ${noPhone.length}`:'')
-    +(noPartner.length?`\n\nЗаказов без партнёра: ${noPartner.length}`:'')
-    +`\n\nЭто ${send.length} ПЛАТНЫХ ${waPlural(send.length)} — Meta берёт за каждое.`;
-  if(!confirm(msg))return;
+  if(!again.length){
+    const msg=`${label}\n\nОтправить реестр ${send.length} ${send.length===1?'партнёру':'партнёрам'}`
+      +` (${orders} ${orders===1?'заказ':'заказов'})?`
+      +(noPhone.length?`\n\nБез телефона в карточке: ${noPhone.length}`:'')
+      +(noPartner.length?`\n\nЗаказов без партнёра: ${noPartner.length}`:'')
+      +`\n\nЭто ${send.length} ПЛАТНЫХ ${waPlural(send.length)} — Meta берёт за каждое.`;
+    if(!confirm(msg))return;
+  }
 
   /* Если хоть один параметр шаблона — ссылка на файл, сначала собираем и выкладываем
      файлы. Делаем это ПОСЛЕ подтверждения: зря гонять выгрузку, если человек отменил. */
@@ -675,7 +681,8 @@ async function waRegistrySelection(key){
     section:g.orders.some(o=>typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(o))?'baraholka':'main',
     components:waRegComponents(t,g,pin.params),
   }));
-  const r=await callEdge('kelesu-waba',{action:'enqueue',template:t.name,button:key,items});
+  const r=await callEdge('kelesu-waba',{action:'enqueue',template:t.name,button:key,
+    ...(force?{force:true}:{}),items});
   if(!r||r.error){
     waBlockModal('Не удалось поставить в очередь',`${esc((r&&r.error)||'ошибка вызова')}`
       +'<br><br>Если это «relation wa_queue does not exist» — выполните <b>db/37</b>,'
@@ -683,9 +690,13 @@ async function waRegistrySelection(key){
     return;
   }
   callEdge('kelesu-waba',{action:'drain'}).catch(()=>{});
+  const oldFn=force&&!r.forced;
+  if(force&&r.queued&&typeof logAction==='function')
+    logAction('wa_resend','partners',{entity_label:label,meta:{template:t.name,queued:r.queued,repeated:again.length}});
   waBlockModal('Реестр поставлен в очередь',
     `В очередь: <b>${r.queued||0}</b> ${waPlural(r.queued||0)} — по одному на партнёра.`
-    +(r.skipped?`<br>Пропущено (уже уходило): ${r.skipped}.`:'')
+    +(r.skipped?`<br>Пропущено (${force&&!oldFn?'уже стоят в очереди':'уже уходило'}): ${r.skipped}.`:'')
+    +(oldFn?`<br><br><b style="color:var(--rust)">${WA_OLD_FN_HINT}</b>`:'')
     +`<br><br>Заказов в реестрах: ${orders}.`
     +'<br><br><b>Вкладку можно закрыть</b> — дальше шлёт сервер.'
     +'<br>Что ушло, видно в <b>Настройки → Оповещения WhatsApp</b>.');
@@ -746,36 +757,43 @@ async function waNotifySelection(key){
   if(seen.error){waBlockModal('Журнал не прочитан',
     `Не удалось проверить, кому уже слали: ${esc(seen.error)}<br><br>Без этой проверки отправлять`
     +' опасно — повтор оплачивается заново. Попробуйте ещё раз.');return;}
-  const again=ok.filter(r=>seen.done.has(r.o.id));
+  let again=ok.filter(r=>seen.done.has(r.o.id));
   ok=ok.filter(r=>!seen.done.has(r.o.id));
-  if(!ok.length){
-    waBlockModal('Уже отправлено',
-      `Все отмеченные заказы (${again.length}) уже получали шаблон <b>${esc(t.name)}</b>.`
-      +'<br><br>Повторно он не уходит: сообщения платные. Нужен именно повтор — отправьте его'
-      +' другим шаблоном или спросите меня, как снять отметку.');
-    return;
+  /* force — человек ЯВНО выбрал повтор. Тогда сервер не сверяется с журналом отправленного
+     (но стоящее в очереди прямо сейчас всё равно не задвоит). */
+  let force=false;
+  if(again.length){
+    // Кому-то уже уходило — вместо «да/нет» окно с выбором: только новым или всем с повтором.
+    const pick=await waRepeatChoice({label,fresh:ok.length,again:again.length,last:seen.last,
+      extra:[`Шаблон: <b>${esc(t.name)}</b>.`,
+        bad.length?`Без телефона и не уйдут: ${bad.length}.`:'',
+        'Шлёт сервер — вкладку можно закрыть сразу после постановки в очередь.'].filter(Boolean).join(' ')});
+    if(!pick)return;
+    if(pick==='all'){ok=ok.concat(again);force=true;}
+    else if(!ok.length)return;         // «только новым», а новых нет — слать нечего
+  }else{
+    // Вот то самое «отправить 1 смс? да или отмена». Про платность говорим от полусотни:
+    // отметить «все» — одно движение, а в Барахолке их полторы тысячи.
+    const msg=`${label}\n\nОтправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
+      +(bad.length?`\n\nБез телефона и не уйдут: ${bad.length}`:'')
+      +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`
+        +`\n\nШлёт сервер, примерно ${waEta(ok.length)}. Вкладку можно закрыть сразу после`
+        +' постановки в очередь — отправка от неё больше не зависит.':'');
+    if(!confirm(msg))return;
   }
-
-  // Вот то самое «отправить 1 смс? да или отмена». Про платность говорим от полусотни:
-  // отметить «все» — одно движение, а в Барахолке их полторы тысячи.
-  const msg=`${label}\n\nОтправить ${ok.length} ${waPlural(ok.length)} в WhatsApp?`
-    +(again.length?`\n\nПропустим ${again.length} — им этот шаблон уже уходил.`:'')
-    +(bad.length?`\n\nБез телефона и не уйдут: ${bad.length}`:'')
-    +(ok.length>=50?`\n\nЭто ${ok.length} ПЛАТНЫХ сообщений — Meta берёт за каждое.`
-      +`\n\nШлёт сервер, примерно ${waEta(ok.length)}. Вкладку можно закрыть сразу после`
-      +' постановки в очередь — отправка от неё больше не зависит.':'');
-  if(!confirm(msg))return;
+  const repeated=force?again.length:0;
 
   /* ОТПРАВЛЯЕТ СЕРВЕР, А НЕ ЭТА ВКЛАДКА (19.10.2026, очередь — db/37, db/38).
      Просьба владельца после разбора «1594 отправили — ушло 251»: «сделай отправку на
      сервере через очередь». Здесь теперь только постановка в очередь: пачки по 500 строк,
      без пауз — это обычная запись, секунды. Дальше шлёт планировщик, раз в минуту по
      60 сообщений, и вкладку можно закрыть. */
-  let queued=0, skipped=again.length, failEnq='';
+  let queued=0, skipped=force?0:again.length, failEnq='', oldFn=false;
   for(let i=0;i<ok.length;i+=WA_QUEUE_CHUNK){
     const part=ok.slice(i,i+WA_QUEUE_CHUNK);
     waProgress(`💬 Ставим в очередь: ${i} из ${ok.length}…`);
     const r=await callEdge('kelesu-waba',{action:'enqueue',template:t.name,button:key,
+      ...(force?{force:true}:{}),
       items:part.map(x=>({order_id:x.o.id,code:x.o.code,phone:x.phone,
         // Раздел пишем ПО ЗАКАЗУ, а не по гриду: в отчёте (db/36) разбивка именно по нему,
         // а смешанная выборка иначе легла бы в один раздел целиком.
@@ -784,8 +802,12 @@ async function waNotifySelection(key){
         components:waComponentsFor(t,x.o,pin.params)}))});
     if(!r||r.error){failEnq=(r&&r.error)||'ошибка вызова';break;}
     queued+=r.queued||0; skipped+=r.skipped||0;
+    if(force&&!r.forced)oldFn=true;
   }
   waProgress('');
+  // Повтор — платное действие по чужой просьбе «ещё раз»: оставляем след, кто и сколько.
+  if(force&&queued&&typeof logAction==='function')
+    logAction('wa_resend','orders',{entity_label:label,meta:{template:t.name,queued,repeated}});
   if(failEnq&&!queued){
     waBlockModal('Не удалось поставить в очередь',`${esc(failEnq)}`
       +'<br><br>Если это «relation wa_queue does not exist» — выполните <b>db/37</b>,'
@@ -798,7 +820,9 @@ async function waNotifySelection(key){
   callEdge('kelesu-waba',{action:'drain'}).catch(()=>{});
   waBlockModal('Поставлено в очередь',
     `В очередь: <b>${queued}</b> ${waPlural(queued)}.`
-    +(skipped?`<br>Пропущено (уже уходило): ${skipped}.`:'')
+    +(force&&!oldFn?`<br>Из них повторно: до ${repeated}.`:'')
+    +(skipped?`<br>Пропущено (${force&&!oldFn?'уже стоят в очереди':'уже уходило'}): ${skipped}.`:'')
+    +(oldFn?`<br><br><b style="color:var(--rust)">${WA_OLD_FN_HINT}</b>`:'')
     +(bad.length?`<br>Без телефона: ${bad.length}.`:'')
     +(failEnq?`<br><br><b style="color:var(--rust)">Часть не встала в очередь:</b> ${esc(failEnq)}`:'')
     +'<br><br><b>Вкладку можно закрыть</b> — дальше шлёт сервер, примерно по 60 сообщений'
@@ -1433,15 +1457,75 @@ const WA_SECTION_RU={baraholka:'Барахолка',main:'Заказы забо�
    и надо повторить. */
 async function waAlreadySent(ids,template){
   const done=new Set();
+  let last='';                  // когда этот шаблон уходил в последний раз — для окна повтора
   for(let i=0;i<ids.length;i+=100){
     const part=ids.slice(i,i+100);
-    const {data,error}=await sb.from('wa_sends').select('order_id,status')
+    const {data,error}=await sb.from('wa_sends').select('order_id,status,created_at')
       .eq('template',template).in('order_id',part);
     if(error)return {error:dbErrText?dbErrText(error):(error.message||'ошибка запроса')};
-    (data||[]).forEach(r=>{if(r.order_id&&r.status!=='failed')done.add(r.order_id);});
+    (data||[]).forEach(r=>{if(r.order_id&&r.status!=='failed'){
+      done.add(r.order_id);
+      if(r.created_at&&r.created_at>last)last=r.created_at;
+    }});
   }
-  return {done};
+  return {done,last};
 }
+/* ПОВТОР РАССЫЛКИ — ЯВНЫЙ ВЫБОР, А НЕ ОБХОД ЗАЩИТЫ (просьба владельца 11.11.2026: «бывает,
+   что при рассылке у нас в Келесу не уходит из-за оплаты, поэтому дай кнопку повторно
+   отправить — не так, что уже уходили и всё, а ещё отправить»).
+
+   Почему защита вообще мешала: журнал считает сообщение отправленным, когда его ПРИНЯЛ
+   Kelesu. Если у Kelesu кончились деньги, до клиента оно не доходит, а у нас стоит
+   «отправлено» — и повторить было нечем, кроме другого шаблона.
+
+   По умолчанию всё как раньше: основная кнопка шлёт только тем, кому не уходило. Повтор —
+   вторая кнопка с числом ПЛАТНЫХ сообщений прямо на ней. Возвращает 'fresh', 'all' или
+   null (отмена). Тот же приём, что окно отправки в KET (`ketSendPlanModal`). */
+function waRepeatChoice(o){
+  // o: {label, fresh, again, last, who, whoAgain, extra}
+  const total=o.fresh+o.again;
+  return new Promise(resolve=>{
+    const ov=showInfo('💬 '+o.label,`
+      <div class="panel" style="margin-bottom:12px"><div style="padding:14px 18px">
+        <div style="margin-bottom:4px">Ещё не получали: <b>${o.fresh}</b></div>
+        <div>Уже уходило: <b style="color:var(--rust)">${o.again}</b>${
+          o.last?` <span style="color:var(--muted)">· последний раз ${esc(fmtDateTime(o.last))}</span>`:''}</div>
+        <div class="hint" style="margin-top:10px;line-height:1.55">«Уже уходило» значит, что сообщение
+          <b>принял Kelesu</b>. Дошло ли оно до ${esc(o.whoAgain||'клиента')} — журнал не знает: если у Kelesu
+          не было оплаты, оно могло не уйти дальше.<br>
+          Повтор — это ещё <b>${o.again}</b> платных ${waPlural(o.again)}. Если прошлые всё-таки дошли,
+          ${esc(o.who||'клиент')} получит второе такое же.</div>
+        ${o.extra?`<div class="hint" style="margin-top:10px">${o.extra}</div>`:''}
+      </div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+        <button class="btn primary" id="waRepFresh"${o.fresh?'':' disabled'}>Отправить только новым (${o.fresh})</button>
+        <button class="btn ghost" id="waRepAll">${o.fresh
+          ?`Отправить всем ${total}, включая ${o.again} повторно`
+          :`Отправить повторно (${o.again})`}</button>
+      </div>`,{closeLabel:'Отмена',wide:true});
+    let done=false;
+    const onEsc=e=>{if(e.key==='Escape')finish(null);};
+    function finish(v){
+      if(done)return;done=true;
+      document.removeEventListener('keydown',onEsc);
+      if(document.body.contains(ov))closeTopModal();
+      resolve(v);
+    }
+    document.addEventListener('keydown',onEsc);
+    if($('waRepFresh'))$('waRepFresh').onclick=()=>finish('fresh');
+    if($('waRepAll'))$('waRepAll').onclick=()=>finish('all');
+    ov.querySelector('.x').addEventListener('click',()=>finish(null));
+    const cl=ov.querySelector('[data-close]');
+    if(cl)cl.addEventListener('click',()=>finish(null));
+    ov.addEventListener('click',e=>{if(e.target===ov)finish(null);});
+  });
+}
+/* Повтор сработает, только если выложена версия `kelesu-waba`, которая его понимает:
+   старая молча пропустит всех «уже получавших», и со стороны это выглядело бы как
+   «кнопка не работает». Новая отвечает полем `forced`. */
+const WA_OLD_FN_HINT='Повтор не сработал: на сервере выложена прежняя версия функции'
+  +' <b>kelesu-waba</b>, она про повтор не знает и пропустила всех, кому уже уходило.'
+  +' Перевыложите функцию (версия 2026-11-11.1) и нажмите ещё раз.';
 /* Полоса хода отправки. Тост живёт 2,2 секунды и внизу экрана — на девятнадцать минут
    работы этого мало, а человеку надо видеть, что процесс идёт и вкладку закрывать нельзя.
    Ровно по этой причине 1594 и оборвались незамеченными. */
