@@ -555,6 +555,12 @@ function nfWhExcel(){
 let nfWaRows=null;      // null — ещё не грузили, [] — грузили и пусто
 let nfWaCfg=null;       // состояние робота из wa_ai_settings
 let nfWaErr='';         // текст беды, если таблицы или колонок ещё нет
+/* Панель при входе в раздел всегда свёрнута (просьба владельца 11.11.2026): она длинная и
+   отодвигала остальной «Центр контроля» вниз. Сколько человек ждёт — видно числом в
+   шапке и в свёрнутом виде. Состояние живёт в памяти вкладки, а сбрасывает его роутер
+   по смене вкладки, а не сам раздел: перерисовка тут случается и от Realtime, и панель
+   закрывалась бы под руками (та же механика, что у таблиц «Статистики»). */
+let nfWaOpen=false;
 const NF_WA_LIMIT=50;      // людей на экране
 const NF_WA_FETCH=400;     // строк из базы: у одного человека их бывает десяток
 
@@ -628,7 +634,13 @@ function nfWaHtml(){
   }).join('');
 }
 
-function nfWaRedraw(){const box=$('nfWaBox');if(box)box.innerHTML=nfWaHtml();}
+function nfWaRedraw(){
+  const box=$('nfWaBox');if(box)box.innerHTML=nfWaHtml();
+  // Число в шапке — единственное, что видно у свёрнутой панели, поэтому обновляем его
+  // вместе со списком: иначе оно осталось бы пустым с первой отрисовки, когда данные
+  // ещё не пришли.
+  const c=$('nfWaCnt');if(c)c.textContent=nfWaRows?nfWaGroups().length:'';
+}
 
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
@@ -654,11 +666,12 @@ function renderNotify(){
     </div>
 
     ${isStaff()?`
-    <div class="panel" style="margin-bottom:18px">
-      <div class="panel-head"><h2>💬 Вопросы клиентов без ответа</h2>
-        <span class="count">${nfWaRows?nfWaGroups().length:''}</span>
-      </div>
-      <div id="nfWaBox">${nfWaHtml()}</div>
+    <div class="panel dash-fold${nfWaOpen?' open':''}" style="margin-bottom:18px">
+      <button type="button" class="panel-head dash-fold-head" data-nffold="wa">
+        <h2>💬 Вопросы клиентов без ответа</h2>
+        <span class="count" id="nfWaCnt">${nfWaRows?nfWaGroups().length:''}</span>
+        <i class="dash-fold-ar">▾</i></button>
+      <div class="dash-fold-body"><div id="nfWaBox">${nfWaHtml()}</div></div>
     </div>`:''}
 
     ${isStaff()?`
@@ -716,6 +729,8 @@ function renderNotify(){
   // панель (nfWaRedraw), а не весь экран — иначе перерисовка собьёт работу
   // с остальными панелями раздела.
   if(isStaff()&&nfWaRows===null)nfWaLoad().then(nfWaRedraw).catch(()=>{});
+  const waFold=$('main').querySelector('[data-nffold="wa"]');
+  if(waFold)waFold.onclick=()=>{nfWaOpen=!nfWaOpen;waFold.closest('.dash-fold').classList.toggle('open',nfWaOpen);};
   $('main').querySelectorAll('[data-wadone]').forEach(b=>b.onclick=async()=>{
     // Разбирают РАЗГОВОР, а не одну реплику: снимаем все сообщения человека,
     // иначе его номер остался бы в списке ещё десять раз.
@@ -848,6 +863,8 @@ function render(){
   // сворачивать нельзя — перерисовка там случается от фото и от Realtime, и панель
   // закрывалась бы под руками. Стоит ДО цепочки if/else ниже, чтобы её не разорвать.
   if(S.tab==='sorting'&&_lastTab!=='sorting'&&typeof sortPrintOpen!=='undefined')sortPrintOpen=false;
+  // «Вопросы клиентов без ответа» в Центре контроля — то же правило: при заходе свёрнута.
+  if(S.tab==='notify'&&_lastTab!=='notify')nfWaOpen=false;
   /* Канал и сверку переписки снимаем ТОЛЬКО когда человек ушёл ИЗ модуля, а не на каждой
      перерисовке. render() зовёт каждое событие Realtime по заказам, и прежняя версия
      (снять здесь, завести в renderWhatsapp) сбрасывала отсчёт раньше, чем он доходил до
