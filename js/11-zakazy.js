@@ -673,7 +673,7 @@ function renderOrders(mode){
   const barNoCreator=bar&&barScope.some(o=>!(o.created_by_name||'').trim());
   $('main').innerHTML=`
     ${moduleHead({title:head,sub:subText,
-      actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(canOrder('create',bar)&&bar)?'<button class="btn primary" id="barNewOrder" title="Отсканировать ШПИ и завести заказ">＋ Создать заказ</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
+      actions:`${canMod('orders')||bar?'<button class="btn btn-excel" id="exportXlsx">⬇ Выгрузить Excel</button>':''}${(bar&&canMod('baraholka'))?'<button class="btn primary" id="importXlsx" title="Создать заказы из реестра Казпочты">⬆ Загрузить из Excel</button>':''}${(!bar&&!ordersMode&&isStaff()&&canOrder('create'))?'<button class="btn ghost" id="importXlsxPick" title="Создать заказы из файла: ФИО, адрес, телефон, индекс, тип доставки, оплачено отправителем">⬆ Загрузить из Excel</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="kazpostAssignSel">📮 Присвоить трек-номер</button>':''}${(canOrder('create')&&isStaff())?'<button class="btn ghost" id="ketSendSel">↑ Отправить в KET</button>':''}${(isStaff()&&ordersMode==='mail')?'<button class="btn ghost" id="printMailLabels">🖨 Печать бланков</button>':''}${(canOrder('create',bar)&&bar)?'<button class="btn primary" id="barNewOrder" title="Отсканировать ШПИ и завести заказ">＋ Создать заказ</button>':''}${(can('orders','create')&&!bar)?'<button class="btn primary" id="newOrder">＋ Создать заказ</button>':''}`,
       hero:{k:'Сумма доставки',v:totalCost.toLocaleString('ru-RU'),unit:'₸'},
       stats:[
         {v:`${list.length}<small> / ${ordersWithPhone(list)}</small>`,k:'всего · сохранено'},
@@ -1058,6 +1058,9 @@ function renderOrders(mode){
   };
   const impBtn=$('importXlsx');
   if(impBtn)impBtn.onclick=()=>importOrdersFromExcel();
+  // Заказы заборов: свой файл и свой разбор (js/17) — не путать с реестром Барахолки выше.
+  const impPickBtn=$('importXlsxPick');
+  if(impPickBtn)impPickBtn.onclick=()=>importPickupOrdersFromExcel();
   const exclBtn=$('ordersExclPartners');
   if(exclBtn)exclBtn.onclick=()=>ordersExcludePartnersModal();
 

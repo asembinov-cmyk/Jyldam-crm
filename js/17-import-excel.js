@@ -200,10 +200,14 @@ async function impExistingTracks(tracks){
 // Просьба владельца 02.10.2026: «пиши какие заказы не загрузились, если есть дубли».
 // Раньше был один тост «пропущено: 14», в котором четыре разные причины складывались
 // в одно число, а сами строки нигде не перечислялись.
-function impResultModal(fileName, made, skipped){
+function impResultModal(fileName, made, skipped, opts){
+  // noTrack — загрузка заказов заборов: трека у них нет, вместо него адрес и строка файла
+  const noTrack = !!(opts && opts.noTrack);
   const byReason = {};
   skipped.forEach(r => { (byReason[r.problem] = byReason[r.problem] || []).push(r); });
-  const plain = skipped.map(r => `${r.track || 'без трека'}\t${r.client || ''}\t${r.problem}`).join('\n');
+  const plain = skipped.map(r => noTrack
+    ? `стр. ${r.line}\t${r.client || ''}\t${r.rawPhone || r.phone || ''}\t${r.problem}`
+    : `${r.track || 'без трека'}\t${r.client || ''}\t${r.problem}`).join('\n');
   showInfo('Загрузка завершена', `
     <p class="imp-note">Файл: <b>${esc(fileName)}</b> · создано заказов: <b>${made}</b>${
       skipped.length ? ` · не загрузилось: <b style="color:var(--rust)">${skipped.length}</b>` : ''}</p>
@@ -212,18 +216,18 @@ function impResultModal(fileName, made, skipped){
         <div class="panel" style="margin-bottom:12px">
           <div class="panel-head"><h2 style="font-size:15px">${esc(why)}</h2><span class="count">${list.length}</span></div>
           <div class="table-scroll"><table class="resp-table"><thead><tr>
-            <th>Стр.</th><th>Трек</th><th>ФИО</th><th>Телефон</th>
+            <th>Стр.</th>${noTrack ? '' : '<th>Трек</th>'}<th>ФИО</th><th>Телефон</th>
           </tr></thead><tbody>
             ${list.map(r => `<tr>
               <td data-label="Стр.">${r.line}</td>
-              <td data-label="Трек">${esc(r.track || '—')}</td>
+              ${noTrack ? '' : `<td data-label="Трек">${esc(r.track || '—')}</td>`}
               <td data-label="ФИО">${esc(r.client || '—')}</td>
-              <td data-label="Телефон">${esc(r.phone || r.rawPhone || '—')}</td>
+              <td data-label="Телефон">${esc(noTrack ? (r.rawPhone || r.phone || '—') : (r.phone || r.rawPhone || '—'))}</td>
             </tr>`).join('')}
           </tbody></table></div>
         </div>`).join('')}
       <button class="btn ghost sm" id="impCopySkipped">📋 Скопировать список</button>
-      <div class="hint" style="margin-top:8px">Список можно отправить партнёру: трек, ФИО и причина по каждой строке.</div>`}`,
+      <div class="hint" style="margin-top:8px">Список можно отправить партнёру: ${noTrack ? 'строка файла, ФИО, телефон' : 'трек, ФИО'} и причина по каждой строке.</div>`}`,
     { wide: true });
   const btn = $('impCopySkipped');
   if(btn) btn.onclick = async () => {
@@ -732,4 +736,413 @@ async function barCreateOrderModal(){
     const btn = ov.querySelector('[data-save]');
     if(btn) btn.click();
   };
+}
+
+/* ============================================================
+   ЗАКАЗЫ ЗАБОРОВ: ЗАГРУЗКА ИЗ EXCEL (11.11.2026)
+
+   Просьба владельца: «в заказы заборов так же сделай загрузить из эксель, как в
+   Барахолке: там будет ФИО, адрес, номер телефона, индекс, тип доставки, оплачено
+   отправителем».
+
+   ЭТО ДРУГОЙ ФАЙЛ, И ПОЭТОМУ ДРУГОЙ РАЗБОР, а не флажок у барахолочного. Реестр
+   Барахолки — документ Казпочты: трек уже присвоен, тип доставки один, цена посчитана
+   в файле. Здесь трека нет вовсе, тип доставки стоит В СТРОКЕ, а цену считаем мы — по
+   тарифу партнёра. Общими остались только мелкие помощники (индекс, телефон, месяц) и
+   итоговое окно: две ветки внутри одной функции разошлись бы на первой же правке.
+
+   В СПИСКЕ ПАРТНЁРОВ — ТОЛЬКО НЕбарахолочные. Кнопку загрузки из «Заказов заборов»
+   уже один раз убирали (раздел 5f): через неё реестры Барахолки наливали в общий
+   список. Зеркальное правило закрывает эту дверь: партнёр с галочкой «Барахолка»
+   сюда не попадает, его файл грузят в его модуле.
+
+   НИЧЕГО НЕ СОЗДАЁТСЯ ВСЛЕПУЮ — как и там: сначала таблица «что создам, что пропущу и
+   почему», потом кнопка.
+   ============================================================ */
+
+// Колонки ищем по названию. У телефона первым стоит полное «номер телефона»: по одному
+// слову «номер» искать нельзя — так называют и номер заказа, и № п/п.
+const PICK_COLS = {
+  client:   ['фио', 'ф.и.о', 'получатель'],
+  address:  ['адрес'],
+  phone:    ['номер телефона', 'телефон', 'тел', 'сотовый'],
+  index:    ['индекс'],
+  delivery: ['тип доставки', 'доставка', 'тип'],
+  paid:     ['оплачено отправителем', 'оплачено', 'оплата'],
+  city:     ['город'],          // необязательная: город назначения у курьерских
+};
+
+/* ТИП ДОСТАВКИ ИЗ ЯЧЕЙКИ. '' — пусто, '?' — написано что-то, чего мы не поняли.
+   Угадывать тип нельзя: он тянет за собой цену, город, трек у Казпочты и видимость на
+   складе (раздел 6) — поэтому непонятное значение пропускаем с причиной, а не
+   превращаем молча в «почтовую». */
+function impPickDelivery(v){
+  const n = impNorm(v);
+  if(!n) return '';
+  if(/курьер|курер|courier/.test(n)) return 'courier';
+  if(/почт|post|mail/.test(n)) return 'mail';
+  return '?';
+}
+/* «ОПЛАЧЕНО ОТПРАВИТЕЛЕМ» ИЗ ЯЧЕЙКИ: true / false / null (не поняли). Это деньги —
+   при отметке сумма заказа становится нулём, — поэтому понимаем только явные «да» и
+   «нет», а всё остальное («каспи», «частично») отдаём человеку причиной пропуска. */
+function impPickPaid(v){
+  const n = impNorm(v).replace(/[.!]+$/, '');
+  if(!n || /^(нет|не|no|n|0|-|—|–|false|не оплачено|неоплачено)$/.test(n)) return false;
+  if(/^(да|д|yes|y|1|\+|true|ок|ok|оплачено|оплачен|оплачена|оплатил|оплатили|оплачено отправителем)$/.test(n)) return true;
+  return null;
+}
+// Ключ «тот же получатель»: последние 10 цифр телефона + ФИО без регистра и лишних пробелов.
+const impPickKey = (phone, client) =>
+  String(phone || '').replace(/\D/g, '').slice(-10) + '|' + normName(client);
+
+function impPickReadSheet(wb){
+  const sh = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sh, { header: 1, raw: false, defval: '' });
+  // сначала точное совпадение или начало, и только потом вхождение: «Номер телефона
+  // получателя» должен найтись, а «Тип» не должен перехватить «Тип оплаты» раньше времени
+  const findIn = (cells, keys) => {
+    for(const k of keys){ const i = cells.findIndex(c => c === k || c.startsWith(k)); if(i >= 0) return i; }
+    for(const k of keys){ if(k.length < 5) continue; const i = cells.findIndex(c => c.includes(k)); if(i >= 0) return i; }
+    return -1;
+  };
+  let head = -1;
+  for(let r = 0; r < Math.min(rows.length, 60); r++){
+    const cells = (rows[r] || []).map(impNorm);
+    if(findIn(cells, PICK_COLS.client) >= 0
+      && (findIn(cells, PICK_COLS.phone) >= 0 || findIn(cells, PICK_COLS.address) >= 0)){ head = r; break; }
+  }
+  if(head < 0) return { error: 'Не нашёл строку заголовков: в файле должны быть колонки «ФИО» и «Телефон».' };
+  const cells = (rows[head] || []).map(impNorm);
+  const map = {};
+  Object.keys(PICK_COLS).forEach(k => { map[k] = findIn(cells, PICK_COLS[k]); });
+  if(map.phone < 0) return { error: 'В файле нет колонки «Телефон» (или «Номер телефона»).' };
+  const out = [];
+  for(let r = head + 1; r < rows.length; r++){
+    const row = rows[r] || [];
+    const get = i => i >= 0 ? String(row[i] == null ? '' : row[i]).trim() : '';
+    const client = get(map.client);
+    if(!client) continue;
+    const rawPhone = get(map.phone);
+    out.push({
+      line: r + 1,
+      client,
+      address: get(map.address),
+      // В заказах заборов телефон лежит ДЕСЯТЬЮ цифрами — так его пишет карточка
+      // (phoneStored). Реестр Барахолки хранит с семёркой, и на этой разнице уже
+      // ломалась отправка в KET; у заборов второго вида записи не заводим.
+      phone: impPhone(rawPhone).slice(-10),
+      phoneOk: impPhone(rawPhone).length === 11,
+      rawPhone,
+      index: impIndex(get(map.index)),
+      rawIndex: get(map.index),
+      del: impPickDelivery(get(map.delivery)),
+      rawDel: get(map.delivery),
+      paid: impPickPaid(get(map.paid)),
+      rawPaid: get(map.paid),
+      rawCity: get(map.city),
+    });
+  }
+  return { rows: out, cols: map };
+}
+
+/* ДЕНЬГИ ЗАКАЗА. Цены в файле нет — считаем как карточка и как болванки из заявки
+   (`buildPickupOrderRows`): размер S по тарифу партнёра для ЭТОГО типа доставки.
+
+   Нулём сумма становится в двух случаях, и условная выручка у них разная:
+     • тариф партнёра по этому типу ровно 0 — он платит по счёту раз в месяц (раздел 5b),
+       в Калькуляцию идёт «условная сумма» из его карточки;
+     • в файле стоит «оплачено отправителем» — тогда условная выручка это сам тариф:
+       ровно то, что запомнила бы карточка при постановке этой галочки руками. */
+function impPickMoney(r, pt, type){
+  const sizes = packageSizesFor(pt);
+  const tariff = type === 'courier' ? sizes.S.courier : sizes.S.mail;
+  if(isExplicitZero(type === 'courier' ? pt.tariff_courier : pt.tariff_post))
+    return { sum: 0, paid: true, why: 'тариф 0',
+      orig: (pt.direct_pay_amount != null && pt.direct_pay_amount !== '') ? +pt.direct_pay_amount : null };
+  if(r.paid) return { sum: 0, paid: true, orig: tariff, why: 'оплачено отправителем' };
+  return { sum: tariff, paid: false, orig: null, why: '' };
+}
+
+/* Что уже заведено у этого партнёра на эту дату — защита от повторной загрузки того же
+   файла. У Барахолки её даёт трек, а здесь трека нет, поэтому ключ — получатель
+   (телефон + ФИО) в пределах «партнёр + дата забора».
+
+   Партнёра ищем ДВУМЯ путями: полем `partner_id` и названием отправителя — у заказов,
+   созданных пачкой из заявки, `partner_id` часто пуст (раздел 5b). `ilike` по названию
+   даёт надмножество (подчёркивание в «sumkiii_astana_» для него — любой знак), поэтому
+   ответ досверяем на месте. Возвращаем Map «ключ → номер заказа» или null при сбое. */
+async function impPickExisting(pt, date){
+  const out = new Map();
+  const take = list => (list || []).forEach(o => {
+    if(o.partner_id === pt.id || normName(o.sender) === normName(pt.name))
+      out.set(impPickKey(o.phone, o.client), o.code);
+  });
+  const cols = 'code,client,phone,partner_id,sender';
+  try{
+    const a = await sb.from('orders').select(cols).eq('pickup_date', date).eq('partner_id', pt.id).limit(1000);
+    if(a.error) throw a.error;
+    take(a.data);
+    const b = await sb.from('orders').select(cols).eq('pickup_date', date).is('partner_id', null)
+      .ilike('sender', String(pt.name || '').trim()).limit(1000);
+    if(b.error) throw b.error;
+    take(b.data);
+    return out;
+  }catch(e){ console.error('pickup import dup check', e); return null; }
+}
+
+// Что мешает создать заказ из строки. type — уже с учётом «типа по умолчанию».
+function impPickProblem(r, type, exist){
+  if(!r.phoneOk) return 'телефон неполный: ' + (r.rawPhone || 'пусто');
+  if(r.del === '?') return 'тип доставки не распознан: «' + r.rawDel + '»';
+  if(!type) return 'тип доставки не указан';
+  if(r.paid === null) return 'не понял «оплачено отправителем»: «' + r.rawPaid + '»';
+  if(type === 'mail' && !r.index) return 'нет индекса (почтовая)';
+  if(exist && exist.has(impPickKey(r.phone, r.client)))
+    return 'такой получатель у этого партнёра на эту дату уже есть (заказ ' + exist.get(impPickKey(r.phone, r.client)) + ')';
+  return '';
+}
+
+// Образец файла — чтобы колонки назвали так, как их ищет разбор.
+function impPickSample(){
+  if(!window.XLSX){ toast('Библиотека Excel ещё загружается, попробуйте снова'); return; }
+  const aoa = [
+    ['ФИО', 'Адрес', 'Номер телефона', 'Индекс', 'Тип доставки', 'Оплачено отправителем', 'Город'],
+    ['Иванов Иван', 'Алматы, Абая 10, кв 5', '87011234567', '', 'курьерская', 'нет', 'Алматы'],
+    ['Ахметова Айгуль', 'Караганда, Бухар-Жырау 20', '87059876543', '100000', 'почтовая', 'да', ''],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // индекс и телефон — текстом: числом Excel съел бы ведущий ноль
+  ['C2','C3','D3'].forEach(a => { if(ws[a]){ ws[a].t = 's'; ws[a].v = String(ws[a].v); } });
+  if(typeof xlsxAutoCols === 'function') ws['!cols'] = xlsxAutoCols(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Заказы');
+  XLSX.writeFile(wb, 'Образец — заказы заборов.xlsx');
+}
+
+async function importPickupOrdersFromExcel(){
+  if(!window.XLSX){ toast('Библиотека Excel ещё загружается, попробуйте снова'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.xls,.xlsx,.xlsm';
+  inp.onchange = async () => {
+    const file = (inp.files || [])[0]; if(!file) return;
+    let wb;
+    try{
+      const buf = await file.arrayBuffer();
+      wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+    }catch(e){ console.error(e); toast('Не удалось прочитать файл'); return; }
+    const parsed = impPickReadSheet(wb);
+    if(parsed.error || !parsed.rows.length){
+      // Не тост, а окно: человеку нужно понять, КАК назвать колонки, и взять образец.
+      showInfo('Файл не разобран', `
+        <p class="imp-note" style="color:var(--rust)">${esc(parsed.error || 'В файле нет строк с ФИО.')}</p>
+        <p class="imp-note">Первая строка таблицы — названия колонок:
+          <b>ФИО · Адрес · Номер телефона · Индекс · Тип доставки · Оплачено отправителем</b>.
+          Порядок колонок не важен, лишние не мешают. Необязательная — <b>Город</b>
+          (город назначения у курьерских).</p>
+        <button class="btn ghost sm" id="impPickSampleBtn">⬇ Скачать образец</button>`);
+      const sb2 = $('impPickSampleBtn'); if(sb2) sb2.onclick = impPickSample;
+      return;
+    }
+    impPickPreviewModal(file.name, parsed.rows, parsed.cols);
+  };
+  inp.click();
+}
+
+function impPickPreviewModal(fileName, rows, cols){
+  // Зеркало правила Барахолки: её партнёров здесь нет, их реестры грузят в её модуле.
+  const pool = (S.partners || []).filter(p => !p.is_baraholka);
+  const guess = pool.find(p => normName(fileName).includes(normName(p.name))) || null;
+  let partnerId = guess ? guess.id : '';
+  let date = localToday();
+  let defType = '';            // что делать со строками БЕЗ типа доставки: '' — пропускать
+  let busy = false;
+  /* Что уже есть в базе у «партнёр + дата»: undefined — ещё спрашиваем, null — спросить
+     не удалось, Map — ответ. Ключ запоминаем, чтобы опоздавший ответ про прежнего
+     партнёра не лёг поверх нового выбора. */
+  let exist, existFor = '';
+  const courierType = (S.delivery || []).find(d => /курьер/i.test(d.name || ''));
+  const mailType = (S.delivery || []).find(d => /почт/i.test(d.name || ''));
+  const cityByName = new Map((S.courier_cities || []).map(c => [normName(c.name), c]));
+  const noTypeRows = rows.filter(r => r.del === '').length;
+
+  const mark = () => rows.map(r => {
+    const type = r.del === '?' ? '' : (r.del || defType);
+    const problem = impPickProblem(r, type, exist || null);
+    const city = (type === 'courier' && r.rawCity) ? (cityByName.get(normName(r.rawCity)) || null) : null;
+    return { ...r, type, problem, city };
+  });
+
+  const loadExist = () => {
+    const pt = pool.find(p => p.id === partnerId);
+    const key = partnerId + '|' + date;
+    if(!pt){ exist = new Map(); existFor = ''; return; }
+    if(existFor === key) return;
+    existFor = key; exist = undefined;
+    impPickExisting(pt, date).then(m => {
+      if(existFor !== key) return;        // пока ждали, выбрали другое
+      exist = m;
+      const box = document.querySelector('.modal-body');
+      if(box && $('impPickPartner')){ box.innerHTML = body(); bind(); }
+    });
+  };
+
+  const money = n => (+n || 0).toLocaleString('ru-RU') + ' ₸';
+  const body = () => {
+    const pt = pool.find(p => p.id === partnerId) || null;
+    const marked = mark();
+    const ok = marked.filter(r => !r.problem), bad = marked.filter(r => r.problem);
+    const nCour = ok.filter(r => r.type === 'courier').length, nMail = ok.length - nCour;
+    const noCity = ok.filter(r => r.type === 'courier' && !r.city).length;
+    const badCity = ok.filter(r => r.type === 'courier' && r.rawCity && !r.city).length;
+    // одинаковые получатели ВНУТРИ файла не пропускаем (один человек правда может
+    // получить две посылки), но говорим числом: задвоенный лист иначе не заметить
+    const seenKeys = new Map(); let twins = 0;
+    ok.forEach(r => { const k = impPickKey(r.phone, r.client); if(seenKeys.has(k)) twins++; else seenKeys.set(k, 1); });
+    const sums = pt ? ok.map(r => impPickMoney(r, pt, r.type)) : [];
+    const total = sums.reduce((a, m) => a + m.sum, 0);
+    const nPaid = sums.filter(m => m.paid).length;
+    return `
+      <div class="imp-head">
+        <div class="field"><label>Партнёр <span style="color:var(--rust)">*</span></label>
+          <select id="impPickPartner"><option value="">— выберите —</option>
+            ${pool.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru'))
+              .map(p => `<option value="${p.id}" ${partnerId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+          </select>
+          <small style="color:var(--muted);font-size:12px">Партнёров Барахолки здесь нет — их реестры грузят в её модуле.</small></div>
+        <div class="field"><label>Дата забора</label><input type="date" id="impPickDate" value="${esc(date)}"></div>
+        ${noTypeRows ? `<div class="field"><label>Строки без типа доставки (${noTypeRows})</label>
+          <select id="impPickDef">
+            <option value="" ${defType === '' ? 'selected' : ''}>— не создавать —</option>
+            <option value="courier" ${defType === 'courier' ? 'selected' : ''}>считать курьерскими</option>
+            <option value="mail" ${defType === 'mail' ? 'selected' : ''}>считать почтовыми</option>
+          </select></div>` : ''}
+      </div>
+      <p class="imp-note">
+        Файл: <b>${esc(fileName)}</b> · строк с ФИО: <b>${rows.length}</b> ·
+        создам: <b>${ok.length}</b>${ok.length ? ` (курьерских ${nCour}, почтовых ${nMail})` : ''}${
+          bad.length ? ` · пропущу: <b style="color:var(--rust)">${bad.length}</b>` : ''}
+        ${pt ? `<br>Сумма — по тарифу партнёра для типа доставки, всего <b>${money(total)}</b>${
+          nPaid ? `; с нулём и отметкой «Оплачено отправителем»: <b>${nPaid}</b>` : ''}.
+          Менеджер продаж и обработчик возьмутся из карточки партнёра.` : ''}
+        ${cols.paid < 0 ? '<br>Колонки «Оплачено отправителем» в файле нет — считаю, что не оплачено.' : ''}
+        ${cols.delivery < 0 ? '<br>Колонки «Тип доставки» в файле нет — выберите тип для всех строк в поле выше.' : ''}
+        ${pt && exist === undefined ? '<br>Проверяю, нет ли уже таких заказов у партнёра на эту дату…' : ''}
+        ${pt && exist === null ? '<br><b style="color:var(--rust)">Не удалось проверить повторы по базе</b> — если этот файл уже загружали, заказы задвоятся.' : ''}
+      </p>
+      ${noCity ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
+        ⚠️ Курьерских без города назначения: <b>${noCity}</b>${badCity ? ` (у ${badCity} город из файла не нашёлся в справочнике)` : ''}.
+        Они создадутся, но склад не увидит, куда их класть, а карточка не сохранится, пока город не выберут.
+        Чтобы город встал сразу — добавьте в файл колонку «Город» с названием как в справочнике.</div>` : ''}
+      ${twins ? `<div class="hint" style="margin:-4px 0 10px">В файле есть одинаковые получатели (ФИО + телефон): <b>${twins}</b>.
+        Создам все — проверьте, что это разные посылки, а не задвоенные строки.</div>` : ''}
+      ${impOtherMonth(date) ? `<div class="hint" style="color:var(--rust);margin:-4px 0 10px">
+        ⚠️ Дата забора — <b>${esc(fmtDate(date))}</b>, а это не текущий месяц. В Калькуляции и в
+        отчёте эти заказы лягут в <b>${esc(impOtherMonth(date))}</b>.</div>` : ''}
+      <div class="table-scroll imp-table"><table class="resp-table"><thead><tr>
+        <th>Стр.</th><th>ФИО</th><th>Телефон</th><th>Адрес</th><th>Индекс</th><th>Доставка</th><th>Сумма</th><th>Что будет</th>
+      </tr></thead><tbody>
+        ${marked.map(r => {
+          const m = (pt && r.type && !r.problem) ? impPickMoney(r, pt, r.type) : null;
+          return `<tr class="${r.problem ? 'imp-bad' : ''}">
+          <td data-label="Стр.">${r.line}</td>
+          <td data-label="ФИО">${esc(r.client)}</td>
+          <td data-label="Телефон">${esc(r.phoneOk ? phoneDisplay(r.phone) : (r.rawPhone || '—'))}</td>
+          <td data-label="Адрес">${esc(r.address || '—')}</td>
+          <td data-label="Индекс">${esc(r.index || '—')}${r.rawIndex && r.index !== r.rawIndex ? `<small class="cell-time">было ${esc(r.rawIndex)}</small>` : ''}</td>
+          <td data-label="Доставка">${r.type === 'courier' ? 'курьерская' : r.type === 'mail' ? 'почтовая' : '—'}${
+            (r.type && !r.del) ? '<small class="cell-time">по умолчанию</small>' : ''}${
+            r.type === 'courier' ? `<small class="cell-time">${r.city ? esc(r.city.name) : 'город не указан'}</small>` : ''}</td>
+          <td data-label="Сумма">${m ? `${m.sum ? esc(money(m.sum)) : '<b>0 ₸</b>'}${
+            m.paid ? `<small class="cell-time">${esc(m.why)}${m.orig != null ? ' · в Калькуляцию ' + esc(money(m.orig)) : ''}</small>` : ''}` : '—'}</td>
+          <td data-label="Что будет">${r.problem ? `<span class="imp-skip">пропуск · ${esc(r.problem)}</span>` : '<span class="imp-ok">создать</span>'}</td>
+        </tr>`; }).join('')}
+      </tbody></table></div>
+      <button class="btn ghost sm" id="impPickSampleBtn" style="margin-top:10px">⬇ Скачать образец файла</button>`;
+  };
+
+  const bind = () => {
+    const redraw = () => { const box = document.querySelector('.modal-body'); if(box){ box.innerHTML = body(); bind(); } };
+    const p2 = $('impPickPartner');
+    if(p2) p2.onchange = () => { partnerId = p2.value; loadExist(); redraw(); };
+    const d2 = $('impPickDate');
+    if(d2) d2.onchange = () => { date = d2.value || localToday(); loadExist(); redraw(); };
+    const t2 = $('impPickDef');
+    if(t2) t2.onchange = () => { defType = t2.value; redraw(); };
+    const s2 = $('impPickSampleBtn'); if(s2) s2.onclick = impPickSample;
+  };
+
+  loadExist();
+  showModal('Заказы заборов — загрузка из Excel', body(), async () => {
+    if(busy) return false;
+    const pt = pool.find(p => p.id === partnerId);
+    if(!pt){ toast('Выберите партнёра'); return false; }
+    const otherMonth = impOtherMonth(date);
+    if(otherMonth && !confirm(`Дата забора ${fmtDate(date)} — заказы попадут в ${otherMonth},\n`
+      + `а не в текущий месяц.\n\nЕсли этот месяц уже закрыт и выплачен, его цифры в Калькуляции\n`
+      + `и в отчёте изменятся.\n\nСоздать заказы с этой датой?`)) return false;
+    busy = true;
+    // ПОВТОРЫ СВЕРЯЕМ С БАЗОЙ ЕЩЁ РАЗ, уже перед записью: между открытием окна и
+    // нажатием кнопки этот же файл мог загрузить кто-то другой.
+    const fresh = await impPickExisting(pt, date);
+    if(fresh) { exist = fresh; existFor = partnerId + '|' + date; }
+    const marked = mark();
+    const ok = marked.filter(r => !r.problem);
+    const skipped = marked.filter(r => r.problem);
+    if(!ok.length){ busy = false; toast('Создавать нечего — все строки пропущены'); impResultModal(fileName, 0, skipped, { noTrack: true }); return false; }
+    if((!courierType && ok.some(r => r.type === 'courier')) || (!mailType && ok.some(r => r.type === 'mail'))){
+      busy = false; toast('В справочнике типов доставки нет «курьерской» или «почтовой» — заведите их в Настройках', 7000); return false;
+    }
+    const now = new Date().toISOString();
+    const bar = (typeof baraholkaReady === 'function' && baraholkaReady());
+    const built = ok.map(r => {
+      const m = impPickMoney(r, pt, r.type);
+      const deliveryId = r.type === 'courier' ? courierType.id : mailType.id;
+      return {
+        code: genOrderCode(),
+        partner_id: pt.id,
+        sender: pt.name,
+        client: r.client,
+        phone: r.phone,
+        address: r.address,
+        index: r.type === 'mail' ? r.index : '',
+        track: '',
+        weight: null,
+        order_sum: m.sum, cost: m.sum,
+        paid_by_sender: m.paid,
+        order_sum_orig: m.orig,
+        delivery_id: deliveryId,
+        courier_city_id: r.city ? r.city.id : null,
+        pickup_date: date,
+        pickup_city_id: pt.city_id || null,
+        sales_id: pt.sales_id || null,
+        processor_id: pt.processor_id || null,
+        status_id: defaultOrderStatusId(),
+        qty: 1, size: 'S',
+        ...(bar ? { calc_group: null } : {}),
+        // Тип доставки известен сразу — значит и снимок доли менеджера ставим при
+        // создании, как у реестра Барахолки, а не ждём сохранения карточки (раздел 5b).
+        ...((typeof salesMarginReady === 'function' && salesMarginReady() && pt.sales_id)
+          ? { sales_margin: salesMarginFor({ sales_id: pt.sales_id, partner_id: pt.id,
+              delivery_id: deliveryId }, date.slice(0, 7)) } : {}),
+        // ФИО, адрес и телефон пришли готовыми — в очередь «Заполнения» этим заказам не надо.
+        // Метка «загрузка из Excel» та же, что у реестров: по ней статистика раздела
+        // не считает загрузку работой менеджера (раздел 8яж).
+        ...(typeof fillReady === 'function' && fillReady()
+          ? { filled_at: now, filled_by: (S.me && S.me.id) || null,
+              filled_by_name: 'загрузка из Excel' } : {}),
+      };
+    });
+    const made = await insertOrderRows(built);
+    // Трека у этих заказов нет, поэтому отклонённые базой строки узнаём по НОМЕРУ заказа.
+    const madeCodes = new Set(made.map(o => String(o.code)));
+    built.forEach((b, i) => { if(!madeCodes.has(String(b.code)))
+      skipped.push({ ...ok[i], problem: 'база отклонила запись' }); });
+    logAction('import', 'orders', { entity_label: fileName,
+      meta: { created: made.length, skipped: skipped.length, kind: 'pickup', partner: pt.name } });
+    renderOrders(ordersMode);
+    impResultModal(fileName, made.length, skipped, { noTrack: true });
+    return true;
+  }, { wide: true, saveLabel: 'Создать заказы' });
+  bind();
 }
