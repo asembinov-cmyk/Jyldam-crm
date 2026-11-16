@@ -898,5 +898,6 @@ function render(){
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
   else if(S.tab==='whatsapp')renderWhatsapp();
+  else if(S.tab==='telephony')renderTelephony();
   _lastTab=S.tab;
 }
