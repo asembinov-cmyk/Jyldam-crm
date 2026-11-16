@@ -5,3 +5,5 @@ preview/
 .claude/
 # исходники Edge Functions — держим локально, как и db/
 functions/
+# настройки сервера телефонии — держим локально, как db/ и functions/
+ats/
