@@ -353,7 +353,7 @@ function telOpsHtml(){
 // Следующий свободный внутренний номер, начиная со 101: подставляем, чтобы не считать глазами.
 function telNextExt(){
   const used=new Set((telOps||[]).map(o=>String(o.extension)));
-  for(let n=101;n<1000;n++)if(!used.has(String(n)))return String(n);
+  for(let n=101;n<200;n++)if(!used.has(String(n)))return String(n);
   return '';
 }
 
@@ -373,8 +373,8 @@ function telOpModal(userId){
         ${staff.map(p=>`<option value="${esc(p.id)}"${cur&&cur.user_id===p.id?' selected':''}>${esc(p.full_name||p.email||'—')}</option>`).join('')}
       </select></div>
     <div class="field"><label>Внутренний номер *</label>
-      <input id="telOpExt" inputmode="numeric" maxlength="4" value="${esc(cur?cur.extension:telNextExt())}">
-      <div class="hint">3–4 цифры, например 101. У каждого сотрудника свой.</div></div>
+      <input id="telOpExt" inputmode="numeric" maxlength="3" value="${esc(cur?cur.extension:telNextExt())}">
+      <div class="hint">От 100 до 199, например 101. У каждого сотрудника свой.</div></div>
     <div class="field"><label>Очереди</label>
       <input id="telOpQueues" value="${esc(cur?(cur.queues||[]).join(', '):'')}" placeholder="например: logist, manager">
       <div class="hint">Через запятую. Названия очередей появятся, когда настроим сервер, — пока можно оставить пустым.</div></div>
@@ -384,7 +384,8 @@ function telOpModal(userId){
     const uid=cur?cur.user_id:$('telOpUser').value;
     const ext=String($('telOpExt').value||'').trim();
     if(!uid){toast('Выберите сотрудника');return false;}
-    if(!/^\d{3,4}$/.test(ext)){toast('Внутренний номер — 3 или 4 цифры');return false;}
+    // АТС принимает только 100–199: так написан её план набора (_1XX) и проверка в jyldam-ext.
+    if(!/^1\d\d$/.test(ext)){toast('Внутренний номер — от 100 до 199');return false;}
     // Проверяем занятость здесь же: отказ базы по уникальности объяснил бы хуже.
     const clash=(telOps||[]).find(o=>String(o.extension)===ext&&o.user_id!==uid);
     if(clash){toast('Номер '+ext+' уже у сотрудника: '+userNameById(clash.user_id),5000);return false;}
@@ -396,6 +397,8 @@ function telOpModal(userId){
     if(res.error){toast(telErr(res.error,'op'),5000);return false;}
     await telOpsLoad();
     renderTelephony();
+    // Добавили в операторы себя — кнопка телефона должна появиться сразу, без перезагрузки.
+    if(uid===(S.me&&S.me.id)&&typeof sfBoot==='function')sfBoot();
   });
   const del=ov.querySelector('#telOpDel');
   if(del)del.onclick=async()=>{

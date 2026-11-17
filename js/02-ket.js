@@ -534,7 +534,7 @@ async function doLogin(){
   await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
-async function doLogout(){await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;clearNav();$('email').value='';_emailPrevRaw='';$('password').value='';showLogin();}
+async function doLogout(){try{if(typeof sfShutdown==='function')sfShutdown();}catch(e){}await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;clearNav();$('email').value='';_emailPrevRaw='';$('password').value='';showLogin();}
 function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();
   // по умолчанию подставляем +7 (можно стереть и ввести email)
   const el=$('email');if(el&&!el.value){el.value='+7 ';}
@@ -799,6 +799,9 @@ async function enterApp(){
   // фото теперь показываются по временным ссылкам: следим за появлением <img data-ph>
   // и подставляем ссылки сами, чтобы не переделывать каждое место отрисовки
   startPhotoHydration();
+  // Кнопка телефона — только у операторов (раздел 15 в CLAUDE.md). Файл js/24 подключён
+  // ниже, поэтому зовём по имени с проверкой: к этому моменту он уже загружен.
+  try{ if(typeof sfBoot==='function')sfBoot(); }catch(e){ console.error('sfBoot',e); }
 }
 
 // ── ФОНОВОЕ АВТООБНОВЛЕНИЕ ДАННЫХ (каждые 30 сек, безопасно) ──

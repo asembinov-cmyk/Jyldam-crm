@@ -2113,3 +2113,52 @@ td .ft-dot{margin:0 0 0 8px}
   .wam-filters input:not([type=checkbox]),.wam-send textarea{font-size:16px;min-height:44px}
   .wam-chk{min-height:44px}
 }
+
+/* ================= СОФТФОН ================= */
+/* Кнопка телефона живёт поверх всего, кроме модальных окон на телефоне (там она закрыла бы
+   «Сохранить») — но во время звонка видна всегда: иначе трубку не положить. */
+#sfRoot{position:fixed;right:18px;bottom:18px;z-index:8500;display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:none}
+#sfRoot>*{pointer-events:auto}
+#sfBox{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.sf-fab{position:relative;width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  display:grid;place-items:center;cursor:pointer;box-shadow:0 10px 26px -12px rgba(20,30,60,.45)}
+.sf-fab svg{width:24px;height:24px}
+.sf-fab.sf-online{background:var(--rust);border-color:var(--rust);color:#fff}
+.sf-fab.sf-incall{background:#16a34a;border-color:#16a34a;color:#fff}
+.sf-fab.sf-ringing{animation:sfpulse 1s ease-in-out infinite}
+@keyframes sfpulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(22,163,74,.55)}50%{transform:scale(1.08);box-shadow:0 0 0 14px rgba(22,163,74,0)}}
+.sf-dot{width:9px;height:9px;border-radius:50%;background:#9aa3b2;display:inline-block;flex:none}
+.sf-dot.sf-online{background:#16a34a}
+.sf-dot.sf-connecting{background:#d97706}
+.sf-dot.sf-error{background:#dc2626}
+.sf-fab .sf-dot{position:absolute;right:2px;top:2px;border:2px solid var(--card);width:13px;height:13px}
+.sf-panel{width:300px;max-width:calc(100vw - 24px);background:var(--card);border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 18px 44px -18px rgba(20,30,60,.5);overflow:hidden}
+.sf-head{display:flex;align-items:center;gap:8px;padding:11px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.sf-head b{font-size:14px}
+.sf-state{color:var(--muted);margin-left:auto;font-size:12px}
+.sf-x{border:0;background:none;font-size:20px;line-height:1;color:var(--muted);cursor:pointer;padding:0 2px;margin-left:4px}
+.sf-body{padding:12px;display:flex;flex-direction:column;gap:10px}
+.sf-peer{font-size:20px;font-weight:600;text-align:center;word-break:break-word}
+.sf-sub{font-size:12px;color:var(--muted);text-align:center;margin-top:-6px}
+.sf-row{display:flex;gap:8px}
+.sf-row .sf-btn{flex:1}
+.sf-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;min-height:42px}
+.sf-btn.sf-ok{background:#16a34a;border-color:#16a34a;color:#fff}
+.sf-btn.sf-no{background:#dc2626;border-color:#dc2626;color:#fff}
+.sf-btn.sf-on{background:var(--ink);border-color:var(--ink);color:#fff}
+.sf-btn.sf-wide{width:100%}
+.sf-dial{display:flex;gap:8px}
+.sf-dial input{flex:1;min-width:0;font:inherit;font-size:16px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+.sf-dial input:focus{outline:2px solid rgba(37,70,201,.3)}
+.sf-note{font-size:12px;color:#b91c1c}
+.sf-hint{font-size:12px;color:var(--muted);line-height:1.4}
+.sf-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.sf-keys button{border:1px solid var(--line);background:#fff;border-radius:9px;padding:9px 0;font:inherit;font-size:16px;font-weight:600;cursor:pointer;color:var(--ink)}
+@media(max-width:760px){
+  #sfRoot{right:12px;bottom:84px}
+  .sf-btn{min-height:44px}
+  /* открыта карточка — кнопка прячется, чтобы не закрывать «Сохранить»; во время звонка остаётся */
+  body.modal-open #sfRoot:not(.sf-busy){display:none}
+}
+@media(prefers-reduced-motion:reduce){.sf-fab.sf-ringing{animation:none}}
