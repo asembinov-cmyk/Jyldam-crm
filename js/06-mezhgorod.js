@@ -163,6 +163,55 @@ function orderTransitHub(o){
   return r?r.hub:'';
 }
 
+/* ПЕРЕНОС НЕОТПРАВЛЕННОГО ДНЯ НА СЛЕДУЮЩУЮ ОТПРАВКУ (23.11.2026).
+   Отправку Астана → Караганда за 03.11 не завели — её заказы сами встают в коробку 04.11,
+   и так по каждому направлению. Просьба владельца: «всё равно незабитые заказы есть,
+   видимо, забывают».
+
+   ПЕРЕНОСИТСЯ ТОЛЬКО ДЕНЬ, В КОТОРЫЙ ПО ЭТОМУ НАПРАВЛЕНИЮ ОТПРАВКИ НЕ БЫЛО ВОВСЕ. Идём от
+   даты отправки назад, пока не встретим день с отправкой, и на нём останавливаемся. Заказ,
+   оставшийся за бортом в день, когда коробку всё-таки создали (его заполнили позже или сняли
+   галочку), сюда НЕ попадает: физически он, скорее всего, уехал в той коробке, и добавлять
+   его надо в неё — этим занимается «Разложить по уже созданным отправкам». Подмешай мы его в
+   сегодняшнюю, доли обеих коробок посчитались бы неверно.
+
+   Направление — это «город склада → город получения», а не склад: два склада одного города
+   возят одним рейсом. Глубина ограничена INTERCITY_CARRY_MAX_DAYS: без предела направление,
+   по которому отправок не заводили никогда, втянуло бы в первую же коробку всю историю —
+   ровно то, что владелец отменил 26.09.2026. */
+const INTERCITY_CARRY_MAX_DAYS=7;
+let _routeDayCache=null,_routeDayKey='';
+function intercityRouteDays(){
+  const list=S.shipments||[];
+  // В ключе — всё, от чего зависит направление: отправку правят (дата, склад, город), и по
+  // одному id с датой старый набор пережил бы правку.
+  const key=list.length+':'+list.map(x=>x.id+'@'+x.ship_date+'@'+x.warehouse_id+'@'+x.dest_city_id).join(',');
+  if(_routeDayCache&&_routeDayKey===key)return _routeDayCache;
+  const set=new Set();
+  list.forEach(x=>{
+    const from=shipmentCityName(x.warehouse_id);
+    if(from&&x.ship_date&&x.dest_city_id)set.add(String(x.ship_date).slice(0,10)+'|'+from+'|'+x.dest_city_id);
+  });
+  _routeDayCache=set;_routeDayKey=key;
+  return set;
+}
+// За какие ПРОШЛЫЕ дни заказы переходят на отправку этой даты (сама дата сюда не входит).
+function intercityCarryDates(cityId,date,whId){
+  // Отправки не загрузились (S.shipments===null) — не знаем, были они или нет, и не переносим:
+  // иначе при сбое сети в коробку встала бы неделя уже отправленных дней.
+  if(!date||!whId||!cityId||!Array.isArray(S.shipments))return [];
+  const from=shipmentCityName(whId);
+  if(!from)return [];
+  const have=intercityRouteDays();
+  const out=[];
+  for(let k=1;k<=INTERCITY_CARRY_MAX_DAYS;k++){
+    const d=shiftDateStr(date,-k);
+    if(have.has(d+'|'+from+'|'+cityId))break;
+    out.push(d);
+  }
+  return out;
+}
+
 function ordersForIntercity(cityId,date,whId){
   const whCityId=whId?warehousePickupCityId(whId):null;
   const whCityNm=whId?shipmentCityName(whId):'';
@@ -176,7 +225,10 @@ function ordersForIntercity(cityId,date,whId){
   // Города с редким расписанием: отправка не каждый день, поэтому подтягиваем ещё и заказы
   // «дня-донора» — вторник к среде, четверг к пятнице, суббота к воскресенью.
   const isLimited=INTERCITY_LIMITED_SCHEDULE_CITIES.some(n=>destNm.includes(n));
-  const allowedDates=(date&&isLimited)?intercityRollupDates(date):null;
+  // Дни отправки, за которые собираем коробку: сама дата и перенесённые на неё дни.
+  const shipDays=date?[date].concat(intercityCarryDates(cityId,date,whId)):[];
+  const ownDays=new Set();
+  shipDays.forEach(sd=>(isLimited?intercityRollupDates(sd):[sd]).forEach(x=>ownDays.add(x)));
   // ПЕРВОЕ ПЛЕЧО. Коробка до пересадки везёт не только заказы с назначением в сам город
   // пересадки, но и все транзитные: физически они едут в ней же. Без этого первое плечо
   // возилось бы даром, а вся его стоимость ложилась бы на «свои» заказы.
@@ -186,11 +238,14 @@ function ordersForIntercity(cityId,date,whId){
   // ВТОРОЕ ПЛЕЧО. Заказ, забранный в городе отправления правила накануне, к сегодняшней
   // отправке с пересадки уже доехал. Ровно накануне: забор сегодня — уезжает сегодня.
   const secondLegRule=INTERCITY_TRANSIT_RULES.find(r=>whCityNm.includes(r.hub)&&!destNm.includes(r.from)&&r.via(destNm))||null;
-  let transitFromCityId=null,transitPrevDate=null;
+  // Транзитный заказ к отправке дня D доезжает с забора D−1. Для перенесённого дня то же
+  // самое: не уехавшее из Астаны 03-го — это алматинский забор 02-го.
+  let transitFromCityId=null;
+  const transitPrevDays=new Set();
   if(secondLegRule&&date){
     const c=(S.cities||[]).find(x=>(x.name||'').trim().toLowerCase().includes(secondLegRule.from));
     transitFromCityId=c?c.id:null;
-    transitPrevDate=shiftDateStr(date,-1);
+    shipDays.forEach(sd=>transitPrevDays.add(shiftDateStr(sd,-1)));
   }
   return (S.orders||[]).filter(o=>{
     if(!isCourierDelivery(o.delivery_id))return false;
@@ -204,10 +259,9 @@ function ordersForIntercity(cityId,date,whId){
     if(whCityNm&&orderShippedFrom(o.id,whCityNm))return false;
     if(!whCityNm&&o.intercity_shipment_id)return false; // склад не определён — старое правило
     const d=(o.pickup_date||o.created_at||'').slice(0,10);
-    const isTransitOrder=!!transitFromCityId&&o.pickup_city_id===transitFromCityId&&d===transitPrevDate;
+    const isTransitOrder=!!transitFromCityId&&o.pickup_city_id===transitFromCityId&&transitPrevDays.has(d);
     if(date){
-      const matchesOwnDay=allowedDates?allowedDates.includes(d):d===date;
-      if(!matchesOwnDay&&!isTransitOrder)return false;
+      if(!ownDays.has(d)&&!isTransitOrder)return false;
     }
     // фильтр по складу: свой город забора, ИЛИ транзитный заказ из города отправления правила
     if(whCityId&&o.pickup_city_id!==whCityId&&!isTransitOrder)return false;
@@ -575,8 +629,30 @@ function shipmentModal(){
       if(!selectedDest){wrap.innerHTML='<div class="hint" style="padding:10px 0">Выберите город получения.</div>';pickedOrders=[];return;}
       const list=ordersForIntercity(selectedDest,date,wh);
       pickedOrders=list.map(o=>o.id);
+      // Перенесённые дни: по ним в этот город отправку не создавали, и их заказы встали сюда.
+      const carryDays=intercityCarryDates(selectedDest,date,wh);
+      const carryFirst=carryDays.length?carryDays[carryDays.length-1]:'';   // самый ранний из них
+      const isCarried=o=>{
+        if(!carryFirst)return false;
+        const pd=(o.pickup_date||o.created_at||'').slice(0,10);
+        if(!pd||pd===date)return false;
+        // транзитный заказ вчерашнего забора для сегодняшней отправки — свой, а не перенесённый
+        const whC=wh?warehousePickupCityId(wh):null;
+        const own=!whC||o.pickup_city_id===whC;
+        return own?carryDays.includes(pd):pd<shiftDateStr(date,-1);
+      };
+      const carried=list.filter(isCarried);
+      const carryByDay={};
+      carried.forEach(o=>{const pd=(o.pickup_date||o.created_at||'').slice(0,10);carryByDay[pd]=(carryByDay[pd]||0)+1;});
+      const carryNote=carried.length?`<div class="ic-carry-note">
+          <b>Подтянуты заказы прошлых дней — ${carried.length}.</b>
+          В этот город отправку в те дни не создавали:
+          ${Object.keys(carryByDay).sort().map(d=>`${esc(fmtDate(d))} — ${carryByDay[d]}`).join(' · ')}.
+          Если отправка тогда была, заведите её отдельно своей датой, а здесь снимите галочки.
+          <button type="button" class="btn sm ghost" id="s_carry_off">Снять с подтянутых</button>
+        </div>`:'';
       if(!list.length){wrap.innerHTML=`<div class="empty" style="padding:20px"><div class="big">Нет заказов</div>Нет курьерских заказов в этот город на ${esc(fmtDate(date))}, ожидающих отправки.</div>`;return;}
-      wrap.innerHTML=`
+      wrap.innerHTML=`${carryNote}
         <div class="ic-orders-head">
           <b>Заказы для отправки (${list.length})</b>
           <span class="hint">Дата забора: ${esc(fmtDate(date))} · снимите галочку, чтобы исключить заказ</span>
@@ -590,7 +666,7 @@ function shipmentModal(){
             const whCityNow=whSel?cityName(warehousePickupCityId(whSel)):'';
             const isTransit=rolled&&pickupCityNm&&whCityNow&&pickupCityNm.toLowerCase()!==whCityNow.toLowerCase();
             return `<label class="ic-order-row">
-            <input type="checkbox" data-icorder="${o.id}" checked>
+            <input type="checkbox" data-icorder="${o.id}"${isCarried(o)?' data-iccarry="1"':''} checked>
             <span class="ic-o-code">${esc(o.code||o.id.slice(0,6))}</span>
             <span class="ic-o-client">${esc(o.client||o.sender||'—')}</span>
             <span class="ic-o-track">${esc(o.track||'')}</span>
@@ -601,6 +677,15 @@ function shipmentModal(){
         <div class="ic-calc-live" id="s_live"></div>`;
       updateShipLive();
       wrap.querySelectorAll('[data-icorder]').forEach(c=>c.onchange=updateShipLive);
+      // Кнопка — переключатель: сняли все подтянутые разом, повторное нажатие вернёт их.
+      const off=$('s_carry_off');
+      if(off)off.onclick=()=>{
+        const boxes=[...wrap.querySelectorAll('[data-iccarry]')];
+        const anyOn=boxes.some(c=>c.checked);
+        boxes.forEach(c=>{c.checked=!anyOn;});
+        off.textContent=anyOn?'Вернуть подтянутые':'Снять с подтянутых';
+        updateShipLive();
+      };
     };
     // пересобрать список городов получения по дате и складу
     const rebuildCities=()=>{

@@ -624,6 +624,8 @@
   .ic-o-code{font-weight:700}
   .ic-o-track{color:var(--muted);font-size:12px}
   .ic-o-rolled{font-size:11px;background:#fff6df;color:#8a6d1a;padding:2px 8px;border-radius:20px;white-space:nowrap}
+  .ic-carry-note{margin:10px 0 2px;padding:10px 12px;border:1px solid #f0dca0;background:#fffaea;color:#6b5514;border-radius:10px;font-size:12.5px;line-height:1.45}
+  .ic-carry-note .btn{margin-left:6px;vertical-align:baseline}
   .ic-calc-live{margin-top:10px;padding:10px 12px;background:rgba(37,70,201,.07);border-radius:10px;font-size:14px}
   .ic-view-head{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;font-size:14px}
   .ic-view-tbl{width:100%;border-collapse:collapse;font-size:14px}
