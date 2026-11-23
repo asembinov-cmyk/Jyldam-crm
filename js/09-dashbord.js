@@ -44,6 +44,9 @@ async function aiRecognizeFromPhoto(o){
         filled.push('телефон (проверьте)');
       }
     }
+    // Телефон вписан кодом, без нажатий — подсказку «такой клиент уже есть» зовём сами:
+    // постоянного получателя надёжнее узнать по номеру, чем разбирать почерк.
+    if(typeof ocsTrigger==='function')ocsTrigger('phone');
     if(filled.length)setNote('Заполнено: '+filled.join(', ')+'. Проверьте и при необходимости поправьте.','ok');
     else setNote('Не удалось распознать данные. Впишите вручную.','err');
   }catch(e){setNote('Ошибка распознавания: '+String(e&&e.message||e),'err');}
