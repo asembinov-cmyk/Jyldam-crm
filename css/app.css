@@ -2177,3 +2177,5 @@ td .ft-dot{margin:0 0 0 8px}
 .ocs-addr{color:var(--ink);word-break:break-word}
 .ocs-row .btn{flex:none}
 @media(max-width:760px),(pointer:coarse){.ocs-row{flex-direction:column;align-items:stretch}.ocs-row .btn{min-height:44px}.ocs-x{min-width:44px;min-height:44px;font-size:22px}.ocs-head{padding:0 0 0 10px}}
+/* Платежи и подписки (Настройки): выключенная запись приглушена */
+.pay-off td{opacity:.5}
