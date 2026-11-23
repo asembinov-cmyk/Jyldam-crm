@@ -9,7 +9,7 @@
    в Supabase, и в репозиторий его писать нельзя (раздел 9a). Пара создаётся
    страницей `tools/push-test.html`.
    ============================================================ */
-const PUSH_VAPID_PUBLIC = 'BBX0n9CAvMSLM6sIGojpisoSjGCoHghfCDMYPE6omSHzocueLvjgrobW1vJl_RBC-HqXkgbdKvKqjNXsk-p_myM';
+const PUSH_VAPID_PUBLIC = 'BLNDjOQXAjxTijyPFV7l449X-btNJDFx8VTRjpxgrl4ZaHsezq8VjaG5pI-InMxN6ZPKt9UIb0nL-8JtHE8XIPU';
 
 const pushSupported = () => !!(window.isSecureContext && 'serviceWorker' in navigator
   && 'PushManager' in window && 'Notification' in window);
