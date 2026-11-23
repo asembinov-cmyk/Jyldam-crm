@@ -2183,3 +2183,11 @@ td .ft-dot{margin:0 0 0 8px}
 .cb-btn{display:inline-flex;align-items:center;gap:6px;margin:6px 0 0 10px;padding:7px 12px;border:1px solid var(--moss);border-radius:10px;background:#fff;color:var(--moss);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;-webkit-user-select:none;user-select:none}
 .cb-btn:disabled{opacity:.55;cursor:default}
 @media(max-width:760px),(pointer:coarse){.cb-btn{display:flex;justify-content:center;margin:8px 0 0;min-height:44px;width:100%;font-size:15px}}
+/* Робот-обзвон (Настройки): строка «кнопка → что значит → статус → ответ» */
+.rob-key{display:grid;grid-template-columns:64px 1.3fr 1.2fr 1.4fr 1.2fr 40px;gap:8px;margin-bottom:8px;align-items:center}
+.rob-key input,.rob-key select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;min-width:0}
+@media(max-width:900px){.rob-key{grid-template-columns:64px 1fr 40px;padding:10px;border:1px solid var(--line);border-radius:12px}.rob-key input,.rob-key select{font-size:16px;min-height:44px}.rob-key [data-rk="label"]{grid-column:2/3}.rob-key [data-rk="status_id"],.rob-key [data-rk="say_ru"],.rob-key [data-rk="say_kz"]{grid-column:1/4}.rob-key [data-rkdel]{grid-row:1;grid-column:3;min-height:44px}}
+/* окно сценария робота: длинное название статуса в списке не должно распирать колонку */
+.rob-form .field{min-width:0}.rob-form select,.rob-form input,.rob-form textarea{max-width:100%;min-width:0;box-sizing:border-box}
+.rob-form textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;resize:vertical}
+@media(max-width:700px){.rob-form [style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}.rob-form textarea{font-size:16px}}

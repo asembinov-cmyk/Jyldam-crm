@@ -717,6 +717,7 @@ function renderOrders(mode){
               .map(b=>`<button type="button" class="act-item" data-wabtn="${esc(b[0])}">${esc(b[1])}</button>`).join(''):''}
             ${(isStaff()&&typeof waBtnKeysForStatus==='function'&&waBtnKeysForStatus(of.status))
               ?`<span class="act-note">по фильтру статуса доступна одна рассылка — чтобы не перепутать</span>`:''}
+            ${(typeof robotCanQueue==='function'&&robotCanQueue())?'<button type="button" class="act-item" id="ordersRobot">🤖 Робот-обзвон</button>':''}
             ${(isStaff()&&(bar||!ordersMode))?'<button type="button" class="act-item" id="ordersTrackDup">🔁 Дубль — повторы трек-кода</button>':''}
             ${canOrder('delete')?'<button type="button" class="act-item act-danger" id="ordersDelSel">🗑 Удалить выделенные</button>':''}
           </span></span>`:''}
@@ -789,6 +790,8 @@ function renderOrders(mode){
      только подтверждение «отправить N?» (js/21-whatsapp.js). Обработчик ОДИН на все кнопки
      и берёт ключ из самой кнопки: их столько, сколько строк в WA_BUTTONS, и новая должна
      заработать без правок здесь. */
+  // Робот-обзвон: отмеченные заказы встают в очередь звонков (js/28-robot.js)
+  if($('ordersRobot'))$('ordersRobot').onclick=()=>{if(actMenu)actMenu.style.display='none';robotQueueSelection();};
   document.querySelectorAll('[data-wabtn]').forEach(b=>{
     b.onclick=()=>{
       if(actMenu)actMenu.style.display='none';
