@@ -456,7 +456,10 @@ async function waRegFiles(groups){
       // ИМЯ ФАЙЛА — ЛАТИНИЦЕЙ: кириллица в адресе ссылки превращается в проценты
       // (%D0%98%D0%9F…), и партнёру в WhatsApp прилетает нечитаемая строка.
       const safe=waTranslit(g.name||'partner');
-      const rnd=Math.random().toString(36).slice(2,10);
+      // ХВОСТ ИМЕНИ — ЕДИНСТВЕННАЯ ЗАЩИТА ФАЙЛА: бакет публичный, и кто знает имя, тот скачает.
+      // Поэтому он длинный и из криптостойкого генератора, а не восемь знаков Math.random
+      // (тот предсказуем). Правила доступа к самому бакету — db/66, блок 1.
+      const rnd=(typeof genPartnerCode==='function')?genPartnerCode(20):Math.random().toString(36).slice(2,12)+Math.random().toString(36).slice(2,12);
       const path=`${day}/${safe}-${rnd}.xls`;
       const up=await sb.storage.from(WA_REG_BUCKET).upload(path,new Blob([bytes],{type:'application/vnd.ms-excel'}),
         {contentType:'application/vnd.ms-excel',upsert:true});
@@ -466,7 +469,32 @@ async function waRegFiles(groups){
       g.fileUrl=data.publicUrl;
     }catch(e){return {error:String(e&&e.message||e)};}
   }
+  waRegCleanup();          // не ждём: уборка старого на отправку влиять не должна
   return {ok:true};
+}
+/* РЕЕСТРЫ НЕ ЛЕЖАТ ВЕЧНО. В файле ФИО, адреса и телефоны клиентов партнёра, а ссылка на
+   него не гаснет сама. Поэтому при каждой рассылке реестров убираем папки старше
+   WA_REG_KEEP_DAYS: партнёр открывает реестр в тот же день, через две недели он не нужен.
+   Работает только после db/66 (блок 1) — он даёт право на удаление; без него Storage на
+   remove отвечает пустым списком, и ничего не происходит. Раз за сеанс, не больше десяти
+   папок за раз: это попутная уборка, а не работа. */
+const WA_REG_KEEP_DAYS=14;
+let _waRegCleaned=false;
+async function waRegCleanup(){
+  if(_waRegCleaned)return; _waRegCleaned=true;
+  try{
+    if(typeof localDaysAgo!=='function')return;
+    const edge=localDaysAgo(WA_REG_KEEP_DAYS);
+    const {data:dirs,error}=await sb.storage.from(WA_REG_BUCKET).list('',{limit:300,sortBy:{column:'name',order:'asc'}});
+    if(error||!Array.isArray(dirs))return;
+    // папка дня — запись без id с именем-датой; всё остальное не трогаем
+    const old=dirs.filter(d=>d&&!d.id&&/^\d{4}-\d{2}-\d{2}$/.test(d.name)&&d.name<edge).slice(0,10);
+    for(const d of old){
+      const {data:files}=await sb.storage.from(WA_REG_BUCKET).list(d.name,{limit:1000});
+      const paths=(files||[]).filter(f=>f&&f.id).map(f=>d.name+'/'+f.name);
+      if(paths.length)await sb.storage.from(WA_REG_BUCKET).remove(paths);
+    }
+  }catch(e){console.warn('waRegCleanup',e);}
 }
 /* СПИСОК НОМЕРОВ — ОДНОЙ СТРОКОЙ И С ОГРАНИЧЕНИЕМ. Параметр шаблона у Meta не может
    содержать переводов строки (их чистит waParam), поэтому номера идут через запятую. И
