@@ -1543,12 +1543,6 @@ function buildNav(opts){
     if(canMod('dashboard'))main.push({k:'dashboard',label:'Статистика',icon:'stats'});
     if(canMod('pickups'))main.push({k:'pickups',label:'Заявки на забор',icon:'pickups'});
     if(canMod('orders'))main.push({k:'orders',label:'Заказы заборов',icon:'orders'});
-    // Барахолка — отдельная ветка бизнеса, отдельным правом (по умолчанию только админу).
-    // Стоит сразу под «Заказами заборов»: это её сосед по смыслу, а не подраздел.
-    if(canMod('baraholka'))main.push({k:'baraholka',label:'Барахолка',icon:'baraholka'});
-    // WhatsApp — переписка с получателями. Менеджеры сидят в нём весь день, поэтому он
-    // в «Основном», а не в справочной группе.
-    if(canMod('whatsapp'))main.push({k:'whatsapp',label:'WhatsApp',icon:'whatsapp'});
     // Телефония — журнал звонков и операторы; звонки пишет сервер АТС (раздел 15 в CLAUDE.md).
     if(canMod('telephony'))main.push({k:'telephony',label:'Телефония',icon:'phone'});
     if(main.length)groups.push({title:'Основное',items:main});
@@ -1556,6 +1550,10 @@ function buildNav(opts){
     const delivery=[];
     if(canMod('courier'))delivery.push({k:'courier',label:'Курьерская доставка',icon:'courier'});
     if(canMod('mail'))delivery.push({k:'mail',label:'Почтовая доставка',icon:'mail'});
+    // Барахолка — отдельная ветка бизнеса, отдельным правом (по умолчанию только админу).
+    // С 23.11.2026 стоит в «Доставке», сразу под «Почтовой»: она вся почтовая (просьба
+    // владельца). Меняется только место в меню — ключ, права и сам раздел прежние.
+    if(canMod('baraholka'))delivery.push({k:'baraholka',label:'Барахолка',icon:'baraholka'});
     if(canMod('intercity'))delivery.push({k:'intercity',label:'Отправки межгород',icon:'intercity'});
     if(isAdmin()||canMod('ket_orders'))delivery.push({k:'ket_orders',label:'SPA трафик',icon:'traffic'});
     if(delivery.length)groups.push({title:'Доставка',items:delivery});
@@ -1575,6 +1573,9 @@ function buildNav(opts){
     if(canMod('history'))histItems.push({k:'history',label:'История изменений',icon:'history'});
     if(canMod('notify'))histItems.push({k:'notify',label:'Центр контроля',icon:'bell'});
     if(canMod('filling'))histItems.push({k:'filling',label:'Заполнение',icon:'fill'});
+    // WhatsApp переехал сюда из «Основного» 23.11.2026 по просьбе владельца — рядом с
+    // «Заполнением». Место в меню, не больше: ключ `whatsapp` и права не тронуты.
+    if(canMod('whatsapp'))histItems.push({k:'whatsapp',label:'WhatsApp',icon:'whatsapp'});
     if(histItems.length)groups.push({title:'История',items:histItems});
 
     const team=[];
