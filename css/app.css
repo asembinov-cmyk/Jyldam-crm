@@ -2201,3 +2201,18 @@ button.set-group-title:hover{background:rgba(0,0,0,.04)}
 .rob-recbox{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
 .rob-recinfo{font-size:13px;color:var(--moss);font-weight:600}
 .rob-key-rec{grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin:-2px 0 4px}
+
+/* ── Поля даты на iPhone (24.11.2026) ─────────────────────────────────────
+   В WebKit на iOS у input[type=date] box-sizing ВСЕГДА content-box: браузер
+   ставит его сам, и перебить нельзя ни общим *{box-sizing}, ни !important
+   (проверено на симуляторе). Поэтому width:100% даёт поле на 24 px шире
+   колонки — в фильтрах заявок и заказов «Дата с / Дата по» вылезали за правый
+   край экрана. В Chromium этого нет, ловится только на настоящем WebKit.
+   Лечится не размером, а растяжением: подпись .date-field — колонка flex, и
+   поле с width:auto тянется ровно на её ширину, как его ни считай.
+   Значение в таком поле iOS ставит по центру; выравниваем влево, как остальные. */
+@media (max-width:760px), (pointer:coarse){
+  .filters .date-field input[type=date]{width:auto;align-self:stretch;min-width:0}
+}
+input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and-time-value,
+input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webkit-date-and-time-value{text-align:left}
