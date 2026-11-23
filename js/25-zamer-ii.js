@@ -28,6 +28,8 @@ const AIB_FAIL_STOP= 4;        // столько отказов подряд —
 const AIB_SHOW_BAD = 40;       // сколько расхождений показать на экране (все — в Excel)
 
 let aibRun = null;             // текущий прогон {stop, rows, …}
+let aibLastSample = null;      // заказы прошлого прогона — чтобы сравнить модели НА ОДНИХ И ТЕХ ЖЕ
+let aibHistory = [];           // итоги прогонов, сделанных в этом окне
 
 const AIB_SYSTEM = 'Ты читаешь фото бланка посылки (Казахстан): текст рукописный или печатный, '
   + 'на русском и казахском. Найди данные ПОЛУЧАТЕЛЯ (не отправителя). Верни СТРОГО один JSON '
@@ -65,6 +67,15 @@ function aibCmpPhone(h,a){
   if(H.length<10)return null;           // у человека номера нет — сравнивать не с чем
   if(!A)return 'none';
   return H===A?'ok':'bad';              // «почти» у телефона не бывает: одна цифра — чужой номер
+}
+// Чем несовпавший телефон отличается от настоящего: 'close' — одной-двумя цифрами на тех же
+// местах, 'other' — это другой номер. Для совпавших и непрочитанных — пусто.
+function aibPhoneKind(h,a){
+  const H=aibDigits(h,10), A=aibDigits(a,10);
+  if(H.length<10||!A||H===A)return '';
+  if(A.length!==10)return 'other';
+  let diff=0; for(let i=0;i<10;i++)if(H[i]!==A[i])diff++;
+  return diff<=2?'close':'other';
 }
 function aibCmpIndex(h,a){
   const H=aibDigits(h), A=aibDigits(a);
@@ -187,8 +198,14 @@ async function aibStart(n,model){
   const run={stop:false,model,n,rows:[],done:0,fails:0,failStreak:0,lastErr:'',usageIn:0,usageOut:0,usageSeen:false,px:0,repeat:null,state:'sample'};
   aibRun=run;aibDraw();
   let sample;
-  try{sample=await aibSample(n);}
-  catch(e){run.state='error';run.lastErr=String(e&&e.message||e);aibDraw();return;}
+  // «Те же заказы» — единственный честный способ сравнить две модели: тридцать случайных
+  // бланков от прогона к прогону разные, и разница в почерке больше разницы в моделях.
+  if(n==='same'&&aibLastSample){sample=aibLastSample;run.same=true;}
+  else{
+    try{sample=await aibSample(n);}
+    catch(e){run.state='error';run.lastErr=String(e&&e.message||e);aibDraw();return;}
+  }
+  aibLastSample=sample;
   if(!sample.length){run.state='error';run.lastErr='Не нашлось заполненных вручную заказов с фото';aibDraw();return;}
   run.total=sample.length;run.state='run';aibDraw();
   aibRepeatCheck(sample).then(r=>{run.repeat=r;aibDraw();}).catch(()=>{});
@@ -212,7 +229,15 @@ async function aibStart(n,model){
         const d=r.data, cf=(d.conf&&typeof d.conf==='object')?d.conf:{};
         run.rows.push({o,ai:d,url:r.url,
           cmp:{client:aibCmpName(o.client,d.client),phone:aibCmpPhone(o.phone,d.phone),
-               address:aibCmpAddr(o.address,d.address),index:aibCmpIndex(o.index,d.index)},
+               // У заказа с индексом в поле адреса стоит адрес ОТДЕЛЕНИЯ, подставленный CRM по
+               // индексу (раздел 6f), а не то, что написано на бланке. Сравнивать с ним чтение
+               // бланка — яблоки с грушами; первый же живой замер показал это на адресе
+               // «с. Актобе, Алматы район…» против прочитанного с бланка. Поэтому не сравниваем.
+               address:aibDigits(o.index).length===6?null:aibCmpAddr(o.address,d.address),
+               index:aibCmpIndex(o.index,d.index)},
+          // Несовпавший телефон бывает двух видов, и лечатся они по-разному: одна-две цифры —
+          // почерк; совсем другой номер — ИИ взял не тот телефон с бланка (отправителя).
+          phoneKind:aibPhoneKind(o.phone,d.phone),
           conf:{client:cf.client==='high',phone:cf.phone==='high',address:cf.address==='high',index:cf.index==='high'}});
       }
       aibDraw();
@@ -220,6 +245,12 @@ async function aibStart(n,model){
   };
   await Promise.all(Array.from({length:AIB_PARALLEL},worker));
   if(aibRun===run&&run.state==='run')run.state=run.stop?'stopped':'done';
+  if(run.rows.length){
+    const S1=aibStats(run);
+    aibHistory.push({model:run.model,n:S1.n,same:!!run.same,
+      pct:AIB_FIELDS.map(([k])=>S1.st[k].n?Math.round(S1.st[k].ok/S1.st[k].n*100)+'%':'—'),
+      sureOk:S1.allSureOk,sureBad:S1.allSureBad});
+  }
   aibDraw();
 }
 
@@ -276,6 +307,17 @@ function aibResultHtml(run){
       <td data-label="Уверен и ошибся" style="color:${s.sureBad?'#dc2626':'inherit'}"><b>${s.sureBad}</b></td></tr>`;
   }).join('');
   const rep=run.repeat;
+  const pClose=run.rows.filter(r=>r.phoneKind==='close').length, pOther=run.rows.filter(r=>r.phoneKind==='other').length;
+  const phoneNote=(pClose+pOther)?`<b>Несовпавшие телефоны (${pClose+pOther}):</b> отличаются одной-двумя цифрами — ${pClose}
+      (это почерк), совсем другой номер — ${pOther} (ИИ взял с бланка не тот телефон, например отправителя).<br>`:'';
+  const hist=aibHistory.length>1?`<h3 style="margin:16px 0 6px;font-size:15px">Прогоны в этом окне</h3>
+    <div class="table-scroll"><table class="resp-table"><thead><tr><th>Модель</th><th>Заказов</th>${AIB_FIELDS.map(f=>`<th>${f[1]}</th>`).join('')}
+      <th>Уверен и верно</th><th>Уверен и ошибся</th></tr></thead><tbody>${aibHistory.map(h=>`<tr>
+      <td data-label="Модель">${esc((AIB_MODELS.find(m=>m[0]===h.model)||[h.model,h.model])[1])}</td>
+      <td data-label="Заказов">${h.n}${h.same?' · те же':''}</td>
+      ${h.pct.map((p,i)=>`<td data-label="${AIB_FIELDS[i][1]}">${p}</td>`).join('')}
+      <td data-label="Уверен и верно">${h.sureOk}</td><td data-label="Уверен и ошибся">${h.sureBad}</td></tr>`).join('')}</tbody></table></div>
+    <div class="hint" style="margin:6px 0 0">Сравнивать модели можно только по строкам «те же»: случайные заказы каждый раз разные.</div>`:'';
   const bad=run.rows.filter(r=>AIB_FIELDS.some(([k])=>r.cmp[k]==='bad'||r.cmp[k]==='near'||r.cmp[k]==='none'));
   const cell=(r,k,h,a)=>{
     const c=r.cmp[k]; if(c===null||c==='ok')return '';
@@ -295,12 +337,14 @@ function aibResultHtml(run){
       <th>Поле</th><th>Сравнили</th><th>Совпало</th><th>Почти</th><th>Не совпало</th><th>ИИ не прочитал</th>
       <th>Уверен и верно</th><th>Уверен и ошибся</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="hint" style="margin:10px 0 0">
-      ${rep?`<b>Повторные получатели:</b> у ${rep.had} из ${rep.total} заказов этот телефон уже был в более ранних заказах
+      ${phoneNote}${rep?`<b>Повторные получатели:</b> у ${rep.had} из ${rep.total} заказов этот телефон уже был в более ранних заказах
         (${aibPct(rep.had,rep.total)}), и у ${rep.same} из них ФИО там совпало с тем, что вписал менеджер. Таких можно не читать, а узнавать по номеру.<br>`:''}
       <b>Оговорка.</b> «Человек» здесь — то, что стоит в заказе. Если менеджер нажал «Распознать с фото» и ничего не поправил,
-      ИИ совпадает сам с собой, и точность получается завышенной. Адрес сравнивается нечётко, по словам и числам.<br>
+      ИИ совпадает сам с собой, и точность получается завышенной. Адрес сравнивается нечётко, по словам и числам, и
+      только у заказов БЕЗ индекса: у почтовых CRM подставляет в адрес адрес отделения, а не написанное на бланке.<br>
       ${esc(aibCostText(run))}
     </div>
+    ${hist}
     ${bad.length?`<h3 style="margin:16px 0 6px;font-size:15px">Расхождения — ${bad.length}${bad.length>AIB_SHOW_BAD?` (показаны первые ${AIB_SHOW_BAD}, все — в Excel)`:''}</h3>
       <div class="table-scroll"><table class="resp-table"><thead><tr><th>Заказ</th><th>Что разошлось</th><th></th></tr></thead><tbody>
       ${bad.slice(0,AIB_SHOW_BAD).map(r=>`<tr>
@@ -334,7 +378,7 @@ function aibDraw(){
   const run=aibRun;
   const busy=run&&(run.state==='sample'||run.state==='run');
   const sel=(id,opts,cur)=>`<select id="${id}" ${busy?'disabled':''}>${opts.map(([v,l])=>`<option value="${esc(String(v))}"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`).join('')}</select>`;
-  const curN=run?run.n:AIB_SIZES[0], curM=run?run.model:AIB_MODELS[0][0];
+  const curN=aibLastSample?'same':(run?run.n:AIB_SIZES[0]), curM=run?run.model:AIB_MODELS[0][0];
   let status='';
   if(run){
     if(run.state==='sample')status='Подбираю заполненные заказы…';
@@ -351,7 +395,7 @@ function aibDraw(){
     <div class="hint" style="margin:0 0 12px">ИИ заново читает фото заказов, которые менеджеры уже заполнили, и результат сравнивается
       с тем, что вписал человек. <b>В заказы ничего не записывается.</b> Обращения к ИИ платные — начните с ${AIB_SIZES[0]} заказов.</div>
     <div class="filters" style="margin:0 0 12px">
-      ${sel('aibN',AIB_SIZES.map(n=>[n,n+' заказов']),curN)}
+      ${sel('aibN',(aibLastSample?[['same','те же '+aibLastSample.length+' заказов']]:[]).concat(AIB_SIZES.map(n=>[n,n+' новых заказов'])),curN)}
       ${sel('aibModel',AIB_MODELS.map(m=>[m[0],'Модель: '+m[1]]),curM)}
       ${busy?'<button class="btn ghost" id="aibStop" type="button">Остановить</button>'
             :'<button class="btn primary" id="aibGo" type="button">Запустить замер</button>'}
@@ -361,9 +405,11 @@ function aibDraw(){
     ${run?aibResultHtml(run):''}`;
   const go=document.getElementById('aibGo');
   if(go)go.onclick=()=>{
-    const n=parseInt(document.getElementById('aibN').value,10)||AIB_SIZES[0];
+    const raw=document.getElementById('aibN').value;
+    const n=raw==='same'?'same':(parseInt(raw,10)||AIB_SIZES[0]);
     const model=document.getElementById('aibModel').value;
-    if(n>AIB_SIZES[0]&&!confirm(`Прочитать ${n} бланков? Каждое обращение к ИИ платное.`))return;
+    const cnt=n==='same'?(aibLastSample||[]).length:n;
+    if(cnt>AIB_SIZES[0]&&!confirm(`Прочитать ${cnt} бланков? Каждое обращение к ИИ платное.`))return;
     aibStart(n,model);
   };
   const stop=document.getElementById('aibStop');
