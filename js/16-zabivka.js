@@ -746,6 +746,7 @@ function renderFilling(){
           <input id="fillFind" class="search" placeholder="Номер заказа, ФИО или телефон — кто заполнял"
             value="${esc(fillFindQ)}" autocomplete="off">
           <button class="btn sm ghost" id="fillFindBtn">Найти</button>
+          ${admin?'<button class="btn sm ghost" id="fillAiBench" title="Проверить, насколько точно ИИ читает бланки — на уже заполненных заказах, без записи в базу">🧪 Замер ИИ</button>':''}
         </div>
       </div>
     </div>
@@ -906,6 +907,8 @@ function renderFilling(){
   fillCdTick();   // обратный отсчёт в «У меня в работе» — и сам погаснет, когда нечего считать
   ['fillNext','fillNextBottom'].forEach(id=>{const b=$(id);if(b)b.onclick=()=>fillTakeNext();});
   if($('fillFindBtn'))$('fillFindBtn').onclick=()=>fillFind();
+  // Замер ИИ живёт в js/25 (подключён ниже) — зовём по имени с проверкой.
+  if($('fillAiBench'))$('fillAiBench').onclick=()=>{if(typeof aiBenchModal==='function')aiBenchModal();};
   if($('fillFind')){
     const inp=$('fillFind');
     inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();fillFind();}};
