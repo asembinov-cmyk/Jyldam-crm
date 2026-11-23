@@ -46,6 +46,7 @@ function sfLsSet(k,v){try{v===null?localStorage.removeItem(k):localStorage.setIt
 
 // Зовётся из enterApp после входа. Курьеру и складу кнопка не рисуется вовсе.
 async function sfBoot(){
+  cbBoot();       // обратный звонок от права «Телефония» не зависит — он для курьеров
   if(sfOp||!S.me||!canMod('telephony'))return;
   try{
     const {data,error}=await sb.from('tel_operators').select('extension,webrtc_enabled').eq('user_id',S.me.id).maybeSingle();
@@ -403,3 +404,64 @@ document.addEventListener('click',e=>{
   else if(a==='mute')sfToggleMute();
   else if(a==='keys'){sfKeys=!sfKeys;sfRender();}
 });
+
+/* ================= ОБРАТНЫЙ ЗВОНОК =================
+   Решение владельца 23.11.2026 для курьеров: кнопка в карточке → станция звонит САМОМУ
+   сотруднику на мобильный → он берёт трубку → станция набирает клиента и соединяет.
+   Клиент видит номер компании, разговор пишется, приложение ставить не нужно.
+
+   Телефон в браузере (всё, что выше в этом файле) курьеру не годится: погас экран —
+   оборвался WebSocket. А здесь от браузера нужен один запрос, дальше всё делает станция.
+
+   НОМЕРА В ЗАПРОСЕ НЕТ — уходит только id заказа или заявки. Свой номер и номер клиента мост
+   достаёт из базы сам и токеном вызывающего: иначе это был бы бесплатный телефон «звони
+   куда хочешь за счёт компании».
+
+   КНОПКИ НЕТ, ПОКА НЕТ ЛИНИИ. Мост отвечает на /api/call/status, готова ли линия оператора
+   связи; до этого кнопка не рисуется вовсе — кнопка, которая не может сработать, хуже её
+   отсутствия. Подключили линию — она появится сама, без выкладки CRM. */
+let cbReady=null;                 // null — ещё не спрашивали
+async function cbBoot(){
+  if(cbReady!==null)return;
+  cbReady=false;
+  try{
+    const r=await fetch(SF_BRIDGE+'/api/call/status');
+    const j=await r.json();
+    cbReady=!!(j&&j.callback);
+  }catch(e){cbReady=false;}
+  // Карточки уже нарисованы без кнопки — перерисуем, если линия есть и человек не занят.
+  if(cbReady&&typeof render==='function'&&typeof canAutoRefresh==='function'&&canAutoRefresh())render();
+}
+// kind: 'order' | 'pickup'
+function cbBtn(kind,id){
+  if(!cbReady||!id)return '';
+  return `<button type="button" class="cb-btn" data-cb="${kind}:${esc(id)}" title="Станция позвонит вам и соединит с клиентом">📞 Позвонить через станцию</button>`;
+}
+async function cbCall(btn){
+  const [kind,id]=String(btn.dataset.cb||'').split(':');
+  if(!id||btn.disabled)return;
+  btn.disabled=true;
+  const was=btn.textContent;btn.textContent='Соединяем…';
+  // 8 секунд — столько же держит мост: двойное нажатие не должно поднять два звонка клиенту
+  setTimeout(()=>{btn.disabled=false;btn.textContent=was;},8000);
+  try{
+    const {data:sess}=await sb.auth.getSession();
+    const token=sess&&sess.session?sess.session.access_token:'';
+    const r=await fetch(SF_BRIDGE+'/api/call/callback',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
+      body:JSON.stringify(kind==='pickup'?{pickup_id:id}:{order_id:id})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok){toast((j&&j.message)||'Не получилось позвонить — попробуйте ещё раз',6000);return;}
+    toast(j.message||'Сейчас вам позвонит станция — возьмите трубку',6000);
+    // След в журнале: кто и по какому заказу звонил. Сам разговор пишет станция.
+    if(typeof logAction==='function')logAction('call',kind==='pickup'?'pickups':'orders',{entity_id:id,entity_label:'обратный звонок через станцию'});
+  }catch(e){toast('Нет связи с сервером телефонии',5000);}
+}
+// Один слушатель на страницу и в фазе ПЕРЕХВАТА: кнопка живёт внутри карточки, у которой
+// свой обработчик раскрытия, — без остановки всплытия нажатие заодно раскрывало бы её.
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-cb]');
+  if(!b)return;
+  e.preventDefault();e.stopPropagation();
+  cbCall(b);
+},true);

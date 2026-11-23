@@ -380,7 +380,7 @@ function drawCourierPickupCards(el,rows){
         <div class="cc-main">
           <div class="cc-client">${esc(p.name)||'Без названия'}${_courierRouteDist[p.id]!=null?` <span class="cc-dist">📍 ${_courierRouteDist[p.id]<1?Math.round(_courierRouteDist[p.id]*1000)+' м':_courierRouteDist[p.id].toFixed(1)+' км'}</span>`:''}</div>
           <div class="cc-addr-row">${address2gis(p.address,cityName(p.city_id),p.name)}</div>
-          ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}</div>`:''}
+          ${ph?`<div class="cc-phone-row">${phoneLink(p.phone)}${typeof cbBtn==='function'?cbBtn('pickup',p.id):''}</div>`:''}
           ${(p.give_packets||p.give_invoices||p.pack_size)?`<div class="cc-give">${(p.give_packets||p.pack_size)?`<span class="cc-give-tag">📦 Пакеты для партнёра${p.pack_size?' · размер '+esc(p.pack_size):''}</span>`:''}${p.give_invoices?'<span class="cc-give-tag">📄 Накладные для партнёра</span>':''}</div>`:''}
         </div>
         <div class="cc-right"><span class="cc-grip" data-grip title="Потяните, чтобы переставить">⠿</span><span class="cc-chev">▾</span></div>

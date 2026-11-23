@@ -2179,3 +2179,7 @@ td .ft-dot{margin:0 0 0 8px}
 @media(max-width:760px),(pointer:coarse){.ocs-row{flex-direction:column;align-items:stretch}.ocs-row .btn{min-height:44px}.ocs-x{min-width:44px;min-height:44px;font-size:22px}.ocs-head{padding:0 0 0 10px}}
 /* Платежи и подписки (Настройки): выключенная запись приглушена */
 .pay-off td{opacity:.5}
+/* Обратный звонок через станцию — кнопка в карточках курьера (js/24-softfon.js) */
+.cb-btn{display:inline-flex;align-items:center;gap:6px;margin:6px 0 0 10px;padding:7px 12px;border:1px solid var(--moss);border-radius:10px;background:#fff;color:var(--moss);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;-webkit-user-select:none;user-select:none}
+.cb-btn:disabled{opacity:.55;cursor:default}
+@media(max-width:760px),(pointer:coarse){.cb-btn{display:flex;justify-content:center;margin:8px 0 0;min-height:44px;width:100%;font-size:15px}}

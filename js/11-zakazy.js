@@ -2450,7 +2450,7 @@ function drawCourierOrderCards(el,rows){
           <div class="cc-top"><span class="cc-id">${esc(o.code)}</span></div>
           <div class="cc-client">${esc(o.client)||'Без имени'}</div>
           <div class="cc-addr">${city?`<strong>${esc(city)}</strong> · `:''}${esc(o.address)||'адрес не указан'}</div>
-          ${ph?`<div class="cc-phone">${phoneLink(o.phone)}</div>`:''}
+          ${ph?`<div class="cc-phone">${phoneLink(o.phone)}${typeof cbBtn==='function'?cbBtn('order',o.id):''}</div>`:''}
         </div>
         <div class="cc-right">
           <div class="cc-sum">${esc(sum)}<small>сумма</small></div>
