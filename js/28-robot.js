@@ -92,7 +92,7 @@ function robotDraw(){
   const scriptName=id=>{const s=(robotScripts||[]).find(x=>x.id===id);return s?s.name:'—';};
   const scripts=(robotScripts||[]).map(s=>`<tr data-rsid="${s.id}" style="cursor:pointer" class="${s.active?'':'pay-off'}">
       <td data-label="Сценарий"><strong>${esc(s.name)}</strong></td>
-      <td data-label="Язык">${esc(ROBOT_LANG[s.lang]||s.lang)}</td>
+      <td data-label="Язык">${esc(ROBOT_LANG[s.lang]||s.lang)}${(s.audio&&(s.audio.ru||s.audio.kz))?'<div class="hint" style="margin:2px 0 0">🎙 своя запись</div>':''}</td>
       <td data-label="Кнопки">${(Array.isArray(s.keys)?s.keys:[]).map(k=>`<b>${esc(k.digit)}</b> — ${esc(k.label||'')}`).join('<br>')||'—'}</td>
       <td data-label="Автозапуск">${s.trigger_status_id?('по статусу «'+esc(robotStatusName(s.trigger_status_id)||'статус удалён')+'»'):'только вручную'}</td>
       <td data-label="Часы">${s.hour_from}:00–${s.hour_to}:00</td>
@@ -170,8 +170,44 @@ function robotDraw(){
   };
 }
 
+// Кусочек «своя запись»: скрытое поле с номером записи на сервере + кнопки. Подпись и видимость
+// кнопок расставляет robotRecPaint — один раз на окно, а не в каждом месте по-своему.
+function robotRecBox(attr,value,label){
+  return `<span class="rob-recbox">${label?`<span>${esc(label)}</span>`:''}<input type="hidden" ${attr} data-rec value="${esc(value||'')}">
+    <button type="button" class="btn ghost sm" data-recup></button><span class="rob-recinfo"></span>
+    <button type="button" class="btn ghost sm" data-recdel title="Убрать запись — робот снова будет читать текст">✕ убрать</button></span>`;
+}
+function robotRecPaint(root){
+  root.querySelectorAll('.rob-recbox').forEach(b=>{
+    const has=!!b.querySelector('[data-rec]').value;
+    b.querySelector('[data-recup]').textContent=has?'🎙 Заменить запись':'🎙 Загрузить свою запись';
+    b.querySelector('.rob-recinfo').textContent=has?(b.dataset.secs?`своя запись, ${b.dataset.secs} с`:'своя запись загружена'):'';
+    b.querySelector('[data-recdel]').style.display=has?'':'none';
+  });
+}
+// Выбрать файл и отдать его мосту: тот приведёт запись к виду, который понимает станция.
+function robotRecUpload(box){
+  const inp=document.createElement('input');inp.type='file';inp.accept='audio/*,.m4a,.mp3,.wav,.ogg,.aac';
+  inp.onchange=async()=>{
+    const f=inp.files&&inp.files[0];if(!f)return;
+    if(f.size>8*1024*1024){toast('Файл больше 8 МБ — запишите фразу короче',5000);return;}
+    const btn=box.querySelector('[data-recup]');btn.disabled=true;btn.textContent='Загружаю…';
+    try{
+      const {data:sess}=await sb.auth.getSession();
+      const token=sess&&sess.session?sess.session.access_token:'';
+      const r=await fetch(ROBOT_BRIDGE+'/api/robot/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream',Authorization:'Bearer '+token},body:f});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok||!j.ok){toast((j&&j.message)||('Запись не принята ('+r.status+')'),6000);return;}
+      box.querySelector('[data-rec]').value=j.id;box.dataset.secs=String(j.seconds);
+      toast(`Запись загружена — ${j.seconds} с. Не забудьте сохранить сценарий.`,5000);
+    }catch(e){toast('Нет связи с сервером телефонии',5000);}
+    finally{btn.disabled=false;robotRecPaint(box.parentNode||document);}
+  };
+  inp.click();
+}
+
 function robotKeyRow(k){
-  k=k||{digit:'',label:'',status_id:'',say_ru:'',say_kz:''};
+  k=k||{digit:'',label:'',status_id:'',say_ru:'',say_kz:'',rec_ru:'',rec_kz:''};
   return `<div class="rob-key">
       <select data-rk="digit" title="Кнопка">${['1','2','3','4','5','6','7','8','9','0'].map(d=>`<option ${d===String(k.digit)?'selected':''}>${d}</option>`).join('')}</select>
       <input data-rk="label" placeholder="что это значит — например: подтвердил" value="${esc(k.label||'')}">
@@ -179,6 +215,7 @@ function robotKeyRow(k){
       <input data-rk="say_ru" placeholder="что сказать в ответ по-русски" value="${esc(k.say_ru||'')}">
       <input data-rk="say_kz" placeholder="…и по-казахски (если нужен)" value="${esc(k.say_kz||'')}">
       <button type="button" class="btn ghost sm" data-rkdel title="Убрать кнопку">✕</button>
+      <div class="rob-key-rec">ответ своей записью: ${robotRecBox('data-rk="rec_ru"',k.rec_ru,'по-русски')} ${robotRecBox('data-rk="rec_kz"',k.rec_kz,'по-казахски')}</div>
     </div>`;
 }
 
@@ -190,11 +227,14 @@ function robotScriptModal(id){
   const ov=showModal(s0?'Сценарий робота':'Новый сценарий',`<div class="rob-form">
     <div class="field"><label>Название <span style="color:var(--rust)">*</span></label><input id="rs_name" value="${esc(s.name||'')}" placeholder="например: Подтверждение доставки"></div>
     <div class="field" style="margin-top:10px"><label>Что говорит робот — по-русски</label>
-      <textarea id="rs_ru" rows="4">${esc(s.text_ru||'')}</textarea></div>
+      <textarea id="rs_ru" rows="4">${esc(s.text_ru||'')}</textarea>
+      ${robotRecBox('id="rs_rec_ru"',(s.audio||{}).ru,'')}</div>
     <div class="field" style="margin-top:10px"><label>…по-казахски</label>
       <textarea id="rs_kz" rows="4">${esc(s.text_kz||'')}</textarea>
+      ${robotRecBox('id="rs_rec_kz"',(s.audio||{}).kz,'')}<br>
       <span class="hint" style="font-size:12px">Подстановки: <b>{дата}</b> — дата доставки словами, <b>{сумма}</b> — сумма заказа словами, <b>{номер}</b> — номер заказа по цифрам.
-        Если в заказе нет того, что стоит в тексте, робот по нему не звонит и пишет причину.</span></div>
+        Если в заказе нет того, что стоит в тексте, робот по нему не звонит и пишет причину.<br>
+        <b>Своя запись главнее текста:</b> если она загружена, робот проигрывает её, а текст не читает. Сумму и дату запись назвать не может — в ней только то, что вы наговорили.</span></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
       <div class="field"><label>На каком языке говорить</label>
         <select id="rs_lang">${Object.keys(ROBOT_LANG).map(k=>`<option value="${k}" ${k===s.lang?'selected':''}>${ROBOT_LANG[k]}</option>`).join('')}</select></div>
@@ -235,9 +275,15 @@ function robotScriptModal(id){
       await robotLoad();robotDraw();toast('Сохранено');
     },{wide:true,readonly:ro});
   const keysBox=ov.querySelector('#rs_keys');
-  ov.querySelector('#rs_keyadd').onclick=()=>keysBox.insertAdjacentHTML('beforeend',robotKeyRow(null));
+  ov.querySelector('#rs_keyadd').onclick=()=>{keysBox.insertAdjacentHTML('beforeend',robotKeyRow(null));robotRecPaint(ov);};
   keysBox.addEventListener('click',e=>{const b=e.target.closest('[data-rkdel]');if(b)b.closest('.rob-key').remove();});
   ov.querySelector('#rs_listen').onclick=()=>robotListen(ov);
+  robotRecPaint(ov);
+  ov.addEventListener('click',e=>{
+    const up=e.target.closest('[data-recup]'),del=e.target.closest('[data-recdel]');
+    if(up){robotRecUpload(up.closest('.rob-recbox'));return;}
+    if(del){const b=del.closest('.rob-recbox');b.querySelector('[data-rec]').value='';delete b.dataset.secs;robotRecPaint(ov);}
+  });
   const del=ov.querySelector('#rs_del');
   if(del)del.onclick=async()=>{
     if(!confirm(`Удалить сценарий «${s0.name}»?\n\nВместе с ним удалятся его звонки из очереди и из списка итогов. В «Истории изменений» записи по заказам останутся.`))return;
@@ -254,8 +300,10 @@ function robotReadForm(){
   if(!name)return {error:'Назовите сценарий'};
   const lang=val('rs_lang')||'ru';
   const text_ru=val('rs_ru').trim(),text_kz=val('rs_kz').trim();
-  if(/ru/.test(lang)&&!text_ru)return {error:'Напишите текст по-русски — он выбран в «языке»'};
-  if(/kz/.test(lang)&&!text_kz)return {error:'Напишите текст по-казахски — он выбран в «языке»'};
+  const audio={ru:val('rs_rec_ru')||'',kz:val('rs_rec_kz')||''};
+  // текст не обязателен там, где есть своя запись: робот проиграет её
+  if(/ru/.test(lang)&&!text_ru&&!audio.ru)return {error:'Напишите текст по-русски или загрузите запись — русский выбран в «языке»'};
+  if(/kz/.test(lang)&&!text_kz&&!audio.kz)return {error:'Напишите текст по-казахски или загрузите запись — казахский выбран в «языке»'};
   const keys=[],seen=new Set();
   for(const el of document.querySelectorAll('#rs_keys .rob-key')){
     const g=k=>el.querySelector(`[data-rk="${k}"]`).value.trim();
@@ -263,7 +311,7 @@ function robotReadForm(){
     if(seen.has(digit))return {error:`Кнопка ${digit} указана дважды`};
     seen.add(digit);
     if(!g('label'))return {error:`Напишите, что означает кнопка ${digit}`};
-    keys.push({digit,label:g('label'),status_id:g('status_id'),say_ru:g('say_ru'),say_kz:g('say_kz')});
+    keys.push({digit,label:g('label'),status_id:g('status_id'),say_ru:g('say_ru'),say_kz:g('say_kz'),rec_ru:g('rec_ru'),rec_kz:g('rec_kz')});
   }
   if(!keys.length)return {error:'Добавьте хотя бы одну кнопку — иначе робот не поймёт ответ клиента'};
   const int=(id,min,max,label)=>{const v=parseInt(val(id),10);return (v>=min&&v<=max)?v:{bad:`${label}: от ${min} до ${max}`};};
@@ -271,7 +319,7 @@ function robotReadForm(){
     h1=int('rs_h1',0,23,'«Звонить с»'),h2=int('rs_h2',1,24,'«Звонить до»');
   for(const v of [rep,att,retry,h1,h2])if(v&&v.bad)return {error:v.bad};
   if(h2<=h1)return {error:'«Звонить до» должно быть позже, чем «звонить с»'};
-  return {data:{name,text_ru:text_ru||null,text_kz:text_kz||null,lang,voice_ru:val('rs_voice')==='ruslan'?'ruslan':'irina',keys,
+  return {data:{name,text_ru:text_ru||null,text_kz:text_kz||null,lang,voice_ru:val('rs_voice')==='ruslan'?'ruslan':'irina',keys,audio,
     repeat_times:rep,max_attempts:att,retry_minutes:retry,hour_from:h1,hour_to:h2,
     trigger_status_id:val('rs_trig')||null,noanswer_status_id:val('rs_noans')||null,
     active:$('rs_active').checked,updated_at:new Date(nowMs()).toISOString()}};
@@ -287,7 +335,8 @@ async function robotListen(ov){
     const token=sess&&sess.session?sess.session.access_token:'';
     const r=await fetch(ROBOT_BRIDGE+'/api/robot/preview',{method:'POST',
       headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
-      body:JSON.stringify({text_ru:val('rs_ru'),text_kz:val('rs_kz'),lang:val('rs_lang'),voice_ru:val('rs_voice')})});
+      body:JSON.stringify({text_ru:val('rs_ru'),text_kz:val('rs_kz'),lang:val('rs_lang'),voice_ru:val('rs_voice'),
+        audio:{ru:val('rs_rec_ru'),kz:val('rs_rec_kz')}})});
     if(!r.ok){const j=await r.json().catch(()=>({}));note.textContent=(j&&j.message)||('не получилось ('+r.status+')');return;}
     const url=URL.createObjectURL(await r.blob());
     robotAudio=new Audio(url);

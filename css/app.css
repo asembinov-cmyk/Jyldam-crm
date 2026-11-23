@@ -2191,3 +2191,13 @@ td .ft-dot{margin:0 0 0 8px}
 .rob-form .field{min-width:0}.rob-form select,.rob-form input,.rob-form textarea{max-width:100%;min-width:0;box-sizing:border-box}
 .rob-form textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;resize:vertical}
 @media(max-width:700px){.rob-form [style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}.rob-form textarea{font-size:16px}}
+/* Настройки: разделы бокового списка сворачиваются */
+button.set-group-title{display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:0;cursor:pointer;font-family:inherit;text-align:left;border-radius:8px}
+button.set-group-title:hover{background:rgba(0,0,0,.04)}
+.set-chev{font-size:11px;transition:transform .15s;opacity:.7}
+.set-group.closed .set-chev{transform:rotate(-90deg)}
+.set-group.closed .set-group-items{display:none}
+/* Робот: строка «своя запись» под текстом и под кнопкой */
+.rob-recbox{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.rob-recinfo{font-size:13px;color:var(--moss);font-weight:600}
+.rob-key-rec{grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin:-2px 0 4px}

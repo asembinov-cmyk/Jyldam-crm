@@ -52,6 +52,7 @@ const SET_GROUPS=[
   ['Разработка',[['apidocs','Документация API','code']]],
 ];
 const setAllItems=()=>SET_GROUPS.flatMap(([g,items])=>items.map(it=>[...it,g]));
+function setClosedGet(){try{const v=JSON.parse(localStorage.getItem('setClosed')||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
 function renderSettings(){
   dirRight='directories';          // в «Настройках» права как были — по справочникам
   // пункт «Статусы Барахолки» убран 22.10.2026 — в адресе мог остаться он
@@ -59,12 +60,18 @@ function renderSettings(){
   const all=setAllItems();
   if(!all.some(it=>it[0]===S.dir))S.dir='cities'; // в адресе мог остаться справочник, которого уже нет
   const groups=SET_GROUPS;
-  const side=groups.map(([title,items])=>`
-    <div class="set-group">
-      <div class="set-group-title">${esc(title)}</div>
-      ${items.map(([k,label,ico])=>`<button class="set-item${S.dir===k?' active':''}" data-dir="${k}">
-        ${SET_ICO[ico]||''}<span>${esc(label)}</span></button>`).join('')}
-    </div>`).join('');
+  // РАЗДЕЛЫ СВОРАЧИВАЮТСЯ (просьба владельца 23.11.2026): пунктов стало два с лишним десятка,
+  // и список не помещался на экран. Что свёрнуто, помнит браузер. Раздел с ОТКРЫТЫМ сейчас
+  // пунктом при отрисовке всегда развёрнут — иначе человек не видел бы, где он находится.
+  const closedSet=setClosedGet();
+  const side=groups.map(([title,items])=>{
+    const closed=closedSet.includes(title)&&!items.some(it=>it[0]===S.dir);
+    return `
+    <div class="set-group${closed?' closed':''}">
+      <button type="button" class="set-group-title" data-setgrp="${esc(title)}" title="Свернуть или развернуть раздел"><span>${esc(title)}</span><span class="set-chev">▾</span></button>
+      <div class="set-group-items">${items.map(([k,label,ico])=>`<button class="set-item${S.dir===k?' active':''}" data-dir="${k}">
+        ${SET_ICO[ico]||''}<span>${esc(label)}</span></button>`).join('')}</div>
+    </div>`;}).join('');
   $('main').innerHTML=`
     <div class="page-head"><div><h1>Настройки</h1><p>${canEditDir()?'Базовые данные системы':'Просмотр настроек (редактирование — у администратора)'}</p></div></div>
     <div class="set-wrap">
@@ -75,6 +82,15 @@ function renderSettings(){
       <div id="dirContent"></div>
     </div>`;
   $('main').querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{S.dir=b.dataset.dir;saveNav();renderSettings();});
+  // сворачивание — только класс на разделе: перерисовывать страницу незачем, это сбило бы
+  // открытый справочник и набранное в его полях
+  $('main').querySelectorAll('[data-setgrp]').forEach(b=>b.onclick=()=>{
+    const g=b.closest('.set-group'),t=b.dataset.setgrp;
+    const nowClosed=!g.classList.contains('closed');
+    g.classList.toggle('closed',nowClosed);
+    const cur=setClosedGet().filter(x=>x!==t);if(nowClosed)cur.push(t);
+    try{localStorage.setItem('setClosed',JSON.stringify(cur));}catch(e){}
+  });
   if($('setPick'))$('setPick').onchange=e=>{S.dir=e.target.value;saveNav();renderSettings();};
   const map={partners:dirPartners,cities:dirCities,districts:dirDistricts,couriers:dirCouriers,
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
