@@ -128,25 +128,93 @@ function stCard(title, value) {
   return `<div class="stat"><div class="stat-body"><div class="k">${stEsc(title)}</div><div class="v">${value}</div></div></div>`;
 }
 
+const ST_KIND = {
+  partner: "Партнёр",
+  pickup_courier: "Заборщик",
+  delivery_courier: "Доставщик",
+  admin: "Администратор",
+};
+const ST_STATE = {
+  open: "К выплате",
+  invoiced: "Выставлен счёт",
+  paid: "Оплачено",
+  awaiting_admin: "Ждёт подтверждения",
+  pending: "Ждёт оплаты",
+  cancelled: "Отменён",
+  error: "Ошибка",
+  unknown: "Статус неясен",
+};
+
+function stIndex(list) {
+  const map = new Map();
+  (list || []).forEach((row) => { if (row && row.id) map.set(row.id, row); });
+  return map;
+}
+
+function stCatalog() {
+  const src = typeof S !== "undefined" ? S : {};
+  return {
+    order: stIndex(src.orders),
+    pickup: stIndex(src.pickups),
+    partner: stIndex(src.partners),
+    courier: stIndex(src.couriers),
+    delivery: stIndex(src.order_couriers),
+  };
+}
+
+function stDay(v) {
+  if (!v) return "—";
+  if (typeof fmtDate === "function") return fmtDate(v);
+  const p = String(v).slice(0, 10).split("-");
+  return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : String(v);
+}
+
+function stOrderText(id, code, cat) {
+  if (code) return String(code);
+  const row = cat.order.get(id);
+  return (row && row.code) || "—";
+}
+
+function stPickupText(id, name, cat) {
+  if (name) return String(name);
+  if (!id) return "—";
+  const row = cat.pickup.get(id);
+  return (row && row.name) || "—";
+}
+
+function stWho(type, id, name, cat) {
+  const kind = ST_KIND[type] || "Долг";
+  let who = name || "";
+  if (!who && type === "partner") who = (cat.partner.get(id) || {}).name || "";
+  if (!who && type === "pickup_courier") who = (cat.courier.get(id) || {}).fio || "";
+  if (!who && type === "delivery_courier") who = (cat.delivery.get(id) || {}).fio || "";
+  return who ? `${kind}: ${who}` : kind;
+}
+
+function stState(v) {
+  return ST_STATE[v] || "—";
+}
+
 function settlementsTable(tab, rows, m) {
+  const cat = stCatalog();
   if (tab === "forgotten") {
     if (!rows.length) return `<div class="empty"><div class="big">Забытых смен нет</div></div>`;
     return `<table class="resp-table"><thead><tr><th>Курьер</th><th>Дата</th><th></th></tr></thead><tbody>${rows.map((r) =>
-      `<tr><td>${stEsc((m.names && m.names[r.courierId]) || r.courierId)}</td><td>${stEsc(r.date)}</td><td><button class="btn sm" type="button" data-stclose="${stEsc(r.courierId)}" data-stdate="${stEsc(r.date)}">Завершить смену</button></td></tr>`).join("")}</tbody></table>`;
+      `<tr><td>${stEsc((m.names && m.names[r.courierId]) || (cat.courier.get(r.courierId) || {}).fio || "Курьер")}</td><td>${stEsc(stDay(r.date))}</td><td><button class="btn sm" type="button" data-stclose="${stEsc(r.courierId)}" data-stdate="${stEsc(r.date)}">Завершить смену</button></td></tr>`).join("")}</tbody></table>`;
   }
   if (tab === "awaiting") {
     if (!rows.length) return `<div class="empty"><div class="big">Нет заказов без цены</div>Такие заказы не попадают в счёт.</div>`;
     return `<table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th></tr></thead><tbody>${rows.map((r) =>
-      `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(r.order_id)}">${stEsc(r.code || r.order_id)}</button></td><td>${stEsc(r.pickup_id || "—")}</td></tr>`).join("")}</tbody></table>`;
+      `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(r.order_id)}">${stEsc(stOrderText(r.order_id, r.code, cat))}</button></td><td>${stEsc(stPickupText(r.pickup_id, r.pickup_name, cat))}</td></tr>`).join("")}</tbody></table>`;
   }
   if (tab === "invoices" || tab === "paid" || tab === "errors") {
     if (!rows.length) return `<div class="empty"><div class="big">Счетов нет</div></div>`;
     return `<table class="resp-table"><thead><tr><th>Счёт</th><th>Кто платит</th><th>Период</th><th>Сумма</th><th>Статус</th><th>Заказы</th></tr></thead><tbody>${rows.map((i) =>
-      `<tr><td>${stEsc(i.id)}${i.test ? " · тест" : ""}</td><td>${stEsc(i.payer_type)} · ${stEsc(i.payer_id)}</td><td>${stEsc(i.period_start)} — ${stEsc(i.period_end)}</td><td>${stMoney(i.amount)}</td><td>${stEsc(i.status)}</td><td>${(i.order_ids || []).map((id) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(id)}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
+      `<tr><td>${i.test ? "Тестовый счёт" : "Счёт"}</td><td>${stEsc(stWho(i.payer_type, i.payer_id, i.payer_name, cat))}</td><td>${stEsc(stDay(i.period_start))} — ${stEsc(stDay(i.period_end))}</td><td>${stMoney(i.amount)}</td><td>${stEsc(stState(i.status))}</td><td>${(i.order_ids || []).map((id, n) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.order_codes || [])[n], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
   }
   if (!rows.length) return `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`;
   return `<table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th><th>Кто держит долг</th><th>Период</th><th>Сумма</th><th>Состояние</th></tr></thead><tbody>${rows.map((o) =>
-    `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(o.order_id)}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(o.pickup_id || "—")}</button></td><td>${stEsc(o.holder_type)} · ${stEsc(o.holder_id)}${(m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(o.period_date)}</td><td>${stMoney(o.amount)}</td><td>${stEsc(o.state)}</td></tr>`).join("")}</tbody></table>`;
+    `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stEsc(stWho(o.holder_type, o.holder_id, o.holder_name, cat))}${(m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td></tr>`).join("")}</tbody></table>`;
 }
 
 function settlementsAdminForm() {
@@ -215,8 +283,9 @@ async function renderSettlements() {
 
 function settlementsExcel() {
   const rows = (settlementsModel && settlementsModel.obligations) || [];
-  const lines = ["заказ;заявка;держатель;период;сумма;состояние"].concat(rows.map((o) =>
-    [o.order_id, o.pickup_id, o.holder_type + " " + o.holder_id, o.period_date, o.amount, o.state].join(";")));
+  const cat = stCatalog();
+  const lines = ["заказ;заявка;кто держит долг;период;сумма;состояние"].concat(rows.map((o) =>
+    [stOrderText(o.order_id, o.order_code, cat), stPickupText(o.pickup_id, o.pickup_name, cat), stWho(o.holder_type, o.holder_id, o.holder_name, cat), stDay(o.period_date), o.amount, stState(o.state)].join(";")));
   const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
