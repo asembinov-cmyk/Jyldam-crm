@@ -1,6 +1,6 @@
-/* Взаиморасчёты. Касса finance_entries и действующий Kaspi Pay не используются.
-   Счета уходят на сервер settlements. Пока функция не опубликована, раздел
-   показывает оболочку и не ломает остальные экраны. */
+/* Взаиморасчёты. Долги партнёров и курьеров идут на сервер settlements.
+   Удалённые счета Kaspi Pay по заказам показываются отдельно, кассой
+   «ИП Зонова Наталья»: вкладка «Счета» — все выставленные, «Оплачено» — оплаченные. */
 let settlementsTab = "summary";
 let settlementsModel = null;
 
@@ -105,7 +105,7 @@ function settlementsMarkup(m) {
       `<button type="button" data-sttab="${k}" class="${tab === k ? "active" : ""}">${lbl}</button>`).join("")}</div>
     ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Старше 31 дня: ${m.stale_total || 0} на ${stMoney(m.stale_amount || 0)}. Эти суммы остаются в учёте и не выставляются автоматом. ${(m.missing_kaspi || []).length ? "Без номера Kaspi: " + (m.missing_kaspi || []).length + "." : ""}</p>` : ""}
     ${tab === "stale" ? `<p style="color:var(--muted);font-size:13px">Задолженность старше автоматического восстановления. Она не исчезает. Счёт по ней выставляет менеджер вручную.</p>` : ""}
-    ${m.load_error ? `<div class="empty"><div class="big">Список не загрузился</div>${stEsc(m.load_error)} Нажмите «Обновить». Заказы на месте, режим из-за этой ошибки не менялся.</div>` : table}
+    ${m.load_error ? `<div class="empty"><div class="big">Список не загрузился</div>${stEsc(m.load_error)} Нажмите «Обновить». Заказы на месте, режим из-за этой ошибки не менялся.</div>` : `${settlementsKaspiBlock(tab, m)}${table}`}
     ${tab === "admins" && !m.preview ? settlementsAdminForm() : ""}`;
 }
 
@@ -144,6 +144,7 @@ const ST_STATE = {
   cancelled: "Отменён",
   error: "Ошибка",
   unknown: "Статус неясен",
+  rejected: "Отклонён",
 };
 
 function stIndex(list) {
@@ -216,6 +217,46 @@ function stPickBox(o, m) {
   return `<input type="checkbox" class="stChk" data-stpick="1" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}">`;
 }
 
+function settlementsKaspiRows(rows, tab) {
+  const list = (rows || []).filter((i) => i && !i.test);
+  if (tab === "paid") return list.filter((i) => i.status === "paid");
+  if (tab === "invoices") return list;
+  return [];
+}
+
+function settlementsKaspiBlock(tab, m) {
+  if (!m || m.preview || (tab !== "invoices" && tab !== "paid")) return "";
+  const name = m.kaspi_kassa || "ИП Зонова Наталья";
+  const rows = settlementsKaspiRows(m.kaspi_invoices, tab);
+  const sum = rows.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const when = (v) => (v && typeof fmtDateTime === "function" ? fmtDateTime(v) : stDay(v));
+  const phone = (v) => (typeof phoneDisplay === "function" ? phoneDisplay(v) : (v ? "+7" + v : "—"));
+  const body = rows.length ? `<table class="resp-table"><thead><tr><th>Заказ</th><th>Телефон</th><th>Сумма</th><th>Статус</th><th>Выставлен</th><th>Оплачен</th></tr></thead><tbody>${rows.map((i) =>
+    `<tr><td>${i.order_id ? `<button class="btn ghost sm" type="button" data-storder="${stEsc(i.order_id)}">${stEsc(i.order_code || "Заказ")}</button>` : stEsc(i.order_code || "—")}</td><td>${stEsc(phone(i.phone10))}</td><td>${stMoney(i.amount)}</td><td>${stEsc(stState(i.status))}</td><td>${stEsc(when(i.created_at))}</td><td>${stEsc(i.paid_at ? when(i.paid_at) : "—")}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty"><div class="big">${tab === "paid" ? "Оплат ещё нет" : "Счетов ещё нет"}</div></div>`;
+  return `<div class="panel" style="padding:14px;margin-bottom:14px"><h3 style="margin:0 0 8px">Касса ${stEsc(name)}</h3>
+    <p style="color:var(--muted);font-size:13px;margin-top:0">Удалённые счета Kaspi Pay. ${rows.length} на ${stMoney(sum)}.</p>${body}</div>`;
+}
+
+async function settlementsLoadKaspi() {
+  const fallback = "ИП Зонова Наталья";
+  const list = (typeof S !== "undefined" && S.finance_kassa) || [];
+  let kassaId = "";
+  let invoices = [];
+  if (typeof sb !== "undefined" && sb) {
+    try {
+      const settings = await sb.from("kaspi_settings").select("kassa_id").eq("id", 1).maybeSingle();
+      if (settings && settings.data && settings.data.kassa_id) kassaId = settings.data.kassa_id;
+    } catch (e) { kassaId = ""; }
+    try {
+      const q = await sb.from("kaspi_invoices").select("id,order_id,order_code,phone10,amount,status,test,created_at,paid_at").order("created_at", { ascending: false }).limit(300);
+      if (!q.error) invoices = q.data || [];
+    } catch (e) { invoices = []; }
+  }
+  const named = (kassaId && list.find((k) => k.id === kassaId)) || list.find((k) => k && k.kassa_type === "cashless" && /зонова/i.test(k.name || ""));
+  return { kaspi_kassa: (named && named.name) || fallback, kaspi_invoices: invoices, kaspi_loaded: true };
+}
+
 function settlementsTable(tab, rows, m) {
   const cat = stCatalog();
   if (tab === "forgotten") {
@@ -230,8 +271,9 @@ function settlementsTable(tab, rows, m) {
   }
   if (tab === "invoices" || tab === "paid" || tab === "errors") {
     if (!rows.length) return `<div class="empty"><div class="big">Счетов нет</div></div>`;
-    return `<table class="resp-table"><thead><tr><th>Счёт</th><th>Кто платит</th><th>Период</th><th>Сумма</th><th>Статус</th><th>Заказы</th></tr></thead><tbody>${rows.map((i) =>
-      `<tr><td>${i.test ? "Тестовый счёт" : "Счёт"}</td><td>${stEsc(stWho(i.payer_type, i.payer_id, i.payer_name, cat))}</td><td>${stEsc(stDay(i.period_start))} — ${stEsc(stDay(i.period_end))}</td><td>${stMoney(i.amount)}</td><td>${stEsc(stState(i.status))}</td><td>${(i.order_ids || []).map((id, n) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.order_codes || [])[n], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
+    const kassa = !m.preview && m.kaspi_kassa ? m.kaspi_kassa : "";
+    return `<table class="resp-table"><thead><tr><th>Счёт</th><th>Кто платит</th><th>Период</th><th>Сумма</th><th>Статус</th>${kassa ? "<th>Касса</th>" : ""}<th>Заказы</th></tr></thead><tbody>${rows.map((i) =>
+      `<tr><td>${i.test ? "Тестовый счёт" : "Счёт"}</td><td>${stEsc(stWho(i.payer_type, i.payer_id, i.payer_name, cat))}</td><td>${stEsc(stDay(i.period_start))} — ${stEsc(stDay(i.period_end))}</td><td>${stMoney(i.amount)}</td><td>${stEsc(stState(i.status))}</td>${kassa ? `<td>${i.test ? "—" : stEsc(kassa)}</td>` : ""}<td>${(i.order_ids || []).map((id, n) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.order_codes || [])[n], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
   }
   if (!rows.length) return `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`;
   const pick = stCanIssue();
@@ -305,6 +347,9 @@ async function renderSettlements() {
         load_error: why,
       };
     } else settlementsModel = res;
+    if (settlementsModel && !settlementsModel.preview && !settlementsModel.kaspi_loaded) {
+      Object.assign(settlementsModel, await settlementsLoadKaspi());
+    }
   }
   main.innerHTML = settlementsMarkup(settlementsModel);
   settlementsBind(main);
