@@ -8,9 +8,8 @@
    экран. Таблицы — kaspi_settings и kaspi_invoices, поля оплаты заказа — pay_method,
    pay_status ('invoiced' | 'paid' | пусто), paid_at (db/72).
 
-   ГЛАВНОЕ: публичного API у Kaspi для этого нет, счёт создаёт привязанный кассир.
-   Способ связи с кассиром пока НЕ подключён, поэтому вживую работает только ТЕСТОВЫЙ
-   режим (фиктивный счёт и «Симулировать оплату»); боевой отвечает честным отказом.
+   Боевой шлюз: привязка кассира через OTP (порт pykaspi в Edge Function). Тестовый
+   режим по-прежнему создаёт фиктивный счёт и даёт «Симулировать оплату».
 
    Имена здесь — с приставкой `kaspi`: все скрипты делят одну глобальную область.
    ============================================================ */
@@ -22,6 +21,8 @@ let kaspiTimer=null;        // опрос открытого счёта, пок�
 const kaspiMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
 const kaspiPhoneOk=v=>/^7\d{9}$/.test(v||'');
 const kaspiOn=()=>!!(kaspiCfg&&kaspiCfg.enabled&&String(kaspiCfg.cashier_phone||'').trim());
+const kaspiBound=()=>!kaspiCfg?false:(kaspiCfg.bind_state==='bound'||(!kaspiCfg.bind_state&&!!kaspiCfg.cashier_phone));
+const kaspiLiveOk=()=>!!(kaspiCfg&&(kaspiCfg.test_mode||(kaspiBound()&&!kaspiCfg.bind_warning)));
 
 async function kaspiCfgLoad(force){
   if(kaspiCfg!==undefined&&!force)return kaspiCfg;
@@ -44,7 +45,7 @@ async function kaspiAttach(o,ro){
   f.insertAdjacentElement('afterend',box);
   box.innerHTML='<span class="hint">Kaspi Pay: проверяем…</span>';
   await kaspiCfgLoad();
-  if(kaspiCfg===null){box.remove();return;}           // таблиц нет — блока нет вовсе
+  if(kaspiCfg===null){box.remove();return;}
   let inv=null;
   if(o&&o.id){
     try{
@@ -52,22 +53,19 @@ async function kaspiAttach(o,ro){
       inv=(data||[])[0]||null;
     }catch(e){inv=null;}
   }
-  if(!document.body.contains(box))return;             // карточку уже закрыли
+  if(!document.body.contains(box))return;
   kaspiDraw(box,o,inv,ro);
 }
 
 function kaspiDraw(box,o,inv,ro){
   if(kaspiTimer){clearInterval(kaspiTimer);kaspiTimer=null;}
   const sumEl=$('o_sum'), paidChk=$('o_paidorder');
-  // --- оплачено ---
   if(inv&&inv.status==='paid'){
     box.innerHTML=`<label>Оплата Kaspi</label><div class="kaspi-paid">✅ Оплачено ${kaspiMoney(inv.amount)} с +7${esc(inv.phone10)}${inv.test?' <span class="hint">(тестовый счёт)</span>':''}</div>`;
     if(sumEl)sumEl.disabled=true;
     return;
   }
-  // --- счёт выставлен, ждём оплату ---
   if(inv&&inv.status==='pending'){
-    // пока счёт открыт, сумму менять нельзя: она должна совпасть со счётом
     if(sumEl)sumEl.disabled=true;
     if(paidChk)paidChk.disabled=true;
     box.innerHTML=`<label>Оплата Kaspi</label>
@@ -93,17 +91,17 @@ function kaspiDraw(box,o,inv,ro){
     const ck=$('kaspiCheck');if(ck)ck.onclick=()=>act('check',ck,'');
     const cn=$('kaspiCancel');if(cn)cn.onclick=()=>{if(confirm('Отменить счёт в Kaspi?'))act('cancel',cn,'Счёт отменён');};
     const sm=$('kaspiSim');if(sm)sm.onclick=()=>act('simulate',sm,'Оплата симулирована');
-    // на открытой карточке статус проверяется сам каждые 15 секунд
     kaspiTimer=setInterval(()=>{
       if(!document.body.contains(box)){clearInterval(kaspiTimer);kaspiTimer=null;return;}
       act('check',null,'');
     },15000);
     return;
   }
-  // --- счёта нет ---
   if(ro){box.remove();return;}
-  if(!kaspiOn()){
-    box.innerHTML=`<label>Оплата Kaspi</label><span class="hint">Кассир Kaspi не привязан или приём выключен.${isAdmin()?' <a href="#" id="kaspiToSet">Открыть настройки</a>':''}</span>`;
+  if(!kaspiOn()||(!kaspiCfg.test_mode&&!kaspiLiveOk())){
+    const why=!kaspiOn()?'Кассир Kaspi не привязан или приём выключен.':
+      (kaspiCfg.bind_warning?('Сессия Kaspi неактивна: '+kaspiCfg.bind_warning):'Боевой режим: сначала привяжите кассира через OTP.');
+    box.innerHTML=`<label>Оплата Kaspi</label><span class="hint">${esc(why)}${isAdmin()?' <a href="#" id="kaspiToSet">Открыть настройки</a>':''}</span>`;
     const a=$('kaspiToSet');
     if(a)a.onclick=e=>{e.preventDefault();const x=box.closest('.overlay');if(x){const b=x.querySelector('.x');if(b)b.click();}S.tab='settings';S.dir='kaspi';render();};
     return;
@@ -128,7 +126,6 @@ function kaspiDraw(box,o,inv,ro){
   phEl.oninput=()=>{phEl.value=phEl.value.replace(/\D/g,'').slice(0,10);upd();};
   if(sumEl)sumEl.addEventListener('input',upd);
   if(paidChk)paidChk.addEventListener('change',()=>setTimeout(upd,0));
-  // сумму подставляет и тариф, и размер пакета — кодом, без события ввода
   const watch=setInterval(()=>{if(!document.body.contains(box)){clearInterval(watch);return;}if(document.activeElement!==phEl)upd();},800);
   upd();
   btn.onclick=()=>{
@@ -139,8 +136,6 @@ function kaspiDraw(box,o,inv,ro){
     if(!sv){toast('Не нашли кнопку сохранения карточки');return;}
     kaspiWait={phone,at:Date.now()};
     sv.click();
-    // Сохранение не прошло (не хватило обязательного поля) — намерение снимаем: иначе
-    // следующее обычное «Сохранить» молча отправило бы счёт.
     const t=setInterval(()=>{if(!document.body.contains(sv)||!sv.disabled){clearInterval(t);kaspiWait=null;}},300);
   };
 }
@@ -150,7 +145,6 @@ function kaspiErr(r){
   return m.replace(/^Unauthorized:\s*/,'Нет доступа: ');
 }
 
-/* Память вкладки: Realtime донесёт правку заказа, но грид должен показать её сразу. */
 function kaspiApplyToOrder(o,inv){
   if(!o||!inv)return;
   if(inv.status==='paid'){o.pay_status='paid';o.pay_method='Kaspi, удалённый счёт';o.paid_at=inv.paid_at;}
@@ -158,8 +152,6 @@ function kaspiApplyToOrder(o,inv){
   else o.pay_status=null;
 }
 
-/* Зовётся из сохранения карточки (js/11) ПОСЛЕ успешной записи заказа: счёта без
-   сохранённого заказа быть не должно. Отказ Kaspi заказ не трогает. */
 async function kaspiAfterSave(saved){
   const w=kaspiWait;kaspiWait=null;
   if(!w||!saved||!saved.id||Date.now()-w.at>120000)return;
@@ -168,8 +160,15 @@ async function kaspiAfterSave(saved){
     kaspiApplyToOrder(saved,r.invoice);
     toast(`Счёт Kaspi на ${kaspiMoney(r.invoice.amount)} отправлен на +7${r.invoice.phone10}`,5000);
   }else toast('Заказ сохранён, но счёт Kaspi не выставлен: '+kaspiErr(r),9000);
-  // карточка после сохранения закрывается — открываем её снова, уже с экраном ожидания
   setTimeout(()=>{if(typeof orderModal==='function')orderModal(saved.id);},250);
+}
+
+function kaspiBindLabel(c){
+  const st=c.bind_state||'not_bound';
+  if(st==='bound')return 'Привязан';
+  if(st==='otp_pending')return 'Ожидает OTP';
+  if(st==='error')return 'Ошибка';
+  return 'Не привязан';
 }
 
 /* ---------- Настройки → Kaspi Pay ---------- */
@@ -180,17 +179,35 @@ async function renderKaspiSettings(){
   if(S.dir!=='kaspi'||!$('dirContent'))return;
   if(kaspiCfg===null){box.innerHTML='<div class="panel"><div class="empty">Раздел ещё не включён: в базе нет таблицы kaspi_settings (db/72).</div></div>';return;}
   const adm=isAdmin(), c=kaspiCfg, dis=adm?'':' disabled';
-  box.innerHTML=`<div class="panel" style="padding:18px;max-width:640px">
+  const st=c.bind_state||'not_bound';
+  const warn=String(c.bind_warning||'').trim();
+  const err=String(c.bind_error||'').trim();
+  const banner=warn
+    ?`<div class="hint" style="margin:10px 0;padding:10px 12px;border-radius:10px;background:#fef2f2;color:#991b1b"><b>Сессия неактивна.</b> ${esc(warn)}</div>`
+    :(st==='bound'
+      ?`<div class="hint" style="margin:10px 0;padding:10px 12px;border-radius:10px;background:#f0fdf4;color:#166534"><b>Кассир привязан.</b> ${c.session_checked_at?'Последняя проверка: '+esc(String(c.session_checked_at).replace('T',' ').slice(0,19)):'Сессию можно проверить кнопкой «Тест».'}</div>`
+      :'');
+  box.innerHTML=`<div class="panel" style="padding:18px;max-width:640px" id="partner-kaspi-gateway">
     <h3 style="margin:0 0 6px">Kaspi Pay — удалённый счёт</h3>
     <p class="hint" style="margin:0 0 14px">В карточке заказа появляется кнопка «Выставить счёт»: счёт уходит на номер клиента, после оплаты заказ сам становится оплаченным.</p>
+    ${banner}
+    ${err&&st!=='bound'?`<div class="hint" style="margin:0 0 10px;color:#9a3412">${esc(err)}</div>`:''}
     <div class="field"><label>Номер кассира Kaspi Pay</label>
       <input type="tel" id="kaspiCashier" value="${esc(c.cashier_phone||'')}" placeholder="+7 7XX XXX XX XX"${dis}></div>
     <label style="display:flex;gap:8px;align-items:center;margin:12px 0"><input type="checkbox" id="kaspiEnabled"${c.enabled?' checked':''}${dis}> Принимать платежи</label>
     <label style="display:flex;gap:8px;align-items:center;margin:12px 0"><input type="checkbox" id="kaspiTest"${c.test_mode?' checked':''}${dis}> Тестовый режим <span class="hint">— в Kaspi не ходит: создаёт фиктивный счёт и даёт кнопку «Симулировать оплату»</span></label>
-    <div class="hint" style="margin:10px 0;padding:10px 12px;border-radius:10px;background:#fff7ed;color:#9a3412">
-      <b>Боевой режим пока не подключён.</b> У Kaspi нет открытого API для удалённых счетов: счёт создаёт привязанный кассир, и CRM нужен способ к нему обратиться (сервис-посредник или описание его запросов). Пока его нет, при выключенном тестовом режиме кнопка в заказе отвечает отказом и счёт не уходит.
+    <div class="field" style="margin-top:14px"><label>Статус привязки</label>
+      <div><b>${esc(kaspiBindLabel(c))}</b> <span class="hint">(${esc(st)})</span></div></div>
+    ${adm?`<div class="kaspi-row" style="margin-top:12px;flex-wrap:wrap;gap:8px">
+      <button class="btn primary" id="kaspiSave">Сохранить</button>
+      <button class="btn ghost" id="kaspiOtpStart">Отправить OTP</button>
+      <input type="text" id="kaspiOtpCode" placeholder="код из SMS" maxlength="8" style="width:110px;padding:8px 10px;border:1px solid #ddd;border-radius:8px">
+      <button class="btn ghost" id="kaspiOtpConfirm">Подтвердить OTP</button>
+      <button class="btn ghost" id="kaspiTestBtn">Тест подключения</button>
+      <button class="btn ghost" id="kaspiUnbind">Отвязать</button>
     </div>
-    ${adm?'<button class="btn primary" id="kaspiSave">Сохранить</button>':'<div class="hint">Менять настройки может только администратор.</div>'}
+    <p class="hint" style="margin:12px 0 0">Для боя: кассир в Kaspi Business на <b>отдельном</b> номере (не полный аккаунт Kaspi), снять тестовый режим, привязать OTP. Секрет <code>KASPI_SESSION_KEY</code> должен быть задан в Edge Functions.</p>`
+    :'<div class="hint">Менять настройки может только администратор.</div>'}
   </div>`;
   const sv=$('kaspiSave');
   if(sv)sv.onclick=async()=>{
@@ -198,10 +215,50 @@ async function renderKaspiSettings(){
     const row={cashier_phone:String($('kaspiCashier').value||'').trim()||null,enabled:$('kaspiEnabled').checked,
       test_mode:$('kaspiTest').checked,updated_at:new Date().toISOString(),updated_by_name:(S.me&&(S.me.full_name||S.me.email))||''};
     if(row.enabled&&!row.cashier_phone){sv.disabled=false;toast('Укажите номер кассира — без него приём не включить');return;}
-    if(row.enabled&&!row.test_mode&&!confirm('Выключить тестовый режим?\n\nБоевой режим пока не подключён: счёта в Kaspi уходить не будут, кнопка в заказе ответит отказом.')){sv.disabled=false;return;}
+    if(row.enabled&&!row.test_mode&&st!=='bound'&&!confirm('Выключить тестовый режим без привязанного кассира?\n\nСначала лучше пройти OTP.')){sv.disabled=false;return;}
     const {data,error}=await sb.from('kaspi_settings').update(row).eq('id',1).select().maybeSingle();
     sv.disabled=false;
     if(error||!data){toast('Не сохранено: '+(error?dbErrText(error):'нет прав'));return;}
-    kaspiCfg=data;toast('Сохранено');
+    kaspiCfg=data;toast('Сохранено');renderKaspiSettings();
+  };
+  const otpStart=$('kaspiOtpStart');
+  if(otpStart)otpStart.onclick=async()=>{
+    otpStart.disabled=true;
+    const phone=String(($('kaspiCashier')||{}).value||c.cashier_phone||'');
+    const r=await callEdge('kaspi-pay',{action:'bind_start',phone});
+    otpStart.disabled=false;
+    if(!r||r.error){toast(kaspiErr(r),8000);await kaspiCfgLoad(true);renderKaspiSettings();return;}
+    toast(r.description||'Код отправлен в SMS',5000);
+    await kaspiCfgLoad(true);renderKaspiSettings();
+  };
+  const otpConfirm=$('kaspiOtpConfirm');
+  if(otpConfirm)otpConfirm.onclick=async()=>{
+    const otp=String(($('kaspiOtpCode')||{}).value||'').trim();
+    if(!otp){toast('Введите код из SMS');return;}
+    otpConfirm.disabled=true;
+    const r=await callEdge('kaspi-pay',{action:'bind_confirm',otp});
+    otpConfirm.disabled=false;
+    if(!r||r.error){toast(kaspiErr(r),8000);await kaspiCfgLoad(true);renderKaspiSettings();return;}
+    toast('Кассир привязан'+(r.org_name?': '+r.org_name:''),5000);
+    await kaspiCfgLoad(true);renderKaspiSettings();
+  };
+  const testBtn=$('kaspiTestBtn');
+  if(testBtn)testBtn.onclick=async()=>{
+    testBtn.disabled=true;
+    const r=await callEdge('kaspi-pay',{action:'test'});
+    testBtn.disabled=false;
+    if(!r||r.error){toast(kaspiErr(r),8000);await kaspiCfgLoad(true);renderKaspiSettings();return;}
+    toast(r.message||'Сессия Kaspi активна',5000);
+    await kaspiCfgLoad(true);renderKaspiSettings();
+  };
+  const ub=$('kaspiUnbind');
+  if(ub)ub.onclick=async()=>{
+    if(!confirm('Сбросить сессию кассира? Для боя понадобится новый OTP.'))return;
+    ub.disabled=true;
+    const r=await callEdge('kaspi-pay',{action:'unbind'});
+    ub.disabled=false;
+    if(!r||r.error){toast(kaspiErr(r),8000);return;}
+    toast('Сессия сброшена');
+    await kaspiCfgLoad(true);renderKaspiSettings();
   };
 }
