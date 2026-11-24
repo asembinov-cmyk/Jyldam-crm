@@ -881,6 +881,12 @@ function render(){
     if(typeof waModStopPoll==='function')waModStopPoll();
     if(typeof waModRtStop==='function')waModRtStop();
   }
+  // То же правило для модуля Green API (js/30): таймер, канал и опрос QR-кода снимаем
+  // только при уходе из него.
+  if(_lastTab==='greenapi'&&S.tab!=='greenapi'){
+    if(typeof gaStopPoll==='function')gaStopPoll();
+    if(typeof gaRtStop==='function')gaRtStop();
+  }
   if(S.tab==='dashboard'){
     // Таблицы по дням при входе всегда свёрнуты: они длинные, и из-за них не видно
     // карточек наверху. Раскрывает их человек сам, и только на время этого захода.
@@ -906,6 +912,7 @@ function render(){
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
   else if(S.tab==='whatsapp')renderWhatsapp();
+  else if(S.tab==='greenapi')renderGreen();
   else if(S.tab==='telephony')renderTelephony();
   _lastTab=S.tab;
 }

@@ -1397,7 +1397,7 @@ function canMod(key){
   if(S.myPerms[permKey]&&typeof S.myPerms[permKey].view!=='undefined')return !!S.myPerms[permKey].view;
   // фолбэк: старая привязка модулей к базовым правам
   const fb={dashboard:'orders',pickups:'pickups',orders:'orders',courier:'orders',mail:'orders',
-    baraholka:null,whatsapp:null,telephony:null,
+    baraholka:null,whatsapp:null,greenapi:null,telephony:null,
     intercity:null,cash:null,sorting:null,filling:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
     users:'users',settings:'directories'};
   const base=fb[key];
@@ -1585,6 +1585,9 @@ function buildNav(opts){
     // WhatsApp переехал сюда из «Основного» 23.11.2026 по просьбе владельца — рядом с
     // «Заполнением». Место в меню, не больше: ключ `whatsapp` и права не тронуты.
     if(canMod('whatsapp'))histItems.push({k:'whatsapp',label:'WhatsApp',icon:'whatsapp'});
+    // Второй канал WhatsApp — через Green API (js/30), 24.11.2026. Стоит сразу под первым:
+    // оба про переписку с клиентом. Право своё (`greenapi`), по умолчанию только админу.
+    if(canMod('greenapi'))histItems.push({k:'greenapi',label:'WhatsApp · Green API',icon:'whatsapp'});
     if(histItems.length)groups.push({title:'История',items:histItems});
 
     const team=[];
@@ -1607,7 +1610,7 @@ function buildNav(opts){
     if(can('pickups','view'))items.push({k:'pickups',label:'Мои заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Мои заказы',icon:'orders'});
     const COURIER_EXTRA=[
-      ['baraholka','Барахолка','baraholka'],['whatsapp','WhatsApp','whatsapp'],['telephony','Телефония','phone'],
+      ['baraholka','Барахолка','baraholka'],['whatsapp','WhatsApp','whatsapp'],['greenapi','WhatsApp · Green API','whatsapp'],['telephony','Телефония','phone'],
       ['intercity','Отправки межгород','intercity'],['sorting','Сортировка','scan'],
       ['cash','Склад','warehouse'],['filling','Заполнение','fill'],
       ['courier','Курьерская доставка','courier'],['mail','Почтовая доставка','mail'],

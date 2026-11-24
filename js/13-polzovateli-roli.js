@@ -6,6 +6,7 @@ const MODULES=[
   ['orders','Заказы заборов'],
   ['baraholka','Барахолка'],
   ['whatsapp','WhatsApp'],
+  ['greenapi','WhatsApp · Green API'],
   ['telephony','Телефония'],
   ['filling','Заполнение'],
   ['ket_orders','SPA трафик'],
@@ -432,7 +433,7 @@ const PERM_LEVEL_LABEL={none:'нет доступа',view:'только прос
 // растянула бы шапку вдвое. Полное название всё равно видно в подсказке ячейки.
 const MODULE_SHORT={pickups:'Заявки',orders:'Заказы',ket_orders:'SPA трафик',courier:'Курьерская',
   mail:'Почтовая',intercity:'Межгород',cash:'Склад',notify:'Контроль',history:'История',
-  directories:'Настройки'};
+  directories:'Настройки',greenapi:'Green API'};
 const moduleShort=(m,lbl)=>MODULE_SHORT[m]||lbl;
 // Точный состав прав — в подсказке при наведении: в таблице он занимал бы место,
 // а нужен редко.

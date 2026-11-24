@@ -27,7 +27,7 @@
 const HIST_DAYS=14;
 /* Разделы, которым нужны ВСЕ заказы, а не только свои. Если курьеру выдан хоть один
    из них, он загружает данные как сотрудник — иначе раздел показывал бы пустоту. */
-const HIST_WIDE_MODULES=['baraholka','intercity','sorting','filling','courier','mail','dashboard','calc','notify','whatsapp','telephony'];
+const HIST_WIDE_MODULES=['baraholka','intercity','sorting','filling','courier','mail','dashboard','calc','notify','whatsapp','greenapi','telephony'];
 const HIST_ERR_TTL=20000;   // через столько ошибку догрузки забываем и пробуем снова
 const _hist={from:null,all:false,keys:new Set(),busy:new Map(),err:new Map(),searched:new Set()};
 

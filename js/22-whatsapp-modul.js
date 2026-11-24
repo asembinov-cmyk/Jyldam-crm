@@ -113,9 +113,11 @@ async function waModChatLoad(norm){
   waModChatErr='';
   try{
     const {data,error}=await sb.from('kelesu_messages').select(WA_MSG_COLS)
-      .eq('phone_norm',norm).order('created_at',{ascending:true}).limit(WA_MOD_CHAT);
+      .eq('phone_norm',norm).order('created_at',{ascending:false}).limit(WA_MOD_CHAT);
     if(error)throw error;
-    waModChat=data||[];
+    // Берём СВЕЖИЕ и разворачиваем: «по возрастанию, первые N» у переписки длиннее
+    // предела отдавало её начало, и новые сообщения в открытом диалоге не появлялись.
+    waModChat=(data||[]).reverse();
   }catch(e){
     waModChat=[];
     waModChatErr=waModTableErr(e);
