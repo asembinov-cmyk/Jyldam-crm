@@ -210,7 +210,7 @@ function gaAiLogHtml(){
       <th>Когда</th><th>Кто</th><th>Написали</th><th>Ответ ассистента</th><th>Итог</th><th></th>
     </tr></thead><tbody>${gaAiLog.map(r=>{
       const pi=r.pickup_info||null;
-      const pick=pi?`<div class="ga-ai-pick">${pi.simulated?'В тесте — создалась бы заявка':'Создана заявка'}: ${esc(pi.name||'')} · ${esc(pi.date?fmtDate(pi.date):'')} · заказов ${esc(String(pi.orders??0))}${pi.pack_size?' · пакет '+esc(pi.pack_size):''}${pi.courier?'<br>курьер: '+esc(pi.courier)+(pi.simulated?' (назначился бы)':''):(pi.courier_note?'<br>курьер не назначен: '+esc(pi.courier_note):'')}${pi.address?'<br>откуда: '+esc(pi.address):''}${pi.delivery_address?'<br>куда: '+esc(pi.delivery_address):''}</div>`:'';
+      const pick=pi?`<div class="ga-ai-pick">${pi.simulated?'В тесте — создалась бы заявка':'Создана заявка'}: ${esc(pi.name||'')} · ${esc(pi.date?fmtDate(pi.date):'')} · заказов ${esc(String(pi.orders??0))}${pi.pack_size?' · пакет '+esc(pi.pack_size):''}${pi.invoices?' · бланки':''}${pi.courier?'<br>курьер: '+esc(pi.courier)+(pi.simulated?' (назначился бы)':''):(pi.courier_note?'<br>курьер не назначен: '+esc(pi.courier_note):'')}${pi.address?'<br>откуда: '+esc(pi.address):''}${pi.delivery_address?'<br>куда: '+esc(pi.delivery_address):''}</div>`:'';
       const cls=r.outcome==='error'?'err':(r.outcome==='pickup'?'ok':(r.outcome==='handoff'?'warn':''));
       return `<tr>
         <td data-label="Когда">${esc(fmtDateTime(r.created_at))}${r.test?'<br><span class="wam-tag">тест</span>':''}</td>
