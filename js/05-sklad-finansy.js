@@ -1508,6 +1508,73 @@ function asmWrongTabHtml(code,actualType){
     Заказ «${esc(code)}» — ${otherWord}. Откройте вкладку «${otherLabel} сборка», чтобы собрать его.</div></div>`;
 }
 
+/* ── ПРИВЯЗКА СКАНЕРОМ ПРИ СБОРКЕ (24.11.2026) ──
+   KET присылает в заказе только техническое название товара — ни штрих-кода, ни нашего
+   артикула. Пока название не привязано к товару склада, заказ собрать было нельзя, и за
+   месяц так висела каждая третья позиция. Теперь сборщик делает привязку попутно: видит в
+   заказе незнакомое название, берёт товар с полки и пикает его штрих-код.
+
+   ПОДТВЕРЖДЕНИЕ — КНОПКОЙ НА ЭКРАНЕ, А НЕ confirm(). Сканер — это клавиатура: он печатает код
+   и жмёт Enter. Системное окно с вопросом следующий же скан закрыл бы своим Enter, и привязка
+   записалась бы сама. А она постоянная и действует на все будущие заказы: неверная привязка —
+   это списание не того остатка. Кнопку нажимают мышью, а новый скан просто заменяет вопрос.
+
+   КОД, УЖЕ ЗАПИСАННЫЙ У ДРУГОГО ТОВАРА, НЕ ПРИВЯЗЫВАЕМ: приём берёт товар, только когда
+   название есть ровно у одного (receive-order), и третий претендент сделал бы хуже. */
+let _asmBind=null;
+async function asmFetchInbound(code){
+  try{
+    const {data,error}=await sb.from('inbound_orders').select('id,external_id,index,stock_written,match_status,source')
+      .eq('external_id',code).order('created_at',{ascending:false}).limit(1);
+    if(error)throw error;
+    // короткий код (начало id) печатался на старых ярлыках — его ищем только в памяти
+    const order=(data&&data[0])||(S.inbound_orders||[]).find(o=>String(o.id).slice(0,8)===code)||null;
+    if(!order)return null;
+    const r=await sb.from('inbound_order_items').select('id,inbound_order_id,ket_sku,product_id,qty,matched').eq('inbound_order_id',order.id);
+    if(r.error)throw r.error;
+    return {order,items:r.data||[]};
+  }catch(e){console.error('asmFetchInbound',e);toast('Не удалось найти заказ KET: '+String(e&&e.message||e));return null;}
+}
+function asmBindPanelHtml(){
+  if(!_asmBind||!_asmOrder)return '';
+  const unbound=_asmOrder.items.filter(i=>!i.product_id);
+  if(!unbound.length){_asmBind=null;return '';}
+  return `<div class="asm-bind"><div class="asm-bind-q">Вы пикнули <b>${esc(_asmBind.product.name)}</b>. Какое это название от KET?</div>
+    <div class="asm-bind-btns">${unbound.map(it=>`<button class="btn primary sm" type="button" data-asmbind="${esc(it.itemId)}">Это «${esc(it.ket_sku||'?')}»</button>`).join('')}
+      <button class="btn ghost sm" type="button" data-asmbind="">Не то, отмена</button></div>
+    <div class="asm-bind-note">Привязка запомнится: следующие заказы с этим названием подхватятся сами.</div></div>`;
+}
+async function asmBindApply(itemId,btn){
+  const bind=_asmBind;_asmBind=null;
+  if(!itemId||!bind||!_asmOrder){drawAssembly();return;}
+  const it=_asmOrder.items.find(i=>i.itemId===itemId), p=bind.product;
+  if(!it||it.product_id||!p){drawAssembly();return;}
+  const norm=normKetSku(it.ket_sku);
+  const other=(S.products||[]).find(x=>x.id!==p.id&&productKetSkuList(x).some(c=>normKetSku(c)===norm));
+  if(other){
+    showInfo('Название уже занято',`<div class="hint">Название <b>${esc(it.ket_sku)}</b> уже записано у товара <b>${esc(other.name)}</b>.<br><br>Привязывать его ещё и к «${esc(p.name)}» нельзя: система не будет знать, какой из двух списывать. Откройте карточки этих товаров в «Складе» и оставьте название у одного.</div>`);
+    drawAssembly();return;
+  }
+  if(btn)btn.disabled=true;
+  try{
+    const merged=mergeKetSku(p.ket_sku||'',it.ket_sku);
+    if(merged!==(p.ket_sku||'')){
+      const u=await dbUpdate('products',p.id,{ket_sku:merged});
+      if(!u)throw new Error('не удалось записать название в карточку товара');
+      p.ket_sku=merged;
+    }
+    // эту позицию — напрямую по id: в названии бывают запятые и скобки, с ними поиск по тексту не работает
+    const {error}=await sb.from('inbound_order_items').update({product_id:p.id,matched:true}).eq('id',it.itemId);
+    if(error)throw error;
+    it.product_id=p.id;
+    const more=await matchInboundItemsForCodes(p.id,[it.ket_sku]);   // остальные заказы с этим названием
+    await refreshInboundMatchStatus([_asmOrder.inboundId]);
+    logAction('update','products',{entity_label:`Привязка при сборке: «${it.ket_sku}» → ${p.name}`});
+    if(productStock(p)>0)it.scanned=Math.min(it.qty,1);              // товар уже в руках — этот скан засчитан
+    toast(`Привязано: «${it.ket_sku}» → ${p.name}`+(more?` · подхвачено в других заказах: ${more}`:''));
+  }catch(e){toast('Не удалось привязать: '+String(e&&e.message||e));}
+  drawAssembly();
+}
 // находим заказ по коду/треку и его состав
 async function startAssembly(code,asmType){
   asmType=asmType||whAssemblyType||'courier';
@@ -1524,8 +1591,10 @@ async function startAssembly(code,asmType){
     return;
   }
   // 2) заказы из интеграции KET (Заказы → Заказы КЕТ) — состав уже привязан к товарам там
-  if(!S.inbound_full_loaded){try{await loadInbound({full:true});}catch(e){}}
-  const inb=(S.inbound_orders||[]).find(o=>String(o.external_id||'')===code||String(o.id).slice(0,8)===code);
+  // Заказ KET и его состав берём ОДНИМ запросом по номеру. До 24.11.2026 первая же сборка за
+  // сеанс грузила ради этого всю историю: 91 тысячу заказов и 212 тысяч позиций.
+  const found=await asmFetchInbound(code);
+  const inb=found&&found.order;
   if(inb){
     const inbType=inboundDeliveryType(inb);
     if(inbType!==asmType){$('asmBody').innerHTML=asmWrongTabHtml(code,inbType);return;}
@@ -1533,12 +1602,18 @@ async function startAssembly(code,asmType){
       $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Заказ уже собран</div>Склад по заказу КЕТ «${esc(code)}» уже был списан ранее (в разделе «Заказы КЕТ»).</div></div>`;
       return;
     }
-    const inbItems=inboundItemsFor(inb.id);
-    if(!inbItems.length||inbItems.some(it=>!it.matched||!it.product_id)){
+    const inbItems=found.items;
+    // НЕПРИВЯЗАННОЕ НАЗВАНИЕ БОЛЬШЕ НЕ ТУПИК (24.11.2026): сборщик берёт товар с полки и пикает
+    // его штрих-код — так название от KET привязывается к товару прямо здесь (см. asmBindApply).
+    // Тупик остался только для пустого состава и для того, кому нельзя править товары.
+    const asmCanBind=isAdmin()||can('cash','edit');
+    if(!inbItems.length||(inbItems.some(it=>!it.matched||!it.product_id)&&!asmCanBind)){
       $('asmBody').innerHTML=`<div class="panel"><div class="empty"><div class="big">Товары ещё не привязаны</div>Это заказ из KET, но не все позиции привязаны к товарам склада. Откройте «Заказы → Заказы КЕТ», найдите заказ «${esc(code)}» и нажмите «Привязать».</div></div>`;
       return;
     }
-    _asmOrder={kind:'ket',assemblyType:asmType,code,inboundId:inb.id,items:inbItems.map(it=>({product_id:it.product_id,qty:it.qty||1,scanned:0}))};
+    _asmBind=null;
+    _asmOrder={kind:'ket',assemblyType:asmType,code,inboundId:inb.id,items:inbItems.map(it=>({itemId:it.id,ket_sku:it.ket_sku,
+      product_id:(it.matched&&it.product_id)?it.product_id:null,qty:it.qty||1,scanned:0}))};
     drawAssembly();
     return;
   }
@@ -1565,8 +1640,12 @@ function drawAssembly(){
         <span class="asm-progress">${_asmOrder.items.reduce((s,it)=>s+it.scanned,0)} / ${_asmOrder.items.reduce((s,it)=>s+it.qty,0)}</span>
       </div>
       <div id="asmFeedback"></div>
+      ${asmBindPanelHtml()}
       <div class="asm-items">
         ${_asmOrder.items.map(it=>{
+          if(!it.product_id)return `<div class="asm-item asm-unbound"><div class="asm-item-ico">❓</div>
+            <div class="asm-item-body"><div class="asm-item-name">${esc(it.ket_sku||'?')}</div><div class="asm-item-bc">название от KET не привязано — возьмите товар и пикните его штрих-код</div></div>
+            <div class="asm-item-qty">0 / ${it.qty}</div></div>`;
           const done=it.scanned>=it.qty;
           const p=(S.products||[]).find(x=>x.id===it.product_id);
           const stockNow=p?productStock(p):0;
@@ -1584,7 +1663,8 @@ function drawAssembly(){
     </div>`;
   const inp=$('asmItemInput');
   if(inp){inp.focus();inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();scanItem(inp.value.trim());inp.value='';}};}
-  if($('asmCancel'))$('asmCancel').onclick=()=>{_asmOrder=null;renderWhAssembly();};
+  $('asmBody').querySelectorAll('[data-asmbind]').forEach(b=>b.onclick=()=>asmBindApply(b.dataset.asmbind,b));
+  if($('asmCancel'))$('asmCancel').onclick=()=>{_asmOrder=null;_asmBind=null;renderWhAssembly();};
   if($('asmFinish'))$('asmFinish').onclick=()=>finishAssembly();
 }
 
@@ -1593,7 +1673,13 @@ function scanItem(code){
   const p=(S.products||[]).find(x=>String(x.barcode||'')===code);
   const fb=$('asmFeedback');
   if(!p){flashFeedback(fb,'❌ Товар не найден','err');return;}
-  const it=_asmOrder.items.find(i=>i.product_id===p.id);
+  const it=_asmOrder.items.find(i=>i.product_id===p.id&&i.scanned<i.qty)||_asmOrder.items.find(i=>i.product_id===p.id);
+  // В заказе есть непривязанные названия от KET, а пикнули товар, которого в нём нет (или он уже
+  // собран) — спрашиваем, не он ли это. Спрашиваем кнопкой на экране, см. asmBindApply.
+  if((!it||it.scanned>=it.qty)&&_asmOrder.items.some(i=>!i.product_id)){
+    _asmBind={product:p};flashFeedback(fb,`❓ «${p.name}» — укажите, какое это название от KET`,'warn');drawAssembly();return;
+  }
+  _asmBind=null;
   if(!it){flashFeedback(fb,`❌ «${p.name}» не в этом заказе`,'err');return;}
   if(it.scanned>=it.qty){flashFeedback(fb,`⚠️ «${p.name}» уже собран полностью`,'warn');return;}
   // остатка на складе не должно хватать меньше, чем уже отсканировано в этой сборке — иначе уйдём в минус
