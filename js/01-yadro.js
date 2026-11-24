@@ -559,6 +559,12 @@ function stampCreatedBy(row){
    `createdByReady` выше и у `salesFixedReady` в Калькуляции: поле уходит в запрос,
    только когда колонка в базе есть. Иначе PostgREST отклонит ВЕСЬ запрос, и карточка
    партнёра (или заявки) перестанет сохраняться целиком, вместе со всеми полями. */
+// Курьер в карточке партнёра (db/71). Поле шлём в запрос, только когда колонка есть:
+// иначе PostgREST отклонил бы ВЕСЬ update, и карточка партнёра перестала бы сохраняться.
+function partnerCourierReady(){
+  const p=(S.partners||[])[0];
+  return !!p&&Object.prototype.hasOwnProperty.call(p,'courier_id');
+}
 function dailyPickupReady(){
   const p=(S.partners||[])[0];
   return !!p&&Object.prototype.hasOwnProperty.call(p,'daily_pickup');

@@ -725,11 +725,12 @@ async function refreshForTab(tab){
       // Realtime, поэтому в фоне обновляем только счётчики: это три лёгких запроса.
       if(typeof loadInboundCounts==='function'){try{await loadInboundCounts();}catch(e){}}
     }else if(tab==='partners'){
-      const [partners,cities,districts,sales,processors,whp]=await Promise.all([
+      const [partners,cities,districts,sales,processors,whp,couriers]=await Promise.all([
         dbList('partners',{order:'name'}),dbList('cities',{order:'name'}),dbList('districts',{order:'name'}),
         dbList('sales_managers',{order:'fio'}),dbList('processors',{order:'fio'}),dbList('warehouse_partners',{order:'name'}).catch(()=>[]),
+        dbList('couriers',{order:'fio'}),   // колонка «Курьер» в гриде партнёров
       ]);
-      Object.assign(S,{partners,cities,districts,sales,processors});S.warehouse_partners=whp||[];
+      Object.assign(S,{partners,cities,districts,sales,processors,couriers});S.warehouse_partners=whp||[];
     }else if(tab==='settings'){
       // справочники: тянем всё, что показывается
       const [cities,districts,couriers,order_couriers,sales,processors,partners,statuses,orderStatuses,delivery,courier_cities,post_ips]=await Promise.all([

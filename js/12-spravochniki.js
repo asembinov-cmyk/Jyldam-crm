@@ -367,6 +367,9 @@ function dirPartners(onlyBar){
       {key:'address',label:'Адрес',filter:'text',text:p=>p.address||''},
       {key:'sales',label:'Менеджер продаж',filter:'select',text:p=>p.sales_id?salesName(p.sales_id):''},
       {key:'proc',label:'Обработчик',filter:'select',text:p=>p.processor_id?processorName(p.processor_id):''},
+      // Курьер, который обычно ездит к партнёру (db/71). Его же назначает ИИ-ассистент WhatsApp.
+      ...(partnerCourierReady()?[{key:'courier',label:'Курьер',filter:'select',
+        text:p=>p.courier_id?courierName(p.courier_id):''}]:[]),
       {key:'tpost',label:'Тариф почта',filter:'select',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
       {key:'tcour',label:'Тариф курьер',filter:'select',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
       // видно сразу, у кого доля менеджера зафиксирована, а у кого считается разницей
@@ -458,6 +461,14 @@ function partnerModal(id){
   // А карточка не сохранялась без адреса и района, и из-за этого у этих двух партнёров
   // нельзя было задать даже обработчика: форма упиралась в поля, которых у них не бывает.
   const fizCard=isFizlicoName(p.name);
+  /* Курьеры — того же города, что партнёр, как в карточке заявки (cOpts в js/10). Уже
+     выбранный остаётся в списке, даже если он из другого города: молча выбросить его
+     значило бы стереть поле при первом же сохранении. У «Физ лицо» поля нет вовсе:
+     это общая карточка разовых отправителей, адреса каждый раз разные. */
+  const pCourierOpts=(cid,cur)=>{
+    const list=(S.couriers||[]).filter(c=>!cid||!c.city_id||c.city_id===cid||c.id===cur);
+    return '<option value="">— не назначен —</option>'+list.map(c=>`<option value="${c.id}" ${cur===c.id?'selected':''}>${esc(c.fio||'')}${cid&&c.city_id&&c.city_id!==cid?' (другой город)':''}</option>`).join('');
+  };
   const star=need=>need?' <span style="color:var(--rust)">*</span>':'';
   const fizHint='<span class="hint">У физ. лица адрес свой в каждом заказе — здесь можно оставить пустым</span>';
   showModal(id?'Партнёр':'Новый партнёр',`
@@ -468,6 +479,8 @@ function partnerModal(id){
     <div class="field"><label>Телефон${star(!fizCard)}</label><input id="p_phone" inputmode="numeric">${fizCard?fizHint:''}</div>
     <div class="field"><label>Менеджер по продажам <span style="color:var(--rust)">*</span></label><select id="p_sales"><option value="">—</option>${S.sales.map(s=>`<option value="${s.id}" ${p.sales_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
     <div class="field"><label>Обработчик <span style="color:var(--rust)">*</span></label><select id="p_proc"><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${p.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
+    ${partnerCourierReady()&&!fizCard?`<div class="field"><label>Курьер</label><select id="p_courier">${pCourierOpts(p.city_id,p.courier_id)}</select>
+      <small style="color:var(--muted);font-size:12px">Кто обычно ездит к партнёру на забор. Сначала заполнено по заявкам за 90 дней — курьер, назначавшийся чаще всех. Его же ставит ИИ-ассистент WhatsApp, когда сам заводит заявку.</small></div>`:''}
     <div class="grid2">
       <div class="field"><label>Тариф · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
       <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
@@ -533,6 +546,7 @@ function partnerModal(id){
         is_protected:!!($('p_protected')&&$('p_protected').checked),
         ...($('p_bar')?{is_baraholka:!!$('p_bar').checked}:{}),
         ...($('p_daily')?{daily_pickup:!!$('p_daily').checked}:{}),
+        ...($('p_courier')?{courier_id:val('p_courier')||null}:{}),
         // поля шлём, только когда колонки в базе есть: иначе PostgREST отклонит ВЕСЬ
         // запрос, и карточка перестанет сохраняться вместе со всеми остальными полями
         ...($('p_smargin')?{sales_margin_fixed:val('p_smargin')!==''?parseFloat(val('p_smargin')):null}:{}),
@@ -577,7 +591,8 @@ function partnerModal(id){
       else{const u=await dbInsert('partners',row);if(!u)return false;S.partners.push(u);}
       toast('Сохранено'+syncMsg);renderPartnersPage();return true;});
   attachPhone('p_phone',p.phone);
-  const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
+  const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+    const pc=$('p_courier');if(pc)pc.innerHTML=pCourierOpts(cs.value,pc.value);};
   // ---- доступ в кабинет партнёра ----
   const qrInp=$('p_qr');
   // новому партнёру код выдаём сразу, чтобы менеджер не забыл этот шаг
