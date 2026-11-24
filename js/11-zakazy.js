@@ -317,8 +317,8 @@ async function pickupOrdersModal(pickupId){
       const paid=chk?chk.checked:!!o.paid_by_sender;
       if(!paid)return false;
       const choice=ov&&ov.querySelector(`input[name="stpay-${o.id}"]:checked`);
-      if(choice){o._payChoice=choice.value;return false;}
-      return !o._payChoice;
+      if(choice){o._payChoice=choice.value;o.sender_pay_via=choice.value;return false;}
+      return !(o.sender_pay_via||o._payChoice);
     });
     if(missingPay.length){
       const first=missingPay[0];
@@ -429,7 +429,8 @@ async function pickupOrdersModal(pickupId){
             }else{
               // возвращаем исходную сумму
               const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
-              patch={paid_by_sender:false,order_sum:back,cost:back,order_sum_orig:null};
+              patch={paid_by_sender:false,order_sum:back,cost:back,order_sum_orig:null,sender_pay_via:null};
+              o._payChoice='';
             }
             const saved=await dbUpdate('orders',o.id,patch);
             if(!saved){chk.checked=!v;toast('Не удалось сохранить — попробуйте ещё раз');return;}
@@ -442,6 +443,7 @@ async function pickupOrdersModal(pickupId){
             // обновляем поле суммы и его доступность
             const sumInp=wrap.querySelector(`[data-pomsum="${o.id}"]`);
             if(sumInp){sumInp.value=o.order_sum!=null?o.order_sum:'';sumInp.disabled=!!o.paid_by_sender;}
+            if(!v)wrap.querySelectorAll(`input[name="stpay-${o.id}"]`).forEach(r=>{r.checked=false;});
             renderDashboardIfActive();
           }catch(e){chk.checked=!v;toast('Не удалось сохранить');}
         };
@@ -2233,6 +2235,13 @@ function bindOrdersDupOff(){
   const b=$('ordersDupOff');
   if(b)b.onclick=()=>{ordersDupIds=null;ordersDupGroups=0;renderOrders();};
 }
+function senderPayCell(o){
+  if(!o||!o.paid_by_sender)return '—';
+  const v=o.sender_pay_via||o._payChoice||'';
+  if(v==='partner_self')return 'Партнёр, свои условия';
+  if(v==='pickup_gold')return 'Kaspi Gold курьера';
+  return '<span style="color:var(--rust)">не выбрано</span>';
+}
 function drawOrders(){
   const el=$('orderTable');const allRows=filteredOrders();
   // счётчик у «Список заказов» = число с учётом ВСЕХ фильтров (вкл. тип доставки, поиск)
@@ -2270,7 +2279,7 @@ function drawOrders(){
   const barGrid=ordersMode==='baraholka';
   el.innerHTML=ordersDupBarHtml(allRows.length)+`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
     ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th>${barGrid?'':'<th>Дата доставки</th>'}<th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
-    <th>Тип доставки</th>${(ordersMode!=='mail'&&!barGrid)?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th>':''}<th>Трек-код</th>
+    <th>Тип доставки</th>${(ordersMode!=='mail'&&!barGrid)?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th><th>Кто платит</th>':''}<th>Трек-код</th>
     <th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(o=>{
       const ph=pickupPhotos(o);
@@ -2297,7 +2306,7 @@ function drawOrders(){
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       ${(ordersMode!=='mail'&&!barGrid)?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
-      ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td>`:''}
+      ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Кто платит">${senderPayCell(o)}</td>`:''}
       <td data-label="Трек-код">${o.track?esc(o.track)+copyBtn(o.track):'—'}${
         (o.ket_last_error&&!(o.ket_id&&String(o.ket_id)!=='0'))
           ? `<small class="cell-time" style="color:var(--rust)" title="${esc(o.ket_last_error)}">KET: ${esc(String(o.ket_last_error).slice(0,60))}</small>`
@@ -2539,6 +2548,7 @@ function drawCourierOrderCards(el,rows){
       <div class="cc-body">
         <div class="cc-row"><span class="lbl">Дата забора</span><span class="vl">${esc(fmtDate(o.pickup_date))}</span></div>
         <div class="cc-row"><span class="lbl">Отправитель</span><span class="vl">${esc(o.sender)||'—'}</span></div>
+        ${o.paid_by_sender?`<div class="cc-row"><span class="lbl">Кто платит</span><span class="vl">${senderPayCell(o)}</span></div>`:''}
         <div class="cc-row"><span class="lbl">Тип доставки</span><span class="vl">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</span></div>
         <div class="cc-row"><span class="lbl">Вес</span><span class="vl">${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</span></div>
         <div class="cc-row"><span class="lbl">Кол-во товаров</span><span class="vl">${esc(o.qty||0)}</span></div>
@@ -2948,7 +2958,11 @@ function orderModal(id,readonly){
       <div class="field"><label>ФИО клиента${cardBar?' *':''}</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс${cardBar?' *':''}</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span><div id="o_index_info" class="idx-info"></div></div>
-      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>`:''}</div>
+      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>
+        <div id="o_payvia" style="margin-top:8px;${d.paid_by_sender?'':'display:none'}">
+          <label class="o-paidorder"><input type="radio" name="o_payvia" value="partner_self" ${d.sender_pay_via==='partner_self'?'checked':''} ${dis}> Платит партнёр по своим условиям</label>
+          <label class="o-paidorder"><input type="radio" name="o_payvia" value="pickup_gold" ${d.sender_pay_via==='pickup_gold'?'checked':''} ${dis}> Курьер получил на свой Kaspi Gold</label>
+        </div>`:''}</div>
       <div class="field"${barHide}><label>Размер пакета</label><select id="o_size" style="width:100%" ${dis}>${Object.entries(_initSizes).map(([k,v])=>`<option value="${k}" ${d.size===k?'selected':''}>${esc(v.label)}</option>`).join('')}</select><span class="hint" id="o_size_hint">Почта ${_initSizes.S.mail}/${_initSizes.M.mail}/${_initSizes.L.mail} · Курьер ${_initSizes.S.courier}/${_initSizes.M.courier}/${_initSizes.L.courier} ₸ (S/M/L)${_initPartner?(_initPartner.is_protected?' — 🔒 неприкосновенный, фиксированная цена по тарифу '+esc(_initPartner.name):' — по тарифу '+esc(_initPartner.name)):' — базовые значения (партнёр ещё не определён)'}. Сумма подставится автоматически по типу доставки.</span></div>
       <!-- ТИП ДОСТАВКИ. Пустой пункт «—» показывается ТОЛЬКО пока тип не выбран (просьба
            владельца 10.10.2026: «пусть будет только курьерская и почтовая»). У заказа с
@@ -3123,11 +3137,18 @@ function orderModal(id,readonly){
           }
           else{row.order_sum_orig=(o.order_sum_orig!=null?o.order_sum_orig:0);}
           row.paid_by_sender=true;row.order_sum=0;row.cost=0;
+          const viaEl=document.querySelector('input[name="o_payvia"]:checked');
+          if(!viaEl){
+            const box=$('o_payvia');if(box)box.style.display='';
+            toast('Выберите, кто платит: партнёр по своим условиям или курьер получил на Kaspi Gold');
+            return false;
+          }
+          row.sender_pay_via=viaEl.value;
         }else{
           // если сняли галочку, а сумму вручную не меняли — вернём исходную
           if(o&&o.paid_by_sender){const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
             if(val('o_sum')===''||parseFloat(val('o_sum'))===0){row.order_sum=back;row.cost=back;}}
-          row.paid_by_sender=false;row.order_sum_orig=null;
+          row.paid_by_sender=false;row.order_sum_orig=null;row.sender_pay_via=null;
         }
       }
       // Отметка «кто заполнил» для раздела «Забивка». Ставится один раз — в момент,
@@ -3573,8 +3594,10 @@ function orderModal(id,readonly){
             if(pt&&pt.direct_pay_amount!=null)se.value=pt.direct_pay_amount;
           }
           paidChk.dataset.prevsum=se.value;se.value='0';se.disabled=true;sumTouched=true;
+          const box=$('o_payvia');if(box)box.style.display='';
         }
-        else{se.disabled=false;se.value=paidChk.dataset.prevsum||'';sumTouched=(se.value!=='');}
+        else{se.disabled=false;se.value=paidChk.dataset.prevsum||'';sumTouched=(se.value!=='');
+          const box=$('o_payvia');if(box)box.style.display='none';}
       };
     }
     // показать/скрыть поля, относящиеся только к почтовой/только к курьерской доставке

@@ -279,8 +279,8 @@ function settlementsPickupExtra(o) {
       <input type="number" min="0" class="pom-sum" data-st-fee="${stEsc(o.id)}" value="${fee === "" ? "" : stEsc(fee)}" placeholder="ещё не определена"></div>
     <small style="color:var(--muted)">Галочка «Оплачено отправителем» больше не прячет эту сумму. Пока цена пустая, заказ в реестре «Ожидает определения стоимости» и в счёт не входит.</small>
     <div data-st-payer="${stEsc(o.id)}" style="margin-top:8px">
-      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="partner_self" ${o._payChoice === "partner_self" ? "checked" : ""}> Платит партнёр по своим условиям</label>
-      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="pickup_gold" ${o._payChoice === "pickup_gold" ? "checked" : ""}> Курьер получил на свой Kaspi Gold</label>
+      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="partner_self" ${(o.sender_pay_via || o._payChoice) === "partner_self" ? "checked" : ""}> Платит партнёр по своим условиям</label>
+      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="pickup_gold" ${(o.sender_pay_via || o._payChoice) === "pickup_gold" ? "checked" : ""}> Курьер получил на свой Kaspi Gold</label>
     </div></div>`;
 }
 
@@ -291,11 +291,23 @@ function settlementsBindPickup(wrap) {
     const sync = () => { if (payer) payer.style.display = box && box.checked ? "" : "none"; };
     if (box) { box.addEventListener("change", sync); sync(); }
     wrap.querySelectorAll(`input[name="stpay-${inp.dataset.stFee}"]`).forEach((radio) => {
-      radio.addEventListener("change", () => {
+      radio.addEventListener("change", async () => {
         const order = (typeof S !== "undefined" && S.orders || []).find((x) => x.id === inp.dataset.stFee);
-        if (order) order._payChoice = radio.value;
+        if (!order) return;
+        order._payChoice = radio.value;
         const card = radio.closest(".pom-order");
         if (card) card.classList.remove("pom-needpay");
+        const saved = await dbUpdate("orders", order.id, { sender_pay_via: radio.value });
+        if (!saved) { if (typeof toast === "function") toast("Не удалось сохранить, кто платит"); return; }
+        Object.assign(order, saved);
+        const fee = inp.value === "" ? null : Number(inp.value);
+        if (fee != null && Number.isFinite(fee)) {
+          const mine = typeof myPickupCourierIds === "function" ? myPickupCourierIds()[0] : "";
+          const res = await callEdge("settlements", {
+            action: "choose", order_id: order.id, fee, choice: radio.value, subject_id: mine || order.courier_id || "",
+          });
+          if (res && res.error && typeof toast === "function" && !/стар|effective|нет права/i.test(res.error)) toast(res.error);
+        }
       });
     });
     inp.onchange = async () => {

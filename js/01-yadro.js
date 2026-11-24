@@ -689,6 +689,7 @@ const FIELD_LABEL={
   processor_id:'Обработчик',district_id:'Район',name:'Наименование',fio:'ФИО',orders:'Кол-во заказов',
   full_name:'ФИО',position:'Должность',role_id:'Роль',color:'Цвет',tariff_post:'Тариф почта',
   tariff_courier:'Тариф курьер',qr_code:'QR-код',id_doc:'Уд. личности',paid_by_sender:'Оплачено отправителем',
+  sender_pay_via:'Кто платит',
   give_packets:'Пакеты для партнёра',give_invoices:'Накладные для партнёра',
   pack_size:'Размер пакета для партнёра',daily_pickup:'Ежедневный забор',
   auto_created:'Создана автоматически',
@@ -716,6 +717,7 @@ function logFieldValue(field,v){
     if(field==='role_id')return roleName(v);
     if(field==='phone')return phoneDisplay(v)||String(v);
     if(field==='paid_by_sender')return v?'да':'нет';
+    if(field==='sender_pay_via')return v==='partner_self'?'Партнёр, свои условия':v==='pickup_gold'?'Kaspi Gold курьера':'—';
     if(field==='order_paid')return v?'да':'нет';
   }catch(e){}
   return String(v);
