@@ -359,8 +359,19 @@ async function delStaff(id){
   }
   if(await dbDelete('profiles',id)){S.profiles=S.profiles.filter(x=>x.id!==id);toast('Сотрудник удалён полностью');renderUsers();}
 }
-function staffModal(id){
+function staffKaspiHolder(profileId,courierKind){
+  const linkedPickup=(S.couriers||[]).find(c=>c.account_id===profileId);
+  const linkedOrder=(S.order_couriers||[]).find(c=>c.account_id===profileId);
+  if(courierKind==='order'&&linkedOrder)return ['delivery_courier',linkedOrder.id];
+  if(linkedPickup)return ['pickup_courier',linkedPickup.id];
+  if(linkedOrder)return ['delivery_courier',linkedOrder.id];
+  return null;
+}
+async function staffModal(id){
   const u=S.profiles.find(x=>x.id===id);if(!u)return;
+  const kindNow=u.courier_kind||courierKindByRole(S.roles.find(r=>r.id===u.role_id));
+  const holderNow=staffKaspiHolder(id,kindNow);
+  const kaspi=holderNow&&typeof settlementsKaspiPhone==='function'?await settlementsKaspiPhone(holderNow[0],holderNow[1]):'';
   showModal('Карточка сотрудника',`
     <div class="grid2">
       <div class="field full"><label>Email (логин)</label><input id="u_email" value="${esc(u.email||'')}"><span class="hint">Для входа по email. Если задан телефон — вход также по телефону.</span></div>
@@ -412,20 +423,18 @@ function staffModal(id){
       const row={full_name:val('u_name').trim(),phone:newPhone,city_id:val('u_city')||null,
         position:val('u_pos').trim(),role_id:roleId||null,role:legacy,courier_kind};
       const u2=await dbUpdate('profiles',id,row);if(!u2)return false;Object.assign(u,u2);
-      const kaspi=phoneVal('u_kaspi');
-      if(kaspi&&typeof settlementsSaveKaspi==='function'){
-        const linkedPickup=(S.couriers||[]).find(c=>c.account_id===id);
-        const linkedOrder=(S.order_couriers||[]).find(c=>c.account_id===id);
-        const holder=courier_kind==='order'&&linkedOrder?['delivery_courier',linkedOrder.id]
-          :linkedPickup?['pickup_courier',linkedPickup.id]
-          :linkedOrder?['delivery_courier',linkedOrder.id]:null;
-        if(!holder&&baseType==='admin'){toast('Номер Kaspi администратора сохраните в разделе «Взаиморасчёты»');}
-        else if(!holder){toast('Сначала привяжите аккаунт в справочнике курьеров, затем укажите номер Kaspi');}
-        else{const ph=await settlementsSaveKaspi(holder[0],holder[1],kaspi);if(ph&&ph.error){toast(ph.error);return false;}}
+      const kaspiPhone=phoneVal('u_kaspi');
+      if(kaspiPhone&&typeof settlementsSaveKaspi==='function'){
+        const holder=staffKaspiHolder(id,courier_kind);
+        if(!holder&&baseType==='admin'){toast('Номер Kaspi администратора сохраните в разделе «Взаиморасчёты»');return false;}
+        if(!holder){toast('Сначала привяжите аккаунт в справочнике курьеров, затем укажите номер Kaspi');return false;}
+        const ph=await settlementsSaveKaspi(holder[0],holder[1],kaspiPhone);
+        if(ph&&ph.error){toast(ph.error);return false;}
       }
       if(id===S.me.id){await loadMe({user:{id:S.me.id,email:S.me.email}});buildNav();}
-      toast('Сохранено');renderUsers();return true;});
+      toast(kaspiPhone?'Сохранено, номер Kaspi записан':'Сохранено');renderUsers();return true;});
   attachPhone('u_phone',u.phone);
+  attachPhone('u_kaspi',kaspi);
   const ur=$('u_role');const toggleUKind=()=>{const bt=(S.roles.find(r=>r.id===ur.value)||{}).base_type;
     $('u_kind_field').style.display=bt==='courier'?'':'none';};
   ur.onchange=toggleUKind;toggleUKind();

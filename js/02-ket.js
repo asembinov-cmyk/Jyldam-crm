@@ -1484,7 +1484,13 @@ function attachPhone(id,initial){
     requestAnimationFrame(()=>{try{el.setSelectionRange(pos,pos);}catch(e){}});
   });
 }
-function phoneVal(id){const el=$(id);return el?(el.dataset.phone||''):'';}
+function phoneVal(id){
+  const el=$(id);if(!el)return '';
+  // Служебную пометку ставит только attachPhone. Поле Kaspi в карточке сотрудника
+  // её не получало, и набранный номер при сохранении читался как пустой.
+  if(el.dataset.phone)return el.dataset.phone;
+  return phoneStored(el.value);
+}
 function val(id){const el=$(id);return el?el.value:'';}
 
 /* ---------- NAV по правам ---------- */
