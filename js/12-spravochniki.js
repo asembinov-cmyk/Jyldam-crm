@@ -710,12 +710,18 @@ function courierModal(id){
     <div class="field"><label>Город</label><select id="k_city"><option value="">—</option>${S.cities.map(ct=>`<option value="${ct.id}" ${c.city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Район</label><select id="k_district"><option value="">—</option>${dOpts(c.city_id).map(d=>`<option value="${d.id}" ${c.district_id===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Номер телефона</label><input id="k_phone" inputmode="numeric"></div>
+    <div class="field"><label>Номер для удалённых счетов Kaspi</label><input id="k_kaspi" inputmode="numeric"><span class="hint">Не номер входа и не WhatsApp. Пустое поле не стирает уже сохранённый номер. Меняют сотрудники с правом взаиморасчётов.</span></div>
     <div class="field"><label>Данные уд. личности</label><textarea id="k_id" rows="2">${esc(c.id_doc)}</textarea></div>
     ${courierAccountField('k_account',c.account_id,'pickup')}`,
     async()=>{const fio=val('k_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('k_city')){toast('Выберите город');return false;}
       const row={fio,city_id:val('k_city'),district_id:val('k_district')||null,phone:phoneVal('k_phone'),id_doc:val('k_id').trim(),account_id:val('k_account')||null};
+      let savedId=id;
       if(id){const u=await dbUpdate('couriers',id,row);if(!u)return false;Object.assign(S.couriers.find(x=>x.id===id),u);}
-      else{const u=await dbInsert('couriers',row);if(!u)return false;S.couriers.push(u);}
+      else{const u=await dbInsert('couriers',row);if(!u)return false;S.couriers.push(u);savedId=u.id;}
+      if(typeof settlementsSaveKaspi==='function'&&phoneVal('k_kaspi')){
+        const ph=await settlementsSaveKaspi('pickup_courier',savedId,phoneVal('k_kaspi'));
+        if(ph&&ph.error){toast(ph.error);return false;}
+      }
       toast('Сохранено');renderSettings();return true;});
   attachPhone('k_phone',c.phone);
   const cs=$('k_city');cs.onchange=()=>{$('k_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
@@ -739,12 +745,18 @@ function orderCourierModal(id){
     <div class="field"><label>ФИО</label><input id="oc_fio" value="${esc(c.fio)}"></div>
     <div class="field"><label>Курьерский город</label><select id="oc_city"><option value="">—</option>${S.courier_cities.map(ct=>`<option value="${ct.id}" ${c.courier_city_id===ct.id?'selected':''}>${esc(ct.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Номер телефона</label><input id="oc_phone" inputmode="numeric"></div>
+    <div class="field"><label>Номер для удалённых счетов Kaspi</label><input id="oc_kaspi" inputmode="numeric"><span class="hint">Не номер входа и не WhatsApp. Пустое поле не стирает уже сохранённый номер.</span></div>
     <div class="field"><label>Данные уд. личности</label><textarea id="oc_id" rows="2">${esc(c.id_doc)}</textarea></div>
     ${courierAccountField('oc_account',c.account_id,'order')}`,
     async()=>{const fio=val('oc_fio').trim();if(!fio){toast('Укажите ФИО');return false;}if(!val('oc_city')){toast('Выберите курьерский город');return false;}
       const row={fio,courier_city_id:val('oc_city'),phone:phoneVal('oc_phone'),id_doc:val('oc_id').trim(),account_id:val('oc_account')||null};
+      let savedId=id;
       if(id){const u=await dbUpdate('order_couriers',id,row);if(!u)return false;Object.assign(S.order_couriers.find(x=>x.id===id),u);}
-      else{const u=await dbInsert('order_couriers',row);if(!u)return false;S.order_couriers.push(u);}
+      else{const u=await dbInsert('order_couriers',row);if(!u)return false;S.order_couriers.push(u);savedId=u.id;}
+      if(typeof settlementsSaveKaspi==='function'&&phoneVal('oc_kaspi')){
+        const ph=await settlementsSaveKaspi('delivery_courier',savedId,phoneVal('oc_kaspi'));
+        if(ph&&ph.error){toast(ph.error);return false;}
+      }
       toast('Сохранено');renderSettings();return true;});
   attachPhone('oc_phone',c.phone);
 }

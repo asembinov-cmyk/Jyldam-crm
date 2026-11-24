@@ -365,7 +365,8 @@ function staffModal(id){
     <div class="grid2">
       <div class="field full"><label>Email (логин)</label><input id="u_email" value="${esc(u.email||'')}"><span class="hint">Для входа по email. Если задан телефон — вход также по телефону.</span></div>
       <div class="field"><label>ФИО</label><input id="u_name" value="${esc(u.full_name||'')}"></div>
-      <div class="field"><label>Телефон</label><input id="u_phone" inputmode="numeric"></div>
+      <div class="field"><label>Телефон для входа</label><input id="u_phone" inputmode="numeric"></div>
+      <div class="field full" id="u_kaspi_field"><label>Номер для удалённых счетов Kaspi</label><input id="u_kaspi" inputmode="numeric"><span class="hint">Только для заборщика, доставщика и администратора. Это не телефон входа и не WhatsApp. Номер пишется в карточку курьера или администратора, история хранится на сервере.</span></div>
       <div class="field"><label>Город</label><select id="u_city"><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${u.city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Должность</label><input id="u_pos" value="${esc(u.position||'')}"></div>
       <div class="field full"><label>Роль</label><select id="u_role">
@@ -411,6 +412,17 @@ function staffModal(id){
       const row={full_name:val('u_name').trim(),phone:newPhone,city_id:val('u_city')||null,
         position:val('u_pos').trim(),role_id:roleId||null,role:legacy,courier_kind};
       const u2=await dbUpdate('profiles',id,row);if(!u2)return false;Object.assign(u,u2);
+      const kaspi=phoneVal('u_kaspi');
+      if(kaspi&&typeof settlementsSaveKaspi==='function'){
+        const linkedPickup=(S.couriers||[]).find(c=>c.account_id===id);
+        const linkedOrder=(S.order_couriers||[]).find(c=>c.account_id===id);
+        const holder=courier_kind==='order'&&linkedOrder?['delivery_courier',linkedOrder.id]
+          :linkedPickup?['pickup_courier',linkedPickup.id]
+          :linkedOrder?['delivery_courier',linkedOrder.id]:null;
+        if(!holder&&baseType==='admin'){toast('Номер Kaspi администратора сохраните в разделе «Взаиморасчёты»');}
+        else if(!holder){toast('Сначала привяжите аккаунт в справочнике курьеров, затем укажите номер Kaspi');}
+        else{const ph=await settlementsSaveKaspi(holder[0],holder[1],kaspi);if(ph&&ph.error){toast(ph.error);return false;}}
+      }
       if(id===S.me.id){await loadMe({user:{id:S.me.id,email:S.me.email}});buildNav();}
       toast('Сохранено');renderUsers();return true;});
   attachPhone('u_phone',u.phone);

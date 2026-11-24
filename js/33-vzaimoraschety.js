@@ -22,6 +22,7 @@ const ST_TABS = [
   ["invoices", "Счета"],
   ["paid", "Оплачено"],
   ["overdue", "Прошлые периоды"],
+  ["stale", "Старше 31 дня"],
   ["errors", "Ошибки"],
 ];
 
@@ -69,6 +70,7 @@ function settlementsMarkup(m) {
     : tab === "delivery" ? (m.obligations || []).filter((o) => o.holder_type === "delivery_courier")
     : tab === "admins" ? (m.obligations || []).filter((o) => o.holder_type === "admin")
     : tab === "paid" ? (m.invoices || []).filter((i) => i.status === "paid")
+    : tab === "stale" ? (m.obligations || []).filter((o) => m.stale_before && o.period_date < m.stale_before && o.state !== "paid")
     : tab === "overdue" ? older
     : tab === "errors" ? errors
     : tab === "invoices" ? (m.invoices || [])
@@ -100,7 +102,8 @@ function settlementsMarkup(m) {
     </div>
     <div class="seg" style="margin-bottom:14px;flex-wrap:wrap">${ST_TABS.map(([k, lbl]) =>
       `<button type="button" data-sttab="${k}" class="${tab === k ? "active" : ""}">${lbl}</button>`).join("")}</div>
-    ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Отмена неоплаченного счёта возвращает долг, а не списывает его.</p>` : ""}
+    ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Старше 31 дня: ${m.stale_total || 0} на ${stMoney(m.stale_amount || 0)}. Эти суммы остаются в учёте и не выставляются автоматом. ${(m.missing_kaspi || []).length ? "Без номера Kaspi: " + (m.missing_kaspi || []).length + "." : ""}</p>` : ""}
+    ${tab === "stale" ? `<p style="color:var(--muted);font-size:13px">Задолженность старше автоматического восстановления. Она не исчезает. Счёт по ней выставляет менеджер вручную.</p>` : ""}
     ${table}
     ${tab === "admins" && !m.preview ? settlementsAdminForm() : ""}`;
 }
@@ -143,7 +146,7 @@ function settlementsTable(tab, rows, m) {
   }
   if (!rows.length) return `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`;
   return `<table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th><th>Кто держит долг</th><th>Период</th><th>Сумма</th><th>Состояние</th></tr></thead><tbody>${rows.map((o) =>
-    `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(o.order_id)}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(o.pickup_id || "—")}</button></td><td>${stEsc(o.holder_type)} · ${stEsc(o.holder_id)}</td><td>${stEsc(o.period_date)}</td><td>${stMoney(o.amount)}</td><td>${stEsc(o.state)}</td></tr>`).join("")}</tbody></table>`;
+    `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(o.order_id)}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(o.pickup_id || "—")}</button></td><td>${stEsc(o.holder_type)} · ${stEsc(o.holder_id)}${(m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(o.period_date)}</td><td>${stMoney(o.amount)}</td><td>${stEsc(o.state)}</td></tr>`).join("")}</tbody></table>`;
 }
 
 function settlementsAdminForm() {
@@ -151,7 +154,7 @@ function settlementsAdminForm() {
     <div class="grid2">
       <div class="field"><label>Имя</label><input id="st_adm_name"></div>
       <div class="field"><label>Город</label><select id="st_adm_city"><option value="">—</option>${(typeof S !== "undefined" ? S.cities || [] : []).map((c) => `<option value="${c.id}">${stEsc(c.name)}</option>`).join("")}</select></div>
-      <div class="field"><label>Kaspi</label><input id="st_adm_phone" inputmode="numeric" placeholder="7XXXXXXXXX"></div>
+      <div class="field"><label>Номер для удалённых счетов Kaspi</label><input id="st_adm_phone" inputmode="numeric" placeholder="7XXXXXXXXX"><span class="hint">Не номер входа и не WhatsApp. Изменение попадает в историю.</span></div>
     </div>
     <button class="btn sm primary" type="button" id="st_adm_save">Сохранить администратора</button>
     <p style="color:var(--muted);font-size:12px">В одном городе может быть несколько администраторов. Счёт ему выставляет менеджер вручную.</p></div>`;
@@ -233,11 +236,13 @@ function settlementsOpenPickup(id) {
   if (typeof toast === "function") toast("Заявка " + id);
 }
 
+async function settlementsSaveKaspi(holderType, holderId, phone) {
+  if (!phone) return { ok: true, skipped: true };
+  return await callEdge("settlements", { action: "phone_set", holder_type: holderType, holder_id: holderId, kaspi_phone: phone });
+}
 async function settlementsCloseShift(courierId, date, already) {
   if (!already && !confirm("Завершить смену " + date + " и выставить один счёт, если есть долг по Kaspi Gold?")) return;
-  const phone = prompt("Номер Kaspi курьера", "7");
-  if (!phone) return;
-  const res = await callEdge("settlements", { action: "shift_close", courier_id: courierId, date, phone });
+  const res = await callEdge("settlements", { action: "shift_close", courier_id: courierId, date });
   if (typeof toast === "function") toast(res && res.error ? res.error : "Смена закрыта");
   settlementsModel = null;
   renderSettlements();
