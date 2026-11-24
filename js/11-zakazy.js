@@ -3097,6 +3097,8 @@ function orderModal(id,readonly){
         try{ await afterSave(saved||o); }
         catch(e){ console.error('afterSave', e); toast('Заказ создан, но следующий шаг не выполнился: '+(e&&e.message||e),7000); }
       }
+      // Счёт Kaspi — только ПОСЛЕ успешной записи заказа (js/32): оплаченного счёта без заказа быть не должно.
+      if(typeof kaspiAfterSave==='function'){try{await kaspiAfterSave(saved||o);}catch(e){console.error('kaspi',e);}}
       // из «Забивки» карточку открывают там же — renderOrders() увёл бы менеджера
       // на другой экран после каждого сохранённого заказа
       if(S.tab==='filling'&&typeof renderFilling==='function')renderFilling();else renderOrders();
@@ -3132,6 +3134,7 @@ function orderModal(id,readonly){
   attachPhone('o_phone',d.phone);
   // Подсказка «такой клиент уже есть» (js/26, подключён ниже — зовём по имени с проверкой).
   if(typeof ocsAttach==='function')ocsAttach(o,cardBar,ro);
+  if(typeof kaspiAttach==='function')kaspiAttach(o,ro);   // счёт Kaspi Pay — js/32
   // Пока менеджер правит карточку, захват заказа в «Заполнении» продлевается: иначе
   // через десять минут работы заказ возвращается в общую очередь и достаётся соседу.
   // Слушаем сам модальный блок — он же и умрёт вместе с карточкой, снимать нечего.

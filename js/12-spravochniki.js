@@ -42,7 +42,7 @@ const SET_GROUPS=[
   ['Финансы',[['fin_kassa','Кассы','card'],['fin_categories','Категории расходов','out'],
               ['fin_income_categories','Категории приходов','out'],['fin_partners','Партнёры (финансы)','user'],
               // напоминания об оплатах в Телеграм — js/27-platezhi.js, только администратору
-              ['pay','Платежи и подписки','card']]],
+              ['pay','Платежи и подписки','card'],['kaspi','Kaspi Pay','card']]],
   ['Казпочта',[['maillabel','Бланк Казпочты','env'],['blanks','Бланки заранее','label']]],
   // РАССЫЛКА ЖИВЁТ ЗДЕСЬ, А АВТООТВЕТ — В МОДУЛЕ «WhatsApp» (решение владельца
   // 05.11.2026). Делит их не прихоть, а то, как ими пользуются: шаблоны кнопок, очередь
@@ -96,7 +96,7 @@ function renderSettings(){
     order_couriers:dirOrderCouriers,sales:dirSales,processors:dirProcessors,statuses:dirStatuses,order_statuses:dirOrderStatuses,
     delivery:dirDelivery,courier_cities:dirCourierCities,post_ips:dirPostIp,warehouses:dirWarehouses,
     fin_kassa:dirFinanceKassa,fin_categories:dirFinanceCategories,fin_income_categories:dirFinanceIncomeCategories,fin_partners:dirFinancePartners,
-    maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings,pay:renderPayReminders,robot:renderRobotSettings,
+    maillabel:dirMailLabel,blanks:renderBlanks,apidocs:renderApiDocsSettings,pay:renderPayReminders,kaspi:renderKaspiSettings,robot:renderRobotSettings,
     // ТОЛЬКО часть 'rest': автоответ рисует модуль «WhatsApp», и показывать его в двух
     // местах нельзя — два стоп-крана у одной машины это способ нажать не тот.
     wa:()=>renderWaSettings('dirContent','rest')};

@@ -2315,3 +2315,15 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
 .ga-ai-state{font-size:12px;color:var(--muted,#6b7280);padding:4px 14px;border-bottom:1px solid var(--line,#e5e7eb);background:#f6faf7}
 .ga-ai-state.paused{background:#fff7ed;color:#b45309;font-weight:600}
 .ga-ai-btn{white-space:nowrap}
+
+/* Kaspi Pay: блок счёта в карточке заказа */
+.kaspi-box{grid-column:1/-1;border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:12px 14px;background:#fffafa}
+.kaspi-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.kaspi-phone{display:flex;align-items:center;gap:6px;flex:0 1 200px}
+.kaspi-phone span{font-weight:600}
+.kaspi-phone input{width:100%}
+.btn.kaspi-btn{background:#f14635;border-color:#f14635;color:#fff;font-weight:600}
+.btn.kaspi-btn:disabled{background:#f5b5ae;border-color:#f5b5ae;color:#fff;cursor:not-allowed}
+.kaspi-ready{font-size:13px;margin-bottom:2px}
+.kaspi-wait{font-weight:600;color:#b45309}
+.kaspi-paid{font-weight:600;color:#15803d}
