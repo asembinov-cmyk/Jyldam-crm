@@ -77,7 +77,8 @@ function settlementsMarkup(m) {
     : tab === "forgotten" ? (m.forgotten || [])
     : tab === "awaiting" ? (m.awaiting || [])
     : (m.obligations || []);
-  const modeLabel = m.stored_mode === "live" && !m.armed ? "боевой в базе, шлюз не вооружён — счета тестовые"
+  const modeLabel = m.load_error ? "не удалось загрузить"
+    : m.stored_mode === "live" && !m.armed ? "боевой в базе, шлюз не вооружён — счета тестовые"
     : m.mode === "off" ? "выключено" : m.mode === "live" ? "боевой" : "тест";
   const table = settlementsTable(tab, rows, m);
   return `
@@ -87,7 +88,7 @@ function settlementsMarkup(m) {
         <button class="btn ghost sm" id="st_excel" type="button">Excel</button>
         ${m.preview ? "" : `<button class="btn sm" id="st_reload" type="button">Обновить</button>`}
       </div></div>
-    ${settlementsModeForm(m)}
+    ${m.load_error ? "" : settlementsModeForm(m)}
     <div class="stats">
       ${stCard("К выплате", stMoney(m.debt))}
       ${stCard("Готово к счёту", stMoney(m.ready))}
@@ -104,7 +105,7 @@ function settlementsMarkup(m) {
       `<button type="button" data-sttab="${k}" class="${tab === k ? "active" : ""}">${lbl}</button>`).join("")}</div>
     ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Старше 31 дня: ${m.stale_total || 0} на ${stMoney(m.stale_amount || 0)}. Эти суммы остаются в учёте и не выставляются автоматом. ${(m.missing_kaspi || []).length ? "Без номера Kaspi: " + (m.missing_kaspi || []).length + "." : ""}</p>` : ""}
     ${tab === "stale" ? `<p style="color:var(--muted);font-size:13px">Задолженность старше автоматического восстановления. Она не исчезает. Счёт по ней выставляет менеджер вручную.</p>` : ""}
-    ${table}
+    ${m.load_error ? `<div class="empty"><div class="big">Список не загрузился</div>${stEsc(m.load_error)} Нажмите «Обновить». Заказы на месте, режим из-за этой ошибки не менялся.</div>` : table}
     ${tab === "admins" && !m.preview ? settlementsAdminForm() : ""}`;
 }
 
@@ -268,16 +269,16 @@ async function renderSettlements() {
     main.innerHTML = '<div class="empty"><div class="big">Загружаем взаиморасчёты…</div></div>';
     const res = await callEdge("settlements", { action: "summary" });
     if (!res || res.error || res.success === false) {
+      const why = (res && (res.error || res.message)) || "Функция взаиморасчётов ещё не опубликована";
       settlementsModel = {
         mode: "off", stored_mode: "off", effective_from: null, armed: false,
         debt: 0, partners: 0, pickup_couriers: 0, delivery_couriers: 0, admins: 0,
         ready: 0, invoiced: 0, paid: 0, awaiting_price: 0, forgotten: [], invoices: [], obligations: [], awaiting: [],
-        offline: (res && (res.error || res.message)) || "Функция взаиморасчётов ещё не опубликована",
+        load_error: why,
       };
     } else settlementsModel = res;
   }
-  main.innerHTML = settlementsMarkup(settlementsModel) + (settlementsModel.offline
-    ? `<div class="panel" style="padding:14px;margin-top:14px"><b>Сервер ещё не включён.</b> ${stEsc(settlementsModel.offline)} Миграция не применена, боевые счета не создаются.</div>` : "");
+  main.innerHTML = settlementsMarkup(settlementsModel);
   settlementsBind(main);
 }
 

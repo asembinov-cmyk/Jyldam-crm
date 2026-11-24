@@ -1373,9 +1373,16 @@ async function callEdge(name,payload){
     // 401 — дело в токене, а не в самой функции: пробуем обновить сессию и повторить
     if(r.status===401){
       try{
-        const {data:fresh}=await sb.auth.refreshSession();
-        const t2=fresh&&fresh.session?fresh.session.access_token:'';
-        if(t2&&t2!==token)r=await send(t2);
+        // Сначала берём токен, который клиент уже обновил сам. Повторный refresh
+        // со старым ключом стирает действующий вход: Auth отвечает «Refresh Token Not Found».
+        const {data:again}=await sb.auth.getSession();
+        const tNow=again&&again.session?again.session.access_token:'';
+        if(tNow&&tNow!==token)r=await send(tNow);
+        else{
+          const {data:fresh}=await sb.auth.refreshSession();
+          const t2=fresh&&fresh.session?fresh.session.access_token:'';
+          if(t2&&t2!==token)r=await send(t2);
+        }
       }catch(e){console.warn('refreshSession',e);}
     }
     if(r.status===401){
