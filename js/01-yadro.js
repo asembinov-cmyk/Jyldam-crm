@@ -1443,6 +1443,21 @@ function autoTrackMaybe(o){
 // запроса другое, и функция кладёт трек в пул, а не в заказ.
 const callKazpostGetBarcodeBatch=(ids,mode)=>
   callEdge('kazpost-get-barcode',mode==='pool'?{pool_ids:ids}:{order_ids:ids});
+/* СВОИ ТРЕК-НОМЕРА QE (решение владельца 24.11.2026). Почтовым заказам заборов трек выдаёт
+   база, а не Казпочта: серия QE5, счётчик идёт после QE505000002KZ — последнего номера
+   выданного нам диапазона. Номер рождает функция jyldam_track_issue: счётчик-sequence,
+   таблица выданных track_issued (уникальная), занятые диапазоны track_reserved и запрет
+   дубля в самих заказах — повтор исключён на уровне базы, а не браузера.
+   Запрос к Казпочте (callKazpostGetBarcode) НЕ удалён: Барахолка и бланки «заранее» идут
+   по нему, а вернуть его заборам — поставить здесь false. */
+const TRACK_OWN_QE=true;
+const callTrackIssue=async ids=>{
+  try{
+    const {data,error}=await sb.rpc('jyldam_track_issue',{p_ids:ids});
+    if(error)return {success:false,error:(typeof dbErrText==='function'?dbErrText(error):error.message)||'ошибка базы'};
+    return {success:true,results:Array.isArray(data)?data:[]};
+  }catch(e){return {success:false,error:String(e&&e.message||e)};}
+};
 // смена пароля сотрудника через Edge Function set-password (только для админа)
 const callSetPassword=payload=>callEdge('set-password',payload);
 

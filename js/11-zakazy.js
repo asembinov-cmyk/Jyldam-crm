@@ -848,6 +848,38 @@ function renderOrders(mode){
     const skippedCourier=list.filter(o=>isCourierDelivery(o.delivery_id)).length;
     list=list.filter(o=>!isCourierDelivery(o.delivery_id));
     if(!list.length){toast(skippedCourier?'В выборке только курьерские заказы — трек-номер для них не нужен':'Нет заказов для присвоения трек-номера');return;}
+    // СВОЙ ТРЕК QE — заказам заборов (js/01-yadro.js, TRACK_OWN_QE). Барахолка идёт ниже, по-старому.
+    if(TRACK_OWN_QE&&ordersMode!=='baraholka'){
+      const bar=list.filter(o=>isBaraholkaOrder(o)).length;
+      const has=list.filter(o=>!isBaraholkaOrder(o)&&o.track).length;
+      const take=list.filter(o=>!isBaraholkaOrder(o)&&!o.track);
+      if(!take.length){toast(has?'У всех выбранных заказов трек-номер уже есть — существующий не заменяется':'Нет заказов для присвоения трек-номера');return;}
+      let q=`Присвоить трек-номер заказам: ${take.length} (${source})?`;
+      if(has)q+=`\n(у ${has} трек уже есть — они пропущены, существующий трек не заменяется)`;
+      if(skippedCourier)q+=`\n(${skippedCourier} курьерских пропущено — им трек-номер не нужен)`;
+      if(bar)q+=`\n(${bar} заказов Барахолки пропущено)`;
+      if(!confirm(q))return;
+      const bb=$('kazpostAssignSel');bb.disabled=true;const lbl=bb.textContent;
+      let ok=0;const errs=[],noIdx=[];const map=new Map(take.map(o=>[o.id,o]));
+      for(let i=0;i<take.length;i+=200){
+        bb.textContent=`Присваиваем… ${Math.min(i+200,take.length)}/${take.length}`;
+        const part=take.slice(i,i+200);
+        const r=await callTrackIssue(part.map(o=>o.id));
+        if(!r.success){part.forEach(o=>errs.push(`${o.code||o.id}: ${r.error}`));continue;}
+        r.results.forEach(x=>{
+          const o=map.get(x.order_id);const code=o?(o.code||o.id):x.order_id;
+          if(x.success){if(o)o.track=x.barcode;ok++;if(x.warning)noIdx.push(code);}
+          else errs.push(`${code}: ${x.error||'ошибка'}`);
+        });
+      }
+      bb.disabled=false;bb.textContent=lbl;
+      toast(`Трек-номер присвоен: ${ok}${errs.length?(', не присвоен: '+errs.length):''}${noIdx.length?(', без индекса: '+noIdx.length):''}`,6000);
+      if(errs.length)alert('Трек-номер не присвоен:\n\n'+errs.slice(0,60).join('\n')+(errs.length>60?`\n… и ещё ${errs.length-60}`:''));
+      if(noIdx.length)alert('Трек-номер присвоен, но у этих заказов не заполнен индекс получателя — впишите его:\n\n'+noIdx.join(', '));
+      ketSelected.clear();ketSelectAll=false;
+      renderOrders();
+      return;
+    }
     const already=list.filter(o=>o.track).length;
     let msg=`Получить трек-номер у Казпочты для заказов: ${list.length} (${source})?`;
     if(skippedCourier)msg+=`\n(${skippedCourier} курьерских заказов из выборки пропущено — им трек-номер не нужен)`;
@@ -3224,6 +3256,18 @@ function orderModal(id,readonly){
         const saved=await saveOrderCard();
         if(saved===false){btn.disabled=false;btn.textContent='📮 Получить трек';return;}
         btn.textContent='⏳ Получаем…';
+      }
+      // Заказам заборов трек выдаёт база (свой QE), к Казпочте не ходим — см. TRACK_OWN_QE.
+      if(TRACK_OWN_QE&&!isBaraholkaOrder(o)){
+        const tr=await callTrackIssue([o.id]);
+        const x=tr.success?(tr.results[0]||{success:false,error:'нет ответа'}):tr;
+        if(x.success){
+          o.track=x.barcode;const te=$('o_track');if(te)te.value=x.barcode;
+          toast('Трек-номер присвоен: '+x.barcode,7000);
+          if(x.warning)toast('Трек присвоен, но '+x.warning,7000);
+        }else toast('Трек-номер не присвоен: '+(x.error||'ошибка'),9000);
+        btn.disabled=false;btn.textContent='📮 Получить трек';
+        return;
       }
       const res=await callKazpostGetBarcode(o.id);
       // ЛОГИРУЕМ ДО РАЗВЕТВЛЕНИЯ. Сначала эти две строки стояли внутри ветки успеха — и при
