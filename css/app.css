@@ -2327,3 +2327,7 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
 .kaspi-ready{font-size:13px;margin-bottom:2px}
 .kaspi-wait{font-weight:600;color:#b45309}
 .kaspi-paid{font-weight:600;color:#15803d}
+/* размеры пакетов в карточке заявки — несколько галочек в строку */
+.pack-sizes{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;margin-top:6px;font-size:13px;color:var(--muted,#6b7280)}
+.pack-sizes>span{flex:0 0 100%}
+.field .pack-sizes .chk-line{display:inline-flex;width:auto;flex:0 0 auto;margin:0;color:var(--ink,inherit)}
