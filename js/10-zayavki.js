@@ -36,6 +36,10 @@ function localDay(ts){
    заказе: пакеты везут В МАГАЗИН под будущие отправления, к конкретному заказу это
    отношения не имеет. Пусто — завозить не надо. */
 const PACK_SIZES=['S','M','L'];
+/* Размеров может быть НЕСКОЛЬКО (просьба владельца 25.11.2026): в pickups.pack_size они
+   лежат одной строкой «S, M» — колонка текстовая, новой не нужно, а таблица, карточка
+   курьера и журнал ассистента печатают её как есть. Порядок всегда S, M, L. */
+function packSizeList(v){const t=String(v||'').toUpperCase();return PACK_SIZES.filter(s=>new RegExp('(^|[^A-Z])'+s+'([^A-Z]|$)').test(t));}
 
 function defaultPickupDate(){
   const d=new Date();
@@ -94,6 +98,7 @@ function renderPickups(){
         ${isStaff()?`<label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
         <label class="date-field"><span>Дата по</span><input type="date" id="pfdateto" value="${esc(pf.dateTo)}"></label>
         <button class="btn sm" id="pftoday" style="align-self:flex-end">Сегодня</button>
+        <button class="btn sm" id="pftomorrow" style="align-self:flex-end">Завтра</button>
         <button class="btn ghost sm" id="pfdateclear" style="align-self:flex-end">Все даты</button>`:''}
       </div>
       <div id="pickupTable"></div>
@@ -115,6 +120,8 @@ function renderPickups(){
   if($('pfdatefrom'))$('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
   if($('pfdateto'))$('pfdateto').onchange=e=>{pf.dateTo=e.target.value;renderPickups();};
   if($('pftoday'))$('pftoday').onclick=()=>{const t=localToday();pf.dateFrom=t;pf.dateTo=t;renderPickups();};
+  /* «Завтра» — заявки на следующий день: их готовят с вечера (25.11.2026) */
+  if($('pftomorrow'))$('pftomorrow').onclick=()=>{const t=localDaysAgo(-1);pf.dateFrom=t;pf.dateTo=t;pickupsPage=1;renderPickups();};
   if($('pfdateclear'))$('pfdateclear').onclick=()=>{pf.dateFrom='';pf.dateTo='';renderPickups();};
   drawPickups();
 }
@@ -925,10 +932,8 @@ function pickupModal(id,readonly){
         <label style="margin-bottom:6px">Для партнёра</label>
         <label class="chk-line"><input type="checkbox" id="m_packets" ${d.give_packets?'checked':''} ${dis}> Пакеты для партнёра</label>
         <label class="chk-line"><input type="checkbox" id="m_invoices" ${d.give_invoices?'checked':''} ${dis}> Накладные для партнёра</label>
-        ${packSizeReady()?`<select id="m_pack" ${dis} style="margin-top:8px">
-          <option value="">— размер пакета не нужен —</option>
-          ${PACK_SIZES.map(s=>`<option value="${s}" ${d.pack_size===s?'selected':''}>Пакет ${s}</option>`).join('')}
-        </select>`:''}
+        ${packSizeReady()?`<input type="hidden" id="m_pack" value="${esc(packSizeList(d.pack_size).join(', '))}">
+        <div class="pack-sizes"><span>Размеры пакетов:</span>${PACK_SIZES.map(s=>`<label class="chk-line"><input type="checkbox" class="m-packsz" data-sz="${s}" ${packSizeList(d.pack_size).includes(s)?'checked':''} ${dis}> ${s}</label>`).join('')}</div>`:''}
       </div>
     </div>`,
     ro?null:async()=>{
@@ -987,6 +992,7 @@ function pickupModal(id,readonly){
       // очистить все поля кроме даты
       ['m_name','m_address'].forEach(fid=>{const el=$(fid);if(el)el.value='';});
       ['m_city','m_district','m_courier','m_sales','m_proc','m_pack'].forEach(fid=>{const el=$(fid);if(el)el.value='';});
+      document.querySelectorAll('.m-packsz').forEach(b=>b.checked=false);
       // телефон
       const ph=$('m_phone');if(ph){ph.value='';ph.dataset.phone='';}
       // сбросить подсветку обязательных полей
@@ -1019,8 +1025,10 @@ function pickupModal(id,readonly){
     // Иначе в карточке стояло бы «пакеты не нужны · размер M», а курьер вёз бы по второму.
     const packSel=$('m_pack'),packChk=$('m_packets');
     if(packSel&&packChk){
+      const boxes=[...document.querySelectorAll('.m-packsz')];
+      boxes.forEach(b=>b.addEventListener('change',()=>{packSel.value=boxes.filter(x=>x.checked).map(x=>x.dataset.sz).join(', ');packSel.dispatchEvent(new Event('change'));}));
       packSel.addEventListener('change',()=>{if(packSel.value&&!packChk.checked){packChk.checked=true;saveDraft();}});
-      packChk.addEventListener('change',()=>{if(!packChk.checked&&packSel.value){packSel.value='';saveDraft();}});
+      packChk.addEventListener('change',()=>{if(!packChk.checked&&packSel.value){packSel.value='';boxes.forEach(b=>b.checked=false);saveDraft();}});
     }
     const cs=$('m_city');cs.onchange=()=>{const cid=cs.value;
       $('m_district').innerHTML='<option value="">—</option>'+dOpts(cid).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
