@@ -1398,7 +1398,7 @@ function canMod(key){
   if(S.myPerms[permKey]&&typeof S.myPerms[permKey].view!=='undefined')return !!S.myPerms[permKey].view;
   // фолбэк: старая привязка модулей к базовым правам
   const fb={dashboard:'orders',pickups:'pickups',orders:'orders',courier:'orders',mail:'orders',
-    baraholka:null,whatsapp:null,greenapi:null,telephony:null,
+    baraholka:null,whatsapp:null,greenapi:null,telephony:null,settlements:null,
     intercity:null,cash:null,sorting:null,filling:null,finance:null,calc:null,partners:'directories',history:null,notify:'orders',
     users:'users',settings:'directories'};
   const base=fb[key];
@@ -1573,6 +1573,7 @@ function buildNav(opts){
     if(canMod('cash'))money.push({k:'cash',label:'Склад',icon:'warehouse'});
     if(canMod('sorting'))money.push({k:'sorting',label:'Сортировка',icon:'scan'});
     if(canMod('finance'))money.push({k:'finance',label:'Финансы',icon:'finance'});
+    if(canMod('settlements'))money.push({k:'settlements',label:'Взаиморасчёты',icon:'finance'});
     if(canMod('calc'))money.push({k:'calc',label:'Калькуляция',icon:'calc'});
     if(money.length)groups.push({title:'Деньги/Склад',items:money});
 

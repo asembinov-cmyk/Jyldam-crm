@@ -909,6 +909,7 @@ function render(){
   else if(S.tab==='sorting')renderSorting();
   else if(S.tab==='filling')renderFilling();
   else if(S.tab==='finance')renderFinance();
+  else if(S.tab==='settlements')renderSettlements();
   else if(S.tab==='calc')renderCalc();
   else if(S.tab==='intercity')renderIntercity();
   else if(S.tab==='whatsapp')renderWhatsapp();
