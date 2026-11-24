@@ -1401,7 +1401,7 @@ const callKazpostGetBarcode=orderId=>callEdge('kazpost-get-barcode',{order_id:or
    там застывают, поэтому вес и сумма должны быть уже окончательными.
    Зовётся из dbUpdate после любой удачной правки заказа. Повтор безопасен: на тот же номер
    заказа Казпочта возвращает прежний ШПИ. Без индекса не запрашиваем — по нему она везёт. */
-const AUTO_TRACK_ON_READY=true;
+const AUTO_TRACK_ON_READY=false; // выключено 24.11.2026 до решения владельца: треки заборам сейчас присваивает KET
 const _autoTrackBusy=new Set(), _autoTrackFailed=new Map();
 function autoTrackMaybe(o){
   try{
