@@ -681,12 +681,13 @@ async function loadAll(){
   // вся история. Полная история докачивается следом и подменяет данные, когда будет готова.
   S.pickups=S.pickups||[];S.orders=S.orders||[];
   const _todayISO=localToday();
-  Promise.all([
+  // Курьеру с узким охватом «всё за сегодня» не нужно и не положено: его загрузка и так мала.
+  (histNarrow()?Promise.resolve([S.pickups,S.orders]):Promise.all([
     // заявки — фильтруем по ДАТЕ ЗАБОРА (pickup_date), а не по дате создания записи: заявка могла
     // быть создана вчера вечером, но назначена на сегодня — по created_at она бы потерялась
     dbList('pickups',{order:'created_at',asc:false,gte:{col:'pickup_date',val:_todayISO}}),
     dbList('orders',{order:'created_at',asc:false,gte:{col:'created_at',val:_todayISO}}),
-  ]).then(([pickupsToday,ordersToday])=>{
+  ])).then(([pickupsToday,ordersToday])=>{
     if(S._heavyLoaded)return; // полная история уже подъехала — быстрые «сегодняшние» данные больше не нужны
     S.pickups=pickupsToday;S.orders=ordersToday;
     try{if(typeof render==='function')render();if(typeof buildNav==='function')buildNav({skipTabFix:true});}catch(e){}
@@ -694,10 +695,8 @@ async function loadAll(){
   // Метку для дельта-синхронизации берём ДО запросов: всё, что запишут пока история
   // грузится, попадёт в первую же дельту. Наоборот — эти правки потерялись бы.
   const _syncMark=new Date(nowMs()-60000).toISOString();
-  S._heavyLoading=Promise.all([
-    dbList('pickups',{order:'created_at',asc:false}),
-    dbList('orders',{order:'created_at',asc:false}),
-  ]).then(([pickups,orders])=>{
+  // Не вся история, а охват: курьеру — своё, сотруднику — последние дни (js/29-istoriya.js).
+  S._heavyLoading=histLoadInitial().then(([pickups,orders])=>{
     S.pickups=pickups;S.orders=orders;S._heavyLoaded=true;S._deltaSince=_syncMark;
     /* Данные только что прочитаны целиком — отмечаем это, иначе первый же догон
        (возврат на вкладку через пару минут) перекачал бы их заново: `_lastFullSync`
@@ -897,7 +896,8 @@ async function rtSyncDelta(){
   for(const t of ['orders','pickups']){
     if(!Array.isArray(S[t]))continue;
     let rows=[];
-    try{rows=await dbList(t,{order:'updated_at',asc:false,gte:{col:'updated_at',val:since}});}
+    const hf=histFilter(t,'sync');if(hf===false)continue;   // у курьера без карточек строк нет
+    try{rows=await dbList(t,{order:'updated_at',asc:false,gte:{col:'updated_at',val:since},filter:hf||undefined});}
     catch(e){console.warn('rtSyncDelta',t,e&&e.message);return changed;} // метку НЕ сдвигаем
     const r=mergeRows(S[t],rows);
     changed+=r.added+r.updated;
@@ -911,9 +911,9 @@ async function rtSyncDelta(){
    пустой ответ при непустой памяти почти наверняка обрыв, а не «всё удалили». */
 async function rtReload(table){
   try{
-    const rows=await dbList(table,{order:'created_at',asc:false});
+    const rows=await histFetch(table,'load');   // охват и окно, а не вся таблица
     if(!rows.length&&(S[table]||[]).length)return 0;
-    S[table]=rows;
+    S[table]=rows;histAfterReload();
     return 1;
   }catch(e){console.warn('rtReload',table,e&&e.message);return 0;}
 }
@@ -923,7 +923,8 @@ async function rtReload(table){
    Поэтому спрашиваем только id (сорок байт вместо всей записи) и вычищаем лишнее. */
 async function rtDropDeleted(table,since){
   let rows=[];
-  try{rows=await dbList(table,{select:'id',order:'created_at',asc:false,gte:{col:'created_at',val:since}});}
+  const hf=histFilter(table,'sync');if(hf===false)return 0;
+  try{rows=await dbList(table,{select:'id',order:'created_at',asc:false,gte:{col:'created_at',val:since},filter:hf||undefined});}
   catch(e){console.warn('rtDropDeleted',table,e&&e.message);return 0;}
   if(!rows.length)return 0; // пустой ответ — скорее сбой, чем «удалили всё»
   const live=new Set(rows.map(r=>r.id));
@@ -942,7 +943,8 @@ async function rtDropDeleted(table,since){
    таблицу — на неделю это несколько тысяч строк вместо шестидесяти. */
 async function rtPullWindow(table,since){
   try{
-    const rows=await dbList(table,{order:'created_at',asc:false,gte:{col:'created_at',val:since}});
+    const hf=histFilter(table,'sync');if(hf===false)return 0;
+    const rows=await dbList(table,{order:'created_at',asc:false,gte:{col:'created_at',val:since},filter:hf||undefined});
     if(!rows.length)return 0;
     const r=mergeRows(S[table],rows);
     return r.added+r.updated;
@@ -974,7 +976,8 @@ async function rtReconcile(){
   for(const t of ['orders','pickups']){
     const arr=S[t];
     if(!Array.isArray(arr))continue;
-    const cnt=await dbCount(t,{gte:{col:'created_at',val:since}});
+    const hf=histFilter(t,'sync');if(hf===false)continue;
+    const cnt=await dbCount(t,{gte:{col:'created_at',val:since},filter:hf||undefined});
     if(cnt==null)continue;              // не смогли спросить — выводов не делаем
     let mine=0;
     for(const r of arr)if(r&&r.created_at>=since)mine++;
@@ -1167,6 +1170,12 @@ function applyRealtime(table,payload){
     const arr=S[key];
     const row=payload.new||payload.old;
     if(!row||!row.id)return;
+    // Курьеру чужие заявки и заказы в память не кладём (js/29-istoriya.js). Если строка
+    // перестала быть его — заявку переназначили — убираем её из памяти.
+    if(payload.eventType!=='DELETE'&&(key==='orders'||key==='pickups')&&!histAccepts(key,row)){
+      const gi=arr.findIndex(x=>x.id===row.id);if(gi>=0){arr.splice(gi,1);scheduleRtRender(table);}
+      return;
+    }
     if(payload.eventType==='INSERT'){
       if(!arr.find(x=>x.id===row.id)){
         arr.unshift(row);

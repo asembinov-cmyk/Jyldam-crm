@@ -213,6 +213,8 @@ function aiAssistantModal(){
     _aiHistory.push({role:'user',text:q});
     log.innerHTML+=`<div class="ai-msg ai-user">${esc(q)}</div><div class="ai-msg ai-assistant ai-loading" id="aiLoading">Думаю…</div>`;
     log.scrollTop=log.scrollHeight;$('aiQ').value='';btn.disabled=true;
+    // разбивка строится по трём последним месяцам — они должны быть в памяти целиком
+    try{await histEnsureRecentMonths(3);}catch(e){console.warn('ai history',e);}
     const summary=aiBuildDataSummary();
     const system='Ты — аналитик логистической компании Jyldam. Отвечай кратко и по делу на русском, опираясь ТОЛЬКО на предоставленную сводку данных в JSON. В разбивках для каждого имени указаны заказы по месяцам ГГГГ-ММ и поле Всего. Месяцы: 2026-06 = июнь, 2026-07 = июль. Для партнёров: Партнёры_все_заказов — сколько всего заказов дал каждый (0 = не давал), Партнёры_без_заказов — готовый список не дававших, Новых_партнёров_по_месяцам_регистрации — количество ЗАРЕГИСТРИРОВАННЫХ (создана карточка, не заказ) партнёров по месяцам, Новых_партнёров_имена_по_месяцам — их имена по тем же месяцам (используй для вопросов «кто именно» / «список новых партнёров»). Если спрашивают про конкретный месяц — бери значение месяца из разбивки. Если данных нет — скажи об этом. Не выдумывай. Суммы округляй, добавляй «₸». Списки можешь давать полностью.';
     const prompt=`Сводка данных по заказам (JSON):\n${JSON.stringify(summary)}\n\nВопрос: ${q}`;
@@ -347,8 +349,11 @@ function renderDashboard(){
   // ТРЕНДЫ: сравнение с прошлым месяцем
   const prevM=(()=>{let y=dashPeriod.year,m=dashPeriod.month-1;if(m<0){m=11;y--;}return `${y}-${String(m+1).padStart(2,'0')}`;})();
   const inPrev=d=>(d||'').slice(0,7)===prevM;
-  const ordersPrev=orders.filter(o=>inPrev(o.pickup_date)).length;
-  const pkPrev=pickups.filter(p=>inPrev(p.pickup_date)&&isCollectedStatus(p.status_id)).length;
+  // Прошлый месяц в память больше не грузится — два его числа приходят счётчиками с сервера
+  // (histDashPrev, js/29-istoriya.js). null — месяц и так в памяти, считаем сами.
+  const prevSrv=histDashPrev(prevM,bar);
+  const ordersPrev=prevSrv?prevSrv.orders:orders.filter(o=>inPrev(o.pickup_date)).length;
+  const pkPrev=prevSrv?prevSrv.pickups:pickups.filter(p=>inPrev(p.pickup_date)&&isCollectedStatus(p.status_id)).length;
   const trendPct=(cur,prev)=>prev>0?Math.round((cur-prev)/prev*100):null;
   const trOrders=trendPct(ordersMonth,ordersPrev);
   const trPickups=trendPct(pkCollectedMonth,pkPrev);

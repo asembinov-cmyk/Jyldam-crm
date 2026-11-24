@@ -618,7 +618,7 @@ let fillLoadedFrom = '';
 function fillEnsureLoaded(){
   const from = fillQueueFrom();
   if(from >= localToday()) return false;                 // сегодняшние есть всегда
-  if(S._heavyLoaded) return false;                       // вся история уже в памяти
+  if(S._heavyLoaded && histState('since',from)==='ok') return false;   // этот отрезок уже в памяти
   if(fillLoadedFrom && fillLoadedFrom <= from) return false;
   fillRefresh();                                         // она сама перерисует экран
   return true;

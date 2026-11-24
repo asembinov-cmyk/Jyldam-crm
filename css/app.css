@@ -2232,3 +2232,5 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
 .orders-pager.op-under>.op-btn{order:4}
 /* меню «на странице» у панели под таблицей раскрывается ВВЕРХ: вниз — уже конец страницы */
 .orders-pager.op-under .op-pp-menu{top:auto;bottom:calc(100% + 8px)}
+/* Строка над гридом: с какого дня заказы в памяти и идёт ли догрузка (js/29-istoriya.js) */
+.hist-note{margin:0 0 10px;padding:9px 12px;border:1px dashed var(--line);border-radius:10px;font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px;align-items:center}

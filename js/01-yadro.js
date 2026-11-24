@@ -374,6 +374,8 @@ async function dbList(table,opts={}){
     // текстом, десятки килобайт), и «звёздочка» тянула их все при каждом входе в систему.
     let q=sb.from(table).select(opts.select||'*',withCount?{count:'exact'}:undefined);
     if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val); // напр. только записи не раньше даты X — сильно сокращает объём для быстро растущих таблиц
+    // opts.filter — произвольное условие (q=>q.or(...)): охват курьера и окно истории, см. js/29-istoriya.js
+    if(typeof opts.filter==='function')q=opts.filter(q);
     if(opts.order) q=q.order(opts.order,{ascending:opts.asc!==false});
     q=q.range(from,to);
     return Promise.race([q,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),PAGE_TIMEOUT))]);
@@ -438,6 +440,7 @@ async function dbCount(table,opts={}){
   try{
     let q=sb.from(table).select('id',{count:'exact',head:true});
     if(opts.gte)q=q.gte(opts.gte.col,opts.gte.val);
+    if(typeof opts.filter==='function')q=opts.filter(q);
     const {count,error}=await q;
     if(error){console.warn('dbCount',table,error.message);return null;}
     return typeof count==='number'?count:null;

@@ -246,7 +246,7 @@ function partnerVolumePanelHtml(){
   const scopeLabel=nfVolCity?(nfVolCity==='-'?'город не указан':cityName(nfVolCity)):'все города';
   // Пока полная история не подъехала, в памяти только сегодняшние заказы — и таблица
   // показала бы один день вместо месяца. Честнее сказать это, чем нарисовать неверное.
-  const loading=!S._heavyLoaded&&S._heavyLoading;
+  const loading=histPanelLoading('month',nfVolMonth);
   return `
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-head"><h2>📦 Партнёры по городам</h2><span class="count">${rows.length}</span></div>
@@ -254,7 +254,7 @@ function partnerVolumePanelHtml(){
         Сколько заказов даёт партнёр в каждом городе забора. Месяц считается по дате забора,
         а если её нет — по дате создания, как в Калькуляции. «В среднем» — по дням, когда
         заказы реально были.</div>
-      ${loading?'<div class="loading" style="padding:30px">Загружаем историю заказов…</div>':`
+      ${loading?'<div class="loading" style="padding:30px">'+esc(histPanelText('month',nfVolMonth))+'</div>':`
       <div class="nf-vol-sum">
         <div class="nfv-i"><span>Партнёров</span><b>${partnersCnt}</b></div>
         <div class="nfv-i"><span>Заказов</span><b>${sum('total')}</b></div>
@@ -440,7 +440,7 @@ function warehouseAcceptPanelHtml(){
   const cur=nfWhMonth===localToday().slice(0,7);
   const peopleCnt=new Set(rows.map(r=>r.who)).size;
   const scopeLabel=nfWhCity?(nfWhCity==='-'?'склад не определён':cityName(nfWhCity)):'все склады';
-  const loading=!S._heavyLoaded&&S._heavyLoading;
+  const loading=histPanelLoading('sorted',nfWhMonth);
   const cols=cur?9:8;
   return `
     <div class="panel" style="margin-bottom:18px">
@@ -450,7 +450,7 @@ function warehouseAcceptPanelHtml(){
         ПРИЁМКИ, а не создания заказа. Склад — город забора; Талдыкорган относится к Алматы,
         как в «Сортировке». «В среднем» — по дням, когда приёмка реально была.
         Нажмите на число, чтобы увидеть разбивку по дням.</div>
-      ${loading?'<div class="loading" style="padding:30px">Загружаем историю заказов…</div>':`
+      ${loading?'<div class="loading" style="padding:30px">'+esc(histPanelText('sorted',nfWhMonth))+'</div>':`
       <div class="nf-vol-sum">
         <div class="nfv-i"><span>Кладовщиков</span><b>${peopleCnt}</b></div>
         <div class="nfv-i"><span>Принято</span><b>${sum('total')}</b></div>
