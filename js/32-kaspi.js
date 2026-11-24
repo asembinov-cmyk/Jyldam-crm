@@ -21,15 +21,23 @@ let kaspiTimer=null;        // опрос открытого счёта, пок�
 const kaspiMoney=n=>Math.round(n||0).toLocaleString('ru-RU')+' ₸';
 const kaspiPhoneOk=v=>/^7\d{9}$/.test(v||'');
 const kaspiOn=()=>!!(kaspiCfg&&kaspiCfg.enabled&&String(kaspiCfg.cashier_phone||'').trim());
-const kaspiBound=()=>!kaspiCfg?false:(kaspiCfg.bind_state==='bound'||(!kaspiCfg.bind_state&&!!kaspiCfg.cashier_phone));
+const kaspiBound=()=>!!(kaspiCfg&&kaspiCfg.bind_state==='bound');
 const kaspiLiveOk=()=>!!(kaspiCfg&&(kaspiCfg.test_mode||(kaspiBound()&&!kaspiCfg.bind_warning)));
+const KASPI_COLS='id,cashier_phone,enabled,test_mode,updated_at,updated_by_name';
+const KASPI_BIND='bind_state,bind_error,bind_warning,session_checked_at';
+
+async function kaspiSettingsRow(){
+  let q=await sb.from('kaspi_settings').select(KASPI_COLS+','+KASPI_BIND).eq('id',1).maybeSingle();
+  if(q.error) q=await sb.from('kaspi_settings').select(KASPI_COLS).eq('id',1).maybeSingle();
+  return q;
+}
 
 async function kaspiCfgLoad(force){
   if(kaspiCfg!==undefined&&!force)return kaspiCfg;
   try{
-    const {data,error}=await sb.from('kaspi_settings').select('*').eq('id',1).maybeSingle();
-    if(error)throw error;
-    kaspiCfg=data||null;
+    const q=await kaspiSettingsRow();
+    if(q.error)throw q.error;
+    kaspiCfg=q.data||null;
   }catch(e){kaspiCfg=null;}
   return kaspiCfg;
 }
@@ -216,10 +224,12 @@ async function renderKaspiSettings(){
       test_mode:$('kaspiTest').checked,updated_at:new Date().toISOString(),updated_by_name:(S.me&&(S.me.full_name||S.me.email))||''};
     if(row.enabled&&!row.cashier_phone){sv.disabled=false;toast('Укажите номер кассира — без него приём не включить');return;}
     if(row.enabled&&!row.test_mode&&st!=='bound'&&!confirm('Выключить тестовый режим без привязанного кассира?\n\nСначала лучше пройти OTP.')){sv.disabled=false;return;}
-    const {data,error}=await sb.from('kaspi_settings').update(row).eq('id',1).select().maybeSingle();
+    const {error}=await sb.from('kaspi_settings').update(row).eq('id',1);
     sv.disabled=false;
-    if(error||!data){toast('Не сохранено: '+(error?dbErrText(error):'нет прав'));return;}
-    kaspiCfg=data;toast('Сохранено');renderKaspiSettings();
+    if(error){toast('Не сохранено: '+dbErrText(error));return;}
+    const q=await kaspiSettingsRow();
+    if(q.error||!q.data){toast('Сохранено, но статус не прочитался');return;}
+    kaspiCfg=q.data;toast('Сохранено');renderKaspiSettings();
   };
   const otpStart=$('kaspiOtpStart');
   if(otpStart)otpStart.onclick=async()=>{

@@ -9729,8 +9729,9 @@ N ₸» — счёт уходит на номер Kaspi клиента, посл
 выключен), таблицы и расписание — `db/72` (выполнен), стили `.kaspi-*`.
 
 **Боевой шлюз** — порт pykaspi в Edge Function: OTP-привязка кассира, удалённый счёт
-на номер клиента, keep-alive сессии. Сессия шифруется `KASPI_SESSION_KEY`. Колонки
-привязки и cron keepalive — в `Jyldam-server/schema/pending/kaspi_cashier_bind.sql`
+на номер клиента, keep-alive сессии. Сессия шифруется `KASPI_SESSION_KEY`
+и хранится в `kaspi_cashier_secret` (браузер её не читает). Статус привязки
+и cron keepalive — в `Jyldam-server/schema/pending/kaspi_cashier_bind.sql`
 (на прод только по подтверждению; до применения/деплоя в бою остаётся тестовый режим).
 
 Красный баннер «Сессия неактивна» — только при непустом `bind_warning`, не при
