@@ -11,7 +11,62 @@
    ============================================================ */
 const PUSH_VAPID_PUBLIC = 'BLNDjOQXAjxTijyPFV7l449X-btNJDFx8VTRjpxgrl4ZaHsezq8VjaG5pI-InMxN6ZPKt9UIb0nL-8JtHE8XIPU';
 
-const pushSupported = () => !!(window.isSecureContext && 'serviceWorker' in navigator
+/* ПРИЛОЖЕНИЕ ДЛЯ iPhONE (25.11.2026). Внутри окна WebKit нет ни PushManager, ни Notification,
+   поэтому там уведомления идут через Apple (APNs): приложение получает токен устройства и
+   отдаёт его странице, а страница записывает его в ту же таблицу подписок с адресом
+   `apns:<токен>`. Отправляет тот же `push-send`.
+     страница → приложение: webkit.messageHandlers.jyldam.postMessage({cmd})
+     приложение → страница: window.jyNativePush({status, token, error}), window.jyNativeOpen(url) */
+const pushNative = () => !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.jyldam);
+const pushNativeCmd = cmd => { try{ window.webkit.messageHandlers.jyldam.postMessage({ cmd }); }catch(e){ console.warn('приложение не ответило', e); } };
+let pushNat = { status: 'default', token: '' };   // последнее, что сказало приложение
+let pushNatWaiting = false;                       // человек нажал «включить» — ждём токен
+const PUSH_NAT_OFF = 'pushNativeOff';             // выключил сам: при входе не включаем обратно
+const pushNatOff = () => { try{ return localStorage.getItem(PUSH_NAT_OFF) === '1'; }catch(e){ return false; } };
+const pushNatOn = () => pushNat.status === 'granted' && !!pushNat.token && !pushNatOff();
+// Запись идёт функцией базы, а не upsert: на одном телефоне входят разные люди (курьер
+// сменился), и строка прежнего владельца токена чужому upsert недоступна по правилам.
+async function pushSaveNative(){
+  if(!pushNat.token || !S.me || !S.me.id) return false;
+  const { error } = await sb.rpc('push_apns_register', { p_token: pushNat.token,
+    p_agent: (navigator.userAgent || '').slice(0, 200) });
+  if(error){ console.warn('токен приложения не сохранился', error); return false; }
+  return true;
+}
+window.jyNativePush = async d => {
+  d = d || {};
+  pushNat = { status: d.status || pushNat.status, token: d.token || (d.status === 'granted' ? pushNat.token : '') };
+  const waiting = pushNatWaiting;
+  if(d.error && waiting){ pushNatWaiting = false; toast('Уведомления не включились: ' + d.error, 8000); }
+  if(pushNat.status === 'denied' && waiting){
+    pushNatWaiting = false;
+    toast('Уведомления запрещены: откройте Настройки iPhone → Jyldam → Уведомления и разрешите', 9000);
+  }
+  if(pushNatOn() && typeof S !== 'undefined' && S.me && S.me.id){
+    const ok = await pushSaveNative();
+    if(waiting){
+      pushNatWaiting = false;
+      if(!ok) toast('Разрешение есть, но запись в базу не прошла — скажите администратору', 8000);
+      else{
+        const r = await callEdge('push-send', { kind: 'test', title: 'Уведомления включены',
+          body: 'Вот так они будут приходить', tag: 'test' });
+        if(r && r.error) toast('Включено, но проверочное не ушло: ' + r.error, 9000);
+        else if(r && r.sent === 0) toast('Включено, но проверочное не ушло' + (r.errors && r.errors[0] ? ': ' + r.errors[0] : ''), 9000);
+        else toast('Уведомления включены — сейчас придёт проверочное', 6000);
+      }
+    }
+  }
+  pushRenderBtn();
+};
+// Нажали на уведомление в приложении — тот же переход, что у service worker ниже.
+window.jyNativeOpen = url => {
+  try{
+    const tab = new URL(url || './', location.href).searchParams.get('tab');
+    if(tab && typeof render === 'function' && typeof S !== 'undefined' && S.me){ S.tab = tab; render(); }
+  }catch(e){}
+};
+
+const pushSupported = () => pushNative() || !!(window.isSecureContext && 'serviceWorker' in navigator
   && 'PushManager' in window && 'Notification' in window);
 // На iPhone уведомления работают ТОЛЬКО у приложения, добавленного на «Домой»:
 // в самом Safari подписаться нельзя, и объяснить это надо прямо, иначе кнопка
@@ -52,6 +107,12 @@ async function pushSaveSub(sub){
   return true;
 }
 async function pushEnable(){
+  if(pushNative()){
+    try{ localStorage.removeItem(PUSH_NAT_OFF); }catch(e){}
+    pushNatWaiting = true;
+    pushNativeCmd('pushEnable');
+    return;
+  }
   if(!pushSupported()){ toast('Браузер не умеет уведомления'); return; }
   if(pushIOS() && !pushStandalone()){
     toast('На iPhone уведомления работают только у приложения: добавьте CRM на экран «Домой» и откройте оттуда', 8000);
@@ -87,6 +148,15 @@ async function pushEnable(){
   pushRenderBtn();
 }
 async function pushDisable(){
+  if(pushNative()){
+    try{
+      if(pushNat.token) await sb.from('push_subscriptions').delete().eq('endpoint', 'apns:' + pushNat.token);
+      localStorage.setItem(PUSH_NAT_OFF, '1');
+    }catch(e){ console.warn(e); }
+    pushNativeCmd('pushDisable');
+    toast('Уведомления выключены');
+    pushRenderBtn(); return;
+  }
   try{
     const sub = await pushCurrent();
     if(sub){
@@ -109,11 +179,22 @@ async function pushRenderBtn(){
     const ub = bar.querySelector('.user-box');
     if(ub) ub.parentNode.insertBefore(btn, ub); else bar.appendChild(btn);
     btn.onclick = async () => {
+      if(pushNative()){ if(pushNatOn()) pushDisable(); else pushEnable(); return; }
       const sub = await pushCurrent();
       if(sub) pushDisable(); else pushEnable();
     };
   }
   if(!pushSupported()){ btn.style.display = 'none'; return; }
+  if(pushNative()){
+    const on = pushNatOn();
+    btn.style.display = '';
+    btn.classList.toggle('on', on);
+    btn.textContent = on ? '🔔' : '🔕';
+    btn.title = on ? 'Уведомления включены — нажмите, чтобы выключить'
+      : pushNat.status === 'denied' ? 'Уведомления запрещены в Настройках iPhone'
+      : 'Включить уведомления на этом телефоне';
+    return;
+  }
   const sub = await pushCurrent();
   const on = !!sub && Notification.permission === 'granted';
   const blocked = Notification.permission === 'denied';
@@ -152,6 +233,9 @@ navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', e
   const tick = async () => {
     if(typeof S !== 'undefined' && S && S.me && S.me.id){
       pushRenderBtn();
+      // В приложении спрашиваем состояние: если разрешение уже дано, оно пришлёт свежий
+      // токен, и jyNativePush допишет его в базу — на случай смены сотрудника на телефоне.
+      if(pushNative()){ pushNativeCmd('pushStatus'); return; }
       // Подписка живёт в браузере и может потеряться в базе (сменили телефон,
       // почистили данные, браузер выдал новый адрес) — при каждом входе дописываем.
       if(pushSupported() && Notification.permission === 'granted'){
