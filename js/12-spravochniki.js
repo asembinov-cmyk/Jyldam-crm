@@ -701,8 +701,9 @@ function dirCouriers(){
       {key:'acc',label:'Аккаунт',filter:'select',text:c=>c.account_id?accountEmail(c.account_id):''},
     ]});
 }
-function courierModal(id){
+async function courierModal(id){
   const c=id?S.couriers.find(x=>x.id===id):{fio:'',city_id:'',district_id:'',phone:'',id_doc:'',account_id:''};
+  const kaspi=id&&typeof settlementsKaspiPhone==='function'?await settlementsKaspiPhone('pickup_courier',id):'';
   if(!S.cities.length){toast('Сначала добавьте город');return;}
   const dOpts=cid=>S.districts.filter(d=>!cid||d.city_id===cid);
   showModal(id?'Курьер':'Новый курьер',`
@@ -724,6 +725,7 @@ function courierModal(id){
       }
       toast('Сохранено');renderSettings();return true;});
   attachPhone('k_phone',c.phone);
+  attachPhone('k_kaspi',kaspi);
   const cs=$('k_city');cs.onchange=()=>{$('k_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');};
 }
 /* Курьеры по заказам */
@@ -738,8 +740,9 @@ function dirOrderCouriers(){
       {key:'acc',label:'Аккаунт',filter:'select',text:c=>c.account_id?accountEmail(c.account_id):''},
     ]});
 }
-function orderCourierModal(id){
+async function orderCourierModal(id){
   const c=id?S.order_couriers.find(x=>x.id===id):{fio:'',courier_city_id:'',phone:'',id_doc:'',account_id:''};
+  const kaspi=id&&typeof settlementsKaspiPhone==='function'?await settlementsKaspiPhone('delivery_courier',id):'';
   if(!S.courier_cities.length){toast('Сначала добавьте курьерский город');return;}
   showModal(id?'Курьер по заказам':'Новый курьер по заказам',`
     <div class="field"><label>ФИО</label><input id="oc_fio" value="${esc(c.fio)}"></div>
@@ -759,6 +762,7 @@ function orderCourierModal(id){
       }
       toast('Сохранено');renderSettings();return true;});
   attachPhone('oc_phone',c.phone);
+  attachPhone('oc_kaspi',kaspi);
 }
 // поле привязки аккаунта (список профилей-курьеров), доступно только админу
 function accountEmail(accId){const p=S.profiles.find(x=>x.id===accId);return p?(p.email||p.full_name||'аккаунт'):'аккаунт';}

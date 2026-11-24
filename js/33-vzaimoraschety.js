@@ -417,6 +417,12 @@ async function settlementsIssueRow(b) {
   renderSettlements();
 }
 
+async function settlementsKaspiPhone(holderType, holderId) {
+  if (!holderId) return "";
+  const res = await callEdge("settlements", { action: "phone_get", holder_type: holderType, holder_id: holderId });
+  return (res && res.kaspi_phone) || "";
+}
+
 async function settlementsSaveKaspi(holderType, holderId, phone) {
   if (!phone) return { ok: true, skipped: true };
   return await callEdge("settlements", { action: "phone_set", holder_type: holderType, holder_id: holderId, kaspi_phone: phone });
