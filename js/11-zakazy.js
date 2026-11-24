@@ -296,6 +296,7 @@ async function pickupOrdersModal(pickupId){
       `:''}
       ${(isStaff()||isCourier())?`
       <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем <span class="pom-paidhint">(сумма станет 0)</span></label>
+      ${typeof settlementsPickupExtra==='function'?settlementsPickupExtra(o):''}
       `:''}
     </div>`).join('');
     // «датчик» внизу — как только докручивают почти до него, сама подгружается следующая порция
@@ -320,6 +321,7 @@ async function pickupOrdersModal(pickupId){
     // кнопками, чтобы не листать длинную ленту заказов до самого низа
     const bottomFoot=wrap.querySelector('.modal-foot');if(bottomFoot)bottomFoot.style.display='none';
     const bind=()=>{
+      if(typeof settlementsBindPickup==='function')settlementsBindPickup(wrap);
       // верхняя кнопка «Сохранить» — просто нажимает исходную (скрытую) кнопку внизу, чтобы
       // сработала та же самая проверка (фото + размер пакета у каждого заказа), без дублирования логики
       const saveTop=wrap.querySelector('#pom_save_top');
@@ -2443,7 +2445,8 @@ function renderOrdersPager(total,totalPages,startIdx,shownCount){
 }
 /* Компактные карточки заказов для курьера: свёрнуто — ID/ФИО/телефон/адрес/сумма/статус, по тапу разворачивается остальное */
 function drawCourierOrderCards(el,rows){
-  el.innerHTML=`<div class="cour-cards">${rows.map(o=>{
+  const shiftBar=typeof settlementsShiftBar==='function'?settlementsShiftBar():'';
+  el.innerHTML=shiftBar+`<div class="cour-cards">${rows.map(o=>{
     const ph=phoneStored(o.phone);
     const sum=orderSum(o)?orderSum(o).toLocaleString('ru-RU')+' ₸':'—';
     const city=isCourierDelivery(o.delivery_id)?courierCityName(o.courier_city_id):'';

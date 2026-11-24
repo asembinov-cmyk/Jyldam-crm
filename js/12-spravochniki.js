@@ -515,7 +515,8 @@ function partnerModal(id){
       </div>
       <small style="color:var(--muted);font-size:12px">Партнёр сможет присылать готовые заказы напрямую через API — они автоматически попадут в «Заказы заборов» с заявкой на забор, выделены другим цветом. Перевыпуск токена отзывает старый — если у партнёра уже настроена интеграция, старый токен перестанет работать.</small>
       <div id="p_token_reveal"></div>
-    </div>`:''}`,
+    </div>`:''}
+    ${typeof settlementsPartnerExtra==='function'?settlementsPartnerExtra(p):''}`,
     async()=>{
       // проверка обязательных полей (кроме QR-кода)
       // Имя берём из ПОЛЯ, а не из p: партнёра могли только что переименовать в физ. лицо
@@ -607,6 +608,7 @@ function partnerModal(id){
       '<img id="p_qr_img" width="200" height="200" alt="QR партнёра"></div>';
     renderQrInto($('p_qr_img'),partnerCabinetLink(code),200);
   };
+  if(typeof settlementsBindPartner==='function')settlementsBindPartner(p);
   const genQr=$('p_gen_qr');
   if(genQr)genQr.onclick=()=>{
     if(qrInp.value.trim()&&!confirm('Старая ссылка партнёра перестанет работать сразу после сохранения. Сменить код?'))return;
