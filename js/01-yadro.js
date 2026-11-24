@@ -1544,9 +1544,13 @@ document.addEventListener('click',e=>{
 const APP_VER_CHECK_MS=10*60*1000;
 let _appVerShown=false;
 // отпечатки всех подключённых файлов в том виде, в каком их загрузил браузер
-function appLoadedVersions(){
+function versionMarks(html){
+  if(html)return (html.match(/\?v=([^"'&\s]+)/g)||[]).map(x=>x.slice(3)).join(',');
   return [...document.querySelectorAll('script[src*="?v="],link[href*="?v="]')]
-    .map(el=>(el.src||el.href||'').split('?v=')[1]||'').filter(Boolean).join(',');
+    .map(el=>{
+      try{return new URL(el.src||el.href,location.href).searchParams.get('v')||'';}
+      catch(e){return '';}
+    }).filter(Boolean).join(',');
 }
 async function checkAppVersion(){
   if(_appVerShown)return;
@@ -1555,8 +1559,8 @@ async function checkAppVersion(){
     const res=await fetch('index.html?ts='+Date.now(),{cache:'no-store'});
     if(!res.ok)return;
     const html=await res.text();
-    const fresh=(html.match(/\?v=([0-9a-f]+)/g)||[]).map(x=>x.slice(3)).join(',');
-    const mine=appLoadedVersions();
+    const fresh=versionMarks(html);
+    const mine=versionMarks();
     if(!fresh||!mine||fresh===mine)return;
     _appVerShown=true;
     showAppUpdateBar();
@@ -1573,7 +1577,11 @@ function showAppUpdateBar(){
   if(btn)btn.onclick=()=>{
     // Перезагружаем с другим адресом: простая перезагрузка может снова взять index.html
     // из кеша, а с меткой времени браузеру придётся спросить сервер.
-    location.replace(location.pathname+'?r='+Date.now()+location.hash);
+    // Адрес «/?r=…» у GitHub Pages попадает в тот же кеш, что и «/», поэтому кнопка
+    // снова открывала старую страницу. index.html кешируется отдельно, и именно его
+    // мы только что сверили с сервером.
+    const page=location.pathname.endsWith('index.html')?location.pathname:'index.html';
+    location.replace(page+'?r='+Date.now()+location.hash);
   };
 }
 setTimeout(checkAppVersion,8000);                 // первый раз — вскоре после входа
