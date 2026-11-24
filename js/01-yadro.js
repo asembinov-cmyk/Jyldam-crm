@@ -609,6 +609,7 @@ async function dbUpdate(table,id,row){
   }
   if(error){console.error('update',table,error);toast(dbErrText(error));return null;}
   if(AUTO_LOG_TABLES.has(table)){const ch=buildChanges(beforeCopy,data);if(ch.length)logAction('update',table,{entity_id:id,entity_label:recLabel(data),changes:ch});}
+  if(table==='orders')autoTrackMaybe(data);
   return data;
 }
 // свежая загрузка одной записи мимо кэша S — используется перед записью складских операций/резервов,
@@ -1394,6 +1395,40 @@ const callKelesuSyncHistory=payload=>callEdge('kelesu-sync-history',payload);
 // получение реального трек-номера у Казпочты (Edge Function kazpost-get-barcode) — по одному
 // заказу; функция сама сохраняет полученный трек-код прямо в заказ, тут только вызов
 const callKazpostGetBarcode=orderId=>callEdge('kazpost-get-barcode',{order_id:orderId});
+/* ТРЕК САМ, КОГДА ЗАКАЗ ГОТОВ (решение владельца 24.11.2026): почтовый заказ заборов, склад
+   принял (sorted_at) и вес внесён — трек у Казпочты запрашивается в фоне, человек не ждёт
+   13 секунд. Именно в этот момент, а не при сохранении: данные уходят в Казпочту один раз и
+   там застывают, поэтому вес и сумма должны быть уже окончательными.
+   Зовётся из dbUpdate после любой удачной правки заказа. Повтор безопасен: на тот же номер
+   заказа Казпочта возвращает прежний ШПИ. Без индекса не запрашиваем — по нему она везёт. */
+const AUTO_TRACK_ON_READY=true;
+const _autoTrackBusy=new Set(), _autoTrackFailed=new Map();
+function autoTrackMaybe(o){
+  try{
+    if(!AUTO_TRACK_ON_READY||!o||!o.id||!isStaff())return;
+    if(String(o.track||'').trim()||!o.sorted_at||!(Number(o.weight)>0))return;
+    if(isBaraholkaOrder(o))return;
+    const d=(S.delivery||[]).find(x=>x.id===o.delivery_id);
+    if(!d||!/почт/i.test(d.name||''))return;
+    if(!/^\d{6}$/.test(String(o.index||'').trim())||!String(o.client||'').trim()||!String(o.phone||'').trim())return;
+    if(_autoTrackBusy.has(o.id))return;
+    const f=_autoTrackFailed.get(o.id);
+    if(f&&Date.now()-f<5*60000)return;   // Казпочта отказала — не долбим её каждой правкой
+    _autoTrackBusy.add(o.id);
+    callKazpostGetBarcode(o.id).then(r=>{
+      _autoTrackBusy.delete(o.id);
+      if(r&&r.success&&r.barcode){
+        const c=(S.orders||[]).find(x=>x.id===o.id); if(c)c.track=r.barcode;
+        toast('Трек-код присвоен: '+r.barcode+' · заказ '+(o.code||''));
+        if(typeof scheduleRtRender==='function')scheduleRtRender();
+      }else{
+        _autoTrackFailed.set(o.id,Date.now());
+        console.warn('авто-трек не получен',o.code,r&&r.error);
+        toast('Трек для заказа '+(o.code||'')+' сам не получился — нажмите «Получить трек»');
+      }
+    }).catch(e=>{_autoTrackBusy.delete(o.id);_autoTrackFailed.set(o.id,Date.now());console.warn('авто-трек',e);});
+  }catch(e){console.warn('autoTrackMaybe',e);}
+}
 // то же самое ПАЧКОЙ: один вызов функции на список заказов. Внутри функции вход
 // проверяется один раз на всю пачку, а не на каждый заказ отдельно, и сама функция
 // запускается один раз вместо N — Казпочта быстрее не стала, но накладные расходы ушли.
