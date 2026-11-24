@@ -196,6 +196,18 @@ function stState(v) {
   return ST_STATE[v] || "—";
 }
 
+function stCanIssue() {
+  if (typeof isAdmin === "function" && isAdmin()) return true;
+  return typeof can === "function" && can("settlements", "edit");
+}
+
+function stIssueCell(o, m) {
+  if (!stCanIssue() || !o || o.state !== "open") return "";
+  const missing = (m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id);
+  if (missing) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>`;
+  return `<button class="btn sm primary" type="button" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}">Выставить счёт</button>`;
+}
+
 function settlementsTable(tab, rows, m) {
   const cat = stCatalog();
   if (tab === "forgotten") {
@@ -214,8 +226,8 @@ function settlementsTable(tab, rows, m) {
       `<tr><td>${i.test ? "Тестовый счёт" : "Счёт"}</td><td>${stEsc(stWho(i.payer_type, i.payer_id, i.payer_name, cat))}</td><td>${stEsc(stDay(i.period_start))} — ${stEsc(stDay(i.period_end))}</td><td>${stMoney(i.amount)}</td><td>${stEsc(stState(i.status))}</td><td>${(i.order_ids || []).map((id, n) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.order_codes || [])[n], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
   }
   if (!rows.length) return `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`;
-  return `<table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th><th>Кто держит долг</th><th>Период</th><th>Сумма</th><th>Состояние</th></tr></thead><tbody>${rows.map((o) =>
-    `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stEsc(stWho(o.holder_type, o.holder_id, o.holder_name, cat))}${(m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th><th>Кто держит долг</th><th>Период</th><th>Сумма</th><th>Состояние</th>${stCanIssue() ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o) =>
+    `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stEsc(stWho(o.holder_type, o.holder_id, o.holder_name, cat))}${(m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${stCanIssue() ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
 }
 
 function settlementsAdminForm() {
@@ -241,6 +253,7 @@ function settlementsBind(root) {
     renderSettlements();
   });
   root.querySelectorAll("[data-storder]").forEach((b) => b.onclick = () => settlementsOpenOrder(b.dataset.storder));
+  root.querySelectorAll("[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
   root.querySelectorAll("[data-stpickup]").forEach((b) => b.onclick = () => settlementsOpenPickup(b.dataset.stpickup));
   const excel = root.querySelector("#st_excel");
   if (excel) excel.onclick = settlementsExcel;
@@ -304,6 +317,32 @@ function settlementsOpenPickup(id) {
   const p = (typeof S !== "undefined" ? (S.pickups || []) : []).find((x) => x.id === id || String(x.code) === String(id));
   if (p && typeof pickupOrdersModal === "function") { pickupOrdersModal(p.id); return; }
   if (typeof toast === "function") toast("Заявка " + id);
+}
+
+async function settlementsIssueRow(b) {
+  const who = (b.closest("tr") && b.closest("tr").children[2] && b.closest("tr").children[2].textContent || "плательщику").replace(/\s+/g, " ").trim();
+  const day = b.dataset.stday || "";
+  const amount = Number(b.dataset.stamount) || 0;
+  if (!confirm(`Выставить счёт «${who}» за ${stDay(day)} на ${stMoney(amount)}?\nПовторное нажатие второй счёт не создаёт.`)) return;
+  b.disabled = true;
+  const res = await callEdge("settlements", {
+    action: "issue",
+    logical_key: `${b.dataset.stissue}:${b.dataset.stholder}:${day}`,
+    holder_type: b.dataset.stissue,
+    holder_id: b.dataset.stholder,
+    period_start: day,
+    period_end: day,
+    launch: "manual",
+  });
+  if (!res || res.error || res.success === false) {
+    b.disabled = false;
+    if (typeof toast === "function") toast((res && (res.error || res.message)) || "Счёт не выставлен");
+    return;
+  }
+  const inv = res.invoice || {};
+  if (typeof toast === "function") toast(inv.test ? "Тестовый счёт записан, в Kaspi не уходил" : `Счёт выставлен · ${stMoney(inv.amount || amount)}`);
+  settlementsModel = null;
+  renderSettlements();
 }
 
 async function settlementsSaveKaspi(holderType, holderId, phone) {
