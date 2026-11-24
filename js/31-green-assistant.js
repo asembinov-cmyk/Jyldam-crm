@@ -35,6 +35,7 @@ let gaAiInfo=null;        // что ответила функция на info (�
 let gaAiBusy='';          // pull | build | save — что сейчас идёт
 let gaAiLastLog=0;
 let gaAiDays=14;
+let gaAiStt;              // undefined — не спрашивали; null — ключа нет; строка — «sk-…abcd»; false — не узнали
 let gaAiDraft={instructions:null,learned:null};   // несохранённый текст переживает перерисовку
 
 const gaAiCanEdit=()=>isAdmin()||can('greenapi','edit');
@@ -202,6 +203,43 @@ function gaAiOptsHtml(){
   </div>`;
 }
 
+/* КЛЮЧ РАСШИФРОВКИ ГОЛОСОВЫХ (просьба владельца 24.11.2026: «выведи, куда вставить ключ»).
+   Ключ уходит в хранилище секретов базы функцией green_ai_set_stt_key и обратно в браузер
+   НЕ возвращается никогда — видно только начало и конец. В таблицах и в коде его нет. */
+async function gaAiSttLoad(){
+  try{
+    const {data,error}=await sb.rpc('green_ai_stt_hint');
+    if(error)throw error;
+    gaAiStt=data||null;
+  }catch(e){gaAiStt=false;}
+}
+function gaAiSttHtml(){
+  const adm=isAdmin();
+  let st;
+  if(gaAiStt===undefined)st='<span class="hint">проверяем…</span>';
+  else if(gaAiStt===false)st='<span style="color:var(--rust)">не удалось узнать, задан ли ключ</span>';
+  else if(gaAiStt)st=`<b style="color:#15803d">ключ задан</b> <span class="hint">(${esc(gaAiStt)})</span> — голосовые расшифровываются`;
+  else st='<b style="color:var(--rust)">ключ не задан</b> — на голосовые ассистент просит написать текстом';
+  return `<div class="ga-ai-sec">
+    <div class="ga-ai-h">Распознавание голосовых сообщений</div>
+    <div style="margin-bottom:8px">${st}</div>
+    ${adm?`<div class="ga-ai-row">
+      <label class="ga-ai-lbl" style="flex:1;min-width:240px">Ключ API OpenAI
+        <input type="password" id="gaAiSttKey" autocomplete="off" placeholder="sk-…" style="width:100%"></label>
+      <button class="btn primary" id="gaAiSttSave" style="align-self:flex-end">Сохранить ключ</button>
+      ${gaAiStt?'<button class="btn ghost" id="gaAiSttDel" style="align-self:flex-end">Удалить</button>':''}
+    </div>`:'<div class="hint">Ключ задаёт администратор.</div>'}
+    <div class="hint">Ключ создаётся на platform.openai.com → API keys. Он хранится на сервере в зашифрованном виде и обратно не показывается. Расшифровка стоит меньше цента за минуту аудио; новый ключ начинает действовать в течение пяти минут.</div>
+  </div>`;
+}
+async function gaAiSttSave(key){
+  const {data,error}=await sb.rpc('green_ai_set_stt_key',{p_key:key});
+  if(error){toast('Не сохранено: '+dbErrText(error));return;}
+  gaAiStt=data||null;
+  toast(key?'Ключ сохранён':'Ключ удалён');
+  gaAiRedraw();
+}
+
 function gaAiLogHtml(){
   if(gaAiLog===null)return '<div class="hint">Загружаем журнал…</div>';
   if(gaAiLogErr)return `<div class="hint" style="color:var(--rust)">${esc(gaAiLogErr)}</div>`;
@@ -228,7 +266,7 @@ function gaAiHtml(){
   if(!gaAi)return '<div class="ga-ai"><div class="hint">Загружаем настройки ассистента…</div></div>';
   return `<div class="ga-ai">
     <div class="hint" style="margin-bottom:6px">Ассистент принимает в WhatsApp заявки на забор и заводит их в CRM. Всё остальное — вопросы о доставке, деньги, жалобы — он передаёт менеджеру: такой диалог появляется во вкладке «Диалоги» в «Ждут ответа».${gaAiCanEdit()?'':' Менять настройки можно по праву «редактирование».'}</div>
-    ${gaAiModeHtml()}${gaAiTestHtml()}${gaAiRulesHtml()}${gaAiLearnHtml()}${gaAiOptsHtml()}
+    ${gaAiModeHtml()}${gaAiTestHtml()}${gaAiRulesHtml()}${gaAiLearnHtml()}${gaAiOptsHtml()}${gaAiSttHtml()}
     <div class="ga-ai-sec">
       <div class="ga-ai-h">Журнал ассистента <button class="btn sm ghost" id="gaAiLogReload" style="margin-left:10px">Обновить</button></div>
       <div id="gaAiLogBox">${gaAiLogHtml()}</div>
@@ -352,6 +390,14 @@ function gaAiBind(){
   };
   const mo=$('gaAiModel');
   if(mo)mo.onchange=async()=>{if(!await gaAiSave({model:mo.value},'Модель сохранена'))mo.value=gaAi.model;};
+  const sk=$('gaAiSttSave');
+  if(sk)sk.onclick=()=>{
+    const v=String(($('gaAiSttKey')||{}).value||'').trim();
+    if(!v){toast('Вставьте ключ в поле');return;}
+    sk.disabled=true;gaAiSttSave(v);
+  };
+  const sd=$('gaAiSttDel');
+  if(sd)sd.onclick=()=>{if(confirm('Удалить ключ? Голосовые перестанут расшифровываться.')){sd.disabled=true;gaAiSttSave('');}};
   const lr=$('gaAiLogReload');
   if(lr)lr.onclick=async()=>{lr.disabled=true;await gaAiLogLoad();gaAiLogRedraw();const b=$('gaAiLogReload');if(b)b.disabled=false;};
   gaAiBindLog();
@@ -374,5 +420,6 @@ function gaAiRender(){
   if(gaAiLog===null||Date.now()-gaAiLastLog>20000)jobs.push(gaAiLogLoad());
   if(!gaAiInfo||gaAiInfo.failed)jobs.push(gaAiInfoLoad());
   if(!gaState)jobs.push(gaStateLoad());
+  if(gaAiStt===undefined||gaAiStt===false)jobs.push(gaAiSttLoad());
   if(jobs.length)Promise.all(jobs).then(()=>{if(gaSub==='assistant'&&!gaAiBusy)gaAiRedraw();}).catch(()=>{});
 }
