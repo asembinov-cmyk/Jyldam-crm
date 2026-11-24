@@ -279,8 +279,8 @@ function settlementsPickupExtra(o) {
       <input type="number" min="0" class="pom-sum" data-st-fee="${stEsc(o.id)}" value="${fee === "" ? "" : stEsc(fee)}" placeholder="ещё не определена"></div>
     <small style="color:var(--muted)">Галочка «Оплачено отправителем» больше не прячет эту сумму. Пока цена пустая, заказ в реестре «Ожидает определения стоимости» и в счёт не входит.</small>
     <div data-st-payer="${stEsc(o.id)}" style="margin-top:8px">
-      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="partner_self"> Платит партнёр по своим условиям</label>
-      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="pickup_gold"> Курьер получил на свой Kaspi Gold</label>
+      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="partner_self" ${o._payChoice === "partner_self" ? "checked" : ""}> Платит партнёр по своим условиям</label>
+      <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="pickup_gold" ${o._payChoice === "pickup_gold" ? "checked" : ""}> Курьер получил на свой Kaspi Gold</label>
     </div></div>`;
 }
 
@@ -290,6 +290,14 @@ function settlementsBindPickup(wrap) {
     const payer = wrap.querySelector(`[data-st-payer="${inp.dataset.stFee}"]`);
     const sync = () => { if (payer) payer.style.display = box && box.checked ? "" : "none"; };
     if (box) { box.addEventListener("change", sync); sync(); }
+    wrap.querySelectorAll(`input[name="stpay-${inp.dataset.stFee}"]`).forEach((radio) => {
+      radio.addEventListener("change", () => {
+        const order = (typeof S !== "undefined" && S.orders || []).find((x) => x.id === inp.dataset.stFee);
+        if (order) order._payChoice = radio.value;
+        const card = radio.closest(".pom-order");
+        if (card) card.classList.remove("pom-needpay");
+      });
+    });
     inp.onchange = async () => {
       const choiceEl = wrap.querySelector(`input[name="stpay-${inp.dataset.stFee}"]:checked`);
       if (!box || !box.checked || !choiceEl || inp.value === "") return;

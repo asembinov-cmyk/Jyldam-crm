@@ -1165,6 +1165,8 @@
   .pom-scan{margin-bottom:14px}
   .pom-scan input{width:100%;padding:11px 14px;border:2px solid var(--rust);border-radius:10px;font:inherit;font-size:15px}
   .pom-order.pom-found{outline:3px solid var(--moss);outline-offset:2px;animation:pomFlash 1.4s ease}
+  .pom-order.pom-needpay{outline:3px solid var(--rust);outline-offset:2px;background:#fff4f2}
+  .pom-order.pom-needpay [data-st-payer]{outline:2px dashed var(--rust);border-radius:8px;padding:6px}
   @keyframes pomFlash{0%{background:#e9f6ec}100%{background:var(--paper)}}
   .pom-paid{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;font-weight:600;color:var(--ink);cursor:pointer}
   .pom-paid input{width:18px;height:18px;accent-color:var(--rust);cursor:pointer}

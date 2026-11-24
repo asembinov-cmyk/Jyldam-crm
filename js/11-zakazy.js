@@ -311,16 +311,53 @@ async function pickupOrdersModal(pickupId){
     // размер пакета тоже обязателен — курьер должен указать его на месте, глядя на посылку
     const noSize=list.filter(o=>!o.size);
     if(noSize.length){toast(`Выберите размер пакета у каждого заказа (не указан у ${noSize.length})`);return false;}
+    const ov=document.querySelector('.overlay:last-child');
+    const missingPay=list.filter(o=>{
+      const chk=ov&&ov.querySelector(`[data-pompaid="${o.id}"]`);
+      const paid=chk?chk.checked:!!o.paid_by_sender;
+      if(!paid)return false;
+      const choice=ov&&ov.querySelector(`input[name="stpay-${o.id}"]:checked`);
+      if(choice){o._payChoice=choice.value;return false;}
+      return !o._payChoice;
+    });
+    if(missingPay.length){
+      const first=missingPay[0];
+      let card=ov&&ov.querySelector(`[data-pomcard="${first.id}"]`);
+      if(!card&&ov){
+        pomOnlyNoPhoto=false;
+        const full=S.orders.filter(o=>o.pickup_id===pickupId);
+        const idx=full.findIndex(o=>o.id===first.id);
+        if(idx>=pomVisible)pomVisible=idx+1;
+        const body=ov.querySelector('.modal-body');
+        if(body){body.innerHTML=renderBody();if(typeof bindPom==='function')bindPom();}
+        card=ov.querySelector(`[data-pomcard="${first.id}"]`);
+      }
+      if(ov){
+        ov.querySelectorAll('.pom-needpay').forEach(c=>c.classList.remove('pom-needpay'));
+        missingPay.forEach(o=>{
+          const el=ov.querySelector(`[data-pomcard="${o.id}"]`);
+          if(el)el.classList.add('pom-needpay');
+        });
+      }
+      if(card)card.scrollIntoView({behavior:'smooth',block:'center'});
+      const code=first.code||'';
+      toast(missingPay.length===1
+        ?`Заказ #${code}: стоит «Оплачено отправителем». Выберите, кто платит — партнёр по своим условиям или курьер получил на Kaspi Gold.`
+        :`У ${missingPay.length} заказов стоит «Оплачено отправителем», но не выбрано, кто платит. Первый: #${code}.`);
+      return false;
+    }
     return true;
   }});
   drawPickups(); // обновляем счётчик в карточке заявки сразу после автосоздания
   // навешиваем обработчики (после вставки в DOM)
+  let bindPom=()=>{};
   setTimeout(()=>{
     const wrap=document.querySelector('.overlay:last-child');if(!wrap)return;
     // прячем нижнюю кнопку «Сохранить» — теперь она продублирована наверху, рядом с остальными
     // кнопками, чтобы не листать длинную ленту заказов до самого низа
     const bottomFoot=wrap.querySelector('.modal-foot');if(bottomFoot)bottomFoot.style.display='none';
     const bind=()=>{
+      bindPom=bind;
       if(typeof settlementsBindPickup==='function')settlementsBindPickup(wrap);
       // верхняя кнопка «Сохранить» — просто нажимает исходную (скрытую) кнопку внизу, чтобы
       // сработала та же самая проверка (фото + размер пакета у каждого заказа), без дублирования логики
