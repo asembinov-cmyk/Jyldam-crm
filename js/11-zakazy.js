@@ -2477,6 +2477,7 @@ function drawCourierOrderCards(el,rows){
         <div class="cc-row"><span class="lbl">Трек-код</span><span class="vl">${esc(o.track)||'—'}</span></div>
         <div class="cc-actions">
           <button class="btn sm ghost" data-oview="${o.id}">Открыть</button>
+          ${typeof settlementsDeliveryPay==='function'?settlementsDeliveryPay(o):''}
         </div>
       </div>
     </div>`;}).join('')}</div>`;

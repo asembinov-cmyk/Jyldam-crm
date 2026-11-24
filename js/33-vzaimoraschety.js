@@ -179,6 +179,12 @@ function settlementsBind(root) {
   if (modeSave) modeSave.onclick = settlementsSaveMode;
   const save = root.querySelector("#st_adm_save");
   if (save) save.onclick = settlementsSaveAdmin;
+  root.querySelectorAll("[data-stcash]").forEach((b) => b.onclick = async () => {
+    const res = await callEdge("settlements", { action: "cash_confirm", order_id: b.dataset.stcash });
+    if (typeof toast === "function") toast(res && res.error ? res.error : "Долг перенесён на администратора");
+    settlementsModel = null;
+    renderSettlements();
+  });
 }
 
 async function renderSettlements() {
@@ -336,6 +342,32 @@ function settlementsShiftMarkup(preview) {
     <p>Долг курьера перед компанией: ${stMoney(preview.debt)}</p>
     <p>Наличные администратору: ${stMoney(preview.cashToAdmin)}</p>
     <p style="color:var(--muted)">${preview.closed ? "Смена уже закрыта" : (preview.debt > 0 ? "После подтверждения выставится один счёт на Kaspi Gold." : "Долг нулевой, счёт не выставится.")}</p></div>`;
+}
+
+function settlementsInvoiceCard(inv, lines) {
+  const list = (lines || []).map((o) => `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(o.order_id)}</button></td><td>${stEsc(o.pickup_id || "—")}</td><td>${stMoney(o.amount)}</td><td>${stEsc(o.state)}</td></tr>`).join("");
+  return `<div class="panel" style="padding:14px"><h3 style="margin:0 0 8px">Счёт ${stEsc(inv.id)}</h3>
+    <p>Плательщик: ${stEsc(inv.payer_type)} · ${stEsc(inv.payer_id)}</p>
+    <p>Период: ${stEsc(inv.period_start)} — ${stEsc(inv.period_end)}</p>
+    <p>Сумма: ${stMoney(inv.amount)} · ${stEsc(inv.status)}${inv.test ? " · тест" : ""}</p>
+    <p style="color:var(--muted)">Отмена неоплаченного счёта возвращает долг. Оплата части суммы не принимается.</p>
+    <table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th><th>Сумма</th><th>Состояние</th></tr></thead><tbody>${list}</tbody></table></div>`;
+}
+
+function settlementsDeliveryPay(o) {
+  return `<div class="panel" style="padding:10px;margin-top:8px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Оплата доставки ${stEsc(o.code || o.id)}</div>
+    <label class="pom-paid"><input type="radio" name="stdel-${stEsc(o.id)}" value="delivery_invoice"> Удалённый счёт получателю</label>
+    <label class="pom-paid"><input type="radio" name="stdel-${stEsc(o.id)}" value="delivery_gold"> На Kaspi Gold курьера</label>
+    <label class="pom-paid"><input type="radio" name="stdel-${stEsc(o.id)}" value="delivery_cash"> Наличные администратору</label>
+  </div>`;
+}
+
+function settlementsAdminConfirm(rows) {
+  const body = (rows || []).map((o) => `<tr><td>${stEsc(o.order_id)}</td><td>${stMoney(o.amount)}</td><td>${stEsc(o.holder_id)}</td><td><button class="btn sm" type="button" data-stcash="${stEsc(o.order_id)}">Деньги получены</button></td></tr>`).join("");
+  return `<div class="panel" style="padding:14px"><h3 style="margin:0 0 8px">Наличные у курьера</h3>
+    <p style="color:var(--muted)">Подтверждается каждый заказ отдельно. Неподтверждённые остаются долгом курьера.</p>
+    <table class="resp-table"><thead><tr><th>Заказ</th><th>Сумма</th><th>Сейчас держит</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 document.addEventListener("click", (ev) => {
