@@ -2276,3 +2276,37 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
   #gaSync{font-size:10px}
   .ga-conn .btn{min-height:44px}
 }
+
+/* ---------- вкладка «ИИ ассистент» (js/31) ---------- */
+.ga-ai{padding:18px;max-width:1040px}
+.ga-ai-sec{padding:16px 0;border-top:1px solid var(--line)}
+.ga-ai-sec:first-of-type{border-top:0}
+.ga-ai-h{font-weight:700;font-size:15px;margin-bottom:8px;display:flex;align-items:center}
+.ga-ai-modes{display:flex;gap:8px;flex-wrap:wrap}
+.ga-ai-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.ga-ai-add{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 8px}
+.ga-ai-add input{flex:1 1 180px;min-width:0}
+.ga-ai input:not([type=checkbox]),.ga-ai select,.ga-ai textarea{font:inherit;font-size:13px;padding:8px 11px;
+  border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink)}
+.ga-ai textarea{width:100%;margin-top:10px;resize:vertical;line-height:1.5}
+.ga-ai input:focus,.ga-ai select:focus,.ga-ai textarea:focus{outline:none;border-color:var(--ink)}
+.ga-ai-chk{display:flex;gap:9px;align-items:flex-start;font-size:13px;margin-top:12px;cursor:pointer}
+.ga-ai-chk input{flex:0 0 auto;width:17px;height:17px;margin:2px 0 0}
+.ga-ai-lbl{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+.ga-ai-log td{vertical-align:top;font-size:12px;max-width:320px;white-space:pre-wrap;word-break:break-word}
+.ga-ai-log td:last-child{white-space:nowrap}
+.ga-ai-out{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;background:rgba(0,0,0,.06);white-space:nowrap}
+.ga-ai-out.ok{background:rgba(22,163,74,.14);color:#15803d}
+.ga-ai-out.warn{background:rgba(180,83,9,.14);color:#b45309}
+.ga-ai-out.err{background:rgba(220,38,38,.12);color:#b91c1c}
+.ga-ai-pick{margin-top:6px;padding:7px 9px;border-radius:8px;background:rgba(22,163,74,.08);font-size:11px;line-height:1.45}
+@media (max-width:760px),(pointer:coarse){
+  .ga-ai{padding:14px}
+  .ga-ai input:not([type=checkbox]),.ga-ai select,.ga-ai textarea{font-size:16px;min-height:44px}
+  .ga-ai-add input{flex:1 1 100%}
+  .ga-ai .btn{min-height:44px}
+  .ga-ai-modes .btn{flex:1 1 auto}
+  .ga-ai-lbl{width:100%}
+  .ga-ai-lbl select{width:100%}
+  .ga-ai-log td{max-width:none}
+}

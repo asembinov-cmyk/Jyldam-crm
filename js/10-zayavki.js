@@ -249,7 +249,7 @@ function drawPickups(){
     <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer" class="${p.partner_id?'pickup-row-qr':''}" title="${p.partner_id?'Пришла от партнёра через кабинет (QR)':''}">
       <td data-label="Дата">${esc(fmtDate(p.pickup_date))}${p.created_at?`<small class="cell-time">создана ${esc(fmtDateTime(p.created_at))}</small>`:''}</td>
       <td data-label="Город">${cityPill(p.city_id)}</td>
-      <td data-label="Наименование"><strong>${esc(p.name)}</strong>${(p.pack_size||p.auto_created)?`<small class="cell-time">${p.pack_size?('📦 пакет '+esc(p.pack_size)):''}${(p.pack_size&&p.auto_created)?' · ':''}${p.auto_created?'создана автоматом':''}</small>`:''}</td>
+      <td data-label="Наименование"><strong>${esc(p.name)}</strong>${(p.pack_size||p.auto_created||p.ai_created)?`<small class="cell-time">${[p.pack_size?('📦 пакет '+esc(p.pack_size)):'',p.auto_created?'создана автоматом':'',p.ai_created?'🤖 создана ассистентом WhatsApp':''].filter(Boolean).join(' · ')}</small>`:''}</td>
       <td data-label="Адрес">${esc(p.address)||'—'}</td>
       <td data-label="Номер">${phoneLink(p.phone)}</td>
       <td data-label="Район">${esc(districtName(p.district_id))}</td>
@@ -889,6 +889,7 @@ function pickupTwinText(t){
   if(st&&st.name)bits.push('статус: '+st.name);
   if(t.partner_id)bits.push('создана партнёром по QR');
   if(t.auto_created)bits.push('создана автоматом');
+  if(t.ai_created)bits.push('создана ассистентом WhatsApp');
   return 'Заявка на «'+(t.name||'')+'» на '+pickupDayWhen(t.pickup_date)+' уже есть.\n\n'
     +bits.join(' · ')+'\n\n'
     +'На одного партнёра в день создаётся одна заявка. Добавьте заказы в существующую '

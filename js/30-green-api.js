@@ -30,9 +30,9 @@ const GA_STATE_MS= 120000;  // как часто спрашиваем состо
 const GA_QR_STEP = 4000;    // QR у Green API живёт 20 секунд — обновляем чаще
 const GA_QR_MAX  = 180000;  // и не крутим его дольше трёх минут без человека
 // `select('*')` не делаем: колонки перечислены по именам, как в модуле Kelesu.
-const GA_COLS='id,id_message,chat_id,phone_norm,chat_name,sender_name,direction,message_type,body_text,media_url,file_name,status,via,sent_by_name,done_at,created_at';
+const GA_COLS='id,id_message,chat_id,phone_norm,chat_name,sender_name,direction,message_type,body_text,media_url,file_name,status,via,sent_by_name,done_at,created_at,ai_status,ai_note';
 
-let gaSub='dialogs';        // dialogs | connect
+let gaSub='dialogs';        // dialogs | assistant | connect
 let gaRows=null;            // последние сообщения — из них собираются диалоги
 let gaErr='';
 let gaChatId='';            // открытый диалог (chat_id у Green API)
@@ -180,6 +180,7 @@ async function gaTick(){
   // на «Подключении» состояние нужно чаще: человек только что отсканировал код
   const stEvery=gaSub==='connect'?15000:GA_STATE_MS;
   if(!gaQr&&Date.now()-gaStateAt>stEvery)gaStateLoad();
+  if(gaSub==='assistant'&&typeof gaAiTick==='function'){gaAiTick();return;}
   if(gaSub!=='dialogs')return;
   const need=gaRtSeen?GA_SYNC_RT:GA_SYNC_MS;
   if(Date.now()-gaLastSync<need)return;
@@ -209,11 +210,23 @@ function gaDialogs(){
     const key=String(m.chat_id||'');
     if(!key)return;
     let d=by.get(key);
-    if(!d){d={id:key,norm:gaNorm(key),group:gaIsGroup(key),last:m,cnt:0,unread:0,closed:false,name:''};by.set(key,d);}
+    if(!d){d={id:key,norm:gaNorm(key),group:gaIsGroup(key),last:m,cnt:0,unread:0,closed:false,aiAnswered:false,handoff:'',name:''};by.set(key,d);}
     d.cnt++;
+    /* С АССИСТЕНТОМ ПРАВИЛО ТОНЬШЕ (js/31). Его ответ диалог НЕ закрывает: если он при
+       этом передал вопрос менеджеру (ai_status handoff / failed), человек обязан это
+       увидеть — иначе «передал менеджеру» означало бы «потерял». А входящее, которое
+       ассистент разобрал сам (answered), ответа человека не ждёт. */
     if(!d.closed){
-      if(m.direction==='outbound'||m.done_at)d.closed=true;
-      else d.unread++;
+      if(m.done_at)d.closed=true;
+      else if(m.direction==='outbound'){
+        if(m.via==='ai')d.aiAnswered=true; else d.closed=true;
+      }else{
+        const st=m.ai_status||'';
+        if(st==='handoff'||st==='failed'){
+          d.unread++;
+          if(!d.handoff)d.handoff=m.ai_note||(st==='failed'?'ассистент не справился':'ассистент передал диалог менеджеру');
+        }else if(st!=='answered'&&!d.aiAnswered)d.unread++;
+      }
     }
     if(!d.name){
       if(m.chat_name)d.name=String(m.chat_name);
@@ -391,11 +404,12 @@ function gaBubbles(){
     let sep='';
     if(t.date&&t.date!==day){day=t.date;sep=`<div class="wam-day">${esc(day)}</div>`;}
     // Кто написал: в группе — участник, у нашего ответа — сотрудник или «с телефона».
-    const who=out?(m.sent_by_name||(m.via==='phone'?'с телефона':'')):(group?(m.sender_name||''):'');
+    const byAi=out&&m.via==='ai';
+    const who=byAi?'🤖 ИИ-ассистент':(out?(m.sent_by_name||(m.via==='phone'?'с телефона':'')):(group?(m.sender_name||''):''));
     const att=gaMedia(m);
     const body=m.body_text||(att?'':'—');
     return sep+`<div class="wam-row ${out?'out':'in'}">
-      <div class="wam-bub ${out?'out':'in'}">
+      <div class="wam-bub ${out?'out':'in'}${byAi?' bot':''}">
         ${who?`<div class="wam-who">${esc(who)}</div>`:''}
         ${att}
         ${body?`<div class="wam-txt">${esc(body)}</div>`:''}
@@ -443,7 +457,10 @@ function gaChatHtml(){
       </div>
     </div>`;
   }
-  return head+`<div class="wam-scroll" id="gaScroll">${gaBubbles()}</div>`+foot;
+  // Ассистент передал диалог человеку — причина видна прямо под перепиской.
+  const dlg=gaDialogs().find(x=>x.id===gaChatId);
+  const strip=dlg&&dlg.handoff?`<div class="wam-wait">🤖 Ассистент передал диалог менеджеру: ${esc(dlg.handoff)}</div>`:'';
+  return head+`<div class="wam-scroll" id="gaScroll">${gaBubbles()}${strip}</div>`+foot;
 }
 
 /* Правая колонка: заказ клиента. Карточку, «Где посылка» и список заказов рисуют
@@ -502,6 +519,7 @@ function gaListHtml(){
         <div class="wam-i-prev">${m.direction==='outbound'?'<span class="wam-i-you">вы: </span>':''}${esc(prev)}</div>
         <div class="wam-i-tags">
           ${d.waiting?`<span class="wam-tag warn">ждёт ответа · ${d.unread}</span>`:''}
+          ${d.handoff&&!d.group?'<span class="wam-tag warn">🤖 передал менеджеру</span>':''}
           ${d.group?'<span class="wam-tag">группа</span>':(d.name?`<span class="wam-tag">${esc(d.name.slice(0,28))}</span>`:'')}
           <span class="wam-tag mute">${d.cnt} сообщ.</span>
         </div>
@@ -792,7 +810,7 @@ function renderGreen(){
     $('main').innerHTML='<div class="empty"><div class="big">Нет доступа к этому разделу</div>Право выдаётся в «Сотрудники» → «Роли и права», столбец «Green API».</div>';
     return;
   }
-  const subs=[['dialogs','Диалоги'],['connect','Подключение']];
+  const subs=[['dialogs','Диалоги'],['assistant','ИИ ассистент'],['connect','Подключение']];
   if(!subs.some(x=>x[0]===gaSub))gaSub='dialogs';
   const canSend=can('greenapi','create');
   $('main').innerHTML=`
@@ -819,6 +837,9 @@ function renderGreen(){
   if(gaSub==='connect'){
     gaConnRedraw();
     if(!gaState||Date.now()-gaStateAt>15000)gaStateLoad();
+  }else if(gaSub==='assistant'){
+    // вкладку рисует js/31; он подключён позже, поэтому зовём по имени в момент вызова
+    if(typeof gaAiRender==='function')gaAiRender();
   }else{
     gaBind();
     const sc=$('gaScroll');if(sc&&gaStick)sc.scrollTop=sc.scrollHeight;
