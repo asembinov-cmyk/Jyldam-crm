@@ -51,6 +51,8 @@ let gaStick=true;           // человек смотрит конец пере
 let gaDrafts={};            // черновики ответов ПО ЧАТАМ: один на всех уехал бы чужому
 let gaQr=null;              // {img,note,at} — пока открыт QR-код
 let gaQrTimer=null;
+let gaAi={};                // пауза ассистента по чатам: chat_id → {paused,resumed_at} | null (таблицы нет)
+let gaAiCfg=null;           // {mode,human_min} из настроек ассистента
 let gaBusy='';              // какое действие на вкладке «Подключение» сейчас идёт
 
 const gaCall=(action,extra)=>callEdge('green-api',Object.assign({action},extra||{}));
@@ -109,10 +111,59 @@ async function gaChatLoad(chatId){
     if(error)throw error;
     if(gaChatId!==chatId)return;            // пока грузили, открыли другой диалог
     gaChat=(data||[]).reverse();
+    gaAiLoad(chatId);                       // пауза ассистента — отдельно, чат её не ждёт
   }catch(e){
     if(gaChatId!==chatId)return;
     gaChat=[];gaChatErr=gaTableErr(e);
   }
+}
+
+/* ПАУЗА АССИСТЕНТА В ЭТОМ ЧАТЕ (просьба владельца 24.11.2026). Строка в green_ai_chats:
+   paused — молчит, пока не снимут; resumed_at — «сняли с паузы» (сообщения менеджера до
+   этого момента автопаузу не держат). Читает её функция green-assistant перед ответом.
+   Таблицы или прав нет — кнопки просто нет. */
+async function gaAiLoad(chatId){
+  if(gaIsGroup(chatId))return;
+  try{
+    if(!gaAiCfg){
+      const c=await sb.from('green_ai_settings').select('mode,human_min').eq('id',1).maybeSingle();
+      if(!c.error&&c.data)gaAiCfg=c.data;
+    }
+    const {data,error}=await sb.from('green_ai_chats').select('paused,resumed_at').eq('chat_id',chatId).maybeSingle();
+    if(error)throw error;
+    gaAi[chatId]=data||{paused:false,resumed_at:null};
+  }catch(e){gaAi[chatId]=null;}
+  if(gaChatId===chatId&&S.tab==='greenapi'&&gaSub==='dialogs')gaRedraw();
+}
+/* Что сейчас с ассистентом в открытом чате: null — показывать нечего. */
+function gaAiState(){
+  const st=gaAi[gaChatId];
+  if(!st||!gaAiCfg||gaAiCfg.mode==='off'||gaIsGroup(gaChatId))return null;
+  if(st.paused)return {paused:true,text:'ассистент на паузе'};
+  const hm=gaAiCfg.human_min==null?15:Math.max(0,+gaAiCfg.human_min||0);
+  if(hm>0){
+    const res=st.resumed_at?Date.parse(st.resumed_at)||0:0;
+    const last=(gaChat||[]).filter(m=>m.direction==='outbound'&&m.via!=='ai').map(m=>Date.parse(m.created_at)||0).sort((a,b)=>b-a)[0]||0;
+    const until=last+hm*60000;
+    if(last>res&&until>nowMs()){
+      const d=new Date(until);
+      return {paused:true,auto:true,text:'пауза до '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' — писал менеджер'};
+    }
+  }
+  return {paused:false,text:'ассистент отвечает'};
+}
+async function gaAiToggle(btn){
+  const chatId=gaChatId, st=gaAiState();
+  if(!st)return;
+  const resume=st.paused;
+  btn.disabled=true;
+  const row={chat_id:chatId,paused:!resume,updated_at:new Date(nowMs()).toISOString(),updated_by_name:(S.me&&(S.me.full_name||S.me.email))||''};
+  if(resume)row.resumed_at=row.updated_at;
+  const {error}=await sb.from('green_ai_chats').upsert(row,{onConflict:'chat_id'});
+  if(error){btn.disabled=false;toast('Не удалось: '+dbErrText(error));return;}
+  gaAi[chatId]={paused:!resume,resumed_at:resume?row.resumed_at:(gaAi[chatId]||{}).resumed_at||null};
+  toast(resume?'Ассистент снят с паузы — на сообщения клиента без ответа ответит он':'Ассистент на паузе в этом чате — отвечаете вы');
+  if(gaChatId===chatId)gaRedraw();
 }
 
 /* Состояние телефона спрашиваем у функции, а она — у Green API. Отказ самой функции
@@ -436,12 +487,14 @@ function gaChatHtml(){
     if(name)sub=esc(name)+' · '+sub;
   }else if(name)sub=esc(name);
   const title=group?(name||'Группа'):gaPhoneText(gaChatId);
+  const aiSt=gaAiState();
   const head=`<div class="wam-chead">
     <button class="btn sm ghost wam-back" id="gaBack">← к списку</button>
     ${waModAvatar(group?(name||'гр'):(norm||gaDigits(gaChatId)))}
     <div class="wam-ctitle">${esc(title)}<span>${sub}</span></div>
+    ${aiSt&&canSend?`<button class="btn sm ${aiSt.paused?'primary':'ghost'} ga-ai-btn" id="gaAiBtn" title="${aiSt.paused?'Ассистент снова начнёт отвечать в этом чате':'Ассистент перестанет отвечать в этом чате, пока не снимете паузу'}">${aiSt.paused?'▶ Снять с паузы':'⏸ Пауза'}</button>`:''}
     ${canSend?'<button class="btn sm ghost" id="gaHist" title="Загрузить переписку этого чата из журнала Green API">⟲ История</button>':''}
-  </div>`;
+  </div>${aiSt?`<div class="ga-ai-state${aiSt.paused?' paused':''}">🤖 ${esc(aiSt.text)}</div>`:''}`;
   let foot;
   const block=gaSendBlock();
   if(!canSend){
@@ -788,6 +841,7 @@ function gaBind(){
   }
   const dn=$('gaDone');if(dn)dn.onclick=()=>gaMarkDone(dn);
   const hs=$('gaHist');if(hs)hs.onclick=()=>gaHistory(hs);
+  const ab=$('gaAiBtn');if(ab)ab.onclick=()=>gaAiToggle(ab);
   // заказ клиента — разметка модуля Kelesu, обработчики свои (рисуем и пишем в своё поле)
   main.querySelectorAll('[data-wapick]').forEach(b=>b.onclick=()=>{
     const o=(waModOrders||[]).find(x=>String(x.id)===b.dataset.wapick);

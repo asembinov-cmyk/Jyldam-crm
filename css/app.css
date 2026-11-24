@@ -2310,3 +2310,8 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
   .ga-ai-lbl select{width:100%}
   .ga-ai-log td{max-width:none}
 }
+
+/* Пауза ассистента в чате Green API */
+.ga-ai-state{font-size:12px;color:var(--muted,#6b7280);padding:4px 14px;border-bottom:1px solid var(--line,#e5e7eb);background:#f6faf7}
+.ga-ai-state.paused{background:#fff7ed;color:#b45309;font-weight:600}
+.ga-ai-btn{white-space:nowrap}
