@@ -1401,13 +1401,19 @@ const callKazpostGetBarcode=orderId=>callEdge('kazpost-get-barcode',{order_id:or
    там застывают, поэтому вес и сумма должны быть уже окончательными.
    Зовётся из dbUpdate после любой удачной правки заказа. Повтор безопасен: на тот же номер
    заказа Казпочта возвращает прежний ШПИ. Без индекса не запрашиваем — по нему она везёт. */
-const AUTO_TRACK_ON_READY=false; // выключено 24.11.2026 до решения владельца: треки заборам сейчас присваивает KET
+const AUTO_TRACK_ON_READY=true;
+// Решение владельца 24.11.2026: только заказы, созданные С ЭТОГО ДНЯ (по Астане); старые не
+// трогаем — они уехали в KET без нашего трека, и KET дал им свой. По той же причине не берём
+// заказ, уже отправленный в KET: второй трек на ту же посылку отменить нечем.
+const AUTO_TRACK_SINCE='2026-11-24';
 const _autoTrackBusy=new Set(), _autoTrackFailed=new Map();
 function autoTrackMaybe(o){
   try{
     if(!AUTO_TRACK_ON_READY||!o||!o.id||!isStaff())return;
     if(String(o.track||'').trim()||!o.sorted_at||!(Number(o.weight)>0))return;
     if(isBaraholkaOrder(o))return;
+    if(localDay(o.created_at)<AUTO_TRACK_SINCE)return;
+    if(o.ket_id&&String(o.ket_id)!=='0')return;
     const d=(S.delivery||[]).find(x=>x.id===o.delivery_id);
     if(!d||!/почт/i.test(d.name||''))return;
     if(!/^\d{6}$/.test(String(o.index||'').trim())||!String(o.client||'').trim()||!String(o.phone||'').trim())return;
