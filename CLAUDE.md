@@ -7119,6 +7119,8 @@ xcrun altool --upload-app -f ios/build/export/Jyldam.ipa -t ios --apiKey 2GYQNFM
 
 **Секреты `push-send`:** `APNS_KEY` (содержимое файла ключа APNs `.p8`), `APNS_KEY_ID`; `APNS_TEAM_ID` и `APNS_BUNDLE` имеют значения по умолчанию в коде. Ключ APNs создаёт владелец аккаунта на developer.apple.com → Keys — это НЕ тот ключ, которым загружаются сборки. В ответе функции поле `apns` показывает номер ключа или «нет ключа».
 
+**Проверено живым телефоном 25.11.2026:** сборка 1.0 (2) из TestFlight, колокольчик → разрешение → проверочное уведомление пришло. Ключ APNs — `ZA7W92WBG3` (секреты `APNS_KEY`, `APNS_KEY_ID`).
+
 **Сборки TestFlight и App Store ходят на боевой адрес APNs** (`api.push.apple.com`); запуск из Xcode на своём телефоне получил бы токен «песочницы», и тот же сервер ответил бы `BadDeviceToken`.
 
 **Ответ `403 REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`** значит, что владелец аккаунта не принял обновлённое соглашение на developer.apple.com (полоса вверху страницы); принять может только он, и доступ открывается через несколько минут — сначала сертификаты, потом App Store Connect. Запись приложения ключом создать нельзя, только руками в App Store Connect.
