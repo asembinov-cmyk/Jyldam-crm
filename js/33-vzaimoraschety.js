@@ -201,11 +201,19 @@ function stCanIssue() {
   return typeof can === "function" && can("settlements", "edit");
 }
 
+function stMissingKaspi(o, m) {
+  return (m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id);
+}
+
 function stIssueCell(o, m) {
   if (!stCanIssue() || !o || o.state !== "open") return "";
-  const missing = (m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id);
-  if (missing) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>`;
+  if (stMissingKaspi(o, m)) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>`;
   return `<button class="btn sm primary" type="button" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}">Выставить счёт</button>`;
+}
+
+function stPickBox(o, m) {
+  if (!stCanIssue() || !o || o.state !== "open" || stMissingKaspi(o, m)) return "";
+  return `<input type="checkbox" class="stChk" data-stpick="1" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}">`;
 }
 
 function settlementsTable(tab, rows, m) {
@@ -226,8 +234,14 @@ function settlementsTable(tab, rows, m) {
       `<tr><td>${i.test ? "Тестовый счёт" : "Счёт"}</td><td>${stEsc(stWho(i.payer_type, i.payer_id, i.payer_name, cat))}</td><td>${stEsc(stDay(i.period_start))} — ${stEsc(stDay(i.period_end))}</td><td>${stMoney(i.amount)}</td><td>${stEsc(stState(i.status))}</td><td>${(i.order_ids || []).map((id, n) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.order_codes || [])[n], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
   }
   if (!rows.length) return `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`;
-  return `<table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th><th>Кто держит долг</th><th>Период</th><th>Сумма</th><th>Состояние</th>${stCanIssue() ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o) =>
-    `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stEsc(stWho(o.holder_type, o.holder_id, o.holder_name, cat))}${(m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${stCanIssue() ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+  const pick = stCanIssue();
+  const anyPick = pick && rows.some((o) => o.state === "open" && !stMissingKaspi(o, m));
+  const bar = anyPick ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
+    <label class="pom-paid" style="margin:0"><input type="checkbox" id="stChkAll"> Выделить все</label>
+    <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
+  </div>` : "";
+  return bar + `<table class="resp-table"><thead><tr>${pick ? "<th style=\"width:34px\"></th>" : ""}<th>Заказ</th><th>Заявка</th><th>Кто держит долг</th><th>Период</th><th>Сумма</th><th>Состояние</th>${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o) =>
+    `<tr>${pick ? `<td>${stPickBox(o, m)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stEsc(stWho(o.holder_type, o.holder_id, o.holder_name, cat))}${stMissingKaspi(o, m) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
 }
 
 function settlementsAdminForm() {
@@ -253,7 +267,8 @@ function settlementsBind(root) {
     renderSettlements();
   });
   root.querySelectorAll("[data-storder]").forEach((b) => b.onclick = () => settlementsOpenOrder(b.dataset.storder));
-  root.querySelectorAll("[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
+  root.querySelectorAll("button[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
+  settlementsBindPick(root);
   root.querySelectorAll("[data-stpickup]").forEach((b) => b.onclick = () => settlementsOpenPickup(b.dataset.stpickup));
   const excel = root.querySelector("#st_excel");
   if (excel) excel.onclick = settlementsExcel;
@@ -319,8 +334,65 @@ function settlementsOpenPickup(id) {
   if (typeof toast === "function") toast("Заявка " + id);
 }
 
+function settlementsBindPick(root) {
+  const all = root.querySelector("#stChkAll");
+  const boxes = () => [...root.querySelectorAll(".stChk")];
+  const sync = () => {
+    const list = boxes();
+    const n = list.filter((c) => c.checked).length;
+    if (all) all.checked = list.length > 0 && n === list.length;
+    const btn = root.querySelector("#stIssueSelected");
+    if (btn) {
+      btn.disabled = n === 0;
+      btn.textContent = n ? `Выставить счета отмеченным (${n})` : "Выставить счета отмеченным";
+    }
+  };
+  if (all) all.onchange = () => { boxes().forEach((c) => { c.checked = all.checked; }); sync(); };
+  boxes().forEach((c) => c.onchange = sync);
+  const go = root.querySelector("#stIssueSelected");
+  if (go) go.onclick = () => settlementsIssueSelected(root);
+}
+
+async function settlementsIssueSelected(root) {
+  const picked = [...root.querySelectorAll(".stChk:checked")];
+  const groups = new Map();
+  picked.forEach((c) => {
+    const key = `${c.dataset.stissue}|${c.dataset.stholder}|${c.dataset.stday}`;
+    const cur = groups.get(key) || { type: c.dataset.stissue, holder: c.dataset.stholder, day: c.dataset.stday, amount: 0, count: 0 };
+    cur.amount += Number(c.dataset.stamount) || 0;
+    cur.count += 1;
+    groups.set(key, cur);
+  });
+  const list = [...groups.values()];
+  if (!list.length) return;
+  const sum = list.reduce((s, g) => s + g.amount, 0);
+  const word = list.length % 10 === 1 && list.length % 100 !== 11 ? "счёт" : (list.length % 10 >= 2 && list.length % 10 <= 4 && (list.length % 100 < 12 || list.length % 100 > 14) ? "счета" : "счетов");
+  if (!confirm(`Выставить ${list.length} ${word} по ${picked.length} проводкам на ${stMoney(sum)}?\nОдин плательщик за один день получает один счёт.`)) return;
+  const go = root.querySelector("#stIssueSelected");
+  if (go) go.disabled = true;
+  let ok = 0;
+  const fails = [];
+  for (const g of list) {
+    const res = await callEdge("settlements", {
+      action: "issue",
+      logical_key: `${g.type}:${g.holder}:${g.day}`,
+      holder_type: g.type,
+      holder_id: g.holder,
+      period_start: g.day,
+      period_end: g.day,
+      launch: "manual",
+    });
+    if (!res || res.error || res.success === false) fails.push((res && (res.error || res.message)) || "Счёт не выставлен");
+    else ok += 1;
+  }
+  if (typeof toast === "function") toast(fails.length ? `Выставлено ${ok}. Не вышло: ${fails[0]}` : `Выставлено счетов: ${ok}`);
+  settlementsModel = null;
+  renderSettlements();
+}
+
 async function settlementsIssueRow(b) {
-  const who = (b.closest("tr") && b.closest("tr").children[2] && b.closest("tr").children[2].textContent || "плательщику").replace(/\s+/g, " ").trim();
+  const cells = b.closest("tr") ? [...b.closest("tr").children] : [];
+  const who = (cells[3] && cells[3].textContent || "плательщику").replace(/\s+/g, " ").trim();
   const day = b.dataset.stday || "";
   const amount = Number(b.dataset.stamount) || 0;
   if (!confirm(`Выставить счёт «${who}» за ${stDay(day)} на ${stMoney(amount)}?\nПовторное нажатие второй счёт не создаёт.`)) return;
