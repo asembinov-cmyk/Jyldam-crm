@@ -2216,3 +2216,19 @@ button.set-group-title:hover{background:rgba(0,0,0,.04)}
 }
 input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and-time-value,
 input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webkit-date-and-time-value{text-align:left}
+/* ── Панель страниц ПОД таблицей на телефоне (24.11.2026) ─────────────────
+   «SPA трафик» и «Склад»: плавающая панель на узком экране складывалась в три
+   ряда и закрывала таблицу. Теперь она лежит в потоке сразу под таблицей
+   (pagerMount в js/05). Класс op-top снимает «плавучесть», этот — правит то,
+   что у панели ПОД таблицей иначе, чем у панели НАД ней. */
+.orders-pager.op-under{margin:12px 0 4px;padding:10px 8px;gap:8px;justify-content:center}
+.orders-pager.op-under .op-nav{flex-wrap:wrap;justify-content:center}
+.orders-pager.op-under .op-btn{padding:0 10px;font-size:13px}
+/* Два ряда вместо четырёх: сверху листание, под ним «показаны…», размер страницы и обновление. */
+.orders-pager.op-under .op-nav{order:1;flex:1 1 100%}
+.orders-pager.op-under .op-info{order:2;flex:0 1 auto}
+.orders-pager.op-under .op-perpage{order:3}
+.orders-pager.op-under .op-perpage>span{display:none}
+.orders-pager.op-under>.op-btn{order:4}
+/* меню «на странице» у панели под таблицей раскрывается ВВЕРХ: вниз — уже конец страницы */
+.orders-pager.op-under .op-pp-menu{top:auto;bottom:calc(100% + 8px)}

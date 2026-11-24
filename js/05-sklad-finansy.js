@@ -1059,6 +1059,19 @@ function renderWhProducts(){
     });
   });
 }
+/* КУДА ВСТАЁТ ПАНЕЛЬ СТРАНИЦ (24.11.2026). На компьютере она плавает у нижнего края экрана.
+   На телефоне так нельзя: пять кнопок и подпись складываются в три ряда, и приклеенная к низу
+   панель закрывала таблицу почти целиком (жалоба владельца по «SPA трафику» и «Складу»:
+   «пагинация на весь экран, ничего не видно»). Поэтому на телефоне панель лежит В ПОТОКЕ, сразу
+   под таблицей, и ничего не перекрывает. Отступ под плавающую панель (has-pager) при этом не
+   ставим — освобождать подвал не подо что. */
+function pagerMount(bar,anchor){
+  if(anchor&&typeof isMobileView==='function'&&isMobileView()){
+    bar.classList.add('op-top','op-under');anchor.after(bar);return;
+  }
+  const m=$('main');if(m)m.classList.add('has-pager');
+  document.body.appendChild(bar);
+}
 // плавающая панель пагинации для списка товаров (тот же вид, что у заказов/заявок/КЕТ)
 function removeWhProductsPager(){const ex=$('whProdPager');if(ex)ex.remove();
   const m=$('main');if(m&&!$('ordersPager')&&!$('pickupsPager')&&!$('inboundPager'))m.classList.remove('has-pager');}
@@ -1073,7 +1086,6 @@ function renderWhProductsPager(total,totalPages,startIdx,shownCount){
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='whProdPager';bar.className='orders-pager';
-  {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
     <button class="op-btn" id="whProdRefreshBtn" title="Подтянуть свежие данные">🔄</button>
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
@@ -1093,7 +1105,7 @@ function renderWhProductsPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-whprodpage="next" ${whProdPage>=totalPages?'disabled':''}>Вперёд ›</button>
       <button class="op-btn" data-whprodpage="last" ${whProdPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
-  document.body.appendChild(bar);
+  {const t=$('whProdTable');pagerMount(bar,t?t.closest('.table-scroll'):null);}
   const whProdRefreshBtn=bar.querySelector('#whProdRefreshBtn');
   if(whProdRefreshBtn)whProdRefreshBtn.onclick=async()=>{
     whProdRefreshBtn.disabled=true;whProdRefreshBtn.textContent='…';

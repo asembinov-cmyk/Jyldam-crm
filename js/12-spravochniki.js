@@ -374,8 +374,8 @@ function dirPartners(onlyBar){
         text:p=>p.daily_pickup?'каждый день':'—'}]:[]),
       ...(salesFixedReady()?[{key:'smpost',label:'Доля · почта',filter:'select',
         text:p=>p.sales_margin_fixed!=null&&p.sales_margin_fixed!==''?(+p.sales_margin_fixed).toLocaleString('ru-RU')+' ₸':'по разнице'}]:[]),
-      ...(salesCourierReady()?[{key:'smcour',label:'Доля · курьер',filter:'select',
-        text:p=>p.sales_margin_courier!=null&&p.sales_margin_courier!==''?(+p.sales_margin_courier).toLocaleString('ru-RU')+' ₸':'по разнице'}]:[]),
+      // Колонки и поля «Доля · курьер» НЕТ (просьба владельца 24.11.2026): по политике надбавки
+      // по курьеру нет вовсе, и поле только путало. Сама колонка в базе осталась, см. сохранение.
     ]});
 }
 // Пересчёт снимка доли менеджера в уже созданных заказах партнёра. Отдельной функцией
@@ -475,13 +475,11 @@ function partnerModal(id){
     ${salesFixedReady()?`<div class="grid2">
       <div class="field"><label>Доля менеджера · почта (₸)</label>
         <input type="number" min="0" id="p_smargin" value="${esc(p.sales_margin_fixed)}" placeholder="по разнице с базовым"></div>
-      ${salesCourierReady()?`<div class="field"><label>Доля менеджера · курьер (₸)</label>
-        <input type="number" min="0" id="p_smcour" value="${esc(p.sales_margin_courier)}" placeholder="по разнице с базовым"></div>`:''}
     </div>
-    <small style="color:var(--muted);font-size:12px;display:block;margin:-6px 0 12px">Сколько с ОДНОГО заказа идёт менеджеру по продажам, отдельно по каждому типу доставки.
+    <small style="color:var(--muted);font-size:12px;display:block;margin:-6px 0 12px">Сколько с ОДНОГО почтового заказа идёт менеджеру по продажам. По курьерским надбавки нет.
       Пусто — считается как раньше, разницей между тарифом партнёра и базовым тарифом компании.
       Заполнено — ровно эта сумма, остаток остаётся прибылью компании: тариф 2000 и доля 110 означают, что 200 ₸ компания держит себе.
-      Поля нужны и партнёрам с тарифом 0, которые платят раз в месяц по счёту: по ним разница не насчитает ничего никогда.</small>`:''}
+      Поле нужно и партнёрам с тарифом 0, которые платят раз в месяц по счёту: по ним разница не насчитает ничего никогда.</small>`:''}
     ${baraholkaReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_bar" ${p.is_baraholka?'checked':''}> Барахолка <span class="pom-paidhint">(заказы считаются по своим нормативам; на уже созданные не влияет)</span></label>`:''}
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     ${dailyPickupReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_daily" ${p.daily_pickup?'checked':''}> Ежедневный забор <span class="pom-paidhint">(каждое утро в 07:00 на этот магазин сама создаётся заявка на забор — без курьера и без заказов, курьера назначает менеджер)</span></label>`:''}
@@ -538,7 +536,10 @@ function partnerModal(id){
         // поля шлём, только когда колонки в базе есть: иначе PostgREST отклонит ВЕСЬ
         // запрос, и карточка перестанет сохраняться вместе со всеми остальными полями
         ...($('p_smargin')?{sales_margin_fixed:val('p_smargin')!==''?parseFloat(val('p_smargin')):null}:{}),
-        ...($('p_smcour')?{sales_margin_courier:val('p_smcour')!==''?parseFloat(val('p_smcour')):null}:{})};
+        // Курьерской доли в карточке нет. НОВОМУ партнёру пишем ноль явно: пустое значение
+        // означало бы «считай по разнице с базовым», а по политике надбавки по курьеру нет.
+        // У существующего поле не трогаем вовсе — что стоит в базе, то и остаётся.
+        ...(!id&&salesCourierReady()?{sales_margin_courier:SALES_MARGIN_NEW_COUR}:{})};
       let syncMsg='';
       if(id){
         const before=S.partners.find(x=>x.id===id);

@@ -1096,7 +1096,6 @@ function renderInboundPager(total,totalPages,startIdx,shownCount){
   const from=startIdx+1, to=startIdx+shownCount;
   const bar=document.createElement('div');
   bar.id='inboundPager';bar.className='orders-pager';
-  {const m=$('main');if(m)m.classList.add('has-pager');}
   bar.innerHTML=`
     <button class="op-btn" id="inbFloatRefreshBtn" title="Подтянуть свежие данные">🔄</button>
     <div class="op-info">Показаны <b>${from}–${to}</b> из <b>${total}</b></div>
@@ -1116,7 +1115,7 @@ function renderInboundPager(total,totalPages,startIdx,shownCount){
       <button class="op-btn" data-inbpage="next" ${inbPage>=totalPages?'disabled':''}>Вперёд ›</button>
       <button class="op-btn" data-inbpage="last" ${inbPage>=totalPages?'disabled':''} title="В конец">»</button>
     </div>`;
-  document.body.appendChild(bar);
+  pagerMount(bar,$('inboundTable'));   // на телефоне — под таблицей, см. pagerMount в js/05
   const inbFloatRefreshBtn=bar.querySelector('#inbFloatRefreshBtn');
   if(inbFloatRefreshBtn)inbFloatRefreshBtn.onclick=async()=>{
     inbFloatRefreshBtn.disabled=true;inbFloatRefreshBtn.textContent='…';

@@ -642,14 +642,21 @@ function nfWaRedraw(){
   const c=$('nfWaCnt');if(c)c.textContent=nfWaRows?nfWaGroups().length:'';
 }
 
+/* ТРИ ПАНЕЛИ ВЫКЛЮЧЕНЫ (просьба владельца 24.11.2026: «выводы ИИ, корзина, вопросы клиентов
+   без ответа — убрать, не нужно»). Код оставлен за флагами: вернуть панель — одно слово.
+   Корзина при этом РАБОТАЕТ как раньше: dbDelete по-прежнему кладёт снимок удалённого в
+   deleted_items, пропал только экран со списком и кнопкой «Восстановить». Вопросы клиентов
+   остались в модуле «WhatsApp» (фильтр «Ждут ответа»). */
+const NF_SHOW_TRASH=false, NF_SHOW_WA=false, NF_SHOW_AI=false;
 function renderNotify(){
   if(!isStaff()&&!isCourier()){$('main').innerHTML='<div class="empty"><div class="big">Нет доступа</div></div>';return;}
   const trash=S.deletedItems||[];
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Центр контроля</h1><p>Резервная корзина, выводы и важные изменения</p></div>
+    <div class="page-head"><div><h1>Центр контроля</h1><p>Объёмы партнёров, приёмка склада и возможные дубли</p></div>
       <div class="head-actions"><button class="btn ghost" id="nfReload">⟳ Обновить</button></div>
     </div>
 
+    ${NF_SHOW_TRASH?`
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-head" data-trashtoggle style="cursor:pointer"><h2>🗑 Корзина</h2><span class="count">${trash.length}</span><span style="margin-left:auto;font-size:12px;color:var(--muted)">${notifyTrashCollapsed?'▸ развернуть':'▾ свернуть'}</span></div>
       ${notifyTrashCollapsed?'':`
@@ -663,9 +670,9 @@ function renderNotify(){
           </div>
           <button class="btn sm primary" data-restore="${it.id}">↩ Восстановить</button>
         </div>`).join(''):'<div class="empty" style="padding:28px"><div class="big">Пусто</div>За последние 30 дней ничего не удаляли.</div>'}`}
-    </div>
+    </div>`:''}
 
-    ${isStaff()?`
+    ${NF_SHOW_WA&&isStaff()?`
     <div class="panel dash-fold${nfWaOpen?' open':''}" style="margin-bottom:18px">
       <button type="button" class="panel-head dash-fold-head" data-nffold="wa">
         <h2>💬 Вопросы клиентов без ответа</h2>
@@ -674,7 +681,7 @@ function renderNotify(){
       <div class="dash-fold-body"><div id="nfWaBox">${nfWaHtml()}</div></div>
     </div>`:''}
 
-    ${isStaff()?`
+    ${NF_SHOW_AI&&isStaff()?`
     <div class="panel nf-ai-panel" style="margin-bottom:18px">
       <div class="panel-head"><h2>💡 Выводы ИИ</h2>
         <button class="btn ai-btn sm" id="nfAiRun" style="margin-left:auto">${_aiInsights?'Обновить анализ':'Проанализировать'}</button>
@@ -704,7 +711,8 @@ function renderNotify(){
     ${isStaff()?partnerVolumePanelHtml():''}
     ${isStaff()?warehouseAcceptPanelHtml():''}
 
-    ${isStaff()?duplicatesPanelHtml():''}`;
+    ${isStaff()?duplicatesPanelHtml():''}
+    ${!isStaff()?'<div class="empty"><div class="big">Здесь пока пусто</div>Для вашей роли в этом разделе ничего нет.</div>':''}`;
   if($('nfSetPartner'))$('nfSetPartner').onclick=()=>setPartnerBulkModal();
   if($('nfAiRun'))$('nfAiRun').onclick=()=>loadAiInsights();
   bindDuplicatesPanel();
@@ -728,7 +736,7 @@ function renderNotify(){
   // Вопросы клиентов: грузим один раз за заход в раздел и рисуем ТОЛЬКО свою
   // панель (nfWaRedraw), а не весь экран — иначе перерисовка собьёт работу
   // с остальными панелями раздела.
-  if(isStaff()&&nfWaRows===null)nfWaLoad().then(nfWaRedraw).catch(()=>{});
+  if(NF_SHOW_WA&&isStaff()&&nfWaRows===null)nfWaLoad().then(nfWaRedraw).catch(()=>{});
   const waFold=$('main').querySelector('[data-nffold="wa"]');
   if(waFold)waFold.onclick=()=>{nfWaOpen=!nfWaOpen;waFold.closest('.dash-fold').classList.toggle('open',nfWaOpen);};
   $('main').querySelectorAll('[data-wadone]').forEach(b=>b.onclick=async()=>{

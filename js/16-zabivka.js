@@ -746,7 +746,8 @@ function renderFilling(){
           <input id="fillFind" class="search" placeholder="Номер заказа, ФИО или телефон — кто заполнял"
             value="${esc(fillFindQ)}" autocomplete="off">
           <button class="btn sm ghost" id="fillFindBtn">Найти</button>
-          ${admin?'<button class="btn sm ghost" id="fillAiBench" title="Проверить, насколько точно ИИ читает бланки — на уже заполненных заказах, без записи в базу">🧪 Замер ИИ</button>':''}
+          ${''/* Кнопка «🧪 Замер ИИ» убрана 24.11.2026 по просьбе владельца. Сам замер (js/25) цел:
+                    из консоли — aiBenchModal(). */}
         </div>
       </div>
     </div>
