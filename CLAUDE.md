@@ -7082,6 +7082,25 @@ Safari симулятора, `xcrun simctl io <устройство> screenshot 
 **подключаете новый сторонний сервис или новый доступ на телефоне, поправьте и её.** Контакты поддержки
 там публичные, их дал владелец. Тексты для страниц магазинов — `ios/store-listing.md`.
 
+### Приложение в App Store Connect — через аккаунт Азата (25.11.2026)
+
+Свой аккаунт разработчика оплатить не вышло, поэтому приложение заведено в команде **Azat Sembinov** (физлицо, Team ID `FQM87T2M2G`); продавцом в App Store будет указан он. Запись приложения: «Jyldam Logistics», `kz.jyldam.crm`, id `6838953084`. Первая сборка 1.0 (1) загружена 25.11.2026.
+
+**У аккаунта на физлицо приглашённый администратор НЕ может подписывать из Xcode:** команда видна в Settings → Apple Accounts, но в списке Team её нет, и галочки «Certificates, Identifiers & Profiles» в App Store Connect не существует. Работает ключ App Store Connect API (роль Admin): файл лежит ТОЛЬКО на Mac владельца в `~/.appstoreconnect/private_keys/`, Key ID `2GYQNFM3RM`, Issuer ID `f98daa8c-af5d-41e7-825c-92c18f9e82c6`. Сам файл в репозиторий и в переписку не класть.
+
+**Сборка и загрузка — три команды** (архив БЕЗ подписи, подпись при экспорте: подписанный архив требует профиль разработки, а для него нужно зарегистрированное устройство, которого в команде нет):
+
+```
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+xcodebuild -project ios/Jyldam.xcodeproj -scheme Jyldam -configuration Release -destination 'generic/platform=iOS' -archivePath ios/build/Jyldam.xcarchive CODE_SIGNING_ALLOWED=NO archive
+xcodebuild -exportArchive -archivePath ios/build/Jyldam.xcarchive -exportPath ios/build/export -exportOptionsPlist ios/tools/export.plist -allowProvisioningUpdates -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_2GYQNFM3RM.p8 -authenticationKeyID 2GYQNFM3RM -authenticationKeyIssuerID f98daa8c-af5d-41e7-825c-92c18f9e82c6
+xcrun altool --upload-app -f ios/build/export/Jyldam.ipa -t ios --apiKey 2GYQNFM3RM --apiIssuer f98daa8c-af5d-41e7-825c-92c18f9e82c6
+```
+
+**Перед каждой новой загрузкой поднять номер сборки** (`CURRENT_PROJECT_VERSION` в проекте): Apple не примет второй файл с тем же номером. Запросы к API — `ios/tools/asc.py` (`python3 -I ios/tools/asc.py "/v1/builds?filter[app]=6838953084"`).
+
+**Ответ `403 REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`** значит, что владелец аккаунта не принял обновлённое соглашение на developer.apple.com (полоса вверху страницы); принять может только он, и доступ открывается через несколько минут — сначала сертификаты, потом App Store Connect. Запись приложения ключом создать нельзя, только руками в App Store Connect.
+
 **Состояние на 23.11.2026:** проект собирается (`BUILD SUCCEEDED`), в симуляторе НЕ запускался —
 среда iOS (8 ГБ) ещё скачивалась. Аккаунта разработчика Apple у владельца пока нет: без него
 нельзя ни поставить на настоящий телефон, ни сделать уведомления.
