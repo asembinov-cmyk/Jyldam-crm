@@ -94,6 +94,7 @@ function renderPickups(){
         ${isStaff()?`<label class="date-field"><span>Дата с</span><input type="date" id="pfdatefrom" value="${esc(pf.dateFrom)}"></label>
         <label class="date-field"><span>Дата по</span><input type="date" id="pfdateto" value="${esc(pf.dateTo)}"></label>
         <button class="btn sm" id="pftoday" style="align-self:flex-end">Сегодня</button>
+        <button class="btn sm" id="pftomorrow" style="align-self:flex-end">Завтра</button>
         <button class="btn ghost sm" id="pfdateclear" style="align-self:flex-end">Все даты</button>`:''}
       </div>
       <div id="pickupTable"></div>
@@ -115,6 +116,8 @@ function renderPickups(){
   if($('pfdatefrom'))$('pfdatefrom').onchange=e=>{pf.dateFrom=e.target.value;renderPickups();};
   if($('pfdateto'))$('pfdateto').onchange=e=>{pf.dateTo=e.target.value;renderPickups();};
   if($('pftoday'))$('pftoday').onclick=()=>{const t=localToday();pf.dateFrom=t;pf.dateTo=t;renderPickups();};
+  /* «Завтра» — заявки на следующий день: их готовят с вечера (25.11.2026) */
+  if($('pftomorrow'))$('pftomorrow').onclick=()=>{const t=localDaysAgo(-1);pf.dateFrom=t;pf.dateTo=t;pickupsPage=1;renderPickups();};
   if($('pfdateclear'))$('pfdateclear').onclick=()=>{pf.dateFrom='';pf.dateTo='';renderPickups();};
   drawPickups();
 }
