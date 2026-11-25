@@ -2351,8 +2351,8 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
   border:1px solid rgba(255,255,255,.9);border-radius:28px;box-shadow:0 24px 60px -30px rgba(20,40,110,.5);overflow:visible}
 .app-ios .login-card .brand{position:absolute;left:0;right:0;top:-88px;justify-content:center;margin:0}
 .app-ios .login-logo-img{height:40px;margin:0}
-.app-ios .login-card h1{font-family:inherit;font-weight:800;font-size:25px;text-align:center;margin:0 0 4px;letter-spacing:-.01em}
-.app-ios .login-card p.hint{text-align:center;font-size:15px;margin-bottom:18px}
+.app-ios .login-card h1{font-family:inherit;font-weight:800;font-size:25px;text-align:center;margin:0 0 18px;letter-spacing:-.01em}
+.app-ios .login-card p.hint{display:none}
 .app-ios .login-card .field{position:relative;margin-bottom:12px}
 .app-ios .login-card .field label{display:none}
 .app-ios .login-card .field input{height:54px;min-height:54px;border-radius:16px;padding:0 50px 0 54px;font-size:17px;background-color:#fff;
