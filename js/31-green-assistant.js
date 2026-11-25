@@ -76,7 +76,7 @@ async function gaAiInfoLoad(){
 /* Запись настроек. Возвращаем строку из базы целиком: `active_since` двигает триггер
    на сервере, и после смены режима или списка номеров в памяти должно быть новое. */
 async function gaAiSave(patch,okText){
-  if(!gaAiCanEdit()){toast('Менять настройки ассистента можно по праву «WhatsApp · Green API → редактирование»');return false;}
+  if(!gaAiCanEdit()){toast('Менять настройки ассистента можно по праву «Ассистент приёма заявок → редактирование»');return false;}
   try{
     const row=Object.assign({},patch,{updated_by_name:(S.me&&(S.me.full_name||S.me.name))||null});
     const {data,error}=await sb.from('green_ai_settings').update(row).eq('id',1).select('*');

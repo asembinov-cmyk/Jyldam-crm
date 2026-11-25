@@ -837,7 +837,7 @@ function waModChatHtml(){
     ? `<div class="wam-wait">Клиент ждёт ответа уже ${esc(waModLeftText(waitMin))} — робот на это сообщение не ответил</div>`:'';
   let foot;
   if(!canSend){
-    foot=`<div class="wam-foot hint">Отвечать отсюда можно по праву «WhatsApp → создание». Прочитать переписку это не мешает.</div>`;
+    foot=`<div class="wam-foot hint">Отвечать отсюда можно по праву «WhatsApp СЗК → создание». Прочитать переписку это не мешает.</div>`;
   }else if(!w.open){
     // Гасим поле, а не даём получить непонятный отказ от Meta: свободный текст она
     // пропускает только в сутки после сообщения клиента.
@@ -1178,7 +1178,7 @@ function renderWhatsapp(){
   // закрытый раздел до перезагрузки (та же механика, что у вкладки Барахолки в Статистике).
   if(!subs.some(x=>x[0]===waModSub))waModSub='dialogs';
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>WhatsApp</h1></div>
+    <div class="page-head"><div><h1>WhatsApp СЗК</h1></div>
       <div class="head-actions"><span class="hint" id="waModSync" style="margin-right:10px">${esc(waModSyncText())}</span>${waModSub==='dialogs'&&canCfg?'<button class="btn ghost" id="waModBack24" style="margin-right:8px">⟲ Добрать переписку</button>':''}<button class="btn ghost" id="waModReload">⟳ Обновить</button></div>
     </div>
     <div class="filters wam-tabs" style="margin-bottom:14px">

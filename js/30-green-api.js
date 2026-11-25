@@ -289,11 +289,15 @@ function gaDialogs(){
   return list;
 }
 
-const GA_FILTERS=[['all','Все'],['wait','Ждут ответа'],['groups','Группы']];
+/* «Передал менеджеру» (просьба владельца 25.11.2026) — ждущие диалоги, где ассистент сам
+   отдал вопрос человеку или не справился. Это часть «Ждут ответа», а не отдельный список:
+   ответил менеджер или нажали «Решено» — диалог уходит из обоих. */
+const GA_FILTERS=[['all','Все'],['wait','Ждут ответа'],['handoff','Передал менеджеру'],['groups','Группы']];
 
 function gaDialogsFiltered(){
   let list=gaDialogs();
   if(gaFilter==='wait')list=list.filter(d=>d.waiting);
+  else if(gaFilter==='handoff')list=list.filter(d=>d.waiting&&d.handoff);
   else if(gaFilter==='groups')list=list.filter(d=>d.group);
   const q=gaSearch.trim().toLowerCase();
   if(q){
@@ -311,7 +315,7 @@ function gaCounters(){
   let today=0;
   const t=typeof localToday==='function'?localToday():'';
   if(t&&typeof localDay==='function')(gaRows||[]).forEach(m=>{if(m.direction==='inbound'&&localDay(m.created_at)===t)today++;});
-  return {wait:all.filter(d=>d.waiting).length,dialogs:all.length,today};
+  return {wait:all.filter(d=>d.waiting).length,handoff:all.filter(d=>d.waiting&&d.handoff).length,dialogs:all.length,today};
 }
 
 /* ---------- отправка и действия по диалогу ---------- */
@@ -498,7 +502,7 @@ function gaChatHtml(){
   let foot;
   const block=gaSendBlock();
   if(!canSend){
-    foot=`<div class="wam-foot hint">Отвечать отсюда можно по праву «WhatsApp · Green API → создание». Прочитать переписку это не мешает.</div>`;
+    foot=`<div class="wam-foot hint">Отвечать отсюда можно по праву «Ассистент приёма заявок → создание». Прочитать переписку это не мешает.</div>`;
   }else if(block){
     foot=`<div class="wam-foot hint" style="color:var(--rust)">${esc(block)}</div>`;
   }else{
@@ -584,7 +588,7 @@ function gaListHtml(){
 function gaBodyHtml(){
   const c=gaCounters();
   const chips=GA_FILTERS.map(([k,l])=>
-    `<button class="wam-chip${gaFilter===k?' on':''}" data-gafl="${k}">${esc(l)}${k==='wait'&&c.wait?' '+c.wait:''}</button>`).join('');
+    `<button class="wam-chip${gaFilter===k?' on':''}" data-gafl="${k}">${esc(l)}${k==='wait'&&c.wait?' '+c.wait:(k==='handoff'&&c.handoff?' '+c.handoff:'')}</button>`).join('');
   return `<div class="wam-wrap${gaChatId?' chat':''}">
     <div class="wam-side">
       <div class="wam-filters">
@@ -661,7 +665,7 @@ function gaConnHtml(){
       :'Пока это не сделано, входящие сообщения в CRM не попадают.'}
       Green API при этом перезапускает инстанс: настройки вступают в силу в течение пяти минут.</div>
     ${canCfg?`<button class="btn primary sm" data-gaact="setup" style="margin-top:8px"${gaBusy?' disabled':''}>${gaBusy==='setup'?'Настраиваю…':'Настроить приём сообщений'}</button>`
-      :'<div class="hint">Настроить может тот, у кого право «WhatsApp · Green API → редактирование».</div>'}`;
+      :'<div class="hint">Настроить может тот, у кого право «Ассистент приёма заявок → редактирование».</div>'}`;
   const step2=gaStepHtml(!!s.hook_ok,'Шаг 2. Приём сообщений'+(s.hook_ok?' настроен':''),b2);
 
   // --- шаг 3: телефон ---
@@ -684,7 +688,7 @@ function gaConnHtml(){
     }else{
       b3=`<div class="hint">Привяжите телефон с рабочим номером WhatsApp — по QR-коду, как WhatsApp Web.</div>
         ${canCfg?'<button class="btn primary sm" data-gaact="qr" style="margin-top:8px">Показать QR-код</button>'
-          :'<div class="hint">Привязать может тот, у кого право «WhatsApp · Green API → редактирование».</div>'}`;
+          :'<div class="hint">Привязать может тот, у кого право «Ассистент приёма заявок → редактирование».</div>'}`;
     }
   }else if(s.state==='starting'){
     b3=`<div class="hint">Инстанс запускается — обычно до пяти минут (так бывает после смены настроек). Страница проверит сама.</div><div style="margin-top:8px">${again}</div>`;
@@ -868,7 +872,7 @@ function renderGreen(){
   if(!subs.some(x=>x[0]===gaSub))gaSub='dialogs';
   const canSend=can('greenapi','create');
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>WhatsApp · Green API</h1></div>
+    <div class="page-head"><div><h1>Ассистент приёма заявок</h1></div>
       <div class="head-actions">
         ${gaSub==='dialogs'?`<span class="hint" id="gaSync" style="margin-right:10px">${esc(gaSyncText())}</span>`:''}
         ${gaPillHtml()}

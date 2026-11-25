@@ -1512,6 +1512,8 @@ function val(id){const el=$(id);return el?el.value:'';}
 /* ---------- NAV по правам ---------- */
 // SVG-иконки для меню
 const ICONS={
+  settlements:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 8.5h14.5M15.5 5.5l3 3-3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 15.5H5.5M8.5 12.5l-3 3 3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  assistant:'<svg viewBox="0 0 24 24" fill="none"><rect x="5" y="8" width="14" height="10.5" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 8V5.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="4.2" r="1.2" stroke="currentColor" stroke-width="1.7"/><circle cx="9.3" cy="12.6" r="1.1" fill="currentColor"/><circle cx="14.7" cy="12.6" r="1.1" fill="currentColor"/><path d="M9.6 15.7h4.8M2.8 12.2v2.6M21.2 12.2v2.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   stats:'<svg viewBox="0 0 24 24" fill="none"><path d="M3 20h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="13" width="3.4" height="5" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="10.3" y="10" width="3.4" height="8" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="16.6" y="6.5" width="3.4" height="11.5" rx="1" stroke="currentColor" stroke-width="1.7"/><path d="M4.5 9.2L9 5.6l3.4 2.2L20 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16.4 3H20v3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   dashboard:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>',
   pickups:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v8.5M12 11.5l-3.2-3.2M12 11.5l3.2-3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h4.2l1.4 2.6h6.8L16.8 13H21v5a3 3 0 01-3 3H6a3 3 0 01-3-3v-5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
@@ -1622,7 +1624,7 @@ function buildNav(opts){
     if(canMod('cash'))money.push({k:'cash',label:'Склад',icon:'warehouse'});
     if(canMod('sorting'))money.push({k:'sorting',label:'Сортировка',icon:'scan'});
     if(canMod('finance'))money.push({k:'finance',label:'Финансы',icon:'finance'});
-    if(canMod('settlements'))money.push({k:'settlements',label:'Взаиморасчёты',icon:'finance'});
+    if(canMod('settlements'))money.push({k:'settlements',label:'Взаиморасчёты',icon:'settlements'});
     if(canMod('calc'))money.push({k:'calc',label:'Калькуляция',icon:'calc'});
     if(money.length)groups.push({title:'Деньги/Склад',items:money});
 
@@ -1635,10 +1637,10 @@ function buildNav(opts){
     if(canMod('filling'))histItems.push({k:'filling',label:'Заполнение',icon:'fill'});
     // WhatsApp переехал сюда из «Основного» 23.11.2026 по просьбе владельца — рядом с
     // «Заполнением». Место в меню, не больше: ключ `whatsapp` и права не тронуты.
-    if(canMod('whatsapp'))histItems.push({k:'whatsapp',label:'WhatsApp',icon:'whatsapp'});
+    if(canMod('whatsapp'))histItems.push({k:'whatsapp',label:'WhatsApp СЗК',icon:'whatsapp'});
     // Второй канал WhatsApp — через Green API (js/30), 24.11.2026. Стоит сразу под первым:
     // оба про переписку с клиентом. Право своё (`greenapi`), по умолчанию только админу.
-    if(canMod('greenapi'))histItems.push({k:'greenapi',label:'WhatsApp · Green API',icon:'whatsapp'});
+    if(canMod('greenapi'))histItems.push({k:'greenapi',label:'Ассистент приёма заявок',icon:'assistant'});
     if(histItems.length)groups.push({title:'История',items:histItems});
 
     const team=[];
@@ -1661,7 +1663,7 @@ function buildNav(opts){
     if(can('pickups','view'))items.push({k:'pickups',label:'Мои заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Мои заказы',icon:'orders'});
     const COURIER_EXTRA=[
-      ['baraholka','Барахолка','baraholka'],['whatsapp','WhatsApp','whatsapp'],['greenapi','WhatsApp · Green API','whatsapp'],['telephony','Телефония','phone'],
+      ['baraholka','Барахолка','baraholka'],['whatsapp','WhatsApp СЗК','whatsapp'],['greenapi','Ассистент приёма заявок','assistant'],['telephony','Телефония','phone'],
       ['intercity','Отправки межгород','intercity'],['sorting','Сортировка','scan'],
       ['cash','Склад','warehouse'],['filling','Заполнение','fill'],
       ['courier','Курьерская доставка','courier'],['mail','Почтовая доставка','mail'],
