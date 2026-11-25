@@ -2712,6 +2712,79 @@ function repriceForWeight(order, newWeight){
   return {order_sum: sum, cost: sum};
 }
 function isExplicitNum(v){return v!=null&&v!==''&&!isNaN(+v);}
+// Цена заказа по тарифу партнёра: размер S — сам тариф, M и L — с надбавкой,
+// у почты ещё перевес. Пустой тариф не подменяем базовой ценой: тогда нечего переносить.
+function orderTariffPrice(partner, order){
+  if(!partner||!order)return null;
+  const courier=typeof isCourierDelivery==='function'&&isCourierDelivery(order.delivery_id);
+  const raw=courier?partner.tariff_courier:partner.tariff_post;
+  if(!isExplicitNum(raw))return null;
+  const sizes=packageSizesFor(partner);
+  const size=order.size&&sizes[order.size]?order.size:'S';
+  const base=courier?sizes[size].courier:sizes[size].mail;
+  const bar=typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(order);
+  return base+weightSurcharge(order.weight,courier,bar);
+}
+function orderRememberedPrice(order){
+  if(order.paid_by_sender)return order.order_sum_orig==null||order.order_sum_orig===''?0:+order.order_sum_orig;
+  return order.order_sum==null||order.order_sum===''?0:+order.order_sum;
+}
+// Тариф в карточке партнёра могли заполнить после создания заказов. Переносим новую
+// цену на те заказы, которые всё ещё стоят по старому тарифу, в том числе по нулю.
+// Свою вручную поставленную сумму не затираем. У «Оплачено отправителем» сумма заказа
+// остаётся 0, меняется запомненная цена — её же видит сводка.
+async function applyPartnerTariffToOrders(partner, oldTariff){
+  if(!partner||!partner.id||typeof sb==='undefined')return 0;
+  const previous=Object.assign({},partner,oldTariff||{});
+  const rows=[];
+  for(let from=0;;from+=1000){
+    const {data,error}=await sb.from('orders').select('id,delivery_id,size,weight,order_sum,order_sum_orig,paid_by_sender,calc_group').eq('partner_id',partner.id).range(from,from+999);
+    if(error)throw error;
+    if(!data||!data.length)break;
+    rows.push(...data);
+    if(data.length<1000)break;
+  }
+  const groups=new Map();
+  const fees=[];
+  for(const o of rows){
+    const courier=typeof isCourierDelivery==='function'&&isCourierDelivery(o.delivery_id);
+    const oldBaseRaw=courier?previous.tariff_courier:previous.tariff_post;
+    const oldBase=isExplicitNum(oldBaseRaw)?+oldBaseRaw:null;
+    if(oldBase==null)continue;
+    const oldPrice=orderTariffPrice(previous,o);
+    const nextPrice=orderTariffPrice(partner,o);
+    if(oldPrice==null||nextPrice==null)continue;
+    const current=orderRememberedPrice(o);
+    const sameAsOld=current===oldPrice||(oldBase===0&&current===0);
+    if(!sameAsOld||current===nextPrice)continue;
+    const key=(o.paid_by_sender?'p:':'o:')+nextPrice;
+    if(!groups.has(key))groups.set(key,{paid:!!o.paid_by_sender,price:nextPrice,ids:[]});
+    groups.get(key).ids.push(o.id);
+    if(o.paid_by_sender)fees.push({order_id:o.id,fee:nextPrice});
+  }
+  let n=0;
+  for(const g of groups.values()){
+    for(let i=0;i<g.ids.length;i+=200){
+      const ids=g.ids.slice(i,i+200);
+      const patch=g.paid?{order_sum_orig:g.price}:{order_sum:g.price,cost:g.price};
+      const {error}=await sb.from('orders').update(patch).in('id',ids);
+      if(error)throw error;
+      n+=ids.length;
+      if(typeof S!=='undefined'&&Array.isArray(S.orders)){
+        const set=new Set(ids);
+        S.orders.forEach(x=>{if(set.has(x.id))Object.assign(x,patch);});
+      }
+    }
+  }
+  if(fees.length&&typeof callEdge==='function'){
+    for(let i=0;i<fees.length;i+=200){
+      const res=await callEdge('settlements',{action:'fees_set',orders:fees.slice(i,i+200)});
+      if(res&&res.error)console.error('fees_set',res.error);
+    }
+    if(typeof settlementsModel!=='undefined')settlementsModel=null;
+  }
+  return n;
+}
 // вариант без привязки к партнёру — на случай, если партнёр ещё не определён/не выбран (базовые значения)
 const PACKAGE_SIZES=packageSizesFor(null);
 // СМЕНА ПАРТНЁРА СРАЗУ У СПИСКА ЗАКАЗОВ — по номерам, вставленным списком.

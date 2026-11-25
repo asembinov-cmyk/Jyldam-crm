@@ -558,6 +558,10 @@ function partnerModal(id){
       let syncMsg='';
       if(id){
         const before=S.partners.find(x=>x.id===id);
+        const normT=v=>v==null||v===''?'':String(+v);
+        const oldPost=before?before.tariff_post:null;
+        const oldCourier=before?before.tariff_courier:null;
+        const tariffChanged=!!(before&&(normT(oldPost)!==normT(row.tariff_post)||normT(oldCourier)!==normT(row.tariff_courier)));
         const salesChanged=before&&before.sales_id!==row.sales_id;
         const procChanged=before&&before.processor_id!==row.processor_id;
         const norm=v=>v==null||v===''?'':String(+v);
@@ -568,6 +572,12 @@ function partnerModal(id){
            noun:['курьерский заказ','курьерских заказа','курьерских заказов']},
         ].filter(x=>before&&(x.key in row)&&norm(before[x.key])!==norm(row[x.key]));
         const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(before,u);
+        if(tariffChanged&&typeof applyPartnerTariffToOrders==='function'){
+          try{
+            const n=await applyPartnerTariffToOrders(before,{tariff_post:oldPost,tariff_courier:oldCourier});
+            if(n)syncMsg+=` · тариф применён к ${n} ранее созданным заказам`;
+          }catch(e){console.error('partner tariff orders',e);syncMsg+=' · тариф в старые заказы не перенёсся';}
+        }
         // ДОЛЮ МЕНЕДЖЕРА В УЖЕ СОЗДАННЫХ ЗАКАЗАХ спрашиваем отдельно и только при явном
         // согласии: она записана снимком в самом заказе (иначе подъём тарифа пересчитал бы
         // прошлые месяцы), и правка задним числом меняет уже посчитанную зарплату.
