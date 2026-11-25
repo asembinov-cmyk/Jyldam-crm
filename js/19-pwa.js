@@ -140,3 +140,39 @@
   else window.addEventListener('load', registerSW);
   // Автоматического показа полосы НЕТ — см. пункт 3. Чтобы вернуть: whenReady(showInstall).
 })();
+
+/* ЭКРАН ВХОДА В ПРИЛОЖЕНИИ ДЛЯ iPhone (25.11.2026, макет владельца).
+   Разметка входа одна на браузер и приложение; здесь меняются только подписи и
+   добавляются «глаз» у пароля и ссылка «Забыли пароль?». Вид — правила .app-ios в CSS. */
+(function appLogin(){
+  const inApp = /JyldamApp/i.test(navigator.userAgent || '') || /[?&]app=ios/.test(location.search);
+  if(!inApp) return;
+  document.documentElement.classList.add('app-ios');
+  const setup = () => {
+    const card = document.querySelector('.login-card');
+    if(!card || card.dataset.app) return;
+    card.dataset.app = '1';
+    const h = card.querySelector('h1'); if(h) h.textContent = 'Вход в приложение';
+    const hint = card.querySelector('p.hint'); if(hint) hint.textContent = 'Для курьеров и сотрудников Jyldam';
+    const login = document.getElementById('email'), pass = document.getElementById('password');
+    if(login){ login.placeholder = 'Номер телефона'; login.setAttribute('inputmode', 'tel'); }
+    if(pass){
+      pass.placeholder = 'Пароль';
+      const eye = document.createElement('button');
+      eye.type = 'button'; eye.className = 'login-eye'; eye.setAttribute('aria-label', 'Показать пароль');
+      const icon = open => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>' + (open ? '' : '<path d="M4 4l16 16"/>') + '</svg>';
+      eye.innerHTML = icon(false);
+      eye.onclick = () => { const show = pass.type === 'password'; pass.type = show ? 'text' : 'password'; eye.innerHTML = icon(show); };
+      pass.parentNode.appendChild(eye);
+    }
+    const btn = document.getElementById('loginBtn');
+    if(btn){
+      const f = document.createElement('button');
+      f.type = 'button'; f.className = 'login-forgot'; f.textContent = 'Забыли пароль?';
+      // Сброса пароля по ссылке в CRM нет: пароль меняет администратор в карточке сотрудника.
+      f.onclick = () => alert('Пароль меняет администратор.\n\nНапишите своему руководителю или в поддержку: +7 747 578 58 55');
+      btn.parentNode.insertBefore(f, btn.nextSibling);
+    }
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup); else setup();
+})();
