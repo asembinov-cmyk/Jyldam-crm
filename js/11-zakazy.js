@@ -1,5 +1,5 @@
 /* ================= МОДУЛЬ: ЗАКАЗЫ ================= */
-let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',creator:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:''};
+let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',creator:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:'',payer:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
@@ -630,7 +630,7 @@ function activeOrdersFilterCount(){
   // createFrom/createTo не считаем: это фильтр дня, он стоит по умолчанию на сегодня и
   // переключается отдельными кнопками «Сегодня» / «Все даты» — на виду и без того.
   ['status','delivery','partner','sales','processor','missing','pickupCity','destCity',
-   'paidBySender','partnerQ'].forEach(k=>{if(of[k])n++;});
+   'paidBySender','payer','partnerQ'].forEach(k=>{if(of[k])n++;});
   if(of.q)n++;
   if(of.pickFrom||of.pickTo||of.delFrom||of.delTo)n++;
   return n;
@@ -749,6 +749,12 @@ function renderOrders(mode){
           <option value="">Оплата: все</option>
           <option value="yes" ${of.paidBySender==='yes'?'selected':''}>Оплачено отправителем</option>
           <option value="no" ${of.paidBySender==='no'?'selected':''}>Не оплачено отправителем</option>
+        </select>
+        <select id="ofpayer" title="Кто оплачивает доставку">
+          <option value="">Кто оплачивает: все</option>
+          <option value="partner_self" ${of.payer==='partner_self'?'selected':''}>Платит партнёр по своим условиям</option>
+          <option value="pickup_gold" ${of.payer==='pickup_gold'?'selected':''}>Курьер получил на свой Kaspi Gold</option>
+          <option value="recipient" ${of.payer==='recipient'?'selected':''}>Получатель</option>
         </select>
         ${isStaff()?'<button type="button" class="filters-btn" id="ordersExclPartners" title="Снять галочки с заказов выбранных партнёров">⊘ Исключить партнёров</button>':''}
         ${(isStaff()||canOrder('delete'))?`<span class="act-wrap"><button type="button" class="filters-btn" id="ordersActBtn" title="Что сделать с отмеченными заказами">⚙ Действие ▾</button>
@@ -1107,6 +1113,7 @@ function renderOrders(mode){
   };
   if($('ofmissing'))$('ofmissing').onchange=e=>{of.missing=e.target.value;drawOrdersReset();};
   if($('ofpaid'))$('ofpaid').onchange=e=>{of.paidBySender=e.target.value;drawOrdersReset();};
+  if($('ofpayer'))$('ofpayer').onchange=e=>{of.payer=e.target.value;drawOrdersReset();};
   if($('ofpickupcity'))$('ofpickupcity').onchange=e=>{of.pickupCity=e.target.value;drawOrdersReset();};
   if($('ofdestcity'))$('ofdestcity').onchange=e=>{of.destCity=e.target.value;drawOrdersReset();};
   if($('ofsales'))$('ofsales').onchange=e=>{of.sales=e.target.value;drawOrdersReset();};
@@ -1291,6 +1298,13 @@ function ordersDateScopedList(){
     return true;
   });
 }
+// Кто оплачивает доставку. «Получатель» — галочка «Оплачено отправителем» снята.
+// Два других варианта — радиокнопки, которые появляются, когда галочка стоит.
+function orderMatchesPayer(o,payer){
+  if(!payer)return true;
+  if(payer==='recipient')return !o.paid_by_sender;
+  return !!o.paid_by_sender&&(o.sender_pay_via||o._payChoice||'')===payer;
+}
 function filteredOrders(){
   /* РЕЖИМ «ДУБЛЬ» ОТМЕНЯЕТ ОСТАЛЬНЫЕ ФИЛЬТРЫ, и это не небрежность. Дубли найдены за ВСЕ
      даты, а фильтр дат в гриде по умолчанию стоит на сегодня — он скрыл бы почти все
@@ -1362,6 +1376,9 @@ function filteredOrders(){
     // фильтр по оплате отправителем
     if(of.paidBySender==='yes'&&!o.paid_by_sender)return false;
     if(of.paidBySender==='no'&&o.paid_by_sender)return false;
+    // «Кто оплачивает»: два варианта из карточки при галочке «Оплачено отправителем»
+    // и «Получатель» — заказы, где этой галочки нет.
+    if(!orderMatchesPayer(o,of.payer))return false;
     if(q){
       const hay=[o.code,o.track,o.client,phoneDisplay(o.phone),o.phone,o.sender,o.address,o.index,partnerName(o.partner_id)].join(' ').toLowerCase();
       // поиск по телефону — устойчивый к формату ввода (с +7/8 впереди, с пробелами/скобками или просто цифрами)
