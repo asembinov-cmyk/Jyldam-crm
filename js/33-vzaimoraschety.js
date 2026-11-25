@@ -878,6 +878,7 @@ function settlementsPickupExtra(o) {
 
 async function settlementsNoteSenderPay(order) {
   if (!order || !order.id || !order.paid_by_sender) return null;
+  if (typeof isBaraholkaOrder === "function" && isBaraholkaOrder(order)) return null;
   const choice = order.sender_pay_via || order._payChoice || "";
   if (choice !== "partner_self" && choice !== "pickup_gold") return null;
   const fee = Number(order.order_sum_orig);
