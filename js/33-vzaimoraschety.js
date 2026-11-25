@@ -242,6 +242,14 @@ function stMissingKaspi(o, m) {
 function stBillable(o) {
   return !!(o && o.state === "open" && !o.unplaced && o.holder_id && Number(o.amount) > 0);
 }
+function stCancelCell(o) {
+  if (!stCanIssue() || !o || o.state !== "invoiced" || !o.invoice_id) return "";
+  return `<button class="btn sm" type="button" data-stcancel="${stEsc(o.invoice_id)}">Отменить счёт</button>`;
+}
+function stOpenInvoiceId(orders) {
+  const ids = [...new Set((orders || []).filter((o) => o && o.state === "invoiced" && o.invoice_id).map((o) => o.invoice_id))];
+  return ids.length === 1 ? ids[0] : "";
+}
 function stIssueCell(o, m, cat) {
   if (!stCanIssue() || !stBillable(o)) return "";
   const fiz = stIsFizlicoRow(o, cat);
@@ -562,7 +570,8 @@ function stPickBar(rows, m, cat) {
 }
 function stObRow(o, n, pick, cat, m, tab) {
   const delivery = tab === "summary" ? `<td data-label="Тип доставки">${stEsc(stDeliveryName(o) || "—")}</td>` : "";
-  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m, cat)}</td>` : ""}</tr>`;
+  const action = pick ? stIssueCell(o, m, cat) || (tab === "summary" ? stCancelCell(o) : "") : "";
+  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
 }
 function stObTable(tab, rows, m, cat) {
   const pick = stCanIssue();
@@ -622,7 +631,9 @@ function stSummaryGrouped(view, m, cat) {
   const openOrders = groups.filter((g) => stSummaryOpen.has(g.key)).flatMap((g) => g.orders);
   const body = groups.map((g, n) => {
     const open = stSummaryOpen.has(g.key);
-    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}</td></tr>`;
+    const invoiceId = stOpenInvoiceId(g.orders);
+    const cancel = invoiceId ? ` ${stCancelCell({ state: "invoiced", invoice_id: invoiceId })}` : "";
+    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}${cancel}</td></tr>`;
     if (!open) return head;
     return head + `<tr class="st-gbody"><td colspan="7" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
@@ -711,6 +722,10 @@ function settlementsBind(root) {
   });
   root.querySelectorAll("[data-storder]").forEach((b) => b.onclick = () => settlementsOpenOrder(b.dataset.storder));
   root.querySelectorAll("button[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
+  root.querySelectorAll("[data-stcancel]").forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    settlementsCancelInvoice(b.dataset.stcancel);
+  });
   settlementsBindPick(root);
   root.querySelectorAll("[data-stpickup]").forEach((b) => b.onclick = () => settlementsOpenPickup(b.dataset.stpickup));
   root.querySelectorAll("[data-stpartner]").forEach((b) => b.onclick = () => settlementsOpenPartner(b.dataset.stpartner));
@@ -914,6 +929,31 @@ async function settlementsIssueSelected(root) {
     else ok += 1;
   }
   if (typeof toast === "function") toast(fails.length ? `Выставлено ${ok}. Не вышло: ${fails[0]}` : `Выставлено счетов: ${ok}`);
+  settlementsModel = null;
+  renderSettlements();
+}
+
+async function settlementsCancelInvoice(id) {
+  if (!id) return;
+  const inv = ((settlementsModel && settlementsModel.invoices) || []).find((i) => i.id === id) || {};
+  const sum = inv.amount != null ? ` на ${stMoney(inv.amount)}` : "";
+  if (!confirm(`Отменить выставленный счёт${sum}? Долг снова станет к выплате. Оплаченный счёт не отменяется.`)) return;
+  const res = await callEdge("settlements", { action: "cancel", invoice_id: id });
+  if (!res || res.error || res.success === false) {
+    if (typeof toast === "function") toast((res && (res.error || res.message)) || "Счёт не отменён");
+    return;
+  }
+  const ids = inv.order_ids || [];
+  if (ids.length && typeof sb !== "undefined" && sb) {
+    try {
+      const q = await sb.from("orders").select("id,order_sum_orig,paid_by_sender").in("id", ids);
+      const fees = (q.data || []).filter((o) => o.paid_by_sender && o.order_sum_orig != null && o.order_sum_orig !== "")
+        .map((o) => ({ order_id: o.id, fee: Number(o.order_sum_orig) }))
+        .filter((o) => Number.isFinite(o.fee) && o.fee >= 0);
+      if (fees.length) await callEdge("settlements", { action: "fees_set", orders: fees });
+    } catch (e) { /* долг уже открыт, цену можно поправить сохранением заказа */ }
+  }
+  if (typeof toast === "function") toast("Счёт отменён");
   settlementsModel = null;
   renderSettlements();
 }

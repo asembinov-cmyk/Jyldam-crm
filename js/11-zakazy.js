@@ -2714,6 +2714,16 @@ function repriceForWeight(order, newWeight){
 function isExplicitNum(v){return v!=null&&v!==''&&!isNaN(+v);}
 // Цена заказа по тарифу партнёра: размер S — сам тариф, M и L — с надбавкой,
 // у почты ещё перевес. Пустой тариф не подменяем базовой ценой: тогда нечего переносить.
+// Цена по выбранному типу доставки. Пустой тариф не подменяем базовой ценой.
+function deliveryTariffPrice(partner, deliveryId, size, weight, bar){
+  if(!partner)return null;
+  const courier=typeof isCourierDelivery==='function'&&isCourierDelivery(deliveryId);
+  const raw=courier?partner.tariff_courier:partner.tariff_post;
+  if(!isExplicitNum(raw))return null;
+  const sizes=packageSizesFor(partner);
+  const key=size&&sizes[size]?size:'S';
+  return (courier?sizes[key].courier:sizes[key].mail)+weightSurcharge(weight,courier,!!bar);
+}
 function orderTariffPrice(partner, order){
   if(!partner||!order)return null;
   const courier=typeof isCourierDelivery==='function'&&isCourierDelivery(order.delivery_id);
@@ -3253,7 +3263,10 @@ function orderModal(id,readonly){
         row.sales_margin=salesMarginFor(Object.assign({},row,{partner_id:(cardPartner()||{}).id}),
           (row.pickup_date||localToday()).slice(0,7));
       }
-      // галочка «Оплачено отправителем»: сумма→0 (исходная запоминается), снятие — возврат
+      // галочка «Оплачено отправителем»: сумма→0 (исходная запоминается), снятие — возврат.
+      // Смена типа доставки берёт цену нового тарифа. Прежняя запомненная сумма не остаётся.
+      const deliveryChanged=!!(o&&String(o.delivery_id||'')!==String(row.delivery_id||''));
+      const nextPrice=deliveryChanged?deliveryTariffPrice(cardPartner(),row.delivery_id,row.size,val('o_weight'),typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(Object.assign({},o||{},{delivery_id:row.delivery_id}))):null;
       if($('o_paidorder')){
         const paidNow=$('o_paidorder').checked;
         if(paidNow){
@@ -3264,7 +3277,8 @@ function orderModal(id,readonly){
              отметкой (сканер Барахолки у партнёра с тарифом 0), `prevsum` взяться неоткуда:
              галочку никто не переключал. Тогда берём условную выручку из заготовки —
              иначе заказ ушёл бы в Калькуляцию с нулевой выручкой, то есть чистым убытком. */
-          if(!o||!o.paid_by_sender){
+          if(nextPrice!=null)row.order_sum_orig=nextPrice;
+          else if(!o||!o.paid_by_sender){
             const fromPrefill=(!o&&d.order_sum_orig!=null)?d.order_sum_orig:null;
             row.order_sum_orig=(prevSum!=null&&prevSum!=='')?(parseFloat(prevSum)||0)
               :(fromPrefill!=null?fromPrefill:0);
@@ -3283,6 +3297,7 @@ function orderModal(id,readonly){
           if(o&&o.paid_by_sender){const back=(o.order_sum_orig!=null?o.order_sum_orig:0);
             if(val('o_sum')===''||parseFloat(val('o_sum'))===0){row.order_sum=back;row.cost=back;}}
           row.paid_by_sender=false;row.order_sum_orig=null;row.sender_pay_via=null;
+          if(nextPrice!=null){row.order_sum=nextPrice;row.cost=nextPrice;}
         }
       }
       // Отметка «кто заполнил» для раздела «Забивка». Ставится один раз — в момент,
@@ -3745,10 +3760,22 @@ function orderModal(id,readonly){
          тут и есть всё дело. */
       if(cardBar&&$('o_ip')){const f=$('o_ip').closest('.field');if(f)f.style.display='none';}
     };
+    const applyDeliveryPrice=()=>{
+      const price=deliveryTariffPrice(findPartner(),$('o_delivery').value,($('o_size')||{}).value,val('o_weight'),typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(d));
+      if(price==null)return;
+      const paid=$('o_paidorder');
+      const sumEl=$('o_sum');
+      if(paid&&paid.checked){
+        paid.dataset.prevsum=String(price);
+        if(sumEl){sumEl.value='0';sumEl.disabled=true;sumEl.title='Запомненная цена: '+price+' ₸';}
+        return;
+      }
+      if(sumEl){sumEl.value=price;sumTouched=false;sumEl.title='';}
+    };
     const ds=$('o_delivery');ds.onchange=()=>{
       const f=$('cityField');
       if(isCourierDelivery(ds.value))f.style.display='';else{f.style.display='none';if($('o_city')){$('o_city').value='';fillCouriers('');}}
-      toggleMailFields();applyTariff();
+      toggleMailFields();applyDeliveryPrice();
     };
     const cityEl=$('o_city');if(cityEl)cityEl.onchange=()=>fillCouriers(cityEl.value);
     // при изменении отправителя — подтянуть данные партнёра
