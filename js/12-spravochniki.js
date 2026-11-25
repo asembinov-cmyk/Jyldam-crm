@@ -590,7 +590,13 @@ function partnerModal(id){
         }
       }
       else{const u=await dbInsert('partners',row);if(!u)return false;S.partners.push(u);}
-      toast('Сохранено'+syncMsg);renderPartnersPage();return true;});
+      toast('Сохранено'+syncMsg);
+      // Карточку открыли из сводки взаиморасчётов: сохранение не уводит в модуль «Партнёры».
+      if(typeof S!=='undefined'&&S.tab==='settlements'&&typeof renderSettlements==='function'){
+        settlementsModel=null;
+        renderSettlements();
+      }else renderPartnersPage();
+      return true;});
   attachPhone('p_phone',p.phone);
   const cs=$('p_city');cs.onchange=()=>{$('p_district').innerHTML='<option value="">—</option>'+dOpts(cs.value).map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
     const pc=$('p_courier');if(pc)pc.innerHTML=pCourierOpts(cs.value,pc.value);};
