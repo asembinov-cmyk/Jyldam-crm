@@ -307,6 +307,16 @@ function stTh(scope, key, label) {
   const mark = bag.col === key ? (bag.dir === 1 ? " ▲" : " ▼") : "";
   return `<th class="fin-th fin-sortable" data-stsort="${stEsc(scope)}" data-stcol="${stEsc(key)}" title="Сортировать">${stEsc(label)}${mark}</th>`;
 }
+function stPageNote(n, total) {
+  const tail = n === total ? "" : ` из ${total}`;
+  return `<div class="st-pagecount" style="margin:0 0 8px;font-size:13px;font-weight:600">На странице: ${n}${tail}</div>`;
+}
+function stNumHead() {
+  return `<th class="st-num" style="width:46px;color:var(--muted)">№</th>`;
+}
+function stNumCell(i) {
+  return `<td class="st-num" data-label="№" style="color:var(--muted)">${i + 1}</td>`;
+}
 const ST_OB_FIND = {
   labels: ["Заказ", "Заявка", "Сумма"],
   text: ["order", "pickup", "amount"],
@@ -425,14 +435,14 @@ function settlementsKaspiBlock(tab, m) {
   }));
   const rows = stSortRows(stSlice(view, ST_KASPI_FIND, scope).shown, scope);
   const sum = rows.reduce((s, i) => s + i.amountNum, 0);
-  const body = rows.length ? `<table class="resp-table"><thead><tr>${stTh(scope, "order", "Заказ")}${stTh(scope, "phone", "Телефон")}${stTh(scope, "amountNum", "Сумма")}${stTh(scope, "status", "Статус")}${stTh(scope, "issued", "Выставлен")}${stTh(scope, "paid", "Оплачен")}</tr></thead><tbody>${rows.map((i) =>
-    `<tr><td>${i.raw.order_id ? `<button class="btn ghost sm" type="button" data-storder="${stEsc(i.raw.order_id)}">${stEsc(i.order || "Заказ")}</button>` : stEsc(i.order || "—")}</td><td>${stEsc(i.phone)}</td><td>${stMoney(i.raw.amount)}</td><td>${stEsc(i.status)}</td><td>${stEsc(when(i.raw.created_at))}</td><td>${stEsc(i.raw.paid_at ? when(i.raw.paid_at) : "—")}</td></tr>`).join("")}</tbody></table>`
+  const body = rows.length ? `<table class="resp-table"><thead><tr>${stNumHead()}${stTh(scope, "order", "Заказ")}${stTh(scope, "phone", "Телефон")}${stTh(scope, "amountNum", "Сумма")}${stTh(scope, "status", "Статус")}${stTh(scope, "issued", "Выставлен")}${stTh(scope, "paid", "Оплачен")}</tr></thead><tbody>${rows.map((i, n) =>
+    `<tr>${stNumCell(n)}<td>${i.raw.order_id ? `<button class="btn ghost sm" type="button" data-storder="${stEsc(i.raw.order_id)}">${stEsc(i.order || "Заказ")}</button>` : stEsc(i.order || "—")}</td><td>${stEsc(i.phone)}</td><td>${stMoney(i.raw.amount)}</td><td>${stEsc(i.status)}</td><td>${stEsc(when(i.raw.created_at))}</td><td>${stEsc(i.raw.paid_at ? when(i.raw.paid_at) : "—")}</td></tr>`).join("")}</tbody></table>`
     : stMiss(view.length, `<div class="empty"><div class="big">${tab === "paid" ? "Оплат ещё нет" : "Счетов ещё нет"}</div></div>`);
   const names = [...new Set(view.map((i) => i.kassa).filter(Boolean))];
   const heading = names.length > 1 ? "Удалённые счета Kaspi Pay" : `Касса ${names[0] || name}`;
   return `<div class="panel" style="padding:14px;margin-bottom:14px"><h3 style="margin:0 0 8px">${stEsc(heading)}</h3>
     <p style="color:var(--muted);font-size:13px;margin-top:0">Удалённые счета Kaspi Pay. ${rows.length} на ${stMoney(sum)}.</p>
-    ${stFindBar(scope, ST_KASPI_FIND, view)}${body}</div>`;
+    ${stFindBar(scope, ST_KASPI_FIND, view)}${stPageNote(rows.length, view.length)}${body}</div>`;
 }
 
 async function settlementsLoadKaspi() {
@@ -478,10 +488,10 @@ function settlementsTable(tab, rows, m) {
       day: String(r.date || "").slice(0, 10),
     }));
     const shown = stSortRows(stSlice(view, ST_SHIFT_FIND, tab).shown, tab);
-    const body = shown.length ? `<table class="resp-table"><thead><tr>${stTh(tab, "courier", "Курьер")}${stTh(tab, "day", "Дата")}<th></th></tr></thead><tbody>${shown.map((r) =>
-      `<tr><td>${stEsc(r.courier)}</td><td>${stEsc(stDay(r.day))}</td><td><button class="btn sm" type="button" data-stclose="${stEsc(r.raw.courierId)}" data-stdate="${stEsc(r.raw.date)}">Завершить смену</button></td></tr>`).join("")}</tbody></table>`
+    const body = shown.length ? `<table class="resp-table"><thead><tr>${stNumHead()}${stTh(tab, "courier", "Курьер")}${stTh(tab, "day", "Дата")}<th></th></tr></thead><tbody>${shown.map((r, n) =>
+      `<tr>${stNumCell(n)}<td>${stEsc(r.courier)}</td><td>${stEsc(stDay(r.day))}</td><td><button class="btn sm" type="button" data-stclose="${stEsc(r.raw.courierId)}" data-stdate="${stEsc(r.raw.date)}">Завершить смену</button></td></tr>`).join("")}</tbody></table>`
       : stMiss(view.length, `<div class="empty"><div class="big">Забытых смен нет</div></div>`);
-    return stFindBar(tab, ST_SHIFT_FIND, view) + body;
+    return stFindBar(tab, ST_SHIFT_FIND, view) + stPageNote(shown.length, view.length) + body;
   }
   if (tab === "awaiting") {
     const view = rows.map((r) => ({
@@ -490,10 +500,10 @@ function settlementsTable(tab, rows, m) {
       pickup: stPickupText(r.pickup_id, r.pickup_name, cat),
     }));
     const shown = stSortRows(stSlice(view, ST_AWAIT_FIND, tab).shown, tab);
-    const body = shown.length ? `<table class="resp-table"><thead><tr>${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}</tr></thead><tbody>${shown.map((r) =>
-      `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(r.raw.order_id)}">${stEsc(r.order)}</button></td><td>${stEsc(r.pickup)}</td></tr>`).join("")}</tbody></table>`
+    const body = shown.length ? `<table class="resp-table"><thead><tr>${stNumHead()}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}</tr></thead><tbody>${shown.map((r, n) =>
+      `<tr>${stNumCell(n)}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(r.raw.order_id)}">${stEsc(r.order)}</button></td><td>${stEsc(r.pickup)}</td></tr>`).join("")}</tbody></table>`
       : stMiss(view.length, `<div class="empty"><div class="big">Нет заказов без цены</div>Такие заказы не попадают в счёт.</div>`);
-    return stFindBar(tab, ST_AWAIT_FIND, view) + body;
+    return stFindBar(tab, ST_AWAIT_FIND, view) + stPageNote(shown.length, view.length) + body;
   }
   if (tab === "invoices" || tab === "paid" || tab === "errors") {
     const kassa = !m.preview && m.kaspi_kassa ? m.kaspi_kassa : "";
@@ -510,10 +520,10 @@ function settlementsTable(tab, rows, m) {
       end: String(i.period_end || i.period_start || "").slice(0, 10),
     }));
     const shown = stSortRows(stSlice(view, ST_INV_FIND, tab).shown, tab);
-    const body = shown.length ? `<table class="resp-table"><thead><tr>${stTh(tab, "bill", "Счёт")}${stTh(tab, "who", "Кто платит")}${stTh(tab, "start", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "status", "Статус")}${kassa ? stTh(tab, "kassa", "Касса") : ""}<th>Заказы</th></tr></thead><tbody>${shown.map((i) =>
-      `<tr><td>${stEsc(i.bill)}</td><td>${stEsc(i.who)}</td><td>${stEsc(stDay(i.start))} — ${stEsc(stDay(i.end))}</td><td>${stMoney(i.raw.amount)}</td><td>${stEsc(i.status)}</td>${kassa ? `<td>${i.kassa ? stEsc(i.kassa) : "—"}</td>` : ""}<td>${(i.raw.order_ids || []).map((id, n) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.raw.order_codes || [])[n], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`
+    const body = shown.length ? `<table class="resp-table"><thead><tr>${stNumHead()}${stTh(tab, "bill", "Счёт")}${stTh(tab, "who", "Кто платит")}${stTh(tab, "start", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "status", "Статус")}${kassa ? stTh(tab, "kassa", "Касса") : ""}<th>Заказы</th></tr></thead><tbody>${shown.map((i, n) =>
+      `<tr>${stNumCell(n)}<td>${stEsc(i.bill)}</td><td>${stEsc(i.who)}</td><td>${stEsc(stDay(i.start))} — ${stEsc(stDay(i.end))}</td><td>${stMoney(i.raw.amount)}</td><td>${stEsc(i.status)}</td>${kassa ? `<td>${i.kassa ? stEsc(i.kassa) : "—"}</td>` : ""}<td>${(i.raw.order_ids || []).map((id, k) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.raw.order_codes || [])[k], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`
       : stMiss(view.length, `<div class="empty"><div class="big">Счетов нет</div></div>`);
-    return stFindBar(tab, ST_INV_FIND, view) + body;
+    return stFindBar(tab, ST_INV_FIND, view) + stPageNote(shown.length, view.length) + body;
   }
   const view = rows.map((o) => ({
     raw: o,
@@ -528,15 +538,15 @@ function settlementsTable(tab, rows, m) {
   const shown = stSortRows(stSlice(view, ST_OB_FIND, tab).shown, tab);
   rows = shown.map((o) => o.raw);
   const barFind = stFindBar(tab, ST_OB_FIND, view);
-  if (!rows.length) return barFind + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
+  if (!rows.length) return barFind + stPageNote(0, view.length) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
   const pick = stCanIssue();
   const anyPick = pick && rows.some((o) => o.state === "open" && !stMissingKaspi(o, m));
   const bar = anyPick ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
     <label class="pom-paid" style="margin:0"><input type="checkbox" id="stChkAll"> Выделить все</label>
     <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
   </div>` : "";
-  return barFind + bar + `<table class="resp-table"><thead><tr>${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o) =>
-    `<tr>${pick ? `<td>${stPickBox(o, m)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stHolderCell(o, cat, m)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+  return barFind + stPageNote(rows.length, view.length) + bar + `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o, n) =>
+    `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stHolderCell(o, cat, m)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
 }
 
 function settlementsAdminForm() {
