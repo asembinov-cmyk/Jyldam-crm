@@ -65,6 +65,26 @@ function visiblePickups(){
   }
   return S.pickups;
 }
+// Заказы внутри карточек, чей счётчик стоит над фильтром. Считаем те же строки,
+// что и «Карточки забора», и раскладываем по городу карточки.
+function pickupCityOrders(rows){
+  let alma=0,asta=0,other=0;
+  (rows||[]).forEach(p=>{
+    const nm=(typeof cityName==='function'?cityName(p.city_id):'').toLowerCase();
+    const n=+p.orders||0;
+    if(/алмат/.test(nm))alma+=n;
+    else if(/астан|нур-?султан|нур\s*султан/.test(nm))asta+=n;
+    else other+=n;
+  });
+  return {alma,asta,other};
+}
+function pickupOrdersLabel(rows){
+  const c=pickupCityOrders(rows);
+  const fmt=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,'\u00a0');
+  let s=`заказов: Алматы ${fmt(c.alma)} · Астана ${fmt(c.asta)}`;
+  if(c.other)s+=` · другие ${fmt(c.other)}`;
+  return s;
+}
 function renderPickups(){
   if((!S.pickups||!S.pickups.length)&&S._heavyLoading&&!S._heavyLoaded){
     $('main').innerHTML='<div class="page-head"><div><h1>Заявки на забор</h1></div></div><div class="loading" style="padding:60px">Загружаем заявки…</div>';
@@ -90,7 +110,7 @@ function renderPickups(){
           active:!!pf.qr,title:'Показать только заявки, пришедшие от партнёров'},
       ]})}
     <div class="panel">
-      <div class="panel-head"><h2>Карточки забора</h2><span class="count" id="pickupsCount">${list.length}</span></div>
+      <div class="panel-head pk-head"><h2>Карточки забора</h2><span class="count" id="pickupsCount">${list.length}</span><span class="count pk-orders" id="pickupsOrders">${esc(pickupOrdersLabel(list))}</span></div>
       <div class="filters">
         <input class="search" id="pfq" placeholder="Поиск: наименование, адрес, номер…" value="${esc(pf.q)}">
         ${isStaff()?`<select id="pfcity"><option value="">Все города</option>${S.cities.filter(c=>/алмат|астан|нур-?султан/i.test(c.name||'')).map(c=>`<option value="${c.id}" ${pf.city===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:''}
@@ -235,8 +255,9 @@ function filteredPickups(){
 }
 function drawPickups(){
   const el=$('pickupTable');const allRows=filteredPickups();
-  // обновляем счётчик рядом с «Карточки забора» (отфильтрованное кол-во)
+  // счётчик карточек и заказы в них — по тому же отфильтрованному списку
   {const cnt=$('pickupsCount');if(cnt)cnt.textContent=allRows.length;}
+  {const ord=$('pickupsOrders');if(ord)ord.textContent=pickupOrdersLabel(allRows);}
   removePickupsPager();
   if(!allRows.length){el.innerHTML=`<div class="empty"><div class="big">Пока нет карточек</div>${isStaff()?'Нажмите «Создать карточку забора».':'Вам пока не назначены заборы.'}</div>`;return;}
   if(isCourier()){drawCourierPickupCards(el,allRows);return;}

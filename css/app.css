@@ -644,6 +644,8 @@
   .panel-head h2{font-family:'Fraunces',serif;font-weight:600;font-size:18px}
   .panel-head .count{font-size:12px;color:var(--muted);background:var(--paper);border:1px solid var(--line);
     padding:2px 9px;border-radius:20px;font-weight:600}
+  .panel-head.pk-head{flex-wrap:wrap}
+  .panel-head .pk-orders{color:var(--ink);font-weight:600}
 
   .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
   table{width:100%;border-collapse:collapse;font-size:13.5px}
