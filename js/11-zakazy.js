@@ -436,6 +436,13 @@ async function pickupOrdersModal(pickupId){
             const saved=await dbUpdate('orders',o.id,patch);
             if(!saved){chk.checked=!v;toast('Не удалось сохранить — попробуйте ещё раз');return;}
             Object.assign(o,saved);
+            if(v){
+              const radio=wrap.querySelector(`input[name="stpay-${o.id}"]:checked`);
+              if(radio){o.sender_pay_via=radio.value;o._payChoice=radio.value;}
+              if(typeof settlementsNoteSenderPay==='function'){
+                try{await settlementsNoteSenderPay(o);}catch(err){console.error('settlements',err);}
+              }
+            }
             await logAction('update','orders',{entity_id:o.id,entity_label:orderLabel(o),changes:[
               {field:'paid_by_sender',label:FIELD_LABEL.paid_by_sender,old:v?'нет':'да',new:v?'да':'нет'},
               {field:'order_sum',label:FIELD_LABEL.order_sum,old:beforeSum!=null?String(beforeSum):'—',new:String(o.order_sum)},
@@ -3247,6 +3254,7 @@ function orderModal(id,readonly){
       }
       // Счёт Kaspi — только ПОСЛЕ успешной записи заказа (js/32): оплаченного счёта без заказа быть не должно.
       if(typeof kaspiAfterSave==='function'){try{await kaspiAfterSave(saved||o);}catch(e){console.error('kaspi',e);}}
+      if(typeof settlementsNoteSenderPay==='function'){try{await settlementsNoteSenderPay(saved||o);}catch(e){console.error('settlements',e);}}
       // из «Забивки» карточку открывают там же — renderOrders() увёл бы менеджера
       // на другой экран после каждого сохранённого заказа
       if(S.tab==='filling'&&typeof renderFilling==='function')renderFilling();else renderOrders();

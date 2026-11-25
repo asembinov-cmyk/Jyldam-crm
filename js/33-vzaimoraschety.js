@@ -64,14 +64,15 @@ function settlementsDemo() {
 function settlementsMarkup(m) {
   m = m || settlementsDemo();
   const tab = settlementsTab;
-  const older = (m.obligations || []).filter((o) => o.period_date < "2026-11-24" && o.state !== "paid");
+  const owed = (m.obligations || []).filter((o) => o.state !== "paid" && !o.unplaced);
+  const older = owed.filter((o) => o.period_date < "2026-11-24");
   const errors = (m.invoices || []).filter((i) => i.status === "error" || i.status === "unknown");
-  const rows = tab === "partners" ? (m.obligations || []).filter((o) => o.holder_type === "partner")
-    : tab === "pickup" ? (m.obligations || []).filter((o) => o.holder_type === "pickup_courier")
-    : tab === "delivery" ? (m.obligations || []).filter((o) => o.holder_type === "delivery_courier")
-    : tab === "admins" ? (m.obligations || []).filter((o) => o.holder_type === "admin")
+  const rows = tab === "partners" ? owed.filter((o) => o.holder_type === "partner")
+    : tab === "pickup" ? owed.filter((o) => o.holder_type === "pickup_courier")
+    : tab === "delivery" ? owed.filter((o) => o.holder_type === "delivery_courier")
+    : tab === "admins" ? owed.filter((o) => o.holder_type === "admin")
     : tab === "paid" ? (m.invoices || []).filter((i) => i.status === "paid")
-    : tab === "stale" ? (m.obligations || []).filter((o) => m.stale_before && o.period_date < m.stale_before && o.state !== "paid")
+    : tab === "stale" ? owed.filter((o) => m.stale_before && o.period_date < m.stale_before)
     : tab === "overdue" ? older
     : tab === "errors" ? errors
     : tab === "invoices" ? (m.invoices || [])
@@ -236,8 +237,11 @@ function stMissingKaspi(o, m) {
   return (m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id);
 }
 
+function stBillable(o) {
+  return !!(o && o.state === "open" && !o.unplaced && o.holder_id && Number(o.amount) > 0);
+}
 function stIssueCell(o, m, cat) {
-  if (!stCanIssue() || !o || o.state !== "open") return "";
+  if (!stCanIssue() || !stBillable(o)) return "";
   const fiz = stIsFizlicoRow(o, cat);
   if (!fiz && stMissingKaspi(o, m)) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>`;
   const mark = fiz ? ` data-stfiz="1" data-storder="${stEsc(o.order_id)}"` : "";
@@ -246,7 +250,7 @@ function stIssueCell(o, m, cat) {
 
 function stPickBox(o, m, cat) {
   const fiz = stIsFizlicoRow(o, cat);
-  if (!stCanIssue() || !o || o.state !== "open" || (!fiz && stMissingKaspi(o, m))) return "";
+  if (!stCanIssue() || !stBillable(o) || (!fiz && stMissingKaspi(o, m))) return "";
   const mark = fiz ? ` data-stfiz="1" data-storder="${stEsc(o.order_id)}"` : "";
   return `<input type="checkbox" class="stChk" data-stpick="1" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}"${mark}>`;
 }
@@ -565,7 +569,7 @@ function settlementsTable(tab, rows, m) {
   const barFind = stFindBar(tab, ST_OB_FIND, view);
   if (!rows.length) return barFind + stPageNote(0, view.length) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
   const pick = stCanIssue();
-  const anyPick = pick && rows.some((o) => o.state === "open" && (stIsFizlicoRow(o, cat) || !stMissingKaspi(o, m)));
+  const anyPick = pick && rows.some((o) => stBillable(o) && (stIsFizlicoRow(o, cat) || !stMissingKaspi(o, m)));
   const bar = anyPick ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
     <label class="pom-paid" style="margin:0"><input type="checkbox" id="stChkAll"> Выделить все</label>
     <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
@@ -865,11 +869,28 @@ function settlementsPickupExtra(o) {
   return `<div class="panel" style="padding:10px;margin-top:8px" data-stfee="${stEsc(o.id)}">
     <div class="pom-sumrow"><span>Реальная стоимость доставки (₸)</span>
       <input type="number" min="0" class="pom-sum" data-st-fee="${stEsc(o.id)}" value="${fee === "" ? "" : stEsc(fee)}" placeholder="ещё не определена"></div>
-    <small style="color:var(--muted)">Галочка «Оплачено отправителем» больше не прячет эту сумму. Пока цена пустая, заказ в реестре «Ожидает определения стоимости» и в счёт не входит.</small>
+    <small style="color:var(--muted)">Галочка «Оплачено отправителем» и выбор, кто платит, сразу ставят заказ в сводку. Сумма берётся из запомненной стоимости доставки.</small>
     <div data-st-payer="${stEsc(o.id)}" style="margin-top:8px">
       <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="partner_self" ${(o.sender_pay_via || o._payChoice) === "partner_self" ? "checked" : ""}> Платит партнёр по своим условиям</label>
       <label class="pom-paid"><input type="radio" name="stpay-${stEsc(o.id)}" value="pickup_gold" ${(o.sender_pay_via || o._payChoice) === "pickup_gold" ? "checked" : ""}> Курьер получил на свой Kaspi Gold</label>
     </div></div>`;
+}
+
+async function settlementsNoteSenderPay(order) {
+  if (!order || !order.id || !order.paid_by_sender) return null;
+  const choice = order.sender_pay_via || order._payChoice || "";
+  if (choice !== "partner_self" && choice !== "pickup_gold") return null;
+  const fee = Number(order.order_sum_orig);
+  const mine = typeof myPickupCourierIds === "function" ? myPickupCourierIds()[0] : "";
+  const res = await callEdge("settlements", {
+    action: "choose",
+    order_id: order.id,
+    choice,
+    fee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
+    subject_id: mine || order.courier_id || "",
+  });
+  if (res && res.error && typeof toast === "function" && !/стар|effective|нет права|уже есть счёт/i.test(res.error)) toast(res.error);
+  return res;
 }
 
 function settlementsBindPickup(wrap) {
@@ -888,14 +909,9 @@ function settlementsBindPickup(wrap) {
         const saved = await dbUpdate("orders", order.id, { sender_pay_via: radio.value });
         if (!saved) { if (typeof toast === "function") toast("Не удалось сохранить, кто платит"); return; }
         Object.assign(order, saved);
-        const fee = inp.value === "" ? null : Number(inp.value);
-        if (fee != null && Number.isFinite(fee)) {
-          const mine = typeof myPickupCourierIds === "function" ? myPickupCourierIds()[0] : "";
-          const res = await callEdge("settlements", {
-            action: "choose", order_id: order.id, fee, choice: radio.value, subject_id: mine || order.courier_id || "",
-          });
-          if (res && res.error && typeof toast === "function" && !/стар|effective|нет права/i.test(res.error)) toast(res.error);
-        }
+        const typed = inp.value === "" ? null : Number(inp.value);
+        if (typed != null && Number.isFinite(typed) && typed >= 0) order.order_sum_orig = typed;
+        if (order.paid_by_sender) await settlementsNoteSenderPay(order);
       });
     });
     inp.onchange = async () => {
