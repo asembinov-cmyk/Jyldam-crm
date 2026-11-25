@@ -4,6 +4,8 @@
    который его выставил. Первый кассир — ИП Зонова Наталья. */
 let settlementsTab = "summary";
 let settlementsModel = null;
+let stSummaryByOrder = false;
+const stSummaryOpen = new Set();
 
 function stMoney(n) {
   return Number(n || 0).toLocaleString("ru-RU") + " ₸";
@@ -355,6 +357,19 @@ const ST_OB_FIND = {
   ],
   dates: [{ key: "period", label: "Период", field: "day" }],
 };
+function stObFind(tab) {
+  if (tab !== "summary") return ST_OB_FIND;
+  return {
+    labels: ST_OB_FIND.labels,
+    text: ST_OB_FIND.text,
+    picks: [
+      { key: "who", label: "Кто держит долг" },
+      { key: "delivery", label: "Тип доставки" },
+      { key: "state", label: "Состояние" },
+    ],
+    dates: ST_OB_FIND.dates,
+  };
+}
 const ST_AWAIT_FIND = {
   labels: ["Заказ", "Заявка"],
   text: ["order", "pickup"],
@@ -508,6 +523,113 @@ async function settlementsLoadKaspi() {
   return { kaspi_kassa: nameOf(first), kaspi_invoices: invoices, kaspi_loaded: true };
 }
 
+function stPayerKey(o) {
+  const type = encodeURIComponent(o.holder_type || "");
+  if (o.holder_id) return type + "|" + encodeURIComponent(o.holder_id);
+  return type + "||" + encodeURIComponent(o.holder_name || "");
+}
+function stDeliveryName(o) {
+  if (o && o.delivery) return String(o.delivery);
+  const order = (typeof S !== "undefined" ? (S.orders || []) : []).find((x) => x.id === (o && o.order_id));
+  const id = order && order.delivery_id;
+  const hit = ((typeof S !== "undefined" && S.delivery) || []).find((d) => d.id === id);
+  return (hit && hit.name) || "";
+}
+function stObView(rows, cat, m) {
+  return (rows || []).map((o) => ({
+    raw: o,
+    order: stOrderText(o.order_id, o.order_code, cat),
+    pickup: stPickupText(o.pickup_id, o.pickup_name, cat),
+    delivery: stDeliveryName(o),
+    who: stWho(o.holder_type, o.holder_id, o.holder_name, cat) + (stMissingKaspi(o, m) ? " Не указан номер Kaspi" : ""),
+    amount: `${o.amount} ${stMoney(o.amount)}`,
+    amountNum: Number(o.amount) || 0,
+    state: stState(o.state),
+    day: String(o.period_date || "").slice(0, 10),
+  }));
+}
+function stSummaryToggle() {
+  return `<label class="pom-paid" style="margin:0 0 10px"><input type="checkbox" id="stByOrder" ${stSummaryByOrder ? "checked" : ""}> Развернуть по заказно</label>`;
+}
+function stPickBar(rows, m, cat) {
+  if (!stCanIssue()) return "";
+  const any = (rows || []).some((o) => stBillable(o) && (stIsFizlicoRow(o, cat) || !stMissingKaspi(o, m)));
+  if (!any) return "";
+  return `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
+    <label class="pom-paid" style="margin:0"><input type="checkbox" id="stChkAll"> Выделить все</label>
+    <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
+  </div>`;
+}
+function stObRow(o, n, pick, cat, m, tab) {
+  const delivery = tab === "summary" ? `<td data-label="Тип доставки">${stEsc(stDeliveryName(o) || "—")}</td>` : "";
+  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m, cat)}</td>` : ""}</tr>`;
+}
+function stObTable(tab, rows, m, cat) {
+  const pick = stCanIssue();
+  const delivery = tab === "summary" ? stTh(tab, "delivery", "Тип доставки") : "";
+  const sorted = stSortRows(stObView(rows, cat, m), tab).map((o) => o.raw);
+  return `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${delivery}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${sorted.map((o, n) => stObRow(o, n, pick, cat, m, tab)).join("")}</tbody></table>`;
+}
+function stGroupWho(o, cat, m) {
+  const label = stWho(o.holder_type, o.holder_id, o.holder_name, cat);
+  const note = !stIsFizlicoRow(o, cat) && stMissingKaspi(o, m) ? " · Не указан номер Kaspi" : "";
+  const who = o.holder_type === "partner" && o.holder_id
+    ? `<button class="btn ghost sm" type="button" data-stpartner="${stEsc(o.holder_id)}" data-stwho="${stEsc(label)}" title="Открыть карточку партнёра">${stEsc(label)}</button>`
+    : `<span data-stwho="${stEsc(label)}">${stEsc(label)}</span>`;
+  return who + (note ? stEsc(note) : "");
+}
+function stPayerGroups(orders, cat, m) {
+  const map = new Map();
+  (orders || []).forEach((o) => {
+    const key = stPayerKey(o);
+    let g = map.get(key);
+    if (!g) g = map.set(key, { key, raw: o, orders: [], amountNum: 0, days: [], states: [], deliveries: [] }).get(key);
+    g.orders.push(o);
+    g.amountNum += Number(o.amount) || 0;
+    const day = String(o.period_date || "").slice(0, 10);
+    if (day && !g.days.includes(day)) g.days.push(day);
+    const state = stState(o.state);
+    if (!g.states.includes(state)) g.states.push(state);
+    const delivery = stDeliveryName(o);
+    if (delivery && !g.deliveries.includes(delivery)) g.deliveries.push(delivery);
+  });
+  return [...map.values()].map((g) => {
+    const days = g.days.slice().sort();
+    return {
+      key: g.key,
+      raw: g.raw,
+      orders: g.orders,
+      who: stWho(g.raw.holder_type, g.raw.holder_id, g.raw.holder_name, cat),
+      delivery: g.deliveries.length ? g.deliveries.join(", ") : "—",
+      count: g.orders.length,
+      amountNum: g.amountNum,
+      state: g.states.length === 1 ? g.states[0] : "Разные",
+      day: days[0] || "",
+      dayLabel: !days.length ? "—" : days.length === 1 ? stDay(days[0]) : `${stDay(days[0])} — ${stDay(days[days.length - 1])}`,
+    };
+  });
+}
+function stSummaryGrouped(view, m, cat) {
+  const spec = stObFind("summary");
+  const matched = stSlice(view, spec, "summary").shown.map((row) => row.raw);
+  const groups = stSortRows(stPayerGroups(matched, cat, m), "summary-payers");
+  const allGroups = stPayerGroups(view.map((row) => row.raw), cat, m).length;
+  const barFind = stFindBar("summary", spec, view);
+  const toggle = stSummaryToggle();
+  if (!groups.length) {
+    return barFind + toggle + stPageNote(0, allGroups) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
+  }
+  const openOrders = groups.filter((g) => stSummaryOpen.has(g.key)).flatMap((g) => g.orders);
+  const body = groups.map((g, n) => {
+    const open = stSummaryOpen.has(g.key);
+    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}</td></tr>`;
+    if (!open) return head;
+    return head + `<tr class="st-gbody"><td colspan="7" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
+  }).join("");
+  const table = `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}</tr></thead><tbody>${body}</tbody></table>`;
+  return barFind + toggle + stPageNote(groups.length, allGroups) + stPickBar(openOrders, m, cat) + table;
+}
+
 function settlementsTable(tab, rows, m) {
   const cat = stCatalog();
   if (tab === "forgotten") {
@@ -554,28 +676,15 @@ function settlementsTable(tab, rows, m) {
       : stMiss(view.length, `<div class="empty"><div class="big">Счетов нет</div></div>`);
     return stFindBar(tab, ST_INV_FIND, view) + stPageNote(shown.length, view.length) + body;
   }
-  const view = rows.map((o) => ({
-    raw: o,
-    order: stOrderText(o.order_id, o.order_code, cat),
-    pickup: stPickupText(o.pickup_id, o.pickup_name, cat),
-    who: stWho(o.holder_type, o.holder_id, o.holder_name, cat) + (stMissingKaspi(o, m) ? " Не указан номер Kaspi" : ""),
-    amount: `${o.amount} ${stMoney(o.amount)}`,
-    amountNum: Number(o.amount) || 0,
-    state: stState(o.state),
-    day: String(o.period_date || "").slice(0, 10),
-  }));
-  const shown = stSortRows(stSlice(view, ST_OB_FIND, tab).shown, tab);
+  const spec = stObFind(tab);
+  const view = stObView(rows, cat, m);
+  const shown = stSortRows(stSlice(view, spec, tab).shown, tab);
   rows = shown.map((o) => o.raw);
-  const barFind = stFindBar(tab, ST_OB_FIND, view);
-  if (!rows.length) return barFind + stPageNote(0, view.length) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
-  const pick = stCanIssue();
-  const anyPick = pick && rows.some((o) => stBillable(o) && (stIsFizlicoRow(o, cat) || !stMissingKaspi(o, m)));
-  const bar = anyPick ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
-    <label class="pom-paid" style="margin:0"><input type="checkbox" id="stChkAll"> Выделить все</label>
-    <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
-  </div>` : "";
-  return barFind + stPageNote(rows.length, view.length) + bar + `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o, n) =>
-    `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stHolderCell(o, cat, m, tab)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m, cat)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+  const barFind = stFindBar(tab, spec, view);
+  const toggle = tab === "summary" ? stSummaryToggle() : "";
+  if (tab === "summary" && !stSummaryByOrder) return stSummaryGrouped(view, m, cat);
+  if (!rows.length) return barFind + toggle + stPageNote(0, view.length) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
+  return barFind + toggle + stPageNote(rows.length, view.length) + stPickBar(rows, m, cat) + stObTable(tab, rows, m, cat);
 }
 
 function settlementsAdminForm() {
@@ -624,6 +733,20 @@ function settlementsBind(root) {
     else el.oninput = () => stApplyFindInput(el);
   });
   root.querySelectorAll("[data-stsort]").forEach((th) => th.onclick = () => stApplySort(th.dataset.stsort, th.dataset.stcol));
+  const byOrder = root.querySelector("#stByOrder");
+  if (byOrder) byOrder.onchange = () => {
+    stSummaryByOrder = byOrder.checked;
+    const y = window.scrollY;
+    Promise.resolve(stRedraw()).then(() => window.scrollTo(0, y));
+  };
+  root.querySelectorAll("[data-stgroup]").forEach((tr) => tr.onclick = (e) => {
+    if (e.target.closest("button, a, input, select, textarea, label")) return;
+    const key = tr.dataset.stgroup;
+    if (stSummaryOpen.has(key)) stSummaryOpen.delete(key);
+    else stSummaryOpen.add(key);
+    const y = window.scrollY;
+    Promise.resolve(stRedraw()).then(() => window.scrollTo(0, y));
+  });
   root.querySelectorAll("[data-stcash]").forEach((b) => b.onclick = async () => {
     const res = await callEdge("settlements", { action: "cash_confirm", order_id: b.dataset.stcash });
     if (typeof toast === "function") toast(res && res.error ? res.error : "Долг перенесён на администратора");
@@ -653,16 +776,50 @@ async function renderSettlements() {
     if (settlementsModel && !settlementsModel.preview && !settlementsModel.kaspi_loaded) {
       Object.assign(settlementsModel, await settlementsLoadKaspi());
     }
+    if (settlementsModel && !settlementsModel.preview) await stAttachDelivery(settlementsModel);
   }
   main.innerHTML = settlementsMarkup(settlementsModel);
   settlementsBind(main);
 }
 
+async function stAttachDelivery(model) {
+  if (!model || model.delivery_loaded) return;
+  const ids = [...new Set((model.obligations || []).map((o) => o.order_id).filter(Boolean))];
+  const byOrder = new Map();
+  if (typeof sb !== "undefined" && sb && ids.length) {
+    for (let i = 0; i < ids.length; i += 80) {
+      try {
+        const q = await sb.from("orders").select("id,delivery_id").in("id", ids.slice(i, i + 80));
+        if (!q.error) (q.data || []).forEach((row) => byOrder.set(row.id, row.delivery_id || ""));
+      } catch (e) { /* тип останется пустым, сводка всё равно откроется */ }
+    }
+  }
+  const types = (typeof S !== "undefined" && Array.isArray(S.delivery)) ? S.delivery : [];
+  const known = new Set(types.map((d) => d.id));
+  const missing = [...byOrder.values()].some((id) => id && !known.has(id));
+  if (missing && typeof sb !== "undefined" && sb) {
+    try {
+      const q = await sb.from("delivery_types").select("id,name");
+      if (!q.error) (q.data || []).forEach((d) => { if (d && d.id && !known.has(d.id)) types.push(d); });
+    } catch (e) { /* имя типа не подставится */ }
+  }
+  const nameOf = (id) => {
+    const hit = types.find((d) => d.id === id);
+    return (hit && hit.name) || "";
+  };
+  (model.obligations || []).forEach((o) => {
+    if (o.delivery) return;
+    const id = byOrder.has(o.order_id) ? byOrder.get(o.order_id) : (((typeof S !== "undefined" ? (S.orders || []) : []).find((x) => x.id === o.order_id) || {}).delivery_id);
+    o.delivery = nameOf(id);
+  });
+  model.delivery_loaded = true;
+}
+
 function settlementsExcel() {
   const rows = (settlementsModel && settlementsModel.obligations) || [];
   const cat = stCatalog();
-  const lines = ["заказ;заявка;кто держит долг;период;сумма;состояние"].concat(rows.map((o) =>
-    [stOrderText(o.order_id, o.order_code, cat), stPickupText(o.pickup_id, o.pickup_name, cat), stWho(o.holder_type, o.holder_id, o.holder_name, cat), stDay(o.period_date), o.amount, stState(o.state)].join(";")));
+  const lines = ["заказ;заявка;тип доставки;кто держит долг;период;сумма;состояние"].concat(rows.map((o) =>
+    [stOrderText(o.order_id, o.order_code, cat), stPickupText(o.pickup_id, o.pickup_name, cat), stDeliveryName(o), stWho(o.holder_type, o.holder_id, o.holder_name, cat), stDay(o.period_date), o.amount, stState(o.state)].join(";")));
   const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
