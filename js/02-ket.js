@@ -534,7 +534,17 @@ async function doLogin(){
   await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
-async function doLogout(){try{if(typeof sfShutdown==='function')sfShutdown();}catch(e){}await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;clearNav();$('email').value='';_emailPrevRaw='';$('password').value='';showLogin();}
+async function doLogout(){try{if(typeof sfShutdown==='function')sfShutdown();}catch(e){}await logAction('logout','auth',{entity_label:(S.me&&(S.me.full_name||S.me.email))||''});if(_autoRefreshTimer){clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;}await sb.auth.signOut();S.me=null;clearNav();$('email').value='';_emailPrevRaw='';$('password').value='';showLogin();
+  /* ПОСЛЕ ВЫХОДА СТРАНИЦА ПЕРЕЗАГРУЖАЕТСЯ (25.11.2026). В памяти вкладки остаётся всё от
+     прежнего сотрудника: заказы и заявки (S.orders, S.pickups), флаги загрузки, охват истории,
+     фильтры, черновики, подписка Realtime — десятки переменных в 32 файлах. Следующий, кто
+     входил на том же телефоне без перезапуска, получал пустой список «Мои заборы» при
+     трёх заявках в базе (поймано на живом iPhone). Сбрасывать переменные поимённо —
+     значит забыть одну на первой же новой; перезагрузка сбрасывает все разом и заодно не
+     оставляет чужие ФИО и адреса в памяти для следующего вошедшего. Экран входа выше уже
+     показан, так что при сбое перезагрузки человек всё равно может войти. */
+  try{location.reload();}catch(e){}
+}
 function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();
   // по умолчанию подставляем +7 (можно стереть и ввести email)
   const el=$('email');if(el&&!el.value){el.value='+7 ';}
