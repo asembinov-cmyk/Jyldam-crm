@@ -49,6 +49,7 @@ function defaultPickupDate(){
 }
 let pf={q:'',city:'',courier:'',sales:'',processor:'',status:'',dateFrom:localToday(),dateTo:localToday(),qr:false};
 let pickupsPage=1; // текущая страница пагинации заявок
+let pickupSort={col:'',dir:1}; // клик по «Заказов»: первый раз по возрастанию, повторный переворачивает
 let pickupsPerPage=50; // заявок на страницу
 // мобильный режим: вместо пагинации — «Показать ещё»
 const isMobileView=()=>window.matchMedia('(max-width:760px)').matches;
@@ -222,6 +223,10 @@ function filteredPickups(){
     });
   }
   return rows.sort((a,b)=>{
+    if(pickupSort.col==='orders'){
+      const d=(+a.orders||0)-(+b.orders||0);
+      if(d)return pickupSort.dir*d;
+    }
     // заявки от партнёра (пришли через кабинет) — всегда первыми, чтобы не пропустить и успеть назначить курьера
     const pa=a.partner_id?1:0,pb=b.partner_id?1:0;
     if(pa!==pb)return pb-pa;
@@ -250,9 +255,10 @@ function drawPickups(){
     startIdx=(pickupsPage-1)*pickupsPerPage;
     rows=allRows.slice(startIdx,startIdx+pickupsPerPage);
   }
+  const ordersMark=pickupSort.col==='orders'?(pickupSort.dir===1?' ▲':' ▼'):'';
   el.innerHTML=`<div class="table-scroll"><table class="resp-table resp-collapse"><thead><tr>
     <th>Дата</th><th>Город</th><th>Наименование</th><th>Адрес</th><th>Номер</th><th>Район</th>
-    ${staff?'<th>Курьер</th>':''}<th>Заказов</th><th>Статус</th><th></th></tr></thead>
+    ${staff?'<th>Курьер</th>':''}<th class="fin-th fin-sortable" data-psort="orders" title="Сортировать по количеству заказов">Заказов${ordersMark}</th><th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`<tr data-prow="${p.id}" style="cursor:pointer" class="${p.partner_id?'pickup-row-qr':''}" title="${p.partner_id?'Пришла от партнёра через кабинет (QR)':''}">
       <td data-label="Дата">${esc(fmtDate(p.pickup_date))}${p.created_at?`<small class="cell-time">создана ${esc(fmtDateTime(p.created_at))}</small>`:''}</td>
       <td data-label="Город">${cityPill(p.city_id)}</td>
@@ -270,6 +276,13 @@ function drawPickups(){
         ${can('pickups','edit')?`<button class="btn sm ghost" data-pedit="${p.id}">Изменить</button>`:`<button class="btn sm ghost" data-pview="${p.id}">Открыть</button>`}
         ${can('pickups','delete')?`<button class="btn sm danger" data-pdel="${p.id}">Удалить</button>`:''}
       </div></td></tr>`).join('')}</tbody></table></div>`;
+  el.querySelectorAll('[data-psort]').forEach(th=>th.onclick=e=>{
+    e.stopPropagation();
+    const col=th.dataset.psort;
+    if(pickupSort.col===col)pickupSort.dir=pickupSort.dir===1?-1:1;
+    else{pickupSort.col=col;pickupSort.dir=1;}
+    drawPickupsReset();
+  });
   el.querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pedit));
   el.querySelectorAll('[data-pview]').forEach(b=>b.onclick=()=>pickupModal(b.dataset.pview,true));
   // мобила: тап по строке (не по кнопке/полю) сворачивает/разворачивает карточку
