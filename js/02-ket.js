@@ -787,11 +787,17 @@ async function enterApp(){
   $('main').innerHTML='<div class="loading">Загружаем данные…</div>';
   try{ await loadAll(); }catch(e){ console.error('loadAll',e); }
   try{ loadNav(); }catch(e){ console.error('loadNav',e); }
+  // Ссылка из меню (?tab=) важнее запомненного раздела: новая вкладка браузера
+  // свою память не делит со старой и должна открыться именно на выбранном пункте.
+  const urlTab=tabFromLocation();
+  if(urlTab)S.tab=urlTab;
   try{ buildNav(); }catch(e){ console.error('buildNav',e); }
+  try{ writeTabUrl(S.tab); }catch(e){}
   try{ render(); }catch(e){
     console.error('render',e);
     // если сохранённая вкладка битая — сбрасываем и пробуем заново
     S.tab='dashboard';
+    try{ writeTabUrl(S.tab); }catch(err){}
     try{ buildNav(); render(); }catch(err){ $('main').innerHTML='<div class="empty"><div class="big">Не удалось открыть раздел</div><div style="font-size:12px;color:var(--rust);margin-top:10px;word-break:break-word">'+esc(String(err&&err.message||err))+'</div>Обновите страницу.</div>'; }
   }
   hideSplash();
@@ -1546,6 +1552,33 @@ function pickupsTodayActive(){
     return /нов|пути|выехал|принял/i.test(nm);
   }).length;
 }
+// Адрес пункта меню. Обычный щелчок остаётся в этой вкладке, а ссылка нужна браузеру:
+// колёсико, Ctrl+щелчок и «Открыть в новой вкладке» открывают тот же раздел рядом.
+function navTabHref(k){
+  const u=new URL(location.href);
+  u.searchParams.set('tab',k);
+  u.hash='';
+  return u.pathname+'?'+u.searchParams.toString();
+}
+function tabFromLocation(){
+  try{
+    const t=new URL(location.href).searchParams.get('tab')||'';
+    return /^[a-z0-9_]+$/i.test(t)?t:'';
+  }catch(e){return '';}
+}
+function writeTabUrl(k){
+  try{
+    const u=new URL(location.href);
+    if(!k||k==='none')u.searchParams.delete('tab');
+    else u.searchParams.set('tab',k);
+    const next=u.pathname+u.search+u.hash;
+    if(next!==location.pathname+location.search+location.hash)history.replaceState({tab:k||''},'',next);
+  }catch(e){}
+}
+// Модификаторы и колёсико отдаём браузеру: он сам откроет ссылку во второй вкладке.
+function navClickStays(e){
+  return !(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button===1);
+}
 function buildNav(opts){
   opts=opts||{};
   // восстановить свёрнутые группы меню из localStorage (один раз)
@@ -1659,8 +1692,10 @@ function buildNav(opts){
       }
       if(it.href){
         html+=`<a href="${esc(it.href)}" target="_blank" rel="noopener" class="${cls}" style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span></a>`;
+      }else if(it.disabled){
+        html+=`<button data-tab="${it.k}" class="${cls}" data-disabled="1" style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
       }else{
-        html+=`<button data-tab="${it.k}" class="${cls}" ${it.disabled?'data-disabled="1"':''} style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</button>`;
+        html+=`<a href="${esc(navTabHref(it.k))}" data-tab="${esc(it.k)}" class="${cls}" style="--nav-col:${col}" title="${esc(it.label)}">${ICONS[it.icon]||''}<span>${esc(it.label)}</span>${badge}</a>`;
       }
     });
   });
@@ -1673,9 +1708,13 @@ function buildNav(opts){
     su.innerHTML=`<div class="su-ava" title="${esc(nm)}">${esc(init)}</div>
       <div class="su-info"><div class="su-name">${esc(nm)}</div><div class="su-role"><span class="su-dot"></span>Онлайн</div></div>`;
   }
-  $('navTabs').querySelectorAll('button[data-tab]').forEach(b=>b.onclick=async()=>{
-    if(b.dataset.disabled){toast('Раздел в разработке');return;}
-    S.tab=b.dataset.tab;saveNav();buildNav();closeSidebar();
+  $('navTabs').querySelectorAll('button[data-tab]').forEach(b=>b.onclick=()=>{
+    if(b.dataset.disabled)toast('Раздел в разработке');
+  });
+  $('navTabs').querySelectorAll('a[data-tab]').forEach(a=>a.onclick=e=>{
+    if(!navClickStays(e))return;
+    e.preventDefault();
+    S.tab=a.dataset.tab;saveNav();writeTabUrl(S.tab);buildNav();closeSidebar();
     render(); // мгновенно рисуем из уже загруженных данных
     const myTab=S.tab;
     refreshForTab(myTab).then(()=>{if(S.tab===myTab)render();}).catch(()=>{}); // свежие данные в фоне

@@ -180,7 +180,7 @@
   /* активный пункт — заливка в цвете группы */
   .side-nav button.active,.side-nav a.active{color:#fff;background:var(--nav-col,#2546c9);border-color:transparent;
     box-shadow:0 3px 12px -2px var(--nav-col,#2546c9)}
-  .side-nav button.active svg{color:#fff}
+  .side-nav button.active svg,.side-nav a.active svg{color:#fff}
   .side-nav button svg,.side-nav a svg{width:19px;height:19px;flex:none;opacity:.9}
   .side-nav button.disabled{opacity:.32;cursor:default}
   .side-nav button.disabled:hover{background:transparent;color:#b0b3b8;transform:none}
@@ -190,7 +190,7 @@
   .side-nav .nav-badge{margin-left:auto;font-size:11px;font-weight:800;background:rgba(255,255,255,.16);color:#fff;
     min-width:20px;height:19px;border-radius:10px;display:inline-grid;place-items:center;padding:0 6px}
   .side-nav .nav-badge.nb-crit{background:#e5484d;color:#fff}
-  .side-nav button.active .nav-badge{background:rgba(255,255,255,.26)}
+  .side-nav button.active .nav-badge,.side-nav a.active .nav-badge{background:rgba(255,255,255,.26)}
   /* профиль пользователя внизу меню */
   .side-user{display:flex;align-items:center;gap:10px;padding:11px 10px;margin-top:10px;flex:none;
     border-top:1px solid rgba(255,255,255,.07)}
@@ -208,8 +208,10 @@
   .nav-collapse-btn:hover{background:var(--rust);color:#fff;border-color:var(--rust);transform:scale(1.08)}
   /* свёрнутое меню: только иконки */
   body.nav-collapsed .sidebar{width:66px;flex:0 0 66px;padding:16px 9px}
-  body.nav-collapsed .side-nav button span:not(.nav-badge){display:none}
-  body.nav-collapsed .side-nav button{justify-content:center;padding:11px 0}
+  body.nav-collapsed .side-nav button span:not(.nav-badge),
+  body.nav-collapsed .side-nav a span:not(.nav-badge){display:none}
+  body.nav-collapsed .side-nav button,
+  body.nav-collapsed .side-nav a{justify-content:center;padding:11px 0}
   body.nav-collapsed .side-nav .nav-group{font-size:0;padding:12px 0 5px;justify-content:center}
   body.nav-collapsed .ng-dot{width:18px;height:3px;border-radius:2px}
   body.nav-collapsed .sidebar-logout{font-size:0;padding:9px 0}
@@ -218,7 +220,10 @@
   body.nav-collapsed .side-user{justify-content:center;padding:11px 0}
   body.nav-collapsed .su-info{display:none}
   @media (max-width:900px){.nav-collapse-btn{display:none}body.nav-collapsed .sidebar{width:224px;flex:0 0 224px;padding:16px 12px}
-    body.nav-collapsed .side-nav button span{display:inline}body.nav-collapsed .side-nav button{justify-content:flex-start;padding:10px 13px}
+    body.nav-collapsed .side-nav button span,
+    body.nav-collapsed .side-nav a span{display:inline}
+    body.nav-collapsed .side-nav button,
+    body.nav-collapsed .side-nav a{justify-content:flex-start;padding:10px 13px}
     body.nav-collapsed .side-nav .nav-group{font-size:10px;padding:15px 13px 5px;justify-content:flex-start}
     body.nav-collapsed .sidebar-logout{font-size:14px}body.nav-collapsed .sidebar-logout::after{content:''}
     body.nav-collapsed .su-info{display:block}}
@@ -1257,19 +1262,21 @@
       display:flex;flex-direction:column;align-items:stretch;box-shadow:0 0 40px -8px rgba(0,0,0,.5)}
     .sidebar.open{transform:translateX(0)}
     .side-nav{flex-direction:column;flex-wrap:nowrap;gap:4px;overflow:visible;flex:0 0 auto}
-    .side-nav button{font-size:14px;padding:11px 14px;border-radius:10px;background:transparent;
+    .side-nav button,.side-nav a{font-size:14px;padding:11px 14px;border-radius:10px;background:transparent;
       border-color:transparent;justify-content:flex-start;color:rgba(255,255,255,.62)}
-    .side-nav button:hover{color:#fff;background:rgba(255,255,255,.07)}
-    .side-nav button.active{background:var(--nav-col,#2546c9);color:#fff;border-color:transparent}
-    .side-nav button.active svg{color:#fff}
+    .side-nav button:hover,.side-nav a:hover{color:#fff;background:rgba(255,255,255,.07)}
+    .side-nav button.active,.side-nav a.active{background:var(--nav-col,#2546c9);color:#fff;border-color:transparent}
+    .side-nav button.active svg,.side-nav a.active svg{color:#fff}
     .side-nav .nav-group{color:rgba(255,255,255,.38)}
     .sidebar-logout{margin-top:14px;width:100%;flex:0 0 auto;border-radius:10px;
       color:#ff8f7a;border-color:rgba(255,143,122,.3);background:transparent}
     .side-user{border-top:1px solid rgba(255,255,255,.07)}
     /* на мобильном меню НИКОГДА не свёрнуто (класс с десктопа игнорируем) */
     body.nav-collapsed .sidebar{width:270px;max-width:82vw;flex:none;padding:18px 14px}
-    body.nav-collapsed .side-nav button span{display:inline !important}
-    body.nav-collapsed .side-nav button{justify-content:flex-start;padding:11px 14px}
+    body.nav-collapsed .side-nav button span,
+    body.nav-collapsed .side-nav a span{display:inline !important}
+    body.nav-collapsed .side-nav button,
+    body.nav-collapsed .side-nav a{justify-content:flex-start;padding:11px 14px}
     body.nav-collapsed .side-nav .nav-group{font-size:10px;padding:15px 13px 5px;justify-content:flex-start}
     body.nav-collapsed .ng-dot{width:7px;height:7px;border-radius:50%}
     body.nav-collapsed .sidebar-logout{font-size:14px;padding:9px 14px}
