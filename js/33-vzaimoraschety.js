@@ -193,13 +193,34 @@ function stWho(type, id, name, cat) {
   if (!who && type === "delivery_courier") who = (cat.delivery.get(id) || {}).fio || "";
   return who ? `${kind}: ${who}` : kind;
 }
-function stHolderCell(o, cat, m) {
+function stHolderName(o, cat) {
+  if (o.holder_name) return String(o.holder_name);
+  if (o.holder_type === "partner") return (cat.partner.get(o.holder_id) || {}).name || "";
+  return "";
+}
+function stIsFizlicoRow(o, cat) {
+  return typeof isFizlicoName === "function" && isFizlicoName(stHolderName(o, cat));
+}
+function stPhone10(raw) {
+  const d = String(raw || "").replace(/\D/g, "");
+  const ten = d.length === 11 && (d[0] === "7" || d[0] === "8") ? d.slice(1) : d;
+  return /^7\d{9}$/.test(ten) ? ten : "";
+}
+function stFizPhoneValue(o) {
+  if (o.invoice_phone) return String(o.invoice_phone);
+  if (o.client_phone) return String(o.client_phone);
+  const row = (typeof S !== "undefined" ? (S.orders || []) : []).find((x) => x.id === o.order_id);
+  return row && row.phone ? String(row.phone) : "";
+}
+function stHolderCell(o, cat, m, tab) {
   const label = stWho(o.holder_type, o.holder_id, o.holder_name, cat);
-  const note = stMissingKaspi(o, m) ? " · Не указан номер Kaspi" : "";
-  if (o.holder_type === "partner" && o.holder_id) {
-    return `<button class="btn ghost sm" type="button" data-stpartner="${stEsc(o.holder_id)}" title="Открыть карточку партнёра">${stEsc(label)}</button>${note ? stEsc(note) : ""}`;
-  }
-  return stEsc(label) + (note ? stEsc(note) : "");
+  const fiz = tab === "summary" && stIsFizlicoRow(o, cat);
+  const note = !fiz && stMissingKaspi(o, m) ? " · Не указан номер Kaspi" : "";
+  const who = o.holder_type === "partner" && o.holder_id
+    ? `<button class="btn ghost sm" type="button" data-stpartner="${stEsc(o.holder_id)}" data-stwho="${stEsc(label)}" title="Открыть карточку партнёра">${stEsc(label)}</button>`
+    : `<span data-stwho="${stEsc(label)}">${stEsc(label)}</span>`;
+  const phone = fiz ? `<input class="st-fiz-phone" data-stfizphone="${stEsc(o.order_id)}" data-stsaved="${stEsc(stPhone10(stFizPhoneValue(o)))}" value="${stEsc(stPhone10(stFizPhoneValue(o)) || stFizPhoneValue(o))}" inputmode="tel" autocomplete="off" placeholder="Номер для счёта" title="Номер для удалённого счёта Kaspi" style="width:148px;margin-left:8px;padding:4px 8px">` : "";
+  return who + phone + (note ? stEsc(note) : "");
 }
 
 function stState(v) {
@@ -215,15 +236,19 @@ function stMissingKaspi(o, m) {
   return (m.missing_kaspi || []).some((x) => x.holder_type === o.holder_type && x.holder_id === o.holder_id);
 }
 
-function stIssueCell(o, m) {
+function stIssueCell(o, m, cat) {
   if (!stCanIssue() || !o || o.state !== "open") return "";
-  if (stMissingKaspi(o, m)) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>`;
-  return `<button class="btn sm primary" type="button" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}">Выставить счёт</button>`;
+  const fiz = stIsFizlicoRow(o, cat);
+  if (!fiz && stMissingKaspi(o, m)) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>`;
+  const mark = fiz ? ` data-stfiz="1" data-storder="${stEsc(o.order_id)}"` : "";
+  return `<button class="btn sm primary" type="button" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}"${mark}>Выставить счёт</button>`;
 }
 
-function stPickBox(o, m) {
-  if (!stCanIssue() || !o || o.state !== "open" || stMissingKaspi(o, m)) return "";
-  return `<input type="checkbox" class="stChk" data-stpick="1" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}">`;
+function stPickBox(o, m, cat) {
+  const fiz = stIsFizlicoRow(o, cat);
+  if (!stCanIssue() || !o || o.state !== "open" || (!fiz && stMissingKaspi(o, m))) return "";
+  const mark = fiz ? ` data-stfiz="1" data-storder="${stEsc(o.order_id)}"` : "";
+  return `<input type="checkbox" class="stChk" data-stpick="1" data-stissue="${stEsc(o.holder_type)}" data-stholder="${stEsc(o.holder_id)}" data-stday="${stEsc(o.period_date)}" data-stamount="${Number(o.amount) || 0}"${mark}>`;
 }
 
 const ST_FIND = {};
@@ -540,13 +565,13 @@ function settlementsTable(tab, rows, m) {
   const barFind = stFindBar(tab, ST_OB_FIND, view);
   if (!rows.length) return barFind + stPageNote(0, view.length) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
   const pick = stCanIssue();
-  const anyPick = pick && rows.some((o) => o.state === "open" && !stMissingKaspi(o, m));
+  const anyPick = pick && rows.some((o) => o.state === "open" && (stIsFizlicoRow(o, cat) || !stMissingKaspi(o, m)));
   const bar = anyPick ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
     <label class="pom-paid" style="margin:0"><input type="checkbox" id="stChkAll"> Выделить все</label>
     <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
   </div>` : "";
   return barFind + stPageNote(rows.length, view.length) + bar + `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o, n) =>
-    `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stHolderCell(o, cat, m)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+    `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stHolderCell(o, cat, m, tab)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m, cat)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
 }
 
 function settlementsAdminForm() {
@@ -576,6 +601,11 @@ function settlementsBind(root) {
   settlementsBindPick(root);
   root.querySelectorAll("[data-stpickup]").forEach((b) => b.onclick = () => settlementsOpenPickup(b.dataset.stpickup));
   root.querySelectorAll("[data-stpartner]").forEach((b) => b.onclick = () => settlementsOpenPartner(b.dataset.stpartner));
+  root.querySelectorAll("[data-stfizphone]").forEach((inp) => {
+    inp.onclick = (e) => e.stopPropagation();
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } };
+    inp.onchange = () => settlementsSaveFizPhone(inp);
+  });
   const excel = root.querySelector("#st_excel");
   if (excel) excel.onclick = settlementsExcel;
   const reload = root.querySelector("#st_reload");
@@ -676,18 +706,34 @@ function settlementsBindPick(root) {
 async function settlementsIssueSelected(root) {
   const picked = [...root.querySelectorAll(".stChk:checked")];
   const groups = new Map();
+  const bare = [];
   picked.forEach((c) => {
+    if (c.dataset.stfiz === "1") {
+      const inp = c.closest("tr") && c.closest("tr").querySelector("[data-stfizphone]");
+      const phone = stPhone10(inp && inp.value);
+      if (!phone) { bare.push(c.dataset.storder || ""); return; }
+      groups.set(`fiz|${c.dataset.storder}`, {
+        type: c.dataset.stissue, holder: c.dataset.stholder, day: c.dataset.stday,
+        amount: Number(c.dataset.stamount) || 0, count: 1, order: c.dataset.storder, phone,
+      });
+      return;
+    }
     const key = `${c.dataset.stissue}|${c.dataset.stholder}|${c.dataset.stday}`;
     const cur = groups.get(key) || { type: c.dataset.stissue, holder: c.dataset.stholder, day: c.dataset.stday, amount: 0, count: 0 };
     cur.amount += Number(c.dataset.stamount) || 0;
     cur.count += 1;
     groups.set(key, cur);
   });
+  if (bare.length) {
+    if (typeof toast === "function") toast("У физлица сначала укажите номер для удалённого счёта");
+    return;
+  }
   const list = [...groups.values()];
   if (!list.length) return;
   const sum = list.reduce((s, g) => s + g.amount, 0);
   const word = list.length % 10 === 1 && list.length % 100 !== 11 ? "счёт" : (list.length % 10 >= 2 && list.length % 10 <= 4 && (list.length % 100 < 12 || list.length % 100 > 14) ? "счета" : "счетов");
-  if (!confirm(`Выставить ${list.length} ${word} по ${picked.length} проводкам на ${stMoney(sum)}?\nОдин плательщик за один день получает один счёт.`)) return;
+  const fizNote = list.some((g) => g.order) ? "\nУ физлица каждый заказ получает свой счёт на номер из строки." : "\nОдин плательщик за один день получает один счёт.";
+  if (!confirm(`Выставить ${list.length} ${word} по ${picked.length} проводкам на ${stMoney(sum)}?${fizNote}`)) return;
   const go = root.querySelector("#stIssueSelected");
   if (go) go.disabled = true;
   let ok = 0;
@@ -695,12 +741,13 @@ async function settlementsIssueSelected(root) {
   for (const g of list) {
     const res = await callEdge("settlements", {
       action: "issue",
-      logical_key: `${g.type}:${g.holder}:${g.day}`,
+      logical_key: g.order ? `${g.type}:${g.holder}:${g.day}:${g.order}` : `${g.type}:${g.holder}:${g.day}`,
       holder_type: g.type,
       holder_id: g.holder,
       period_start: g.day,
       period_end: g.day,
       launch: "manual",
+      ...(g.order ? { phone: g.phone, order_ids: [g.order] } : {}),
     });
     if (!res || res.error || res.success === false) fails.push((res && (res.error || res.message)) || "Счёт не выставлен");
     else ok += 1;
@@ -711,20 +758,36 @@ async function settlementsIssueSelected(root) {
 }
 
 async function settlementsIssueRow(b) {
-  const cells = b.closest("tr") ? [...b.closest("tr").children] : [];
-  const who = (cells[3] && cells[3].textContent || "плательщику").replace(/\s+/g, " ").trim();
+  const tr = b.closest("tr");
+  const whoEl = tr && tr.querySelector("[data-stwho]");
+  const who = ((whoEl && whoEl.textContent) || "плательщику").replace(/\s+/g, " ").trim();
   const day = b.dataset.stday || "";
   const amount = Number(b.dataset.stamount) || 0;
-  if (!confirm(`Выставить счёт «${who}» за ${stDay(day)} на ${stMoney(amount)}?\nПовторное нажатие второй счёт не создаёт.`)) return;
+  const phoneInp = tr && tr.querySelector("[data-stfizphone]");
+  let phone = "";
+  if (phoneInp) {
+    phone = stPhone10(phoneInp.value);
+    if (!phone) {
+      if (typeof toast === "function") toast("Сначала укажите номер для удалённого счёта");
+      return;
+    }
+  }
+  if (!confirm(`Выставить счёт «${who}» за ${stDay(day)} на ${stMoney(amount)}?${phone ? "\nУдалённый счёт уйдёт на " + phone + "." : ""}\nПовторное нажатие второй счёт не создаёт.`)) return;
   b.disabled = true;
+  if (phoneInp) {
+    try { await settlementsSaveKaspi("order", phoneInp.dataset.stfizphone, phone); }
+    catch (e) { /* номер всё равно уходит вместе со счётом */ }
+  }
+  const orderId = b.dataset.storder || (phoneInp && phoneInp.dataset.stfizphone) || "";
   const res = await callEdge("settlements", {
     action: "issue",
-    logical_key: `${b.dataset.stissue}:${b.dataset.stholder}:${day}`,
+    logical_key: orderId && phone ? `${b.dataset.stissue}:${b.dataset.stholder}:${day}:${orderId}` : `${b.dataset.stissue}:${b.dataset.stholder}:${day}`,
     holder_type: b.dataset.stissue,
     holder_id: b.dataset.stholder,
     period_start: day,
     period_end: day,
     launch: "manual",
+    ...(phone ? { phone, order_ids: [orderId] } : {}),
   });
   if (!res || res.error || res.success === false) {
     b.disabled = false;
@@ -744,8 +807,26 @@ async function settlementsKaspiPhone(holderType, holderId) {
 }
 
 async function settlementsSaveKaspi(holderType, holderId, phone) {
-  if (!phone) return { ok: true, skipped: true };
   return await callEdge("settlements", { action: "phone_set", holder_type: holderType, holder_id: holderId, kaspi_phone: phone });
+}
+async function settlementsSaveFizPhone(inp) {
+  if (!inp) return;
+  const phone = stPhone10(inp.value);
+  if (String(inp.value || "").trim() && !phone) {
+    if (typeof toast === "function") toast("Нужен номер Казахстана: 7XXXXXXXXX");
+    return;
+  }
+  const prev = inp.dataset.stsaved || "";
+  if (phone === prev) return;
+  const res = await settlementsSaveKaspi("order", inp.dataset.stfizphone, phone);
+  if (!res || res.error || res.success === false) {
+    if (typeof toast === "function") toast((res && (res.error || res.message)) || "Номер не записался");
+    return;
+  }
+  inp.dataset.stsaved = phone;
+  const row = ((settlementsModel && settlementsModel.obligations) || []).find((o) => o.order_id === inp.dataset.stfizphone);
+  if (row) row.invoice_phone = phone;
+  if (typeof toast === "function") toast(phone ? "Номер для счёта записан" : "Номер для счёта очищен");
 }
 async function settlementsCloseShift(courierId, date, already) {
   if (!already && !confirm("Завершить смену " + date + " и выставить один счёт, если есть долг по Kaspi Gold?")) return;
