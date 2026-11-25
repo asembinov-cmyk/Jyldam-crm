@@ -940,17 +940,64 @@ function settlementsPartnerExtra(p) {
     <p style="color:var(--muted);font-size:12px">Ежемесячному партнёру счёт выставляет менеджер. Автоматика его не трогает.</p></div>`;
 }
 
+let settlementsTermsLoad = null;
+function settlementsMarkTermsTouched(el) {
+  if (el) el.dataset.sttouched = "1";
+}
+function settlementsApplyPartnerTerms(t) {
+  const row = t || {};
+  const kaspi = $("st_p_kaspi");
+  const wa = $("st_p_wa");
+  const cadence = $("st_p_cadence");
+  const time = $("st_p_time");
+  const auto = $("st_p_auto");
+  const rem = $("st_p_rem");
+  if (kaspi && kaspi.dataset.sttouched !== "1") kaspi.value = row.kaspi_phone || "";
+  if (wa && wa.dataset.sttouched !== "1") wa.value = row.whatsapp || "";
+  if (cadence && cadence.dataset.sttouched !== "1" && row.cadence) cadence.value = row.cadence;
+  if (time && time.dataset.sttouched !== "1" && row.auto_time) time.value = row.auto_time;
+  if (auto && auto.dataset.sttouched !== "1") auto.checked = !!row.auto;
+  if (rem && rem.dataset.sttouched !== "1") rem.checked = !!row.reminders;
+  if (kaspi) kaspi.dataset.stloaded = "1";
+}
+async function settlementsFillPartnerTerms(partnerId) {
+  const kaspi = $("st_p_kaspi");
+  if (!kaspi || !partnerId) return;
+  const res = await callEdge("settlements", { action: "terms_get", partner_id: partnerId });
+  if (!res || res.error) return;
+  settlementsApplyPartnerTerms(res.terms || {});
+}
+async function settlementsSavePartnerTerms(partnerId) {
+  const kaspi = $("st_p_kaspi");
+  if (!kaspi || !partnerId) return null;
+  if (settlementsTermsLoad) await settlementsTermsLoad;
+  const touched = [kaspi, $("st_p_wa"), $("st_p_cadence"), $("st_p_time"), $("st_p_auto"), $("st_p_rem")]
+    .some((el) => el && el.dataset.sttouched === "1");
+  if (kaspi.dataset.stloaded !== "1" && !touched) return { ok: true, skipped: true };
+  const res = await callEdge("settlements", {
+    action: "terms_set", partner_id: partnerId,
+    cadence: $("st_p_cadence").value, auto_time: $("st_p_time").value,
+    kaspi_phone: kaspi.value, whatsapp: $("st_p_wa").value,
+    auto: $("st_p_auto").checked, reminders: $("st_p_rem").checked,
+  });
+  if (res && !res.error && typeof S !== "undefined" && S.tab === "settlements") settlementsModel = null;
+  return res;
+}
 function settlementsBindPartner(p) {
   const btn = $("st_p_save");
-  if (!btn || !p || !p.id) return;
+  const kaspi = $("st_p_kaspi");
+  if (!kaspi || !p || !p.id) return;
+  [kaspi, $("st_p_wa"), $("st_p_cadence"), $("st_p_time"), $("st_p_auto"), $("st_p_rem")].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("input", () => settlementsMarkTermsTouched(el));
+    el.addEventListener("change", () => settlementsMarkTermsTouched(el));
+  });
+  settlementsTermsLoad = settlementsFillPartnerTerms(p.id);
+  if (!btn) return;
   btn.onclick = async () => {
-    const res = await callEdge("settlements", {
-      action: "terms_set", partner_id: p.id,
-      cadence: $("st_p_cadence").value, auto_time: $("st_p_time").value,
-      kaspi_phone: $("st_p_kaspi").value, whatsapp: $("st_p_wa").value,
-      auto: $("st_p_auto").checked, reminders: $("st_p_rem").checked,
-    });
+    const res = await settlementsSavePartnerTerms(p.id);
     if (typeof toast === "function") toast(res && res.error ? res.error : "Условия записаны");
+    if (res && !res.error && typeof S !== "undefined" && S.tab === "settlements" && typeof renderSettlements === "function") renderSettlements();
   };
 }
 

@@ -590,6 +590,10 @@ function partnerModal(id){
         }
       }
       else{const u=await dbInsert('partners',row);if(!u)return false;S.partners.push(u);}
+      if($('st_p_kaspi')&&typeof settlementsSavePartnerTerms==='function'){
+        const tres=await settlementsSavePartnerTerms(id);
+        if(!tres||tres.error){toast((tres&&tres.error)||'Номер Kaspi не записался');return false;}
+      }
       toast('Сохранено'+syncMsg);
       // Карточку открыли из сводки взаиморасчётов: сохранение не уводит в модуль «Партнёры».
       if(typeof S!=='undefined'&&S.tab==='settlements'&&typeof renderSettlements==='function'){
