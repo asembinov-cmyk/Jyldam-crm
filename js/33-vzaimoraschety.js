@@ -249,8 +249,14 @@ function stMatchSpan(start, end, from, to) {
   if (to && a > to) return false;
   return true;
 }
-function stKeep(row, spec, bag) {
+function stKeep(row, spec, bag, skipKey) {
   if (!stMatchSearch(spec.text.map((k) => row[k] || "").join("\n"), bag.q)) return false;
+  const picks = spec.picks || [];
+  for (const p of picks) {
+    if (p.key === skipKey) continue;
+    const chosen = bag[p.key] || "";
+    if (chosen && (row[p.key] || "") !== chosen) return false;
+  }
   return spec.dates.every((d) => {
     const from = bag[d.key + "_from"] || "";
     const to = bag[d.key + "_to"] || "";
@@ -258,70 +264,130 @@ function stKeep(row, spec, bag) {
     return stMatchDay(row[d.field], from, to);
   });
 }
+function stPickValues(rows, spec, bag, key) {
+  return [...new Set((rows || []).filter((row) => stKeep(row, spec, bag, key)).map((row) => row[key] || "").filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "ru"));
+}
 function stSlice(rows, spec, scope) {
   const bag = stFindBag(scope);
   const shown = (rows || []).filter((row) => stKeep(row, spec, bag));
-  const active = !!(bag.q || spec.dates.some((d) => bag[d.key + "_from"] || bag[d.key + "_to"]));
+  const active = !!(bag.q
+    || (spec.picks || []).some((p) => bag[p.key])
+    || spec.dates.some((d) => bag[d.key + "_from"] || bag[d.key + "_to"]));
   return { shown, active };
 }
+const ST_SORT = {};
+function stSortBag(scope) {
+  if (!ST_SORT[scope]) ST_SORT[scope] = { col: "", dir: 1 };
+  return ST_SORT[scope];
+}
+function stSortRows(rows, scope) {
+  const bag = stSortBag(scope);
+  if (!bag.col) return rows;
+  const dir = bag.dir === -1 ? -1 : 1;
+  const col = bag.col;
+  return rows.slice().sort((a, b) => {
+    const av = a[col];
+    const bv = b[col];
+    if (typeof av === "number" || typeof bv === "number") return dir * ((Number(av) || 0) - (Number(bv) || 0));
+    return dir * String(av || "").localeCompare(String(bv || ""), "ru", { numeric: true });
+  });
+}
+function stTh(scope, key, label) {
+  const bag = stSortBag(scope);
+  const mark = bag.col === key ? (bag.dir === 1 ? " ▲" : " ▼") : "";
+  return `<th class="fin-th fin-sortable" data-stsort="${stEsc(scope)}" data-stcol="${stEsc(key)}" title="Сортировать">${stEsc(label)}${mark}</th>`;
+}
 const ST_OB_FIND = {
-  labels: ["Заказ", "Заявка", "Кто держит долг", "Сумма", "Состояние"],
-  text: ["order", "pickup", "who", "amount", "state"],
+  labels: ["Заказ", "Заявка", "Сумма"],
+  text: ["order", "pickup", "amount"],
+  picks: [
+    { key: "who", label: "Кто держит долг" },
+    { key: "state", label: "Состояние" },
+  ],
   dates: [{ key: "period", label: "Период", field: "day" }],
 };
 const ST_AWAIT_FIND = {
   labels: ["Заказ", "Заявка"],
   text: ["order", "pickup"],
+  picks: [],
   dates: [],
 };
 const ST_SHIFT_FIND = {
   labels: ["Курьер"],
   text: ["courier"],
+  picks: [],
   dates: [{ key: "day", label: "Дата", field: "day" }],
 };
 const ST_INV_FIND = {
-  labels: ["Счёт", "Кто платит", "Сумма", "Статус", "Касса", "Заказы"],
-  text: ["bill", "who", "amount", "status", "kassa", "orders"],
+  labels: ["Счёт", "Сумма", "Заказы"],
+  text: ["bill", "amount", "orders"],
+  picks: [
+    { key: "who", label: "Кто платит" },
+    { key: "status", label: "Статус" },
+    { key: "kassa", label: "Касса" },
+  ],
   dates: [{ key: "period", label: "Период", start: "start", end: "end" }],
 };
 const ST_KASPI_FIND = {
-  labels: ["Заказ", "Телефон", "Сумма", "Статус"],
-  text: ["order", "phone", "amount", "status"],
+  labels: ["Заказ", "Телефон", "Сумма"],
+  text: ["order", "phone", "amount"],
+  picks: [
+    { key: "status", label: "Статус" },
+    { key: "kassa", label: "Касса" },
+  ],
   dates: [
     { key: "issued", label: "Выставлен", field: "issued" },
     { key: "paid", label: "Оплачен", field: "paid" },
   ],
 };
-function stFindBar(scope, spec) {
+function stFindBar(scope, spec, rows) {
   const bag = stFindBag(scope);
+  const list = rows || [];
+  (spec.picks || []).forEach((p) => {
+    if (bag[p.key] && !stPickValues(list, spec, bag, p.key).includes(bag[p.key])) bag[p.key] = "";
+  });
+  const picks = (spec.picks || []).map((p) => {
+    const vals = stPickValues(list, spec, bag, p.key);
+    return `<div class="field" style="margin:0;min-width:170px"><label>${stEsc(p.label)}</label><select data-stscope="${stEsc(scope)}" data-stk="${stEsc(p.key)}"><option value="">Все</option>${vals.map((v) => `<option value="${stEsc(v)}" ${bag[p.key] === v ? "selected" : ""}>${stEsc(v)}</option>`).join("")}</select></div>`;
+  }).join("");
   const dates = (spec.dates || []).map((d) => `<div class="field" style="margin:0"><label>${stEsc(d.label)} с</label><input type="date" data-stscope="${stEsc(scope)}" data-stk="${d.key}_from" value="${stEsc(bag[d.key + "_from"] || "")}"></div>
     <div class="field" style="margin:0"><label>${stEsc(d.label)} по</label><input type="date" data-stscope="${stEsc(scope)}" data-stk="${d.key}_to" value="${stEsc(bag[d.key + "_to"] || "")}"></div>`).join("");
   return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:0 0 10px">
-    <div class="field" style="margin:0;min-width:220px;flex:1"><label>Поиск</label><input data-stscope="${stEsc(scope)}" data-stk="q" value="${stEsc(bag.q || "")}" placeholder="${stEsc(spec.labels.join(", "))}"></div>
-    ${dates}</div>`;
+    <div class="field" style="margin:0;min-width:200px;flex:1"><label>Поиск</label><input data-stscope="${stEsc(scope)}" data-stk="q" value="${stEsc(bag.q || "")}" placeholder="${stEsc(spec.labels.join(", "))}"></div>
+    ${picks}${dates}</div>`;
 }
 function stMiss(had, emptyHtml) {
-  if (had) return `<div class="empty"><div class="big">Ничего не найдено</div>Измените поиск или даты.</div>`;
+  if (had) return `<div class="empty"><div class="big">Ничего не найдено</div>Измените поиск или фильтр.</div>`;
   return emptyHtml;
 }
 let stFindGen = 0;
-async function stApplyFindInput(el) {
-  if (!el || !el.dataset) return;
-  stFindBag(el.dataset.stscope)[el.dataset.stk] = el.value;
+async function stRedraw(focus) {
   const gen = ++stFindGen;
-  const pos = el.selectionStart;
-  const scope = el.dataset.stscope;
-  const key = el.dataset.stk;
+  const pos = focus && typeof focus.selectionStart === "number" ? focus.selectionStart : null;
+  const scope = focus && focus.dataset ? focus.dataset.stscope : "";
+  const key = focus && focus.dataset ? focus.dataset.stk : "";
   if (settlementsModel && settlementsModel.preview) {
     const main = $("main");
     main.innerHTML = settlementsMarkup(settlementsModel);
     settlementsBind(main);
   } else await renderSettlements();
-  if (gen !== stFindGen) return;
+  if (gen !== stFindGen || !scope || !key) return;
   const next = $("main") && $("main").querySelector(`[data-stscope="${scope}"][data-stk="${key}"]`);
   if (!next) return;
   next.focus();
-  if (typeof pos === "number") try { next.setSelectionRange(pos, pos); } catch (e) {}
+  if (pos != null) try { next.setSelectionRange(pos, pos); } catch (e) {}
+}
+async function stApplyFindInput(el) {
+  if (!el || !el.dataset) return;
+  stFindBag(el.dataset.stscope)[el.dataset.stk] = el.value;
+  await stRedraw(el);
+}
+function stApplySort(scope, col) {
+  const bag = stSortBag(scope);
+  if (bag.col === col) bag.dir = bag.dir === 1 ? -1 : 1;
+  else { bag.col = col; bag.dir = 1; }
+  stRedraw();
 }
 
 function settlementsKaspiRows(rows, tab) {
@@ -336,24 +402,26 @@ function settlementsKaspiBlock(tab, m) {
   const name = m.kaspi_kassa || "ИП Зонова Наталья";
   const phone = (v) => (typeof phoneDisplay === "function" ? phoneDisplay(v) : (v ? "+7" + v : "—"));
   const when = (v) => (v && typeof fmtDateTime === "function" ? fmtDateTime(v) : stDay(v));
+  const scope = tab + "-kaspi";
   const view = settlementsKaspiRows(m.kaspi_invoices, tab).map((i) => ({
     raw: i,
     order: i.order_code || "",
     phone: phone(i.phone10),
     amount: `${i.amount} ${stMoney(i.amount)}`,
+    amountNum: Number(i.amount) || 0,
     status: stState(i.status),
+    kassa: name,
     issued: String(i.created_at || "").slice(0, 10),
     paid: String(i.paid_at || "").slice(0, 10),
   }));
-  const cut = stSlice(view, ST_KASPI_FIND, tab + "-kaspi");
-  const rows = cut.shown;
-  const sum = rows.reduce((s, i) => s + (Number(i.raw.amount) || 0), 0);
-  const body = rows.length ? `<table class="resp-table"><thead><tr><th>Заказ</th><th>Телефон</th><th>Сумма</th><th>Статус</th><th>Выставлен</th><th>Оплачен</th></tr></thead><tbody>${rows.map((i) =>
+  const rows = stSortRows(stSlice(view, ST_KASPI_FIND, scope).shown, scope);
+  const sum = rows.reduce((s, i) => s + i.amountNum, 0);
+  const body = rows.length ? `<table class="resp-table"><thead><tr>${stTh(scope, "order", "Заказ")}${stTh(scope, "phone", "Телефон")}${stTh(scope, "amountNum", "Сумма")}${stTh(scope, "status", "Статус")}${stTh(scope, "issued", "Выставлен")}${stTh(scope, "paid", "Оплачен")}</tr></thead><tbody>${rows.map((i) =>
     `<tr><td>${i.raw.order_id ? `<button class="btn ghost sm" type="button" data-storder="${stEsc(i.raw.order_id)}">${stEsc(i.order || "Заказ")}</button>` : stEsc(i.order || "—")}</td><td>${stEsc(i.phone)}</td><td>${stMoney(i.raw.amount)}</td><td>${stEsc(i.status)}</td><td>${stEsc(when(i.raw.created_at))}</td><td>${stEsc(i.raw.paid_at ? when(i.raw.paid_at) : "—")}</td></tr>`).join("")}</tbody></table>`
     : stMiss(view.length, `<div class="empty"><div class="big">${tab === "paid" ? "Оплат ещё нет" : "Счетов ещё нет"}</div></div>`);
   return `<div class="panel" style="padding:14px;margin-bottom:14px"><h3 style="margin:0 0 8px">Касса ${stEsc(name)}</h3>
     <p style="color:var(--muted);font-size:13px;margin-top:0">Удалённые счета Kaspi Pay. ${rows.length} на ${stMoney(sum)}.</p>
-    ${stFindBar(tab + "-kaspi", ST_KASPI_FIND)}${body}</div>`;
+    ${stFindBar(scope, ST_KASPI_FIND, view)}${body}</div>`;
 }
 
 async function settlementsLoadKaspi() {
@@ -383,11 +451,11 @@ function settlementsTable(tab, rows, m) {
       courier: (m.names && m.names[r.courierId]) || (cat.courier.get(r.courierId) || {}).fio || "Курьер",
       day: String(r.date || "").slice(0, 10),
     }));
-    const cut = stSlice(view, ST_SHIFT_FIND, tab);
-    const body = cut.shown.length ? `<table class="resp-table"><thead><tr><th>Курьер</th><th>Дата</th><th></th></tr></thead><tbody>${cut.shown.map((r) =>
+    const shown = stSortRows(stSlice(view, ST_SHIFT_FIND, tab).shown, tab);
+    const body = shown.length ? `<table class="resp-table"><thead><tr>${stTh(tab, "courier", "Курьер")}${stTh(tab, "day", "Дата")}<th></th></tr></thead><tbody>${shown.map((r) =>
       `<tr><td>${stEsc(r.courier)}</td><td>${stEsc(stDay(r.day))}</td><td><button class="btn sm" type="button" data-stclose="${stEsc(r.raw.courierId)}" data-stdate="${stEsc(r.raw.date)}">Завершить смену</button></td></tr>`).join("")}</tbody></table>`
       : stMiss(view.length, `<div class="empty"><div class="big">Забытых смен нет</div></div>`);
-    return stFindBar(tab, ST_SHIFT_FIND) + body;
+    return stFindBar(tab, ST_SHIFT_FIND, view) + body;
   }
   if (tab === "awaiting") {
     const view = rows.map((r) => ({
@@ -395,11 +463,11 @@ function settlementsTable(tab, rows, m) {
       order: stOrderText(r.order_id, r.code, cat),
       pickup: stPickupText(r.pickup_id, r.pickup_name, cat),
     }));
-    const cut = stSlice(view, ST_AWAIT_FIND, tab);
-    const body = cut.shown.length ? `<table class="resp-table"><thead><tr><th>Заказ</th><th>Заявка</th></tr></thead><tbody>${cut.shown.map((r) =>
+    const shown = stSortRows(stSlice(view, ST_AWAIT_FIND, tab).shown, tab);
+    const body = shown.length ? `<table class="resp-table"><thead><tr>${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}</tr></thead><tbody>${shown.map((r) =>
       `<tr><td><button class="btn ghost sm" type="button" data-storder="${stEsc(r.raw.order_id)}">${stEsc(r.order)}</button></td><td>${stEsc(r.pickup)}</td></tr>`).join("")}</tbody></table>`
       : stMiss(view.length, `<div class="empty"><div class="big">Нет заказов без цены</div>Такие заказы не попадают в счёт.</div>`);
-    return stFindBar(tab, ST_AWAIT_FIND) + body;
+    return stFindBar(tab, ST_AWAIT_FIND, view) + body;
   }
   if (tab === "invoices" || tab === "paid" || tab === "errors") {
     const kassa = !m.preview && m.kaspi_kassa ? m.kaspi_kassa : "";
@@ -408,17 +476,18 @@ function settlementsTable(tab, rows, m) {
       bill: i.test ? "Тестовый счёт" : "Счёт",
       who: stWho(i.payer_type, i.payer_id, i.payer_name, cat),
       amount: `${i.amount} ${stMoney(i.amount)}`,
+      amountNum: Number(i.amount) || 0,
       status: stState(i.status),
       kassa: i.test ? "" : kassa,
       orders: (i.order_ids || []).map((id, n) => stOrderText(id, (i.order_codes || [])[n], cat)).join(" "),
       start: String(i.period_start || "").slice(0, 10),
       end: String(i.period_end || i.period_start || "").slice(0, 10),
     }));
-    const cut = stSlice(view, ST_INV_FIND, tab);
-    const body = cut.shown.length ? `<table class="resp-table"><thead><tr><th>Счёт</th><th>Кто платит</th><th>Период</th><th>Сумма</th><th>Статус</th>${kassa ? "<th>Касса</th>" : ""}<th>Заказы</th></tr></thead><tbody>${cut.shown.map((i) =>
+    const shown = stSortRows(stSlice(view, ST_INV_FIND, tab).shown, tab);
+    const body = shown.length ? `<table class="resp-table"><thead><tr>${stTh(tab, "bill", "Счёт")}${stTh(tab, "who", "Кто платит")}${stTh(tab, "start", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "status", "Статус")}${kassa ? stTh(tab, "kassa", "Касса") : ""}<th>Заказы</th></tr></thead><tbody>${shown.map((i) =>
       `<tr><td>${stEsc(i.bill)}</td><td>${stEsc(i.who)}</td><td>${stEsc(stDay(i.start))} — ${stEsc(stDay(i.end))}</td><td>${stMoney(i.raw.amount)}</td><td>${stEsc(i.status)}</td>${kassa ? `<td>${i.kassa ? stEsc(i.kassa) : "—"}</td>` : ""}<td>${(i.raw.order_ids || []).map((id, n) => `<button class="btn ghost sm" type="button" data-storder="${stEsc(id)}">${stEsc(stOrderText(id, (i.raw.order_codes || [])[n], cat))}</button>`).join(" ")}</td></tr>`).join("")}</tbody></table>`
       : stMiss(view.length, `<div class="empty"><div class="big">Счетов нет</div></div>`);
-    return stFindBar(tab, ST_INV_FIND) + body;
+    return stFindBar(tab, ST_INV_FIND, view) + body;
   }
   const view = rows.map((o) => ({
     raw: o,
@@ -426,12 +495,13 @@ function settlementsTable(tab, rows, m) {
     pickup: stPickupText(o.pickup_id, o.pickup_name, cat),
     who: stWho(o.holder_type, o.holder_id, o.holder_name, cat) + (stMissingKaspi(o, m) ? " Не указан номер Kaspi" : ""),
     amount: `${o.amount} ${stMoney(o.amount)}`,
+    amountNum: Number(o.amount) || 0,
     state: stState(o.state),
     day: String(o.period_date || "").slice(0, 10),
   }));
-  const cut = stSlice(view, ST_OB_FIND, tab);
-  rows = cut.shown.map((o) => o.raw);
-  const barFind = stFindBar(tab, ST_OB_FIND);
+  const shown = stSortRows(stSlice(view, ST_OB_FIND, tab).shown, tab);
+  rows = shown.map((o) => o.raw);
+  const barFind = stFindBar(tab, ST_OB_FIND, view);
   if (!rows.length) return barFind + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
   const pick = stCanIssue();
   const anyPick = pick && rows.some((o) => o.state === "open" && !stMissingKaspi(o, m));
@@ -439,7 +509,7 @@ function settlementsTable(tab, rows, m) {
     <label class="pom-paid" style="margin:0"><input type="checkbox" id="stChkAll"> Выделить все</label>
     <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
   </div>` : "";
-  return barFind + bar + `<table class="resp-table"><thead><tr>${pick ? "<th style=\"width:34px\"></th>" : ""}<th>Заказ</th><th>Заявка</th><th>Кто держит долг</th><th>Период</th><th>Сумма</th><th>Состояние</th>${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o) =>
+  return barFind + bar + `<table class="resp-table"><thead><tr>${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o) =>
     `<tr>${pick ? `<td>${stPickBox(o, m)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stEsc(stWho(o.holder_type, o.holder_id, o.holder_name, cat))}${stMissingKaspi(o, m) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
 }
 
@@ -479,8 +549,10 @@ function settlementsBind(root) {
   const save = root.querySelector("#st_adm_save");
   if (save) save.onclick = settlementsSaveAdmin;
   root.querySelectorAll("[data-stscope]").forEach((el) => {
-    el.oninput = () => stApplyFindInput(el);
+    if (el.tagName === "SELECT") el.onchange = () => stApplyFindInput(el);
+    else el.oninput = () => stApplyFindInput(el);
   });
+  root.querySelectorAll("[data-stsort]").forEach((th) => th.onclick = () => stApplySort(th.dataset.stsort, th.dataset.stcol));
   root.querySelectorAll("[data-stcash]").forEach((b) => b.onclick = async () => {
     const res = await callEdge("settlements", { action: "cash_confirm", order_id: b.dataset.stcash });
     if (typeof toast === "function") toast(res && res.error ? res.error : "Долг перенесён на администратора");
