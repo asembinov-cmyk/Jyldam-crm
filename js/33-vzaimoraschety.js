@@ -193,6 +193,14 @@ function stWho(type, id, name, cat) {
   if (!who && type === "delivery_courier") who = (cat.delivery.get(id) || {}).fio || "";
   return who ? `${kind}: ${who}` : kind;
 }
+function stHolderCell(o, cat, m) {
+  const label = stWho(o.holder_type, o.holder_id, o.holder_name, cat);
+  const note = stMissingKaspi(o, m) ? " · Не указан номер Kaspi" : "";
+  if (o.holder_type === "partner" && o.holder_id) {
+    return `<button class="btn ghost sm" type="button" data-stpartner="${stEsc(o.holder_id)}" title="Открыть карточку партнёра">${stEsc(label)}</button>${note ? stEsc(note) : ""}`;
+  }
+  return stEsc(label) + (note ? stEsc(note) : "");
+}
 
 function stState(v) {
   return ST_STATE[v] || "—";
@@ -528,7 +536,7 @@ function settlementsTable(tab, rows, m) {
     <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
   </div>` : "";
   return barFind + bar + `<table class="resp-table"><thead><tr>${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${rows.map((o) =>
-    `<tr>${pick ? `<td>${stPickBox(o, m)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stEsc(stWho(o.holder_type, o.holder_id, o.holder_name, cat))}${stMissingKaspi(o, m) ? " · Не указан номер Kaspi" : ""}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+    `<tr>${pick ? `<td>${stPickBox(o, m)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td><td>${stHolderCell(o, cat, m)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${stIssueCell(o, m)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
 }
 
 function settlementsAdminForm() {
@@ -557,6 +565,7 @@ function settlementsBind(root) {
   root.querySelectorAll("button[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
   settlementsBindPick(root);
   root.querySelectorAll("[data-stpickup]").forEach((b) => b.onclick = () => settlementsOpenPickup(b.dataset.stpickup));
+  root.querySelectorAll("[data-stpartner]").forEach((b) => b.onclick = () => settlementsOpenPartner(b.dataset.stpartner));
   const excel = root.querySelector("#st_excel");
   if (excel) excel.onclick = settlementsExcel;
   const reload = root.querySelector("#st_reload");
@@ -627,6 +636,12 @@ function settlementsOpenPickup(id) {
   const p = (typeof S !== "undefined" ? (S.pickups || []) : []).find((x) => x.id === id || String(x.code) === String(id));
   if (p && typeof pickupOrdersModal === "function") { pickupOrdersModal(p.id); return; }
   if (typeof toast === "function") toast("Заявка " + id);
+}
+function settlementsOpenPartner(id) {
+  if (!id) return;
+  const p = (typeof S !== "undefined" ? (S.partners || []) : []).find((x) => x.id === id);
+  if (p && typeof partnerModal === "function") { partnerModal(p.id); return; }
+  if (typeof toast === "function") toast("Карточка партнёра не найдена");
 }
 
 function settlementsBindPick(root) {
