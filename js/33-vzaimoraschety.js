@@ -1,6 +1,7 @@
 /* Взаиморасчёты. Долги партнёров и курьеров идут на сервер settlements.
-   Удалённые счета Kaspi Pay по заказам показываются отдельно, кассой
-   «ИП Зонова Наталья»: вкладка «Счета» — все выставленные, «Оплачено» — оплаченные. */
+   Удалённые счета Kaspi Pay по заказам показываются отдельно: вкладка «Счета»
+   — все выставленные, «Оплачено» — оплаченные. Касса счёта — касса того кассира,
+   который его выставил. Первый кассир — ИП Зонова Наталья. */
 let settlementsTab = "summary";
 let settlementsModel = null;
 
@@ -410,7 +411,7 @@ function settlementsKaspiBlock(tab, m) {
     amount: `${i.amount} ${stMoney(i.amount)}`,
     amountNum: Number(i.amount) || 0,
     status: stState(i.status),
-    kassa: name,
+    kassa: i.kassa_name || name,
     issued: String(i.created_at || "").slice(0, 10),
     paid: String(i.paid_at || "").slice(0, 10),
   }));
@@ -419,28 +420,45 @@ function settlementsKaspiBlock(tab, m) {
   const body = rows.length ? `<table class="resp-table"><thead><tr>${stTh(scope, "order", "Заказ")}${stTh(scope, "phone", "Телефон")}${stTh(scope, "amountNum", "Сумма")}${stTh(scope, "status", "Статус")}${stTh(scope, "issued", "Выставлен")}${stTh(scope, "paid", "Оплачен")}</tr></thead><tbody>${rows.map((i) =>
     `<tr><td>${i.raw.order_id ? `<button class="btn ghost sm" type="button" data-storder="${stEsc(i.raw.order_id)}">${stEsc(i.order || "Заказ")}</button>` : stEsc(i.order || "—")}</td><td>${stEsc(i.phone)}</td><td>${stMoney(i.raw.amount)}</td><td>${stEsc(i.status)}</td><td>${stEsc(when(i.raw.created_at))}</td><td>${stEsc(i.raw.paid_at ? when(i.raw.paid_at) : "—")}</td></tr>`).join("")}</tbody></table>`
     : stMiss(view.length, `<div class="empty"><div class="big">${tab === "paid" ? "Оплат ещё нет" : "Счетов ещё нет"}</div></div>`);
-  return `<div class="panel" style="padding:14px;margin-bottom:14px"><h3 style="margin:0 0 8px">Касса ${stEsc(name)}</h3>
+  const names = [...new Set(view.map((i) => i.kassa).filter(Boolean))];
+  const heading = names.length > 1 ? "Удалённые счета Kaspi Pay" : `Касса ${names[0] || name}`;
+  return `<div class="panel" style="padding:14px;margin-bottom:14px"><h3 style="margin:0 0 8px">${stEsc(heading)}</h3>
     <p style="color:var(--muted);font-size:13px;margin-top:0">Удалённые счета Kaspi Pay. ${rows.length} на ${stMoney(sum)}.</p>
     ${stFindBar(scope, ST_KASPI_FIND, view)}${body}</div>`;
 }
 
 async function settlementsLoadKaspi() {
   const fallback = "ИП Зонова Наталья";
-  const list = (typeof S !== "undefined" && S.finance_kassa) || [];
-  let kassaId = "";
+  const kassas = (typeof S !== "undefined" && S.finance_kassa) || [];
+  let settings = [];
   let invoices = [];
   if (typeof sb !== "undefined" && sb) {
     try {
-      const settings = await sb.from("kaspi_settings").select("kassa_id").eq("id", 1).maybeSingle();
-      if (settings && settings.data && settings.data.kassa_id) kassaId = settings.data.kassa_id;
-    } catch (e) { kassaId = ""; }
+      const s = await sb.from("kaspi_settings").select("id,title,kassa_id").order("id");
+      if (!s.error) settings = s.data || [];
+    } catch (e) { settings = []; }
     try {
-      const q = await sb.from("kaspi_invoices").select("id,order_id,order_code,phone10,amount,status,test,created_at,paid_at").order("created_at", { ascending: false }).limit(300);
+      let q = await sb.from("kaspi_invoices").select("id,order_id,order_code,phone10,amount,status,test,created_at,paid_at,settings_id").order("created_at", { ascending: false }).limit(300);
+      if (q.error) q = await sb.from("kaspi_invoices").select("id,order_id,order_code,phone10,amount,status,test,created_at,paid_at").order("created_at", { ascending: false }).limit(300);
       if (!q.error) invoices = q.data || [];
     } catch (e) { invoices = []; }
   }
-  const named = (kassaId && list.find((k) => k.id === kassaId)) || list.find((k) => k && k.kassa_type === "cashless" && /зонова/i.test(k.name || ""));
-  return { kaspi_kassa: (named && named.name) || fallback, kaspi_invoices: invoices, kaspi_loaded: true };
+  const nameOf = (row) => {
+    if (!row) return fallback;
+    const named = row.kassa_id && kassas.find((k) => k.id === row.kassa_id);
+    if (named && named.name) return named.name;
+    const title = String(row.title || "").trim();
+    if (title) return title;
+    if (Number(row.id) === 1) {
+      const zonova = kassas.find((k) => k && k.kassa_type === "cashless" && /зонова/i.test(k.name || ""));
+      return (zonova && zonova.name) || fallback;
+    }
+    return "Новый кассир";
+  };
+  const byId = new Map(settings.map((row) => [Number(row.id), row]));
+  const first = byId.get(1);
+  invoices = invoices.map((inv) => ({ ...inv, kassa_name: nameOf(byId.get(Number(inv.settings_id) || 1) || first) }));
+  return { kaspi_kassa: nameOf(first), kaspi_invoices: invoices, kaspi_loaded: true };
 }
 
 function settlementsTable(tab, rows, m) {
