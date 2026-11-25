@@ -2,6 +2,7 @@
 let of={q:'',status:'',delivery:'',partnerQ:'',sales:'',processor:'',creator:'',missing:'',pickFrom:'',pickTo:'',delFrom:'',delTo:'',createFrom:'',createTo:'',pickupCity:'',destCity:'',paidBySender:'',payer:''};
 let ordersDateInit=false; // по умолчанию ставим фильтр даты создания = сегодня (один раз)
 let ordersPage=1; // текущая страница пагинации
+let ordersSort={col:'',dir:1}; // сортировка грида «Заказы заборов»: sender | courier
 let ordersPerPage=50; // заказов на страницу (можно менять снизу)
 const ORDERS_PAGE_SIZES=[50,100,200,500,1000,1500,2000,2500];
 const ketSelected=new Set(); // id выбранных заказов (живёт между страницами)
@@ -1224,11 +1225,18 @@ function ordersMovableRange(table){
 }
 function ordersApplyColOrder(table){
   const saved=ordersColOrderLoad(); if(!saved.length)return;
+  // Новая колонка «Курьер заборщик» у тех, кто уже двигал столбцы, встаёт сразу
+  // за «Отправитель», а не в конец: её просили рядом с отправителем.
   const {from,to,ths}=ordersMovableRange(table);
   const keys=ths.slice(from,to+1).map(th=>th.textContent.trim());
+  const order=saved.slice();
+  if(keys.includes('Курьер заборщик')&&!order.includes('Курьер заборщик')){
+    const at=order.indexOf('Отправитель');
+    if(at>=0)order.splice(at+1,0,'Курьер заборщик');
+  }
   // Порядок берём из сохранённого; колонки, которых там нет (появились позже или
   // видны только в другом режиме), остаются на своих местах в конце.
-  const idx=k=>{const i=saved.indexOf(k);return i<0?1e6:i;};
+  const idx=k=>{const i=order.indexOf(k);return i<0?1e6:i;};
   const target=keys.map((k,i)=>({k,i})).sort((a,b)=>idx(a.k)-idx(b.k)||a.i-b.i).map(x=>x.i);
   if(target.every((v,i)=>v===i))return; // уже в нужном порядке
   table.querySelectorAll('tr').forEach(tr=>{
@@ -1249,7 +1257,7 @@ function ordersBindColDrag(table){
   ths.slice(from,to+1).forEach(th=>{
     th.draggable=true;
     th.classList.add('col-move');
-    th.title='Потяните, чтобы переставить колонку';
+    th.title=th.dataset.osort?'Сортировать. Потяните, чтобы переставить колонку':'Потяните, чтобы переставить колонку';
     th.ondragstart=e=>{dragKey=th.textContent.trim();e.dataTransfer.effectAllowed='move';
       try{e.dataTransfer.setData('text/plain',dragKey);}catch(_e){}};
     th.ondragover=e=>{e.preventDefault();th.classList.add('col-over');};
@@ -1313,8 +1321,9 @@ function filteredOrders(){
      Сортируем по треку — тогда заказы одной группы стоят в списке рядом. */
   if(ordersDupIds){
     return ordersScopedList().filter(o=>ordersDupIds.has(o.id))
-      .sort((a,b)=>String(a.track||'').localeCompare(String(b.track||''))
-        ||String(a.code||'').localeCompare(String(b.code||'')));
+      .sort((a,b)=>ordersSort.col?ordersCompare(a,b)
+        :(String(a.track||'').localeCompare(String(b.track||''))
+        ||String(a.code||'').localeCompare(String(b.code||''))));
   }
   const q=of.q.toLowerCase().trim();
   return ordersDateScopedList().filter(o=>{
@@ -1389,7 +1398,24 @@ function filteredOrders(){
       if(!hay.includes(q)&&!matchByPhone)return false;
     }
     return true;
-  }).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  }).sort(ordersCompare);
+}
+// Курьер, который забирает заказ: он назначен на карточку забора, не на сам заказ.
+function orderPickupCourierName(o){
+  if(!o||!o.pickup_id||typeof S==='undefined')return '';
+  const p=(S.pickups||[]).find(x=>x.id===o.pickup_id);
+  if(!p||!p.courier_id)return '';
+  return ((S.couriers||[]).find(c=>c.id===p.courier_id)||{}).fio||'';
+}
+function ordersCompare(a,b){
+  const byText=(left,right)=>{
+    const emptyL=!left, emptyR=!right;
+    if(emptyL!==emptyR)return emptyL?1:-1;
+    return ordersSort.dir*String(left).localeCompare(String(right),'ru',{sensitivity:'base',numeric:true});
+  };
+  if(!ordersMode&&ordersSort.col==='sender')return byText(a.sender||'',b.sender||'');
+  if(!ordersMode&&ordersSort.col==='courier')return byText(orderPickupCourierName(a),orderPickupCourierName(b));
+  return (b.created_at||'').localeCompare(a.created_at||'');
 }
 let editingOrderId=null; // id заказа в режиме строчного редактирования
 
@@ -2178,6 +2204,7 @@ async function exportOrdersToExcel(){
       'Дата забора':o.pickup_date?fmtDate(o.pickup_date):'',
       'Дата доставки':o.deliver_date?fmtDate(o.deliver_date):'',
       'Отправитель':o.sender||'',
+      ...(!ordersMode?{'Курьер заборщик':orderPickupCourierName(o)||''}:{}),
       'ФИО клиента':o.client||'',
       'Телефон':o.phone?phoneDisplay(o.phone):'',
       'Вес (кг)':fmtWeight(o.weight),
@@ -2294,8 +2321,10 @@ function drawOrders(){
      доставка там почтовая и даты доставки у неё не бывает, а город — всегда Алматы и
      ставится заготовкой, то есть обе колонки показывали бы прочерк во всех строках. */
   const barGrid=ordersMode==='baraholka';
+  const pickupCourierCol=!ordersMode;
+  const sortCls=col=>'fin-th fin-sortable'+(ordersSort.col===col?(ordersSort.dir===1?' fin-sort-asc':' fin-sort-desc'):'');
   el.innerHTML=ordersDupBarHtml(allRows.length)+`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th>${barGrid?'':'<th>Дата доставки</th>'}<th>Отправитель</th><th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th>${barGrid?'':'<th>Дата доставки</th>'}<th class="${sortCls('sender')}" data-osort="sender">Отправитель</th>${pickupCourierCol?`<th class="${sortCls('courier')}" data-osort="courier">Курьер заборщик</th>`:''}<th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th>${(ordersMode!=='mail'&&!barGrid)?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th><th>Кто платит</th>':''}<th>Трек-код</th>
     <th>Статус</th><th></th></tr></thead>
     <tbody>${rows.map(o=>{
@@ -2317,7 +2346,7 @@ function drawOrders(){
         return `<small class="cell-time">создан ${esc(same?t.slice(-5):t)}</small>`;
       })():''}</td>
       ${barGrid?'':`<td data-label="Дата доставки">${o.deliver_date?esc(fmtDate(o.deliver_date)):'—'}</td>`}
-      <td data-label="Отправитель">${esc(o.sender)||'—'}</td><td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
+      <td data-label="Отправитель">${esc(o.sender)||'—'}</td>${pickupCourierCol?`<td data-label="Курьер заборщик">${esc(orderPickupCourierName(o)||'—')}</td>`:''}<td data-label="ФИО клиента">${esc(o.client)||'—'}</td>
       <td data-label="Телефон">${o.phone?phoneLink(o.phone):'—'}</td>
       <td data-label="Вес">${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</td>
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
@@ -2338,6 +2367,14 @@ function drawOrders(){
     }).join('')}</tbody></table></div>`;
   const _tbl=el.querySelector('table');
   if(_tbl){ordersApplyColOrder(_tbl);ordersBindColDrag(_tbl);}
+  el.querySelectorAll('[data-osort]').forEach(th=>th.onclick=e=>{
+    e.stopPropagation();
+    const col=th.dataset.osort;
+    if(ordersSort.col===col)ordersSort.dir=ordersSort.dir===1?-1:1;
+    else{ordersSort.col=col;ordersSort.dir=1;}
+    ordersPage=1;ordersMobileLimit=MOBILE_STEP;
+    drawOrders();
+  });
   el.querySelectorAll('[data-oviewphoto]').forEach(im=>im.onclick=e=>{e.stopPropagation();viewPhoto(im.dataset.oviewphoto);});
   el.querySelectorAll('[data-oedit]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oedit));
   el.querySelectorAll('[data-oview]').forEach(b=>b.onclick=()=>orderModal(b.dataset.oview,true));

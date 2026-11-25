@@ -874,6 +874,8 @@
   .ac-item.ac-hi{background:#e8ecfb}
   .fin-th{position:relative;cursor:grab;user-select:none;white-space:nowrap}
   .fin-th.fin-sortable{cursor:pointer}
+  .fin-th.fin-sort-asc::after{content:" ▲"}
+  .fin-th.fin-sort-desc::after{content:" ▼"}
   .fin-th.fin-dragging{opacity:.4}
   .fin-th.fin-dragover{box-shadow:inset 2px 0 0 var(--rust)}
   .fin-col-resize{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:5}
