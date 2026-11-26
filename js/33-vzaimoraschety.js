@@ -626,6 +626,12 @@ function stPayerKey(o) {
   if (o.holder_id) return type + "|" + encodeURIComponent(o.holder_id);
   return type + "||" + encodeURIComponent(o.holder_name || "");
 }
+function stSplitFiz(orders, cat) {
+  const fiz = [];
+  const rest = [];
+  (orders || []).forEach((o) => (stIsFizlicoRow(o, cat) ? fiz : rest).push(o));
+  return { fiz, rest };
+}
 function stDeliveryName(o) {
   if (o && o.delivery) return String(o.delivery);
   const order = (typeof S !== "undefined" ? (S.orders || []) : []).find((x) => x.id === (o && o.order_id));
@@ -813,14 +819,17 @@ function stGroupStateCell(g, m, cat) {
 function stSummaryGrouped(view, m, cat) {
   const spec = stObFind("summary");
   const matched = stSlice(view, spec, "summary").shown.map((row) => row.raw);
-  const groups = stSortRows(stPayerGroups(matched, cat, m), "summary-payers");
-  const allGroups = stPayerGroups(view.map((row) => row.raw), cat, m).length;
+  const split = stSplitFiz(matched, cat);
+  const groups = stSortRows(stPayerGroups(split.rest, cat, m), "summary-payers");
+  const fiz = stSortRows(stObView(split.fiz, cat, m), "summary").map((row) => row.raw);
+  const allSplit = stSplitFiz(view.map((row) => row.raw), cat);
+  const allGroups = stPayerGroups(allSplit.rest, cat, m).length + allSplit.fiz.length;
   const barFind = stFindBar("summary", spec, view);
   const toggle = stSummaryToggle();
-  if (!groups.length) {
+  if (!groups.length && !fiz.length) {
     return barFind + toggle + stPageNote(0, allGroups, true) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
   }
-  const openOrders = groups.filter((g) => stSummaryOpen.has(g.key)).flatMap((g) => g.orders);
+  const openOrders = groups.filter((g) => stSummaryOpen.has(g.key)).flatMap((g) => g.orders).concat(fiz);
   const body = groups.map((g, n) => {
     const open = stSummaryOpen.has(g.key);
     const actions = stGroupCancel(g);
@@ -828,8 +837,9 @@ function stSummaryGrouped(view, m, cat) {
     if (!open) return head;
     return head + `<tr class="st-gbody"><td colspan="11" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
-  const table = `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "pay", "Оплата")}<th>Номер для счёта</th><th>WhatsApp</th>${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}<th></th></tr></thead><tbody>${body}</tbody></table>`;
-  return barFind + toggle + stPageNote(groups.length, allGroups, true) + stPickBar(openOrders, m, cat) + table;
+  const table = groups.length ? `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "pay", "Оплата")}<th>Номер для счёта</th><th>WhatsApp</th>${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}<th></th></tr></thead><tbody>${body}</tbody></table>` : "";
+  const people = fiz.length ? stObTable("summary", fiz, m, cat) : "";
+  return barFind + toggle + stPageNote(groups.length + fiz.length, allGroups, true) + stPickBar(openOrders, m, cat) + people + table;
 }
 
 function settlementsTable(tab, rows, m) {
