@@ -6,7 +6,7 @@ const MODULES=[
   ['orders','Заказы заборов'],
   ['baraholka','Барахолка'],
   ['whatsapp','WhatsApp СЗК'],
-  ['greenapi','Ассистент приёма заявок'],
+  ['greenapi','WhatsApp Ассистент приёма заявок'],
   ['telephony','Телефония'],
   ['filling','Заполнение'],
   ['ket_orders','SPA трафик'],

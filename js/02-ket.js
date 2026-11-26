@@ -1646,7 +1646,7 @@ function buildNav(opts){
     if(canMod('whatsapp'))histItems.push({k:'whatsapp',label:'WhatsApp СЗК',icon:'whatsapp'});
     // Второй канал WhatsApp — через Green API (js/30), 24.11.2026. Стоит сразу под первым:
     // оба про переписку с клиентом. Право своё (`greenapi`), по умолчанию только админу.
-    if(canMod('greenapi'))histItems.push({k:'greenapi',label:'Ассистент приёма заявок',icon:'assistant'});
+    if(canMod('greenapi'))histItems.push({k:'greenapi',label:'WhatsApp Ассистент приёма заявок',icon:'assistant'});
     if(histItems.length)groups.push({title:'История',items:histItems});
 
     const team=[];
@@ -1669,7 +1669,7 @@ function buildNav(opts){
     if(can('pickups','view'))items.push({k:'pickups',label:'Мои заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Мои заказы',icon:'orders'});
     const COURIER_EXTRA=[
-      ['baraholka','Барахолка','baraholka'],['whatsapp','WhatsApp СЗК','whatsapp'],['greenapi','Ассистент приёма заявок','assistant'],['telephony','Телефония','phone'],
+      ['baraholka','Барахолка','baraholka'],['whatsapp','WhatsApp СЗК','whatsapp'],['greenapi','WhatsApp Ассистент приёма заявок','assistant'],['telephony','Телефония','phone'],
       ['intercity','Отправки межгород','intercity'],['sorting','Сортировка','scan'],
       ['cash','Склад','warehouse'],['filling','Заполнение','fill'],
       ['courier','Курьерская доставка','courier'],['mail','Почтовая доставка','mail'],

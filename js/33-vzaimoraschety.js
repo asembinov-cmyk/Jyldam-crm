@@ -949,7 +949,7 @@ async function stOpenWaChat(phone) {
         <span class="hint">Сообщение уйдёт с номера ИИ-агента.</span>
         <button class="btn ghost sm" type="button" id="stWaHist">История с телефона</button>
       </div>`
-    : `<div class="hint" style="margin-top:8px">Прочитать переписку можно. Написать — по праву «Ассистент приёма заявок → создание».</div>`;
+    : `<div class="hint" style="margin-top:8px">Прочитать переписку можно. Написать — по праву «WhatsApp Ассистент приёма заявок → создание».</div>`;
   if (typeof showInfo !== "function") return;
   const ov = showInfo("WhatsApp ИИ-агента · " + shown, `<div id="stWaBox" style="min-height:240px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;background:#f7f7f4">Загружаем переписку…</div>${foot}`, { wide: true });
   await stWaPaint(chatId);

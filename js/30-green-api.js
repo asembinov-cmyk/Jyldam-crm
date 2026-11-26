@@ -502,7 +502,7 @@ function gaChatHtml(){
   let foot;
   const block=gaSendBlock();
   if(!canSend){
-    foot=`<div class="wam-foot hint">Отвечать отсюда можно по праву «Ассистент приёма заявок → создание». Прочитать переписку это не мешает.</div>`;
+    foot=`<div class="wam-foot hint">Отвечать отсюда можно по праву «WhatsApp Ассистент приёма заявок → создание». Прочитать переписку это не мешает.</div>`;
   }else if(block){
     foot=`<div class="wam-foot hint" style="color:var(--rust)">${esc(block)}</div>`;
   }else{
@@ -665,7 +665,7 @@ function gaConnHtml(){
       :'Пока это не сделано, входящие сообщения в CRM не попадают.'}
       Green API при этом перезапускает инстанс: настройки вступают в силу в течение пяти минут.</div>
     ${canCfg?`<button class="btn primary sm" data-gaact="setup" style="margin-top:8px"${gaBusy?' disabled':''}>${gaBusy==='setup'?'Настраиваю…':'Настроить приём сообщений'}</button>`
-      :'<div class="hint">Настроить может тот, у кого право «Ассистент приёма заявок → редактирование».</div>'}`;
+      :'<div class="hint">Настроить может тот, у кого право «WhatsApp Ассистент приёма заявок → редактирование».</div>'}`;
   const step2=gaStepHtml(!!s.hook_ok,'Шаг 2. Приём сообщений'+(s.hook_ok?' настроен':''),b2);
 
   // --- шаг 3: телефон ---
@@ -688,7 +688,7 @@ function gaConnHtml(){
     }else{
       b3=`<div class="hint">Привяжите телефон с рабочим номером WhatsApp — по QR-коду, как WhatsApp Web.</div>
         ${canCfg?'<button class="btn primary sm" data-gaact="qr" style="margin-top:8px">Показать QR-код</button>'
-          :'<div class="hint">Привязать может тот, у кого право «Ассистент приёма заявок → редактирование».</div>'}`;
+          :'<div class="hint">Привязать может тот, у кого право «WhatsApp Ассистент приёма заявок → редактирование».</div>'}`;
     }
   }else if(s.state==='starting'){
     b3=`<div class="hint">Инстанс запускается — обычно до пяти минут (так бывает после смены настроек). Страница проверит сама.</div><div style="margin-top:8px">${again}</div>`;
@@ -872,7 +872,7 @@ function renderGreen(){
   if(!subs.some(x=>x[0]===gaSub))gaSub='dialogs';
   const canSend=can('greenapi','create');
   $('main').innerHTML=`
-    <div class="page-head"><div><h1>Ассистент приёма заявок</h1></div>
+    <div class="page-head"><div><h1>WhatsApp Ассистент приёма заявок</h1></div>
       <div class="head-actions">
         ${gaSub==='dialogs'?`<span class="hint" id="gaSync" style="margin-right:10px">${esc(gaSyncText())}</span>`:''}
         ${gaPillHtml()}
