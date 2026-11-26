@@ -2402,3 +2402,8 @@ td .chat-tag{margin-left:0}
 .sh-code input{flex:1 1 auto;min-width:0;padding:10px 14px;font-size:16px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink,#1a1a1a);letter-spacing:.04em}
 .sh-code input{border-color:transparent}
 .sh-code .btn{min-height:44px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.55)}
+/* Взаиморасчёты: кнопка «исправить сумму» рядом с суммой открытого долга */
+.st-sum{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.st-fix{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:8px;width:28px;height:28px;line-height:1;font-size:14px;cursor:pointer;padding:0}
+.st-fix:hover{color:var(--rust);border-color:var(--rust)}
+@media (max-width:760px),(pointer:coarse){.st-fix{width:44px;height:44px;font-size:17px}}

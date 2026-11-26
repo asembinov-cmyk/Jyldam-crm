@@ -107,7 +107,7 @@ function settlementsMarkup(m) {
     </div>
     <div class="seg" style="margin-bottom:14px;flex-wrap:wrap">${ST_TABS.map(([k, lbl]) =>
       `<button type="button" data-sttab="${k}" class="${tab === k ? "active" : ""}">${lbl}</button>`).join("")}</div>
-    ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Старше 31 дня: ${m.stale_total || 0} на ${stMoney(m.stale_amount || 0)}. Эти суммы остаются в учёте и не выставляются автоматом. ${(m.missing_kaspi || []).length ? "Без номера Kaspi: " + (m.missing_kaspi || []).length + "." : ""} Статус оплаты проверяется каждые 30 секунд.</p>` : ""}
+    ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Старше 31 дня: ${m.stale_total || 0} на ${stMoney(m.stale_amount || 0)}. Эти суммы остаются в учёте и не выставляются автоматом. ${(m.missing_kaspi || []).length ? "Без номера Kaspi: " + (m.missing_kaspi || []).length + "." : ""} Статус оплаты проверяется каждые 30 секунд.${stCanIssue() ? " Сумму долга по заказу можно исправить кнопкой ✎, пока счёт не выставлен; у плательщика с несколькими заказами сначала раскройте строку." : ""}</p>` : ""}
     ${tab === "stale" ? `<p style="color:var(--muted);font-size:13px">Задолженность старше автоматического восстановления. Она не исчезает. Счёт по ней выставляет менеджер вручную.</p>` : ""}
     ${m.load_error ? `<div class="empty"><div class="big">Список не загрузился</div>${stEsc(m.load_error)} Нажмите «Обновить». Заказы на месте, режим из-за этой ошибки не менялся.</div>` : `${settlementsKaspiBlock(tab, m)}${table}`}
     ${tab === "admins" && !m.preview ? settlementsAdminForm() : ""}`;
@@ -311,6 +311,18 @@ function stMissingKaspi(o, m) {
 
 function stBillable(o) {
   return !!(o && o.state === "open" && !o.unplaced && o.holder_id && Number(o.amount) > 0);
+}
+/* ИСПРАВЛЕНИЕ СУММЫ ДОЛГА (26.11.2026). Сумму по заказу можно поправить, пока счёт не
+   выставлен: сервер меняет её только у открытого долга (действие fees_set), а у долга «в
+   счёте» и «оплачено» отвечает отказом — сначала отменяют счёт. Кнопка есть у того, кто
+   выставляет счета. */
+function stFixable(o) {
+  return !!(stCanIssue() && o && o.order_id && !o.unplaced && (o.state === "open" || o.state === "awaiting_admin"));
+}
+function stAmountCell(o) {
+  const sum = stMoney(o.amount);
+  if (!stFixable(o)) return sum;
+  return `<span class="st-sum">${sum}<button class="st-fix" type="button" data-stfix="${stEsc(o.order_id)}" title="Исправить сумму" aria-label="Исправить сумму">✎</button></span>`;
 }
 function stCancelCell(o) {
   if (!stCanIssue() || !o || o.state !== "invoiced" || !o.invoice_id) return "";
@@ -727,7 +739,7 @@ function stObRow(o, n, pick, cat, m, tab) {
   const partner = tab === "summary" ? stPartnerCells(o, cat) : "";
   const state = tab === "summary" ? stSummaryState(o, m, cat) : stEsc(stState(o.state));
   const action = pick ? (tab === "summary" ? stCancelCell(o) : (stIssueCell(o, m, cat) || "")) : "";
-  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}" title="Открыть карточку заказа">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td>${partner}<td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${state}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
+  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}" title="Открыть карточку заказа">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td>${partner}<td>${stEsc(stDay(o.period_date))}</td><td data-label="Сумма">${stAmountCell(o)}</td><td>${state}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
 }
 function stObTable(tab, rows, m, cat, start) {
   const pick = stCanIssue();
@@ -834,7 +846,7 @@ function stSummaryGrouped(view, m, cat) {
   const body = groups.map((g, n) => {
     const open = stSummaryOpen.has(g.key);
     const actions = stGroupCancel(g);
-    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(fiz.length + n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Оплата">${stEsc(g.pay)}</td><td data-label="Номер для счёта">${stPartnerInput(g.raw, "kaspi")}</td><td data-label="WhatsApp">${stWaCell(g.raw, cat, g.orders)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stGroupStateCell(g, m, cat)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
+    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(fiz.length + n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Оплата">${stEsc(g.pay)}</td><td data-label="Номер для счёта">${stPartnerInput(g.raw, "kaspi")}</td><td data-label="WhatsApp">${stWaCell(g.raw, cat, g.orders)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${g.orders.length === 1 ? stAmountCell(g.orders[0]) : stMoney(g.amountNum)}</td><td data-label="Состояние">${stGroupStateCell(g, m, cat)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
     if (!open) return head;
     return head + `<tr class="st-gbody"><td colspan="11" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
@@ -1031,6 +1043,10 @@ function settlementsBind(root) {
     settlementsOpenOrder(b.dataset.storder);
   });
   root.querySelectorAll("button[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
+  root.querySelectorAll("button[data-stfix]").forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    settlementsFixAmount(b.dataset.stfix);
+  });
   root.querySelectorAll("button[data-stopen]").forEach((b) => b.onclick = () => {
     stSummaryOpen.add(b.dataset.stopen);
     if (typeof toast === "function") toast("У физлица номер и счёт указываются в каждом заказе");
@@ -1389,6 +1405,77 @@ async function settlementsCancelInvoice(id) {
   if (typeof toast === "function") toast("Счёт отменён");
   settlementsModel = null;
   renderSettlements();
+}
+
+/* Окно исправления суммы. Что оно делает и чего не делает:
+   • меняет сумму открытого долга на сервере (fees_set) — в счёт пойдёт новая;
+   • у заказа «оплачено отправителем» та же сумма лежит в заказе как «реальная стоимость
+     доставки» (order_sum_orig, её же читает Калькуляция) — пишем и туда, иначе первое же
+     сохранение карточки заказа вернуло бы долгу прежнюю сумму;
+   • у заказа с пакетом M или L НЕ даёт сохранить: сервер при каждом обновлении сводки сам
+     ставит таким заказам тариф размера, и исправление молча откатилось бы;
+   • кто, когда, с какой суммы на какую и почему — в «Истории изменений». */
+async function settlementsFixAmount(orderId) {
+  const m = settlementsModel || {};
+  const ob = (m.obligations || []).find((o) => o.order_id === orderId && (o.state === "open" || o.state === "awaiting_admin"));
+  if (!ob || !stFixable(ob)) {
+    if (typeof toast === "function") toast("Сумму можно менять только у долга «к выплате». Если счёт уже выставлен — сначала отмените его.");
+    return;
+  }
+  if (m.preview) { if (typeof toast === "function") toast("Это пример: настоящие суммы появятся после загрузки списка"); return; }
+  const cat = stCatalog();
+  let order = (typeof S !== "undefined" ? (S.orders || []) : []).find((x) => x.id === orderId) || null;
+  if (!order && typeof sb !== "undefined" && sb) {
+    try {
+      const q = await sb.from("orders").select("id,code,size,paid_by_sender,order_sum_orig").eq("id", orderId).limit(1);
+      order = (q.data || [])[0] || null;
+    } catch (e) { order = null; }
+  }
+  const size = String((order && order.size) || "S").toUpperCase();
+  const sized = size === "M" || size === "L";
+  const old = Number(ob.amount) || 0;
+  const title = stOrderText(ob.order_id, ob.order_code, cat);
+  const who = stWho(ob.holder_type, ob.holder_id, ob.holder_name, cat);
+  const body = `<div style="font-size:14px;margin-bottom:12px"><b>${stEsc(title)}</b> · ${stEsc(who)}<br><span style="color:var(--muted)">Сейчас: ${stMoney(old)}</span></div>
+    ${sized ? `<div class="hint" style="color:var(--rust);margin-bottom:10px">У заказа размер пакета ${stEsc(size)}. Сумма по таким заказам считается по тарифу размера и при каждом обновлении сводки ставится заново — исправление здесь не удержится. Поменяйте размер пакета в карточке заказа или цену размера в карточке партнёра.</div>` : `
+    <div class="field"><label>Новая сумма (₸)</label><input id="st_fix_sum" type="number" inputmode="numeric" min="0" step="1" value="${old}" autocomplete="off"></div>
+    <div class="field"><label>Причина (необязательно)</label><input id="st_fix_why" maxlength="200" autocomplete="off" placeholder="например: договорились о скидке"></div>
+    <div class="hint">Новая сумма пойдёт в счёт.${order && order.paid_by_sender ? " Она же запишется в заказ как реальная стоимость доставки — её считает Калькуляция." : ""} Кто и когда исправил, видно в «Истории изменений».</div>`}`;
+  if (sized) { showInfo("Исправить сумму", body); return; }
+  showModal("Исправить сумму", body, async () => {
+    const raw = String(($("st_fix_sum") || {}).value || "").replace(",", ".").trim();
+    const fee = Math.round(Number(raw));
+    if (raw === "" || !Number.isFinite(fee) || fee < 0) { toast("Введите сумму — число от нуля"); return false; }
+    if (fee === old) { toast("Сумма не изменилась"); return; }
+    if (fee === 0 && !confirm("Поставить сумму 0 ₸? Долг останется в списке, но в счёт не попадёт.")) return false;
+    const why = String(($("st_fix_why") || {}).value || "").trim().slice(0, 200);
+    const res = await callEdge("settlements", { action: "fees_set", orders: [{ order_id: orderId, fee }] });
+    if (!res || res.error || res.success === false) { toast((res && (res.error || res.message)) || "Сумма не сохранена"); return false; }
+    if (res.locked) { toast("По заказу уже выставлен счёт — сначала отмените его"); return false; }
+    if (!res.updated) { toast("Долг по этому заказу не найден — нажмите «Обновить»"); return false; }
+    if (order && order.paid_by_sender) {
+      try {
+        const q = await sb.from("orders").update({ order_sum_orig: fee }).eq("id", orderId);
+        if (q.error) throw q.error;
+        const cached = (S.orders || []).find((x) => x.id === orderId);
+        if (cached) cached.order_sum_orig = fee;
+      } catch (e) {
+        console.error("settlements fix", e);
+        toast("Долг исправлен, но в заказ сумма не записалась — откройте заказ и поправьте «Реальную стоимость доставки»");
+      }
+    }
+    if (typeof logAction === "function") {
+      logAction("update", "orders", {
+        entity_id: orderId,
+        entity_label: `${title} · взаиморасчёты: сумма долга`,
+        changes: [{ field: "settlement_amount", label: "Сумма долга", old: stMoney(old), new: stMoney(fee) }],
+        meta: { source: "settlements", holder: who, reason: why || null },
+      });
+    }
+    toast(`Сумма исправлена: ${stMoney(old)} → ${stMoney(fee)}`);
+    settlementsModel = null;
+    renderSettlements();
+  });
 }
 
 async function settlementsIssueRow(b) {
