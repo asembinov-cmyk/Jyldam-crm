@@ -622,6 +622,10 @@ async function dbGetOne(table,id){
   }catch(e){console.error('dbGetOne',table,e&&e.message);return null;}
 }
 async function dbDelete(table,id){
+  if((table==='orders'||table==='inbound_orders'||table==='inbound_order_items')&&typeof orderDeleteBlocked==='function'&&orderDeleteBlocked()){
+    toast('Удаление заказов для этой учётной записи закрыто');
+    return false;
+  }
   const before=AUTO_LOG_TABLES.has(table)?findCached(table,id):null;
   const lbl=before?recLabel(before):String(id);
   // сохраняем полный снимок строки в корзину, ПРЕЖДЕ чем реально удалить — на случай, если

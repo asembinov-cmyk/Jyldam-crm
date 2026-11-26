@@ -1396,7 +1396,13 @@ function can(mod,act){
    кнопка, и сама карточка висели на can('orders', …).
    Аргумент `bar` нужен там, где раздел известен точнее, чем по текущей вкладке:
    карточку заказа открывают и из «Заполнения», и из поиска дублей. */
+// Этой учётной записи удаление заказов закрыто в базе. Кнопки прячем здесь,
+// чтобы она не упиралась в отказ уже после подтверждения.
+function orderDeleteBlocked(){
+  return !!(S.me&&S.me.id==='f8cd7db2-17d5-4699-a4c9-1429dbee0461');
+}
 function canOrder(act,bar){
+  if(act==='delete'&&orderDeleteBlocked())return false;
   if(can('orders',act))return true;
   const inBar=(bar===undefined)
     ?(typeof ordersMode!=='undefined'&&ordersMode==='baraholka')
