@@ -729,12 +729,13 @@ function stObRow(o, n, pick, cat, m, tab) {
   const action = pick ? (tab === "summary" ? stCancelCell(o) : (stIssueCell(o, m, cat) || "")) : "";
   return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}" title="Открыть карточку заказа">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td>${partner}<td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${state}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
 }
-function stObTable(tab, rows, m, cat) {
+function stObTable(tab, rows, m, cat, start) {
   const pick = stCanIssue();
+  const from = Number(start) || 0;
   const delivery = tab === "summary" ? stTh(tab, "delivery", "Тип доставки") : "";
   const partner = tab === "summary" ? `${stTh(tab, "pay", "Оплата")}<th>Номер для счёта</th><th>WhatsApp</th>` : "";
   const sorted = stSortRows(stObView(rows, cat, m), tab).map((o) => o.raw);
-  return `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${delivery}${stTh(tab, "who", "Кто держит долг")}${partner}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${sorted.map((o, n) => stObRow(o, n, pick, cat, m, tab)).join("")}</tbody></table>`;
+  return `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${delivery}${stTh(tab, "who", "Кто держит долг")}${partner}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${sorted.map((o, n) => stObRow(o, from + n, pick, cat, m, tab)).join("")}</tbody></table>`;
 }
 function stGroupWho(o, cat, m) {
   const label = stWho(o.holder_type, o.holder_id, o.holder_name, cat);
@@ -833,12 +834,12 @@ function stSummaryGrouped(view, m, cat) {
   const body = groups.map((g, n) => {
     const open = stSummaryOpen.has(g.key);
     const actions = stGroupCancel(g);
-    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Оплата">${stEsc(g.pay)}</td><td data-label="Номер для счёта">${stPartnerInput(g.raw, "kaspi")}</td><td data-label="WhatsApp">${stWaCell(g.raw, cat, g.orders)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stGroupStateCell(g, m, cat)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
+    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(fiz.length + n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Оплата">${stEsc(g.pay)}</td><td data-label="Номер для счёта">${stPartnerInput(g.raw, "kaspi")}</td><td data-label="WhatsApp">${stWaCell(g.raw, cat, g.orders)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stGroupStateCell(g, m, cat)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
     if (!open) return head;
     return head + `<tr class="st-gbody"><td colspan="11" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
   const table = groups.length ? `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "pay", "Оплата")}<th>Номер для счёта</th><th>WhatsApp</th>${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}<th></th></tr></thead><tbody>${body}</tbody></table>` : "";
-  const people = fiz.length ? stObTable("summary", fiz, m, cat) : "";
+  const people = fiz.length ? stObTable("summary", fiz, m, cat, 0) : "";
   return barFind + toggle + stPageNote(groups.length + fiz.length, allGroups, true) + stPickBar(openOrders, m, cat) + people + table;
 }
 
