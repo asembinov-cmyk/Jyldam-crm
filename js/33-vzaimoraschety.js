@@ -346,8 +346,8 @@ function stTh(scope, key, label) {
   const mark = bag.col === key ? (bag.dir === 1 ? " ▲" : " ▼") : "";
   return `<th class="fin-th fin-sortable" data-stsort="${stEsc(scope)}" data-stcol="${stEsc(key)}" title="Сортировать">${stEsc(label)}${mark}</th>`;
 }
-function stPageNote(n, total) {
-  const tail = n === total ? "" : ` из ${total}`;
+function stPageNote(n, total, bare) {
+  const tail = bare || n === total ? "" : ` из ${total}`;
   return `<div class="st-pagecount" style="margin:0 0 8px;font-size:13px;font-weight:600">На странице: ${n}${tail}</div>`;
 }
 function stNumHead() {
@@ -549,6 +549,7 @@ function stPayLabel(o) {
   return o.pay_cadence === "monthly" ? "Раз в месяц" : "Каждый день";
 }
 function stPartnerInput(o, kind) {
+  if (kind === "kaspi" && o && o.holder_type === "pickup_courier" && o.holder_id) return stEsc(o.kaspi_phone || "—");
   if (!o || o.holder_type !== "partner" || !o.holder_id) return "—";
   const value = kind === "wa" ? (o.whatsapp || "") : (o.kaspi_phone || "");
   if (!stCanIssue()) return stEsc(value || "—");
@@ -667,7 +668,7 @@ function stSummaryGrouped(view, m, cat) {
   const barFind = stFindBar("summary", spec, view);
   const toggle = stSummaryToggle();
   if (!groups.length) {
-    return barFind + toggle + stPageNote(0, allGroups) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
+    return barFind + toggle + stPageNote(0, allGroups, true) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
   }
   const openOrders = groups.filter((g) => stSummaryOpen.has(g.key)).flatMap((g) => g.orders);
   const body = groups.map((g, n) => {
@@ -678,7 +679,7 @@ function stSummaryGrouped(view, m, cat) {
     return head + `<tr class="st-gbody"><td colspan="11" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
   const table = `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "pay", "Оплата")}<th>Номер для счёта</th><th>WhatsApp</th>${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}<th></th></tr></thead><tbody>${body}</tbody></table>`;
-  return barFind + toggle + stPageNote(groups.length, allGroups) + stPickBar(openOrders, m, cat) + table;
+  return barFind + toggle + stPageNote(groups.length, allGroups, true) + stPickBar(openOrders, m, cat) + table;
 }
 
 function settlementsTable(tab, rows, m) {
@@ -734,8 +735,9 @@ function settlementsTable(tab, rows, m) {
   const barFind = stFindBar(tab, spec, view);
   const toggle = tab === "summary" ? stSummaryToggle() : "";
   if (tab === "summary" && !stSummaryByOrder) return stSummaryGrouped(view, m, cat);
-  if (!rows.length) return barFind + toggle + stPageNote(0, view.length) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
-  return barFind + toggle + stPageNote(rows.length, view.length) + stPickBar(rows, m, cat) + stObTable(tab, rows, m, cat);
+  const bare = tab === "summary";
+  if (!rows.length) return barFind + toggle + stPageNote(0, view.length, bare) + stMiss(view.length, `<div class="empty"><div class="big">Записей нет</div>Долг появится после включения режима и подтверждения стоимости новых заказов.</div>`);
+  return barFind + toggle + stPageNote(rows.length, view.length, bare) + stPickBar(rows, m, cat) + stObTable(tab, rows, m, cat);
 }
 
 function settlementsAdminForm() {
