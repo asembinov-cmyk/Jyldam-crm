@@ -2392,3 +2392,12 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
   margin-left:6px;padding:0;border:0;background:transparent;vertical-align:middle;cursor:pointer;line-height:0}
 .st-wa-logo svg{width:26px;height:26px;display:block}
 .st-wa-logo:hover{filter:brightness(.92)}
+
+/* Заказ из чата WhatsApp (db/75): пометка в гриде и в карточке заявки вместо фото бланка */
+.chat-tag{display:inline-block;padding:2px 8px;border-radius:999px;background:#e7f1fb;color:#1d5fa8;font-size:11px;font-weight:600;white-space:nowrap;margin-left:6px;vertical-align:middle}
+td .chat-tag{margin-left:0}
+/* «Сортировка»: номер с пакета — для заказов из чата, у которых нет бланка */
+.sh-code{display:flex;gap:8px;margin-top:10px;max-width:340px}
+.sh-code input{flex:1 1 auto;min-width:0;padding:10px 14px;font-size:16px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink,#1a1a1a);letter-spacing:.04em}
+.sh-code input{border-color:transparent}
+.sh-code .btn{min-height:44px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.55)}

@@ -25,7 +25,9 @@
 
 const GA_AI_LOG_LIMIT=60;
 const GA_AI_MODELS=[['claude-opus-5-5','Opus 5.5 — точнее'],['claude-sonnet-5-5','Sonnet 5.5 — дешевле'],['claude-haiku-5-5','Haiku 5.5 — самый дешёвый']];
-const GA_AI_OUT_RU={reply:'ответил',pickup:'заявка',handoff:'передал менеджеру',skipped:'промолчал',error:'сбой'};
+const GA_AI_OUT_RU={reply:'ответил',pickup:'заявка',order:'заказ',handoff:'передал менеджеру',skipped:'промолчал',error:'сбой'};
+// Приём заказов сообщением появился в функции этой версии; на более старой блок честно говорит, что её нужно выложить.
+const GA_AI_ORDERS_FN='2026-11-26.1';
 
 let gaAi=null;            // строка green_ai_settings; null — ещё не грузили
 let gaAiErr='';
@@ -153,6 +155,49 @@ function gaAiTestHtml(){
   </div>`;
 }
 
+/* ПРИЁМ ЗАКАЗОВ СООБЩЕНИЕМ (26.11.2026, db/75). Выключатель ОТДЕЛЬНЫЙ от режима самого
+   ассистента: тот уже работает на всех, а заказы сначала проверяют на тестовых номерах.
+     off  — заказы не принимаются;
+     test — только с тестовых номеров, у которых указано «считать партнёром»;
+     on   — от партнёров с галочкой «Заказы через чат» в карточке.
+   Блока нет, пока в базе нет колонки orders_mode. */
+function gaAiOrdersHtml(){
+  if(!gaAi||!('orders_mode' in gaAi))return '';
+  const m=gaAi.orders_mode||'off', edit=gaAiCanEdit();
+  const btn=(k,label)=>`<button class="btn ${m===k?'primary':'ghost'}" data-gaaiord="${k}"${edit&&m!==k?'':' disabled'}>${label}</button>`;
+  const withFlag=(S.partners||[]).filter(p=>p.chat_orders===true&&!p.is_baraholka).length;
+  const testPartners=(gaAi.test_numbers||[]).filter(t=>t.partner_id).length;
+  const text={
+    off:'Заказы сообщением не принимаются. Ассистент работает как раньше: заявки на забор и «где посылка».',
+    test:'Тест: заказы принимаются только с номеров из блока «Тестовые номера», у которых указано «считать партнёром». Остальным ассистент отвечает как раньше.',
+    on:'Работает: заказы принимаются от партнёров с галочкой «Заказы через чат» в карточке — сейчас таких: '+withFlag+'. Остальным ассистент отвечает как раньше.',
+  }[m]||'';
+  const warn=[];
+  if(m!=='off'){
+    if(gaAi.mode==='off')warn.push('Сам ассистент выключен (блок «Режим» выше) — заказы тоже не принимаются.');
+    if(gaAiInfo&&!gaAiInfo.failed&&String(gaAiInfo.version||'')<GA_AI_ORDERS_FN)warn.push('На сервере прежняя версия ассистента ('+(gaAiInfo.version||'без версии')+') — она про заказы не знает. Нужно выложить functions/green-assistant.');
+    if(m==='test'&&!testPartners)warn.push('Нет тестового номера с указанным партнёром — заказ принять не от кого. Добавьте номер в блоке «Тестовые номера» и заполните «считать партнёром».');
+    if(m==='on'&&!withFlag)warn.push('Ни у одного партнёра не стоит галочка «Заказы через чат» — принимать не от кого. Она в карточке партнёра.');
+  }
+  const real=m==='test'&&edit?`<label class="ga-ai-chk"><input type="checkbox" id="gaAiOrdReal"${gaAi.orders_real?' checked':''}>
+      <span>В тесте создавать <b>настоящие</b> заказы. Пока галочки нет, в CRM не создаётся ничего — ни заказ, ни заявка; что создалось бы, видно в журнале ниже.</span></label>`:'';
+  return `<div class="ga-ai-sec">
+    <div class="ga-ai-h">Приём заказов сообщением</div>
+    <div class="hint" style="margin-bottom:8px">Партнёр присылает данные получателя текстом — ассистент заводит заказ и отвечает номером, который партнёр пишет на пакете. Бланк и ручное «Заполнение» по таким заказам не нужны.</div>
+    <div class="ga-ai-modes">${btn('off','Выключен')}${btn('test','Тест')}${btn('on','Работает')}</div>
+    <div class="hint" style="margin-top:8px">${esc(text)}</div>
+    ${warn.map(w=>`<div class="hint" style="color:var(--rust);margin-top:6px">${esc(w)}</div>`).join('')}
+    ${real}
+    <div class="hint" style="margin-top:8px">Что партнёр пишет на каждый заказ: ФИО и телефон получателя, «курьер» или «почта»; для курьерской — город и адрес, для почтовой — индекс. Чего не хватает, ассистент спросит сам. Отменить или исправить заказ он не может — такой диалог уходит менеджеру.</div>
+  </div>`;
+}
+
+async function gaAiSetOrders(mode){
+  if(!gaAi||(gaAi.orders_mode||'off')===mode)return;
+  if(mode==='on'&&!confirm('Включить приём заказов от партнёров?\n\nАссистент начнёт создавать НАСТОЯЩИЕ заказы по сообщениям партнёров, у которых в карточке стоит галочка «Заказы через чат», и отвечать им номером заказа. Сначала стоит проверить это в режиме «Тест».'))return;
+  if(await gaAiSave({orders_mode:mode},mode==='off'?'Приём заказов выключен':(mode==='test'?'Приём заказов: тест':'Приём заказов работает')))gaAiRedraw();
+}
+
 function gaAiRulesHtml(){
   const edit=gaAiCanEdit();
   const val=gaAiDraft.instructions!=null?gaAiDraft.instructions:(gaAi.instructions||'');
@@ -249,12 +294,14 @@ function gaAiLogHtml(){
     </tr></thead><tbody>${gaAiLog.map(r=>{
       const pi=r.pickup_info||null;
       const pick=pi?`<div class="ga-ai-pick">${pi.simulated?'В тесте — создалась бы заявка':'Создана заявка'}: ${esc(pi.name||'')} · ${esc(pi.date?fmtDate(pi.date):'')} · заказов ${esc(String(pi.orders??0))}${pi.pack_size?' · пакет '+esc(pi.pack_size):''}${pi.invoices?' · бланки':''}${pi.courier?'<br>курьер: '+esc(pi.courier)+(pi.simulated?' (назначился бы)':''):(pi.courier_note?'<br>курьер не назначен: '+esc(pi.courier_note):'')}${pi.address?'<br>откуда: '+esc(pi.address):''}${pi.delivery_address?'<br>куда: '+esc(pi.delivery_address):''}</div>`:'';
-      const cls=r.outcome==='error'?'err':(r.outcome==='pickup'?'ok':(r.outcome==='handoff'?'warn':''));
+      const oi=Array.isArray(r.orders_info)?r.orders_info:[];
+      const ords=oi.length?`<div class="ga-ai-pick">${oi.some(o=>o.simulated)?'В тесте — создались бы заказы':'Созданы заказы'}${oi[0].date?' на '+esc(fmtDate(oi[0].date)):''}:${oi.map(o=>`<br>№${esc(String(o.code))} — ${esc(o.client||'')} · ${o.delivery==='courier'?'курьер':'почта'} · ${esc(o.to||'')} · ${esc(fmtNum(o.sum||0))} ₸${o.size&&o.size!=='S'?' · '+esc(o.size):''}${o.track?' · '+esc(o.track):''}`).join('')}</div>`:'';
+      const cls=r.outcome==='error'?'err':((r.outcome==='pickup'||r.outcome==='order')?'ok':(r.outcome==='handoff'?'warn':''));
       return `<tr>
         <td data-label="Когда">${esc(fmtDateTime(r.created_at))}${r.test?'<br><span class="wam-tag">тест</span>':''}</td>
         <td data-label="Кто">${esc(gaPhoneText(r.chat_id))}<br><span class="hint">${esc(r.who||'')}</span></td>
         <td data-label="Написали">${esc(r.inbound_text||'')}</td>
-        <td data-label="Ответ">${r.reply_text?esc(r.reply_text):'<span class="hint">— не писал —</span>'}${pick}</td>
+        <td data-label="Ответ">${r.reply_text?esc(r.reply_text):'<span class="hint">— не писал —</span>'}${pick}${ords}</td>
         <td data-label="Итог"><span class="ga-ai-out ${cls}">${esc(GA_AI_OUT_RU[r.outcome]||r.outcome)}</span>${r.note?`<br><span class="hint">${esc(r.note)}</span>`:''}</td>
         <td><button class="btn sm ghost" data-gaaiopen="${esc(r.chat_id)}">Диалог</button></td>
       </tr>`;
@@ -266,7 +313,7 @@ function gaAiHtml(){
   if(!gaAi)return '<div class="ga-ai"><div class="hint">Загружаем настройки ассистента…</div></div>';
   return `<div class="ga-ai">
     <div class="hint" style="margin-bottom:6px">Ассистент принимает в WhatsApp заявки на забор и заводит их в CRM. Всё остальное — вопросы о доставке, деньги, жалобы — он передаёт менеджеру: такой диалог появляется во вкладке «Диалоги» в «Ждут ответа».${gaAiCanEdit()?'':' Менять настройки можно по праву «редактирование».'}</div>
-    ${gaAiModeHtml()}${gaAiTestHtml()}${gaAiRulesHtml()}${gaAiLearnHtml()}${gaAiOptsHtml()}${gaAiSttHtml()}
+    ${gaAiModeHtml()}${gaAiTestHtml()}${gaAiOrdersHtml()}${gaAiRulesHtml()}${gaAiLearnHtml()}${gaAiOptsHtml()}${gaAiSttHtml()}
     <div class="ga-ai-sec">
       <div class="ga-ai-h">Журнал ассистента <button class="btn sm ghost" id="gaAiLogReload" style="margin-left:10px">Обновить</button></div>
       <div id="gaAiLogBox">${gaAiLogHtml()}</div>
@@ -353,6 +400,13 @@ function gaAiBind(){
     list.splice(parseInt(b.dataset.gaaidel,10),1);
     if(await gaAiSave({test_numbers:list},'Номер убран'))gaAiRedraw();
   });
+  box.querySelectorAll('[data-gaaiord]').forEach(b=>b.onclick=()=>gaAiSetOrders(b.dataset.gaaiord));
+  const ordReal=$('gaAiOrdReal');
+  if(ordReal)ordReal.onchange=async()=>{
+    if(ordReal.checked&&!confirm('Создавать в тесте настоящие заказы?\n\nОни появятся в «Заказах заборов» и в заявке партнёра, указанного у тестового номера, как обычные; почтовым сразу выдаётся трек-номер. После проверки их нужно будет удалить руками.')){ordReal.checked=false;return;}
+    if(await gaAiSave({orders_real:ordReal.checked},ordReal.checked?'В тесте создаются настоящие заказы':'В тесте заказы не создаются'))gaAiRedraw();
+    else ordReal.checked=!ordReal.checked;
+  };
   const add=$('gaAiAdd');if(add)add.onclick=gaAiAddNumber;
   const real=$('gaAiReal');
   if(real)real.onchange=async()=>{

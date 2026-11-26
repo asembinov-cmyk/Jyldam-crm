@@ -368,7 +368,8 @@ function fillOrderSecs(o){
 // Фильтруем в ОДНОМ месте, здесь: отсюда считаются и таблица команды, и карточки
 // наверху, и доля на смену, и сравнение с прошлым периодом. Вырежи по отдельности —
 // и числа начали бы спорить друг с другом.
-const FILL_IMPORT_NAME = /из\s*excel/i;
+// «из чата партнёра» — заказы, которые завёл ассистент WhatsApp (db/75): менеджер за них тоже не садился.
+const FILL_IMPORT_NAME = /из\s*(excel|чата)/i;
 const fillByPerson = o => !FILL_IMPORT_NAME.test(o.filled_by_name || '');
 function fillDoneIn(from, to){
   return (S.orders || []).filter(o => {

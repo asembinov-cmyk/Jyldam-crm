@@ -106,7 +106,7 @@ function renderSortListOnly(){
   const tbody=document.querySelector('#sortListTbody');if(!tbody)return;
   const myCity=S.me&&S.me.city_id;
   const cityFilter=o=>sortingCityId(o)===myCity;
-  const dayOrders=mainOrders().filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  const dayOrders=mainOrders().filter(o=>sortingOrderDay(o)===sortingDate&&(!myCity||cityFilter(o)));
   const processed=dayOrders.filter(orderIsProcessed);
   const filtered=sortingListFiltered(processed);
   const mobile=isMobileView();
@@ -200,7 +200,7 @@ function renderSorting(){
   // в этот город; если город не указан (админ, общий доступ) — видит все города, как раньше
   const myCity=S.me&&S.me.city_id;
   const cityFilter=o=>sortingCityId(o)===myCity;
-  const dayOrders=mainOrders().filter(o=>(o.created_at||'').slice(0,10)===sortingDate&&(!myCity||cityFilter(o)));
+  const dayOrders=mainOrders().filter(o=>sortingOrderDay(o)===sortingDate&&(!myCity||cityFilter(o)));
   // «обработан» — менеджер уже внёс данные получателя И определился с типом доставки (курьер/почта).
   // Заказы, которые только созданы «пустышкой» по заявке (ждут забивки), кладовщику пока не нужны —
   // тип доставки во время забивки ещё может поменяться, показывать их рано.
@@ -245,6 +245,10 @@ function renderSorting(){
           Сканировать накладную
           <input type="file" accept="image/*" capture="environment" id="sortPhotoInput">
         </label>
+        <div class="sh-code">
+          <input id="sortCodeInput" type="text" inputmode="numeric" autocomplete="off" maxlength="9" placeholder="или номер с пакета — 7 цифр">
+          <button type="button" class="btn" id="sortCodeGo">Найти</button>
+        </div>
       </div>
       <div class="sh-nums">
         <div><b>${total}</b><span>заказов${isToday?' сегодня':''}</span></div>
@@ -303,6 +307,11 @@ function renderSorting(){
     await handleSortPhoto(file);
     inp.value='';
   };
+  const codeInp=$('sortCodeInput'),codeGo=$('sortCodeGo');
+  if(codeInp&&codeGo){
+    codeGo.onclick=()=>sortByCode(codeInp.value);
+    codeInp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();sortByCode(codeInp.value);}};
+  }
   const dateInp=$('sortDateFilter');
   if(dateInp)dateInp.onchange=()=>{if(dateInp.value){sortingDate=dateInp.value;sortListPage=1;sortListMobileLimit=MOBILE_STEP;renderSorting();}};
   const todayBtn=$('sortDateToday');
@@ -339,6 +348,42 @@ function bindSortRowClicks(){
 // «обработан» ли заказ менеджером — есть ФИО получателя и определён тип доставки (курьер/почта).
 // Пока это не так — заказ существует (по заявке), но данные ещё забивают, показывать его
 // кладовщику рано (тип доставки, а с ним и город, может ещё поменяться).
+/* ДЕНЬ ЗАКАЗА НА СКЛАДЕ. Обычный заказ — день, когда его завели (как было всегда). Заказ из
+   чата WhatsApp (db/75) заводят ЗАРАНЕЕ: партнёр пишет в 15:00, а курьер заберёт посылку
+   завтра. По дню создания он висел бы сегодня «не принятым» и пропал бы из завтрашнего
+   списка — поэтому у него день забора. */
+function sortingOrderDay(o){
+  if(typeof orderFromChat==='function'&&orderFromChat(o)&&o.pickup_date)return String(o.pickup_date).slice(0,10);
+  return (o.created_at||'').slice(0,10);
+}
+/* НОМЕР С ПАКЕТА (26.11.2026). Партнёр, который присылает заказы сообщением, пишет номер
+   заказа на пакете от руки — бланка на таком пакете нет, фотографировать нечего. Кладовщик
+   вводит номер и получает ту же карточку, что после сканирования: город, тип доставки, ФИО.
+   ФИО В КАРТОЧКЕ — ЭТО СВЕРКА: одна неверно переписанная цифра открыла бы чужой заказ.
+   Ищем сначала в памяти, потом в базе: заказ на завтра завели вчера, и в памяти вкладки его
+   может не быть. */
+async function sortByCode(raw){
+  const code=String(raw||'').replace(/\D/g,'');
+  const box=$('sortResult');
+  if(code.length!==7){toast('Номер заказа — 7 цифр');return;}
+  let o=(S.orders||[]).find(x=>String(x.code)===code);
+  if(!o){
+    try{
+      const {data,error}=await sb.from('orders').select('*').eq('code',code).limit(1);
+      if(error)throw error;
+      if(data&&data[0]){o=data[0];if(!(S.orders||[]).some(x=>x.id===o.id))S.orders.push(o);}
+    }catch(e){toast('Не удалось найти заказ: '+String((e&&e.message)||e));return;}
+  }
+  const msg=(big,text)=>{if(box)box.innerHTML=`<div class="empty" style="padding:20px"><div class="big">${esc(big)}</div><div style="margin-top:8px;color:var(--muted);font-size:14px">${esc(text)}</div></div>`;};
+  if(!o){msg('Заказ '+code+' не найден','Проверьте цифры на пакете. Если номер написан неразборчиво — найдите заказ в списке ниже по ФИО или телефону.');return;}
+  if(isBaraholkaOrder(o)){msg('Заказ '+code+' — из Барахолки','Такие посылки на склад не привозят. Проверьте цифры на пакете.');return;}
+  if(!orderIsProcessed(o)){msg('Заказ '+code+' ещё не заполнен','В нём нет получателя или типа доставки — куда его класть, пока неизвестно.');return;}
+  const myCity=S.me&&S.me.city_id;
+  if(myCity&&sortingCityId(o)!==myCity)toast('Внимание: заказ числится за другим складом — '+cityName(sortingCityId(o)));
+  if(box)box.innerHTML='';
+  const inp=$('sortCodeInput');if(inp)inp.value='';
+  openSortOrderModal(o,{});
+}
 function orderIsProcessed(o){return !!(o.client&&o.client.trim())&&!!o.delivery_id;}
 // город назначения заказа — курьерский берёт из courier_city_id, почтовый из city_id
 function orderDestCityId(o){return isCourierDelivery(o.delivery_id)?o.courier_city_id:o.city_id;}
@@ -363,14 +408,14 @@ function sortingPool(){
   // БАРАХОЛКИ ЗДЕСЬ НЕТ. Её заказы приходят готовым реестром Казпочты: посылки уже
   // сданы, курьер к партнёру не ездил, на склад они не привозились. Кладовщик искал их
   // по фото и не находил — физически их на складе нет.
-  return mainOrders().filter(o=>(o.created_at||'').slice(0,10)===day&&!o.sorted_at&&orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity));
+  return mainOrders().filter(o=>sortingOrderDay(o)===day&&!o.sorted_at&&orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity));
 }
 // необработанные (пустые) заказы за тот же день/город — чтобы отличить «правда нет такого заказа»
 // от «заказ есть, просто ещё не забили» и показать кладовщику понятное сообщение вместо путаницы
 function sortingUnprocessedCount(){
   const day=sortingDate||localToday();
   const myCity=S.me&&S.me.city_id;
-  return mainOrders().filter(o=>(o.created_at||'').slice(0,10)===day&&!orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity)).length;
+  return mainOrders().filter(o=>sortingOrderDay(o)===day&&!orderIsProcessed(o)&&(!myCity||sortingCityId(o)===myCity)).length;
 }
 // сжимает фото перед отправкой на распознавание — полноразмерный снимок с телефона (часто
 // несколько МБ) не нужен для чтения текста на бланке, а сильно замедляет и отправку, и саму

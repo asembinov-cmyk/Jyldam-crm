@@ -12,6 +12,13 @@ function visibleOrders(){
   if(isCourier()){const ids=myOrderCourierIds();return S.orders.filter(o=>ids.includes(o.order_courier_id));}
   return S.orders;
 }
+/* ЗАКАЗ ИЗ ЧАТА WHATSAPP (db/75, 26.11.2026). Данные получателя партнёр прислал текстом, и
+   ассистент завёл заказ сам: бумажного бланка у такого заказа нет, фотографировать нечего.
+   Поэтому «без фото» он не считается — ни в счётчике, ни в фильтре, ни в обязательной
+   проверке при сохранении заявки, — и пакетная загрузка фото в него не кладёт: иначе фото
+   чужого бланка село бы на уже заполненный заказ. */
+function orderFromChat(o){return !!(o&&o.ai_created);}
+function orderNeedsPhoto(o){return !pickupPhotos(o).length&&!orderFromChat(o);}
 function genOrderCode(){
   const ex=new Set(S.orders.map(o=>o.code));let c;
   do{c=String(Math.floor(1000000+Math.random()*9000000));}while(ex.has(c));
@@ -267,8 +274,8 @@ async function pickupOrdersModal(pickupId){
   let pomOnlyNoPhoto=false; // фильтр «показать только заказы без фото» — помогает найти те, что не попали при пакетной загрузке
   const renderBody=()=>{
     const fullList=S.orders.filter(o=>o.pickup_id===pickupId);
-    const noPhotoCount=fullList.filter(o=>!pickupPhotos(o).length).length;
-    const list=pomOnlyNoPhoto?fullList.filter(o=>!pickupPhotos(o).length):fullList;
+    const noPhotoCount=fullList.filter(orderNeedsPhoto).length;
+    const list=pomOnlyNoPhoto?fullList.filter(orderNeedsPhoto):fullList;
     const wantNow=parseInt(p.orders||'0',10)||0;
     const shown=Math.min(pomVisible,list.length);
     const head=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
@@ -284,7 +291,8 @@ async function pickupOrdersModal(pickupId){
     ${list.some(o=>o.track)?`<div class="pom-scan"><input id="pom_scan_input" placeholder="📷 Отсканируйте штрих-код посылки, чтобы найти её заказ…" autocomplete="off"></div>`:''}`;
     if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Добавить заказы» или «Заказы из фото».</div>`;
     const cards=list.slice(0,shown).map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
-      <div class="pom-head"><b>Заказ #${esc(o.code)}</b><span class="pom-st">${statusBadge(o.status_id)}</span></div>
+      <div class="pom-head"><b>Заказ #${esc(o.code)}</b>${orderFromChat(o)?'<span class="chat-tag" title="Партнёр прислал данные получателя сообщением в WhatsApp — фото бланка не нужно">из чата</span>':''}<span class="pom-st">${statusBadge(o.status_id)}</span></div>
+      ${orderFromChat(o)&&o.client?`<div class="pom-track">👤 ${esc(o.client)}${o.phone?' · '+esc(phoneDisplay(o.phone)):''}</div>`:''}
       ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:''}
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${(isStaff()||isCourier())?`
@@ -307,7 +315,7 @@ async function pickupOrdersModal(pickupId){
   showInfo(`Заказы заявки · ${p.name||''}`,renderBody(),{closeLabel:'Сохранить',beforeClose:()=>{
     // фото обязательно: проверяем, что у каждого заказа есть хотя бы одно фото
     const list=S.orders.filter(o=>o.pickup_id===pickupId);
-    const noPhoto=list.filter(o=>!pickupPhotos(o).length);
+    const noPhoto=list.filter(orderNeedsPhoto);
     if(noPhoto.length){toast(`Добавьте фото к заказам (${noPhoto.length} без фото)`);return false;}
     // размер пакета тоже обязателен — курьер должен указать его на месте, глядя на посылку
     const noSize=list.filter(o=>!o.size);
@@ -517,7 +525,7 @@ async function pickupOrdersModal(pickupId){
       if(bulkInp)bulkInp.onchange=async e=>{
         const files=pickedPhotoFiles(bulkInp);if(!files.length){bulkInp.value='';return;}
         const currentList=S.orders.filter(o=>o.pickup_id===pickupId);
-        const emptyOrders=currentList.filter(o=>!pickupPhotos(o).length);
+        const emptyOrders=currentList.filter(orderNeedsPhoto);
         if(!emptyOrders.length){toast('У всех заказов уже есть хотя бы одно фото');bulkInp.value='';return;}
         const n=Math.min(files.length,emptyOrders.length);
         const pairs=[];for(let i=0;i<n;i++)pairs.push({order:emptyOrders[i],file:files[i]});
@@ -2338,7 +2346,7 @@ function drawOrders(){
       const ph=pickupPhotos(o);
       const photoCell=ph.length
         ? `<img data-ph="${esc(photoPath(ph[0]))}" data-oviewphoto="${esc(photoPath(ph[0]))}" loading="lazy" decoding="async" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
-        : '<span style="color:var(--line)">—</span>';
+        : (orderFromChat(o)?'<span class="chat-tag" title="Партнёр прислал данные получателя сообщением в WhatsApp — фото бланка не нужно">из чата</span>':'<span style="color:var(--line)">—</span>');
       return `<tr data-orow="${o.id}" style="cursor:pointer" class="${o.via_integration?'order-row-api':''}" title="${o.via_integration?'Пришёл от партнёра напрямую через API-интеграцию':''}">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       ${noPhoto?'':`<td data-label="Фото">${photoCell}</td>`}

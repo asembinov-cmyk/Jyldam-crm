@@ -375,6 +375,8 @@ function dirPartners(onlyBar){
       // видно сразу, у кого доля менеджера зафиксирована, а у кого считается разницей
       ...(dailyPickupReady()?[{key:'daily',label:'Ежедн. забор',filter:'select',
         text:p=>p.daily_pickup?'каждый день':'—'}]:[]),
+      ...(chatOrdersReady()?[{key:'chat',label:'Заказы через чат',filter:'select',
+        text:p=>p.chat_orders?'принимаются':'—'}]:[]),
       ...(salesFixedReady()?[{key:'smpost',label:'Доля · почта',filter:'select',
         text:p=>p.sales_margin_fixed!=null&&p.sales_margin_fixed!==''?(+p.sales_margin_fixed).toLocaleString('ru-RU')+' ₸':'по разнице'}]:[]),
       // Колонки и поля «Доля · курьер» НЕТ (просьба владельца 24.11.2026): по политике надбавки
@@ -504,6 +506,7 @@ function partnerModal(id){
     ${baraholkaReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_bar" ${p.is_baraholka?'checked':''}> Барахолка <span class="pom-paidhint">(заказы считаются по своим нормативам; на уже созданные не влияет)</span></label>`:''}
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     ${dailyPickupReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_daily" ${p.daily_pickup?'checked':''}> Ежедневный забор <span class="pom-paidhint">(каждое утро в 07:00 на этот магазин сама создаётся заявка на забор — без курьера и без заказов, курьера назначает менеджер)</span></label>`:''}
+    ${chatOrdersReady()&&!fizCard&&!p.is_baraholka?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_chat" ${p.chat_orders?'checked':''}> Заказы через чат <span class="pom-paidhint">(партнёр присылает данные получателя сообщением в WhatsApp, ассистент сам заводит заказ и отвечает номером для пакета; работает, когда в «WhatsApp Ассистент» → «ИИ ассистент» включён приём заказов; номер партнёра — поле «Телефон» выше)</span></label>`:''}
     <div class="field"><label>Условная сумма заказа при прямой оплате (₸)</label><input type="number" min="0" id="p_direct_pay" value="${esc(p.direct_pay_amount)}" placeholder="например 3000"><small style="color:var(--muted);font-size:12px">Для партнёров с тарифом 0 (платят за доставку сами, напрямую, минуя сумму заказа). Эта сумма подставится в «Калькуляцию» как условная выручка, чтобы такие заказы не выглядели чистым убытком.</small></div>
     <div class="field"><label>Доступ в кабинет партнёра</label>
       <input id="p_qr" value="${esc(p.qr_code||'')}" readonly placeholder="код ещё не выдан"
@@ -561,6 +564,7 @@ function partnerModal(id){
         is_protected:!!($('p_protected')&&$('p_protected').checked),
         ...($('p_bar')?{is_baraholka:!!$('p_bar').checked}:{}),
         ...($('p_daily')?{daily_pickup:!!$('p_daily').checked}:{}),
+        ...($('p_chat')?{chat_orders:!!$('p_chat').checked}:{}),
         ...($('p_courier')?{courier_id:val('p_courier')||null}:{}),
         // поля шлём, только когда колонки в базе есть: иначе PostgREST отклонит ВЕСЬ
         // запрос, и карточка перестанет сохраняться вместе со всеми остальными полями

@@ -565,6 +565,12 @@ function partnerCourierReady(){
   const p=(S.partners||[])[0];
   return !!p&&Object.prototype.hasOwnProperty.call(p,'courier_id');
 }
+// «Заказы через чат» в карточке партнёра (db/75): ассистент WhatsApp принимает от такого
+// партнёра заказы сообщением. Поле шлём, только когда колонка есть, — как соседние.
+function chatOrdersReady(){
+  const p=(S.partners||[])[0];
+  return !!p&&Object.prototype.hasOwnProperty.call(p,'chat_orders');
+}
 function dailyPickupReady(){
   const p=(S.partners||[])[0];
   return !!p&&Object.prototype.hasOwnProperty.call(p,'daily_pickup');
