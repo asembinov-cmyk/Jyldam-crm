@@ -210,10 +210,23 @@ function stPhone10(raw) {
   return /^7\d{9}$/.test(ten) ? ten : "";
 }
 function stFizPhoneValue(o) {
-  if (o.invoice_phone) return String(o.invoice_phone);
-  if (o.client_phone) return String(o.client_phone);
-  const row = (typeof S !== "undefined" ? (S.orders || []) : []).find((x) => x.id === o.order_id);
-  return row && row.phone ? String(row.phone) : "";
+  return o && o.invoice_phone ? String(o.invoice_phone) : "";
+}
+function stSummaryBillPhone(o) {
+  const own = stPhone10(stFizPhoneValue(o));
+  if (own && own !== stPhone10(o && o.client_phone)) return own;
+  return stPhone10(o && o.kaspi_phone);
+}
+function stRowBillPhone(tr) {
+  if (!tr) return "";
+  const ownEl = tr.querySelector("[data-stfizphone]");
+  const own = ownEl ? stPhone10(ownEl.value) : "";
+  const columnEl = tr.querySelector("[data-stkaspi]");
+  const column = columnEl ? stPhone10(columnEl.value) : "";
+  const recipient = ownEl ? stPhone10(ownEl.getAttribute("data-stclient") || "") : "";
+  if (own && own !== recipient) return own;
+  if (column) return column;
+  return own;
 }
 function stHolderCell(o, cat, m, tab) {
   const label = stWho(o.holder_type, o.holder_id, o.holder_name, cat);
@@ -222,7 +235,7 @@ function stHolderCell(o, cat, m, tab) {
   const who = o.holder_type === "partner" && o.holder_id
     ? `<button class="btn ghost sm" type="button" data-stpartner="${stEsc(o.holder_id)}" data-stwho="${stEsc(label)}" title="Открыть карточку партнёра">${stEsc(label)}</button>`
     : `<span data-stwho="${stEsc(label)}">${stEsc(label)}</span>`;
-  const phone = fiz ? `<input class="st-fiz-phone" data-stfizphone="${stEsc(o.order_id)}" data-stsaved="${stEsc(stPhone10(stFizPhoneValue(o)))}" value="${stEsc(stPhone10(stFizPhoneValue(o)) || stFizPhoneValue(o))}" inputmode="tel" autocomplete="off" placeholder="Номер для счёта" title="Номер для удалённого счёта Kaspi" style="width:148px;margin-left:8px;padding:4px 8px">` : "";
+  const phone = fiz ? `<input class="st-fiz-phone" data-stfizphone="${stEsc(o.order_id)}" data-stclient="${stEsc(stPhone10(o.client_phone))}" data-stsaved="${stEsc(stPhone10(stFizPhoneValue(o)))}" value="${stEsc(stSummaryBillPhone(o))}" inputmode="tel" autocomplete="off" placeholder="Номер для счёта" title="Счёт уходит на этот номер" style="width:148px;margin-left:8px;padding:4px 8px">` : "";
   return who + phone + (note ? stEsc(note) : "");
 }
 
@@ -763,7 +776,7 @@ function stGroupIssue(g, m, cat) {
   const open = (g.orders || []).filter(stBillable);
   if (!open.length) return "";
   const fiz = stIsFizlicoRow(g.raw, cat);
-  if (fiz && (open.length > 1 || open.some((o) => !stPhone10(stFizPhoneValue(o))))) {
+  if (fiz && (open.length > 1 || open.some((o) => !stSummaryBillPhone(o)))) {
     return `<button class="btn sm primary" type="button" data-stopen="${stEsc(g.key)}">Выставить счёт</button>`;
   }
   if (!fiz && stMissingKaspi(g.raw, m)) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>`;
@@ -773,7 +786,7 @@ function stGroupIssue(g, m, cat) {
   const amount = open.reduce((s, o) => s + (Number(o.amount) || 0), 0);
   const ids = open.map((o) => o.order_id).filter(Boolean).join(",");
   const one = fiz ? open[0] : null;
-  const mark = one ? ` data-stfiz="1" data-storder="${stEsc(one.order_id)}" data-stphone="${stEsc(stPhone10(stFizPhoneValue(one)))}"` : "";
+  const mark = one ? ` data-stfiz="1" data-storder="${stEsc(one.order_id)}" data-stphone="${stEsc(stSummaryBillPhone(one))}"` : "";
   return `<button class="btn sm primary" type="button" data-stissue="${stEsc(g.raw.holder_type)}" data-stholder="${stEsc(g.raw.holder_id)}" data-stday="${stEsc(start)}" data-stend="${stEsc(end)}" data-stamount="${amount}" data-storders="${stEsc(ids)}"${mark}>Выставить счёт</button>`;
 }
 function stGroupCancel(g) {
@@ -1295,8 +1308,7 @@ async function settlementsIssueSelected(root) {
   const bare = [];
   picked.forEach((c) => {
     if (c.dataset.stfiz === "1") {
-      const inp = c.closest("tr") && c.closest("tr").querySelector("[data-stfizphone]");
-      const phone = stPhone10(inp && inp.value);
+      const phone = stRowBillPhone(c.closest("tr"));
       if (!phone) { bare.push(c.dataset.storder || ""); return; }
       groups.set(`fiz|${c.dataset.storder}`, {
         type: c.dataset.stissue, holder: c.dataset.stholder, day: c.dataset.stday,
@@ -1376,19 +1388,11 @@ async function settlementsIssueRow(b) {
   const end = b.dataset.stend || day;
   const amount = Number(b.dataset.stamount) || 0;
   const phoneInp = tr && tr.querySelector("[data-stfizphone]");
-  let phone = "";
-  if (phoneInp) {
-    phone = stPhone10(phoneInp.value);
-    if (!phone) {
-      if (typeof toast === "function") toast("Сначала укажите номер для удалённого счёта");
-      return;
-    }
-  } else if (b.dataset.stfiz === "1") {
-    phone = stPhone10(b.dataset.stphone || "");
-    if (!phone) {
-      if (typeof toast === "function") toast("Сначала укажите номер для удалённого счёта");
-      return;
-    }
+  let phone = stRowBillPhone(tr);
+  if (!phone && b.dataset.stfiz === "1") phone = stPhone10(b.dataset.stphone || "");
+  if ((phoneInp || b.dataset.stfiz === "1") && !phone) {
+    if (typeof toast === "function") toast("Сначала укажите номер в поле «Номер для счёта»");
+    return;
   }
   const period = end && end !== day ? `${stDay(day)} — ${stDay(end)}` : stDay(day);
   if (!confirm(`Выставить счёт «${who}» за ${period} на ${stMoney(amount)}?${phone ? "\nУдалённый счёт уйдёт на " + phone + "." : ""}\nПовторное нажатие второй счёт не создаёт.`)) return;
