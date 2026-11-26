@@ -27,7 +27,7 @@ const GA_AI_LOG_LIMIT=60;
 const GA_AI_MODELS=[['claude-opus-5-5','Opus 5.5 — точнее'],['claude-sonnet-5-5','Sonnet 5.5 — дешевле'],['claude-haiku-5-5','Haiku 5.5 — самый дешёвый']];
 const GA_AI_OUT_RU={reply:'ответил',pickup:'заявка',order:'заказ',handoff:'передал менеджеру',skipped:'промолчал',error:'сбой'};
 // Приём заказов сообщением появился в функции этой версии; на более старой блок честно говорит, что её нужно выложить.
-const GA_AI_ORDERS_FN='2026-11-26.2';
+const GA_AI_ORDERS_FN='2026-11-26.4';
 
 let gaAi=null;            // строка green_ai_settings; null — ещё не грузили
 let gaAiErr='';
@@ -175,7 +175,7 @@ function gaAiOrdersHtml(){
   const warn=[];
   if(m!=='off'){
     if(gaAi.mode==='off')warn.push('Сам ассистент выключен (блок «Режим» выше) — заказы тоже не принимаются.');
-    if(gaAiInfo&&!gaAiInfo.failed&&String(gaAiInfo.version||'')<GA_AI_ORDERS_FN)warn.push('На сервере прежняя версия ассистента ('+(gaAiInfo.version||'без версии')+') — она про заказы не знает. Нужно выложить functions/green-assistant.');
+    if(gaAiInfo&&!gaAiInfo.failed&&String(gaAiInfo.version||'')<GA_AI_ORDERS_FN)warn.push('На сервере прежняя версия ассистента ('+(gaAiInfo.version||'без версии')+') — в ней нет последних правок приёма заказов. Нужно выложить functions/green-assistant.');
     if(m==='test'&&!testPartners)warn.push('Нет тестового номера с указанным партнёром — заказ принять не от кого. Добавьте номер в блоке «Тестовые номера» и заполните «считать партнёром».');
     if(m==='on'&&!withFlag)warn.push('Ни у одного партнёра не стоит галочка «Заказы через чат» — принимать не от кого. Она в карточке партнёра.');
   }
@@ -188,7 +188,7 @@ function gaAiOrdersHtml(){
     <div class="hint" style="margin-top:8px">${esc(text)}</div>
     ${warn.map(w=>`<div class="hint" style="color:var(--rust);margin-top:6px">${esc(w)}</div>`).join('')}
     ${real}
-    <div class="hint" style="margin-top:8px">Что партнёр пишет на каждый заказ: ФИО и телефон получателя, «курьер» или «почта»; для курьерской — город и адрес, для почтовой — индекс. Заказ создаётся, даже если чего-то не хватает: ассистент тут же спрашивает недостающее и дописывает заказ, когда партнёр ответит. Отменить заказ или сменить тип доставки он не может — такой диалог уходит менеджеру.</div>
+    <div class="hint" style="margin-top:8px">Что партнёр пишет на каждый заказ: ФИО и телефон получателя, «курьер» или «почта»; для курьерской — город и адрес, для почтовой — индекс. Заказ создаётся, даже если чего-то не хватает: ассистент тут же спрашивает недостающее и дописывает заказ, когда партнёр ответит. Партнёр может отменить заказ, написав «отмена» и ID, — пока курьер не забрал посылки и склад заказ не принял; отменённый заказ лежит в «Корзине» 30 дней. Сменить тип доставки ассистент не может — такой диалог уходит менеджеру. После оформленной заявки на забор ассистент вторым сообщением присылает партнёру шаблон заказа.</div>
   </div>`;
 }
 
@@ -295,7 +295,7 @@ function gaAiLogHtml(){
       const pi=r.pickup_info||null;
       const pick=pi?`<div class="ga-ai-pick">${pi.simulated?'В тесте — создалась бы заявка':'Создана заявка'}: ${esc(pi.name||'')} · ${esc(pi.date?fmtDate(pi.date):'')} · заказов ${esc(String(pi.orders??0))}${pi.pack_size?' · пакет '+esc(pi.pack_size):''}${pi.invoices?' · бланки':''}${pi.courier?'<br>курьер: '+esc(pi.courier)+(pi.simulated?' (назначился бы)':''):(pi.courier_note?'<br>курьер не назначен: '+esc(pi.courier_note):'')}${pi.address?'<br>откуда: '+esc(pi.address):''}${pi.delivery_address?'<br>куда: '+esc(pi.delivery_address):''}</div>`:'';
       const oi=Array.isArray(r.orders_info)?r.orders_info:[];
-      const ords=oi.length?`<div class="ga-ai-pick">${oi.some(o=>o.simulated)?'В тесте — заказы (в CRM не созданы)':'Заказы из чата'}${oi[0].date?' на '+esc(fmtDate(oi[0].date)):''}:${oi.map(o=>`<br>ID ${esc(String(o.code))} — ${esc([o.client||(o.phone?'тел. +7'+o.phone:''),o.delivery==='courier'?'курьер':(o.delivery==='post'?'почта':''),o.to||''].filter(Boolean).join(' · '))}${o.sum!=null?' · '+esc(fmtNum(o.sum))+' ₸':''}${o.size&&o.size!=='S'?' · '+esc(o.size):''}${o.track?' · '+esc(o.track):''}${o.updated?' · <i>дописан</i>':''}${(o.missing||[]).length?'<br><span style="color:var(--rust)">&nbsp;&nbsp;не хватает: '+esc(o.missing.join('; '))+'</span>':''}`).join('')}</div>`:'';
+      const ords=oi.length?`<div class="ga-ai-pick">${oi.some(o=>o.simulated)?'В тесте — заказы (в CRM не созданы)':'Заказы из чата'}${oi[0].date?' на '+esc(fmtDate(oi[0].date)):''}:${oi.map(o=>`<br>ID ${esc(String(o.code))} — ${esc([o.client||(o.phone?'тел. +7'+o.phone:''),o.delivery==='courier'?'курьер':(o.delivery==='post'?'почта':''),o.to||''].filter(Boolean).join(' · '))}${o.sum!=null?' · '+esc(fmtNum(o.sum))+' ₸':''}${o.size&&o.size!=='S'?' · '+esc(o.size):''}${o.track?' · '+esc(o.track):''}${o.cancelled?' · <b style="color:var(--rust)">отменён партнёром</b>':(o.updated?' · <i>дописан</i>':'')}${(o.missing||[]).length?'<br><span style="color:var(--rust)">&nbsp;&nbsp;не хватает: '+esc(o.missing.join('; '))+'</span>':''}`).join('')}</div>`:'';
       const cls=r.outcome==='error'?'err':((r.outcome==='pickup'||r.outcome==='order')?'ok':(r.outcome==='handoff'?'warn':''));
       return `<tr>
         <td data-label="Когда">${esc(fmtDateTime(r.created_at))}${r.test?'<br><span class="wam-tag">тест</span>':''}</td>
