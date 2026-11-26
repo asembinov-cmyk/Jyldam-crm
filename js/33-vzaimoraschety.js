@@ -639,17 +639,25 @@ function stPhoneText(raw) {
   }
   return value;
 }
+function stWaChatBtn(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length < 10) return "";
+  return `<button class="btn ghost sm" type="button" data-stwachat="${stEsc(phone)}" title="Открыть чат WhatsApp ИИ-агента" style="margin-left:6px;padding:4px 8px">💬</button>`;
+}
 function stFizWa(orders) {
   const phones = [];
   (orders || []).forEach((o) => {
     const phone = stPhoneText(stSenderPhone(o));
     if (phone && !phones.includes(phone)) phones.push(phone);
   });
-  return stEsc(phones.join(", ") || "—");
+  if (!phones.length) return "—";
+  return phones.map((p) => stEsc(p) + stWaChatBtn(p)).join("<br>");
 }
 function stWaCell(o, cat, orders) {
   if (stIsFizlicoRow(o, cat)) return stFizWa(orders || [o]);
-  return stPartnerInput(o, "wa");
+  const field = stPartnerInput(o, "wa");
+  if (field === "—") return "—";
+  return field + stWaChatBtn(o && o.whatsapp);
 }
 function stPartnerCells(o, cat) {
   return `<td data-label="Оплата">${stEsc(stPayLabel(o))}</td><td data-label="Номер для счёта">${stPartnerInput(o, "kaspi")}</td><td data-label="WhatsApp">${stWaCell(o, cat)}</td>`;
@@ -838,6 +846,109 @@ function settlementsAdminForm() {
     <p style="color:var(--muted);font-size:12px">В одном городе может быть несколько администраторов. Счёт ему выставляет менеджер вручную.</p></div>`;
 }
 
+function stWaChatId(phone) {
+  if (typeof gaChatIdFromPhone === "function") return gaChatIdFromPhone(phone);
+  let d = String(phone || "").replace(/\D/g, "");
+  if (d.length === 10) d = "7" + d;
+  else if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1);
+  if (d.length < 11 || d.length > 15) return "";
+  return d + "@c.us";
+}
+function stCanWaSend() {
+  if (typeof isAdmin === "function" && isAdmin()) return true;
+  return typeof can === "function" && can("greenapi", "create");
+}
+function stWaBubbles(rows) {
+  if (!rows || !rows.length) return `<div class="hint">Переписки с этим номером пока нет. Напишите первым — сообщение уйдёт с номера ИИ-агента.</div>`;
+  return rows.map((m) => {
+    const out = m.direction === "outbound";
+    const who = out && m.via === "ai" ? "ИИ-ассистент" : (out ? (m.sent_by_name || "Мы") : "Клиент");
+    const time = typeof fmtLogTime === "function" ? ((fmtLogTime(m.created_at) || {}).time || "") : "";
+    return `<div style="display:flex;justify-content:${out ? "flex-end" : "flex-start"};margin-bottom:6px">
+      <div style="max-width:80%;padding:8px 12px;border-radius:12px;background:${out ? "#dcf8c6" : "#fff"};border:1px solid var(--line);font-size:13px;white-space:pre-wrap;word-break:break-word">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:2px">${stEsc(who)}</div>
+        ${stEsc(m.body_text || "—")}
+        <div style="font-size:10px;color:var(--muted);margin-top:2px;text-align:right">${stEsc(time)}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+async function stWaMessages(chatId) {
+  if (typeof sb === "undefined" || !sb) return { rows: [], error: "Нет связи с базой" };
+  const q = await sb.from("green_messages").select("direction,body_text,created_at,via,sent_by_name")
+    .eq("chat_id", chatId).order("created_at", { ascending: false }).limit(200);
+  if (q.error) return { rows: [], error: q.error.message || "Переписка не прочиталась" };
+  return { rows: (q.data || []).slice().reverse(), error: "" };
+}
+async function stWaPaint(chatId) {
+  const box = $("stWaBox");
+  if (!box) return;
+  const got = await stWaMessages(chatId);
+  if (!$("stWaBox")) return;
+  $("stWaBox").innerHTML = got.error
+    ? `<div class="hint" style="color:var(--rust)">${stEsc(got.error)}</div>`
+    : stWaBubbles(got.rows);
+  $("stWaBox").scrollTop = $("stWaBox").scrollHeight;
+}
+async function stOpenWaChat(phone) {
+  const chatId = stWaChatId(phone);
+  if (!chatId) {
+    if (typeof toast === "function") toast("Номер не похож на телефон");
+    return;
+  }
+  const shown = typeof phoneDisplay === "function" ? (phoneDisplay(phone) || phone) : phone;
+  const send = stCanWaSend();
+  const foot = send
+    ? `<div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end">
+        <textarea id="stWaText" rows="2" placeholder="Сообщение клиенту…" style="flex:1;min-height:52px"></textarea>
+        <button class="btn primary" type="button" id="stWaSend">Отправить</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:6px">
+        <span class="hint">Сообщение уйдёт с номера ИИ-агента.</span>
+        <button class="btn ghost sm" type="button" id="stWaHist">История с телефона</button>
+      </div>`
+    : `<div class="hint" style="margin-top:8px">Прочитать переписку можно. Написать — по праву «Ассистент приёма заявок → создание».</div>`;
+  if (typeof showInfo !== "function") return;
+  const ov = showInfo("WhatsApp ИИ-агента · " + shown, `<div id="stWaBox" style="min-height:240px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;background:#f7f7f4">Загружаем переписку…</div>${foot}`, { wide: true });
+  await stWaPaint(chatId);
+  if (!ov) return;
+  const hist = ov.querySelector("#stWaHist");
+  if (hist) hist.onclick = async () => {
+    hist.disabled = true;
+    const res = typeof gaCall === "function" ? await gaCall("history", { chat_id: chatId, count: 200 }) : { error: "Чат ИИ-агента недоступен" };
+    hist.disabled = false;
+    if (!res || res.error) {
+      if (typeof toast === "function") toast("История не загрузилась: " + ((res && res.error) || "сервер не ответил"));
+      return;
+    }
+    await stWaPaint(chatId);
+  };
+  const btn = ov.querySelector("#stWaSend");
+  const ta = ov.querySelector("#stWaText");
+  if (!btn || !ta) return;
+  const sendNow = async () => {
+    const text = String(ta.value || "").trim();
+    if (!text) {
+      if (typeof toast === "function") toast("Нечего отправлять");
+      return;
+    }
+    btn.disabled = true;
+    const res = typeof gaCall === "function" ? await gaCall("send", { chat_id: chatId, text }) : { error: "Чат ИИ-агента недоступен" };
+    btn.disabled = false;
+    if (!res || res.error || res.ok === false) {
+      if (typeof toast === "function") toast("Не отправлено: " + ((res && res.error) || "сервер не ответил"));
+      return;
+    }
+    ta.value = "";
+    if (typeof toast === "function") toast("Отправлено");
+    await stWaPaint(chatId);
+  };
+  btn.onclick = sendNow;
+  ta.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendNow(); }
+  };
+}
+
 function settlementsBind(root) {
   if (!root) return;
   root.querySelectorAll("[data-sttab]").forEach((b) => b.onclick = () => {
@@ -873,6 +984,12 @@ function settlementsBind(root) {
     inp.onclick = (e) => e.stopPropagation();
     inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } };
     inp.onchange = () => settlementsSavePartnerField(inp, inp.hasAttribute("data-stwa") ? "wa" : "kaspi");
+  });
+  root.querySelectorAll("[data-stwachat]").forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const cell = b.closest("td");
+    const inp = cell && cell.querySelector("[data-stwa]");
+    stOpenWaChat(inp ? inp.value : b.dataset.stwachat);
   });
   const excel = root.querySelector("#st_excel");
   if (excel) excel.onclick = settlementsExcel;
