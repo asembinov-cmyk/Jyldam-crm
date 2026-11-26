@@ -493,6 +493,7 @@ function partnerModal(id){
       Пусто — считается как раньше, разницей между тарифом партнёра и базовым тарифом компании.
       Заполнено — ровно эта сумма, остаток остаётся прибылью компании: тариф 2000 и доля 110 означают, что 200 ₸ компания держит себе.
       Поле нужно и партнёрам с тарифом 0, которые платят раз в месяц по счёту: по ним разница не насчитает ничего никогда.</small>`:''}
+    ${typeof settlementsPartnerExtra==='function'?settlementsPartnerExtra(p):''}
     ${baraholkaReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_bar" ${p.is_baraholka?'checked':''}> Барахолка <span class="pom-paidhint">(заказы считаются по своим нормативам; на уже созданные не влияет)</span></label>`:''}
     <label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_protected" ${p.is_protected?'checked':''}> Неприкосновенный <span class="pom-paidhint">(любой размер пакета — по тарифу выше, без надбавок S/M/L)</span></label>
     ${dailyPickupReady()?`<label class="pom-paid" style="margin-top:4px"><input type="checkbox" id="p_daily" ${p.daily_pickup?'checked':''}> Ежедневный забор <span class="pom-paidhint">(каждое утро в 07:00 на этот магазин сама создаётся заявка на забор — без курьера и без заказов, курьера назначает менеджер)</span></label>`:''}
@@ -515,8 +516,7 @@ function partnerModal(id){
       </div>
       <small style="color:var(--muted);font-size:12px">Партнёр сможет присылать готовые заказы напрямую через API — они автоматически попадут в «Заказы заборов» с заявкой на забор, выделены другим цветом. Перевыпуск токена отзывает старый — если у партнёра уже настроена интеграция, старый токен перестанет работать.</small>
       <div id="p_token_reveal"></div>
-    </div>`:''}
-    ${typeof settlementsPartnerExtra==='function'?settlementsPartnerExtra(p):''}`,
+    </div>`:''}`,
     async()=>{
       // проверка обязательных полей (кроме QR-кода)
       // Имя берём из ПОЛЯ, а не из p: партнёра могли только что переименовать в физ. лицо

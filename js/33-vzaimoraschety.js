@@ -1124,11 +1124,11 @@ function settlementsBindPickup(wrap) {
 function settlementsPartnerExtra(p) {
   if (!p || !p.id) return "";
   if (typeof isAdmin === "function" && !isAdmin() && typeof can === "function" && !can("settlements", "edit")) return "";
-  return `<div class="panel" style="padding:12px;margin-top:12px"><h3 style="margin:0 0 8px">Взаиморасчёты партнёра</h3>
+  return `<div class="panel" style="padding:12px;margin-top:12px"><h3 style="margin:0 0 8px">Счёт и WhatsApp</h3>
     <div class="grid2">
-      <div class="field"><label>Период</label><select id="st_p_cadence"><option value="daily">Каждый день, счёт за вчера</option><option value="monthly">Раз в месяц, вручную</option></select></div>
+      <div class="field"><label>Оплата</label><select id="st_p_cadence"><option value="daily">Каждый день</option><option value="monthly">Раз в месяц</option></select></div>
       <div class="field"><label>Время автосчёта, Алматы</label><input id="st_p_time" value="10:00"></div>
-      <div class="field"><label>Kaspi для счёта</label><input id="st_p_kaspi" inputmode="numeric"></div>
+      <div class="field"><label>Номер для счёта</label><input id="st_p_kaspi" inputmode="numeric" placeholder="Kaspi"></div>
       <div class="field"><label>WhatsApp</label><input id="st_p_wa" inputmode="numeric"></div>
     </div>
     <label class="pom-paid"><input type="checkbox" id="st_p_auto"> Автосчёт включён <span class="pom-paidhint">(по умолчанию выключен)</span></label>
