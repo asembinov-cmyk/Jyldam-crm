@@ -887,6 +887,7 @@ function render(){
     if(typeof gaStopPoll==='function')gaStopPoll();
     if(typeof gaRtStop==='function')gaRtStop();
   }
+  if(_lastTab==='settlements'&&S.tab!=='settlements'&&typeof stStopPayWatch==='function')stStopPayWatch();
   if(S.tab==='dashboard'){
     // Таблицы по дням при входе всегда свёрнуты: они длинные, и из-за них не видно
     // карточек наверху. Раскрывает их человек сам, и только на время этого захода.

@@ -107,7 +107,7 @@ function settlementsMarkup(m) {
     </div>
     <div class="seg" style="margin-bottom:14px;flex-wrap:wrap">${ST_TABS.map(([k, lbl]) =>
       `<button type="button" data-sttab="${k}" class="${tab === k ? "active" : ""}">${lbl}</button>`).join("")}</div>
-    ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Старше 31 дня: ${m.stale_total || 0} на ${stMoney(m.stale_amount || 0)}. Эти суммы остаются в учёте и не выставляются автоматом. ${(m.missing_kaspi || []).length ? "Без номера Kaspi: " + (m.missing_kaspi || []).length + "." : ""}</p>` : ""}
+    ${tab === "summary" ? `<p style="color:var(--muted);font-size:13px;margin-top:0">Ожидают стоимости: ${m.awaiting_price || 0}. Забытых смен: ${(m.forgotten || []).length}. Старше 31 дня: ${m.stale_total || 0} на ${stMoney(m.stale_amount || 0)}. Эти суммы остаются в учёте и не выставляются автоматом. ${(m.missing_kaspi || []).length ? "Без номера Kaspi: " + (m.missing_kaspi || []).length + "." : ""} Статус оплаты проверяется каждые 30 секунд.</p>` : ""}
     ${tab === "stale" ? `<p style="color:var(--muted);font-size:13px">Задолженность старше автоматического восстановления. Она не исчезает. Счёт по ней выставляет менеджер вручную.</p>` : ""}
     ${m.load_error ? `<div class="empty"><div class="big">Список не загрузился</div>${stEsc(m.load_error)} Нажмите «Обновить». Заказы на месте, режим из-за этой ошибки не менялся.</div>` : `${settlementsKaspiBlock(tab, m)}${table}`}
     ${tab === "admins" && !m.preview ? settlementsAdminForm() : ""}`;
@@ -796,14 +796,107 @@ function settlementsBind(root) {
   });
 }
 
+const ST_PAY_MS = 30000;
+let stPayTimer = 0;
+let stPayBusy = false;
+let stPayAway = false;
+let stPayListen = false;
+
+function stPayStamp(m) {
+  if (!m) return "";
+  const obs = (m.obligations || []).map((o) => [o.id, o.state, o.amount, o.invoice_id].join(":")).join("|");
+  const inv = (m.invoices || []).map((i) => [i.id, i.status, i.amount].join(":")).join("|");
+  return [m.debt, m.ready, m.invoiced, m.paid, obs, inv].join("#");
+}
+
+function stKeepPayExtras(prev, next) {
+  next.kaspi_kassa = prev.kaspi_kassa;
+  next.kaspi_invoices = prev.kaspi_invoices;
+  next.kaspi_loaded = prev.kaspi_loaded;
+  const known = new Map((prev.obligations || []).filter((o) => o.delivery_id).map((o) => [o.order_id, o.delivery_id]));
+  let missing = false;
+  (next.obligations || []).forEach((o) => {
+    if (known.has(o.order_id)) o.delivery_id = known.get(o.order_id);
+    else if (o.order_id) missing = true;
+  });
+  next.delivery_loaded = !!prev.delivery_loaded && !missing;
+  return missing;
+}
+
+async function stAskReconcile() {
+  try { await callEdge("settlements", { action: "reconcile" }); }
+  catch (e) { /* сводка откроется и со статусом, который уже записан */ }
+}
+
+async function stPullPayment() {
+  if (stPayBusy) return;
+  if (typeof S === "undefined" || S.tab !== "settlements") { stStopPayWatch(); return; }
+  if (typeof document !== "undefined" && document.hidden) return;
+  if (!settlementsModel || settlementsModel.preview || settlementsModel.load_error) return;
+  stPayBusy = true;
+  try {
+    await stAskReconcile();
+    if (typeof S === "undefined" || S.tab !== "settlements") return;
+    const res = await callEdge("settlements", { action: "summary" });
+    if (!res || res.error || res.success === false) return;
+    if (typeof S === "undefined" || S.tab !== "settlements") return;
+    if (stPayStamp(res) === stPayStamp(settlementsModel)) return;
+    const missing = stKeepPayExtras(settlementsModel, res);
+    settlementsModel = res;
+    if (missing) await stAttachDelivery(settlementsModel);
+    if (typeof S === "undefined" || S.tab !== "settlements") return;
+    const y = window.scrollY;
+    const active = document.activeElement;
+    const scope = active && active.dataset ? active.dataset.stscope : "";
+    const key = active && active.dataset ? active.dataset.stk : "";
+    const pos = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
+    const main = $("main");
+    if (!main) return;
+    main.innerHTML = settlementsMarkup(settlementsModel);
+    settlementsBind(main);
+    window.scrollTo(0, y);
+    if (scope && key) {
+      const next = main.querySelector(`[data-stscope="${scope}"][data-stk="${key}"]`);
+      if (next) {
+        next.focus();
+        if (pos != null) try { next.setSelectionRange(pos, pos); } catch (e) {}
+      }
+    }
+  } finally {
+    stPayBusy = false;
+  }
+}
+
+function stStopPayWatch() {
+  if (!stPayTimer) return;
+  clearInterval(stPayTimer);
+  stPayTimer = 0;
+  stPayAway = true;
+}
+
+function stWatchPayments() {
+  if (!stPayListen && typeof document !== "undefined") {
+    stPayListen = true;
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && typeof S !== "undefined" && S.tab === "settlements") stPullPayment();
+    });
+  }
+  const away = stPayAway;
+  stPayAway = false;
+  if (!stPayTimer) stPayTimer = setInterval(stPullPayment, ST_PAY_MS);
+  if (away) stPullPayment();
+}
+
 async function renderSettlements() {
   const main = $("main");
   if (typeof canMod === "function" && !canMod("settlements") && !(typeof isAdmin === "function" && isAdmin())) {
+    stStopPayWatch();
     main.innerHTML = '<div class="empty"><div class="big">Нет доступа к взаиморасчётам</div></div>';
     return;
   }
   if (!settlementsModel) {
     main.innerHTML = '<div class="empty"><div class="big">Загружаем взаиморасчёты…</div></div>';
+    await stAskReconcile();
     const res = await callEdge("settlements", { action: "summary" });
     if (!res || res.error || res.success === false) {
       const why = (res && (res.error || res.message)) || "Функция взаиморасчётов ещё не опубликована";
@@ -821,6 +914,7 @@ async function renderSettlements() {
   }
   main.innerHTML = settlementsMarkup(settlementsModel);
   settlementsBind(main);
+  if (settlementsModel && !settlementsModel.preview && !settlementsModel.load_error) stWatchPayments();
 }
 
 async function stAttachDelivery(model) {
