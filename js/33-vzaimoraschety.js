@@ -584,12 +584,41 @@ function stPickBar(rows, m, cat) {
     <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
   </div>`;
 }
-function stPartnerCells(o) {
-  return `<td data-label="Оплата">${stEsc(stPayLabel(o))}</td><td data-label="Номер для счёта">${stPartnerInput(o, "kaspi")}</td><td data-label="WhatsApp">${stPartnerInput(o, "wa")}</td>`;
+function stSenderPhone(o) {
+  const direct = o && String(o.sender_phone || "").trim();
+  if (direct) return direct;
+  const id = o && o.pickup_id;
+  if (!id || typeof S === "undefined") return "";
+  const row = (S.pickups || []).find((x) => x.id === id);
+  return row && row.phone ? String(row.phone).trim() : "";
+}
+function stPhoneText(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  if (typeof phoneDisplay === "function") {
+    const shown = phoneDisplay(value);
+    if (shown) return shown;
+  }
+  return value;
+}
+function stFizWa(orders) {
+  const phones = [];
+  (orders || []).forEach((o) => {
+    const phone = stPhoneText(stSenderPhone(o));
+    if (phone && !phones.includes(phone)) phones.push(phone);
+  });
+  return stEsc(phones.join(", ") || "—");
+}
+function stWaCell(o, cat, orders) {
+  if (stIsFizlicoRow(o, cat)) return stFizWa(orders || [o]);
+  return stPartnerInput(o, "wa");
+}
+function stPartnerCells(o, cat) {
+  return `<td data-label="Оплата">${stEsc(stPayLabel(o))}</td><td data-label="Номер для счёта">${stPartnerInput(o, "kaspi")}</td><td data-label="WhatsApp">${stWaCell(o, cat)}</td>`;
 }
 function stObRow(o, n, pick, cat, m, tab) {
   const delivery = tab === "summary" ? `<td data-label="Тип доставки">${stEsc(stDeliveryName(o) || "—")}</td>` : "";
-  const partner = tab === "summary" ? stPartnerCells(o) : "";
+  const partner = tab === "summary" ? stPartnerCells(o, cat) : "";
   const action = pick ? stIssueCell(o, m, cat) || (tab === "summary" ? stCancelCell(o) : "") : "";
   return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td>${partner}<td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
 }
@@ -675,7 +704,7 @@ function stSummaryGrouped(view, m, cat) {
   const body = groups.map((g, n) => {
     const open = stSummaryOpen.has(g.key);
     const actions = stGroupActions(g, m, cat);
-    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Оплата">${stEsc(g.pay)}</td><td data-label="Номер для счёта">${stPartnerInput(g.raw, "kaspi")}</td><td data-label="WhatsApp">${stPartnerInput(g.raw, "wa")}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
+    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Оплата">${stEsc(g.pay)}</td><td data-label="Номер для счёта">${stPartnerInput(g.raw, "kaspi")}</td><td data-label="WhatsApp">${stWaCell(g.raw, cat, g.orders)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
     if (!open) return head;
     return head + `<tr class="st-gbody"><td colspan="11" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
@@ -982,7 +1011,7 @@ function settlementsExcel() {
   const rows = (settlementsModel && settlementsModel.obligations) || [];
   const cat = stCatalog();
   const lines = ["заказ;заявка;тип доставки;кто держит долг;оплата;номер для счёта;whatsapp;период;сумма;состояние"].concat(rows.map((o) =>
-    [stOrderText(o.order_id, o.order_code, cat), stPickupText(o.pickup_id, o.pickup_name, cat), stDeliveryName(o), stWho(o.holder_type, o.holder_id, o.holder_name, cat), stPayLabel(o), o.holder_type === "partner" ? (o.kaspi_phone || "") : "", o.holder_type === "partner" ? (o.whatsapp || "") : "", stDay(o.period_date), o.amount, stState(o.state)].join(";")));
+    [stOrderText(o.order_id, o.order_code, cat), stPickupText(o.pickup_id, o.pickup_name, cat), stDeliveryName(o), stWho(o.holder_type, o.holder_id, o.holder_name, cat), stPayLabel(o), o.holder_type === "partner" ? (o.kaspi_phone || "") : "", stIsFizlicoRow(o, cat) ? stSenderPhone(o) : (o.holder_type === "partner" ? (o.whatsapp || "") : ""), stDay(o.period_date), o.amount, stState(o.state)].join(";")));
   const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
