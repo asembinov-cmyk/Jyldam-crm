@@ -531,6 +531,8 @@ async function doLogin(){
     errEl.textContent=NO_PROFILE_MSG;
     return;
   }
+  // логин последнего вошедшего — подставим на экране входа (пароль не храним никогда)
+  try{localStorage.setItem('lastLogin',login);}catch(e){}
   await logAction('login','auth',{entity_label:S.me.full_name||S.me.email});
   await enterApp();
 }
@@ -547,7 +549,9 @@ async function doLogout(){try{if(typeof sfShutdown==='function')sfShutdown();}ca
 }
 function showLogin(){$('appShell').style.display='none';$('loginScreen').style.display='grid';hideSplash();
   // по умолчанию подставляем +7 (можно стереть и ввести email)
-  const el=$('email');if(el&&!el.value){el.value='+7 ';}
+  const el=$('email');if(el&&!el.value){let last='';try{last=localStorage.getItem('lastLogin')||'';}catch(e){}
+    // логин последнего вошедшего на этом устройстве; остаётся и после «Выйти»
+    if(last){el.value=last;_emailPrevRaw=last;}else el.value='+7 ';}
 }
 function hideSplash(){const s=$('splash');if(!s)return;s.classList.add('hide');setTimeout(()=>{if(s.parentNode)s.remove();},600);}
 
