@@ -19,6 +19,16 @@ function visibleOrders(){
    чужого бланка село бы на уже заполненный заказ. */
 function orderFromChat(o){return !!(o&&o.ai_created);}
 function orderNeedsPhoto(o){return !pickupPhotos(o).length&&!orderFromChat(o);}
+/* К КАКОМУ ДНЮ ОТНОСИТСЯ ЗАКАЗ В ГРИДЕ. Обычный заказ — день, когда его завели. Заказ из
+   чата заводят ЗАРАНЕЕ: партнёр пишет вечером, а заберут посылку завтра, вместе с завтрашней
+   заявкой. По дню создания он стоял бы в сегодняшнем списке, хотя сегодня с ним делать нечего
+   (жалоба владельца 26.11.2026: «заявка на завтра, а заказ создался на сегодня»). Поэтому у
+   него день забора — как и в «Сортировке» (`sortingOrderDay`). Колонка «Создан» по-прежнему
+   показывает настоящее время создания. */
+function orderGridDay(o){
+  if(orderFromChat(o)&&o.pickup_date)return String(o.pickup_date).slice(0,10);
+  return localDay(o.created_at);
+}
 // Заказ из чата создаётся сразу, даже если партнёр прислал не всё: ассистент спрашивает
 // недостающее и дописывает заказ. Пока данных нет, отметки filled_at у него тоже нет.
 function orderChatTag(o){
@@ -1314,7 +1324,7 @@ function ordersScopedList(){
   list=ordersMode==='baraholka'?barOnlyOrders(list):mainOrders(list);
   if(ordersMode==='courier')list=list.filter(o=>isCourierDelivery(o.delivery_id));
   else if(ordersMode==='mail')list=list.filter(o=>o.delivery_id&&!isCourierDelivery(o.delivery_id));
-  else if(ordersMode==='today'){const t=localToday();list=list.filter(o=>localDay(o.created_at)===t||(o.pickup_date||'').slice(0,10)===t);}
+  else if(ordersMode==='today'){const t=localToday();list=list.filter(o=>orderGridDay(o)===t||(o.pickup_date||'').slice(0,10)===t);}
   return list;
 }
 // список с учётом режима вкладки И фильтра по дате создания (для статистики вверху)
@@ -1323,7 +1333,7 @@ function ordersDateScopedList(){
     // МЕСТНАЯ дата, а не срез строки: `created_at` в UTC, и заказ, заведённый
     // до 05:00 по Астане, попадал во вчерашний день — фильтр «23.10–23.10»
     // подтягивал заказы 24-го, хотя в колонке стояло 24-е (жалоба 24.10.2026).
-    const cd=localDay(o.created_at);
+    const cd=orderGridDay(o);
     if(of.createFrom&&(!cd||cd<of.createFrom))return false;
     if(of.createTo&&(!cd||cd>of.createTo))return false;
     return true;
