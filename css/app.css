@@ -2386,3 +2386,9 @@ input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webk
 .app-ios .login-forgot{display:block;margin:10px auto 0;background:none;border:0;font:inherit;font-size:16px;font-weight:600;color:#0c2a8c;
   text-decoration:underline;text-underline-offset:4px;min-height:44px;cursor:pointer}
 .app-ios .login-card .err{text-align:center}
+
+/* Значок перехода в чат WhatsApp ИИ-агента в сводке. */
+.st-wa-logo{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+  margin-left:6px;padding:0;border:0;background:transparent;vertical-align:middle;cursor:pointer;line-height:0}
+.st-wa-logo svg{width:26px;height:26px;display:block}
+.st-wa-logo:hover{filter:brightness(.92)}

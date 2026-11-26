@@ -642,7 +642,7 @@ function stPhoneText(raw) {
 function stWaChatBtn(phone) {
   const digits = String(phone || "").replace(/\D/g, "");
   if (digits.length < 10) return "";
-  return `<button class="btn ghost sm" type="button" data-stwachat="${stEsc(phone)}" title="Открыть чат WhatsApp ИИ-агента" style="margin-left:6px;padding:4px 8px">💬</button>`;
+  return `<button class="st-wa-logo" type="button" data-stwachat="${stEsc(phone)}" title="Открыть чат WhatsApp ИИ-агента" aria-label="Открыть чат WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#25D366" d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2z"/><path fill="#fff" d="M17.47 14.38c-.23-.12-1.36-.67-1.57-.75-.21-.08-.36-.12-.51.12-.15.23-.59.75-.72.9-.13.15-.27.17-.5.06-.23-.12-.97-.36-1.85-1.14-.68-.61-1.14-1.36-1.28-1.59-.13-.23-.01-.36.1-.47.1-.1.23-.27.34-.4.11-.14.15-.23.23-.38.08-.15.04-.29-.02-.4-.06-.12-.51-1.23-.7-1.68-.18-.44-.37-.38-.51-.39h-.43c-.15 0-.4.06-.61.29-.21.23-.8.78-.8 1.9 0 1.12.82 2.2.93 2.35.12.15 1.61 2.46 3.9 3.45.54.23.96.37 1.29.47.54.17.98.15 1.35.09.42-.06 1.36-.56 1.55-1.1.19-.53.19-.99.13-1.09-.06-.1-.21-.15-.44-.27z"/></svg></button>`;
 }
 function stFizWa(orders) {
   const phones = [];
