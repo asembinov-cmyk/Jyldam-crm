@@ -2645,17 +2645,18 @@ function showBarcode(id){const o=S.orders.find(x=>x.id===id);if(!o)return;
 async function delOrder(id){const o=S.orders.find(x=>x.id===id);if(!confirm(`Удалить заказ ${o?.code||''}?`))return;
   if(await dbDelete('orders',id)){await logAction('delete','orders',{entity_id:id,entity_label:orderLabel(o)});S.orders=S.orders.filter(x=>x.id!==id);toast('Заказ удалён');renderOrders();}}
 // расценки по размеру пакета (S/M/L) — раздельно для почтовой и курьерской доставки.
-// Больше не единая цена на всех: размер S = собственный тариф ПАРТНЁРА (курьер/почта), а M и L
-// считаются от него с надбавкой. Сами надбавки правятся в «Калькуляции» → «Размеры пакетов
-// и перевес» (priceNorm, js/01-yadro.js); пока их там не меняли, действуют прежние значения —
-// почта M = S+500, L = S+1500; курьер +2000 и +4000.
-// Если у партнёра тариф не указан (пусто) — используются базовые значения по умолчанию.
+// S — тариф, который записан в карточке партнёра. M и L — свои суммы в той же карточке.
+// Пока отдельных сумм нет, M и L считаются надбавкой, как раньше: почта +500 и +1500,
+// курьер +2000 и +4000 (priceNorm, js/01-yadro.js).
+// «Неприкосновенный» партнёр любой размер считает по тарифу S.
 const PACKAGE_SIZE_LABELS={S:'S — малый',M:'M — средний',L:'L — большой'};
+function packageSizeAmount(partner,key,base,surchargeKey){
+  if(isExplicitNum(partner&&partner[key]))return +partner[key];
+  return base+priceNorm(surchargeKey);
+}
 function packageSizesFor(partner){
   const baseCourier=isExplicitNum(partner&&partner.tariff_courier)?+partner.tariff_courier:3000;
   const baseMail=isExplicitNum(partner&&partner.tariff_post)?+partner.tariff_post:1500;
-  // «Неприкосновенный» партнёр — своя фиксированная цена по тарифу, наша обычная сетка надбавок
-  // (S/M/L) на него не действует: любой размер пакета стоит одинаково, ровно по тарифу партнёра
   if(partner&&partner.is_protected){
     return {
       S:{label:PACKAGE_SIZE_LABELS.S,courier:baseCourier,mail:baseMail},
@@ -2665,8 +2666,8 @@ function packageSizesFor(partner){
   }
   return {
     S:{label:PACKAGE_SIZE_LABELS.S,courier:baseCourier,mail:baseMail},
-    M:{label:PACKAGE_SIZE_LABELS.M,courier:baseCourier+priceNorm('size_courier_m'),mail:baseMail+priceNorm('size_mail_m')},
-    L:{label:PACKAGE_SIZE_LABELS.L,courier:baseCourier+priceNorm('size_courier_l'),mail:baseMail+priceNorm('size_mail_l')},
+    M:{label:PACKAGE_SIZE_LABELS.M,courier:packageSizeAmount(partner,'tariff_courier_m',baseCourier,'size_courier_m'),mail:packageSizeAmount(partner,'tariff_post_m',baseMail,'size_mail_m')},
+    L:{label:PACKAGE_SIZE_LABELS.L,courier:packageSizeAmount(partner,'tariff_courier_l',baseCourier,'size_courier_l'),mail:packageSizeAmount(partner,'tariff_post_l',baseMail,'size_mail_l')},
   };
 }
 // Надбавка за перевес у ПОЧТОВЫХ заказов: всё тяжелее порога считается по ставке за

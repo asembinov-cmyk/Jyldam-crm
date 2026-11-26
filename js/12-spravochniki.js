@@ -370,8 +370,8 @@ function dirPartners(onlyBar){
       // Курьер, который обычно ездит к партнёру (db/71). Его же назначает ИИ-ассистент WhatsApp.
       ...(partnerCourierReady()?[{key:'courier',label:'Курьер',filter:'select',
         text:p=>p.courier_id?courierName(p.courier_id):''}]:[]),
-      {key:'tpost',label:'Тариф почта',filter:'select',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
-      {key:'tcour',label:'Тариф курьер',filter:'select',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
+      {key:'tpost',label:'S почта',filter:'select',text:p=>p.tariff_post!=null&&p.tariff_post!==''?(+p.tariff_post).toLocaleString('ru-RU')+' ₸':''},
+      {key:'tcour',label:'S курьер',filter:'select',text:p=>p.tariff_courier!=null&&p.tariff_courier!==''?(+p.tariff_courier).toLocaleString('ru-RU')+' ₸':''},
       // видно сразу, у кого доля менеджера зафиксирована, а у кого считается разницей
       ...(dailyPickupReady()?[{key:'daily',label:'Ежедн. забор',filter:'select',
         text:p=>p.daily_pickup?'каждый день':'—'}]:[]),
@@ -481,9 +481,16 @@ function partnerModal(id){
     <div class="field"><label>Обработчик <span style="color:var(--rust)">*</span></label><select id="p_proc"><option value="">—</option>${S.processors.map(s=>`<option value="${s.id}" ${p.processor_id===s.id?'selected':''}>${esc(s.fio)}</option>`).join('')}</select></div>
     ${partnerCourierReady()&&!fizCard?`<div class="field"><label>Курьер</label><select id="p_courier">${pCourierOpts(p.city_id,p.courier_id)}</select>
       <small style="color:var(--muted);font-size:12px">Кто обычно ездит к партнёру на забор. Сначала заполнено по заявкам за 90 дней — курьер, назначавшийся чаще всех. Его же ставит ИИ-ассистент WhatsApp, когда сам заводит заявку.</small></div>`:''}
-    <div class="grid2">
-      <div class="field"><label>Тариф · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
-      <div class="field"><label>Тариф · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
+    <div class="field full"><label>Тариф по размеру пакета</label>
+      <div class="grid2">
+        <div class="field"><label>S · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost" value="${esc(p.tariff_post)}" placeholder="0"></div>
+        <div class="field"><label>S · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour" value="${esc(p.tariff_courier)}" placeholder="0"></div>
+        <div class="field"><label>M · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost_m" value="${esc(isExplicitNum(p.tariff_post_m)?p.tariff_post_m:2500)}"></div>
+        <div class="field"><label>M · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour_m" value="${esc(isExplicitNum(p.tariff_courier_m)?p.tariff_courier_m:5000)}"></div>
+        <div class="field"><label>L · почтовая (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tpost_l" value="${esc(isExplicitNum(p.tariff_post_l)?p.tariff_post_l:3000)}"></div>
+        <div class="field"><label>L · курьерская (₸) <span style="color:var(--rust)">*</span></label><input type="number" min="0" id="p_tcour_l" value="${esc(isExplicitNum(p.tariff_courier_l)?p.tariff_courier_l:7000)}"></div>
+      </div>
+      <small style="color:var(--muted);font-size:12px;display:block;margin:-6px 0 12px">S — тариф, который уже был в карточке. Сводка берёт S, M или L по размеру, который стоит в карточке заказа.</small>
     </div>
     ${salesFixedReady()?`<div class="grid2">
       <div class="field"><label>Доля менеджера · почта (₸)</label>
@@ -534,15 +541,22 @@ function partnerModal(id){
         ]),
         ['p_sales','Выберите менеджера по продажам',()=>val('p_sales')],
         ['p_proc','Выберите обработчика',()=>val('p_proc')],
-        ['p_tpost','Укажите тариф почтовой доставки',()=>val('p_tpost')!==''],
-        ['p_tcour','Укажите тариф курьерской доставки',()=>val('p_tcour')!==''],
+        ['p_tpost','Укажите тариф S почтовой доставки',()=>val('p_tpost')!==''],
+        ['p_tcour','Укажите тариф S курьерской доставки',()=>val('p_tcour')!==''],
+        ['p_tpost_m','Укажите тариф M почтовой доставки',()=>val('p_tpost_m')!==''],
+        ['p_tcour_m','Укажите тариф M курьерской доставки',()=>val('p_tcour_m')!==''],
+        ['p_tpost_l','Укажите тариф L почтовой доставки',()=>val('p_tpost_l')!==''],
+        ['p_tcour_l','Укажите тариф L курьерской доставки',()=>val('p_tcour_l')!==''],
       ];
       for(const [fid,msg,ok] of req){
         if(!ok()){toast(msg);const el=$(fid);if(el){el.focus();el.style.borderColor='var(--rust)';}return false;}
       }
       const name=val('p_name').trim();
       const row={name,city_id:val('p_city')||null,district_id:val('p_district')||null,address:val('p_addr').trim(),phone:phoneVal('p_phone'),sales_id:val('p_sales')||null,processor_id:val('p_proc')||null,
-        tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,qr_code:val('p_qr').trim()||null,
+        tariff_post:val('p_tpost')!==''?parseFloat(val('p_tpost')):null,tariff_courier:val('p_tcour')!==''?parseFloat(val('p_tcour')):null,
+        tariff_post_m:val('p_tpost_m')!==''?parseFloat(val('p_tpost_m')):null,tariff_courier_m:val('p_tcour_m')!==''?parseFloat(val('p_tcour_m')):null,
+        tariff_post_l:val('p_tpost_l')!==''?parseFloat(val('p_tpost_l')):null,tariff_courier_l:val('p_tcour_l')!==''?parseFloat(val('p_tcour_l')):null,
+        qr_code:val('p_qr').trim()||null,
         direct_pay_amount:val('p_direct_pay')!==''?parseFloat(val('p_direct_pay')):null,
         is_protected:!!($('p_protected')&&$('p_protected').checked),
         ...($('p_bar')?{is_baraholka:!!$('p_bar').checked}:{}),
@@ -561,7 +575,13 @@ function partnerModal(id){
         const normT=v=>v==null||v===''?'':String(+v);
         const oldPost=before?before.tariff_post:null;
         const oldCourier=before?before.tariff_courier:null;
-        const tariffChanged=!!(before&&(normT(oldPost)!==normT(row.tariff_post)||normT(oldCourier)!==normT(row.tariff_courier)));
+        const oldSize={
+          tariff_post:oldPost,tariff_courier:oldCourier,
+          tariff_post_m:before?before.tariff_post_m:null,tariff_courier_m:before?before.tariff_courier_m:null,
+          tariff_post_l:before?before.tariff_post_l:null,tariff_courier_l:before?before.tariff_courier_l:null,
+        };
+        const tariffChanged=!!(before&&['tariff_post','tariff_courier','tariff_post_m','tariff_courier_m','tariff_post_l','tariff_courier_l']
+          .some(k=>normT(oldSize[k])!==normT(row[k])));
         const salesChanged=before&&before.sales_id!==row.sales_id;
         const procChanged=before&&before.processor_id!==row.processor_id;
         const norm=v=>v==null||v===''?'':String(+v);
@@ -574,7 +594,7 @@ function partnerModal(id){
         const u=await dbUpdate('partners',id,row);if(!u)return false;Object.assign(before,u);
         if(tariffChanged&&typeof applyPartnerTariffToOrders==='function'){
           try{
-            const n=await applyPartnerTariffToOrders(before,{tariff_post:oldPost,tariff_courier:oldCourier});
+            const n=await applyPartnerTariffToOrders(before,oldSize);
             if(n)syncMsg+=` · тариф применён к ${n} ранее созданным заказам`;
           }catch(e){console.error('partner tariff orders',e);syncMsg+=' · тариф в старые заказы не перенёсся';}
         }
