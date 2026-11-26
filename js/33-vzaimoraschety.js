@@ -549,13 +549,14 @@ function stPayLabel(o) {
   return o.pay_cadence === "monthly" ? "Раз в месяц" : "Каждый день";
 }
 function stPartnerInput(o, kind) {
-  if (kind === "kaspi" && o && o.holder_type === "pickup_courier" && o.holder_id) return stEsc(o.kaspi_phone || "—");
-  if (!o || o.holder_type !== "partner" || !o.holder_id) return "—";
+  const courierKaspi = kind === "kaspi" && o && o.holder_type === "pickup_courier" && o.holder_id;
+  if (!courierKaspi && (!o || o.holder_type !== "partner" || !o.holder_id)) return "—";
   const value = kind === "wa" ? (o.whatsapp || "") : (o.kaspi_phone || "");
   if (!stCanIssue()) return stEsc(value || "—");
   const mark = kind === "wa" ? "data-stwa" : "data-stkaspi";
+  const holder = courierKaspi ? ` data-stholder="pickup_courier"` : "";
   const title = kind === "wa" ? "WhatsApp" : "Номер для счёта";
-  return `<input class="st-partner-field" ${mark}="1" data-stpartner="${stEsc(o.holder_id)}" data-stsaved="${stEsc(value)}" value="${stEsc(value)}" inputmode="tel" autocomplete="off" placeholder="${title}" title="${title}" style="width:132px;padding:4px 8px">`;
+  return `<input class="st-partner-field" ${mark}="1"${holder} data-stpartner="${stEsc(o.holder_id)}" data-stsaved="${stEsc(value)}" value="${stEsc(value)}" inputmode="tel" autocomplete="off" placeholder="${title}" title="${title}" style="width:132px;padding:4px 8px">`;
 }
 function stObView(rows, cat, m) {
   return (rows || []).map((o) => ({
@@ -1180,10 +1181,16 @@ async function settlementsSavePartnerField(inp, kind) {
   }
   const prev = inp.dataset.stsaved ? (stPhone10(inp.dataset.stsaved) || inp.dataset.stsaved) : "";
   if (phone === prev) { inp.value = phone; return; }
-  const body = { action: "terms_fields", partner_id: inp.dataset.stpartner };
-  if (kind === "wa") body.whatsapp = phone;
-  else body.kaspi_phone = phone;
-  const res = await callEdge("settlements", body);
+  const holder = inp.dataset.stholder || "partner";
+  const id = inp.dataset.stpartner;
+  let res;
+  if (holder === "pickup_courier") res = await settlementsSaveKaspi("pickup_courier", id, phone);
+  else {
+    const body = { action: "terms_fields", partner_id: id };
+    if (kind === "wa") body.whatsapp = phone;
+    else body.kaspi_phone = phone;
+    res = await callEdge("settlements", body);
+  }
   if (!res || res.error || res.success === false) {
     inp.value = inp.dataset.stsaved || "";
     if (typeof toast === "function") toast((res && (res.error || res.message)) || "Номер не записался");
@@ -1191,15 +1198,14 @@ async function settlementsSavePartnerField(inp, kind) {
   }
   const savedKaspi = kind === "kaspi" ? (res.kaspi_phone || phone) : null;
   const savedWa = kind === "wa" ? (res.whatsapp || phone) : null;
-  const id = inp.dataset.stpartner;
   ((settlementsModel && settlementsModel.obligations) || []).forEach((o) => {
-    if (o.holder_type !== "partner" || o.holder_id !== id) return;
+    if (o.holder_type !== holder || o.holder_id !== id) return;
     if (savedKaspi != null) o.kaspi_phone = savedKaspi;
     if (savedWa != null) o.whatsapp = savedWa;
   });
   if (kind === "kaspi" && settlementsModel) {
-    const rest = (settlementsModel.missing_kaspi || []).filter((x) => !(x.holder_type === "partner" && x.holder_id === id));
-    settlementsModel.missing_kaspi = savedKaspi ? rest : rest.concat([{ holder_type: "partner", holder_id: id }]);
+    const rest = (settlementsModel.missing_kaspi || []).filter((x) => !(x.holder_type === holder && x.holder_id === id));
+    settlementsModel.missing_kaspi = savedKaspi ? rest : rest.concat([{ holder_type: holder, holder_id: id }]);
   }
   document.querySelectorAll(`[data-stpartner="${CSS.escape(id)}"]`).forEach((el) => {
     if (kind === "wa" && el.hasAttribute("data-stwa")) { el.value = savedWa || ""; el.dataset.stsaved = savedWa || ""; }
