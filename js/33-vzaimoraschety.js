@@ -373,6 +373,7 @@ function stObFind(tab) {
     picks: [
       { key: "who", label: "Кто держит долг" },
       { key: "delivery", label: "Тип доставки" },
+      { key: "pay", label: "Оплата" },
       { key: "state", label: "Состояние" },
     ],
     dates: ST_OB_FIND.dates,
@@ -543,6 +544,18 @@ function stDeliveryName(o) {
   const hit = ((typeof S !== "undefined" && S.delivery) || []).find((d) => d.id === id);
   return (hit && hit.name) || "";
 }
+function stPayLabel(o) {
+  if (!o || o.holder_type !== "partner" || !o.holder_id) return "—";
+  return o.pay_cadence === "monthly" ? "Раз в месяц" : "Каждый день";
+}
+function stPartnerInput(o, kind) {
+  if (!o || o.holder_type !== "partner" || !o.holder_id) return "—";
+  const value = kind === "wa" ? (o.whatsapp || "") : (o.kaspi_phone || "");
+  if (!stCanIssue()) return stEsc(value || "—");
+  const mark = kind === "wa" ? "data-stwa" : "data-stkaspi";
+  const title = kind === "wa" ? "WhatsApp" : "Номер для счёта";
+  return `<input class="st-partner-field" ${mark}="1" data-stpartner="${stEsc(o.holder_id)}" data-stsaved="${stEsc(value)}" value="${stEsc(value)}" inputmode="tel" autocomplete="off" placeholder="${title}" title="${title}" style="width:132px;padding:4px 8px">`;
+}
 function stObView(rows, cat, m) {
   return (rows || []).map((o) => ({
     raw: o,
@@ -550,6 +563,7 @@ function stObView(rows, cat, m) {
     pickup: stPickupText(o.pickup_id, o.pickup_name, cat),
     delivery: stDeliveryName(o),
     who: stWho(o.holder_type, o.holder_id, o.holder_name, cat) + (stMissingKaspi(o, m) ? " Не указан номер Kaspi" : ""),
+    pay: stPayLabel(o),
     amount: `${o.amount} ${stMoney(o.amount)}`,
     amountNum: Number(o.amount) || 0,
     state: stState(o.state),
@@ -568,16 +582,21 @@ function stPickBar(rows, m, cat) {
     <button class="btn sm primary" type="button" id="stIssueSelected" disabled>Выставить счета отмеченным</button>
   </div>`;
 }
+function stPartnerCells(o) {
+  return `<td data-label="Оплата">${stEsc(stPayLabel(o))}</td><td data-label="Номер для счёта">${stPartnerInput(o, "kaspi")}</td><td data-label="WhatsApp">${stPartnerInput(o, "wa")}</td>`;
+}
 function stObRow(o, n, pick, cat, m, tab) {
   const delivery = tab === "summary" ? `<td data-label="Тип доставки">${stEsc(stDeliveryName(o) || "—")}</td>` : "";
+  const partner = tab === "summary" ? stPartnerCells(o) : "";
   const action = pick ? stIssueCell(o, m, cat) || (tab === "summary" ? stCancelCell(o) : "") : "";
-  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td><td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
+  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td>${partner}<td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${stEsc(stState(o.state))}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
 }
 function stObTable(tab, rows, m, cat) {
   const pick = stCanIssue();
   const delivery = tab === "summary" ? stTh(tab, "delivery", "Тип доставки") : "";
+  const partner = tab === "summary" ? `${stTh(tab, "pay", "Оплата")}<th>Номер для счёта</th><th>WhatsApp</th>` : "";
   const sorted = stSortRows(stObView(rows, cat, m), tab).map((o) => o.raw);
-  return `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${delivery}${stTh(tab, "who", "Кто держит долг")}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${sorted.map((o, n) => stObRow(o, n, pick, cat, m, tab)).join("")}</tbody></table>`;
+  return `<table class="resp-table"><thead><tr>${stNumHead()}${pick ? "<th style=\"width:34px\"></th>" : ""}${stTh(tab, "order", "Заказ")}${stTh(tab, "pickup", "Заявка")}${delivery}${stTh(tab, "who", "Кто держит долг")}${partner}${stTh(tab, "day", "Период")}${stTh(tab, "amountNum", "Сумма")}${stTh(tab, "state", "Состояние")}${pick ? "<th></th>" : ""}</tr></thead><tbody>${sorted.map((o, n) => stObRow(o, n, pick, cat, m, tab)).join("")}</tbody></table>`;
 }
 function stGroupWho(o, cat, m) {
   const label = stWho(o.holder_type, o.holder_id, o.holder_name, cat);
@@ -609,6 +628,7 @@ function stPayerGroups(orders, cat, m) {
       raw: g.raw,
       orders: g.orders,
       who: stWho(g.raw.holder_type, g.raw.holder_id, g.raw.holder_name, cat),
+      pay: stPayLabel(g.raw),
       delivery: g.deliveries.length ? g.deliveries.join(", ") : "—",
       count: g.orders.length,
       amountNum: g.amountNum,
@@ -653,11 +673,11 @@ function stSummaryGrouped(view, m, cat) {
   const body = groups.map((g, n) => {
     const open = stSummaryOpen.has(g.key);
     const actions = stGroupActions(g, m, cat);
-    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
+    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Оплата">${stEsc(g.pay)}</td><td data-label="Номер для счёта">${stPartnerInput(g.raw, "kaspi")}</td><td data-label="WhatsApp">${stPartnerInput(g.raw, "wa")}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
     if (!open) return head;
-    return head + `<tr class="st-gbody"><td colspan="8" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
+    return head + `<tr class="st-gbody"><td colspan="11" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
-  const table = `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}<th></th></tr></thead><tbody>${body}</tbody></table>`;
+  const table = `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "pay", "Оплата")}<th>Номер для счёта</th><th>WhatsApp</th>${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}<th></th></tr></thead><tbody>${body}</tbody></table>`;
   return barFind + toggle + stPageNote(groups.length, allGroups) + stPickBar(openOrders, m, cat) + table;
 }
 
@@ -759,6 +779,11 @@ function settlementsBind(root) {
     inp.onclick = (e) => e.stopPropagation();
     inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } };
     inp.onchange = () => settlementsSaveFizPhone(inp);
+  });
+  root.querySelectorAll("[data-stkaspi],[data-stwa]").forEach((inp) => {
+    inp.onclick = (e) => e.stopPropagation();
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } };
+    inp.onchange = () => settlementsSavePartnerField(inp, inp.hasAttribute("data-stwa") ? "wa" : "kaspi");
   });
   const excel = root.querySelector("#st_excel");
   if (excel) excel.onclick = settlementsExcel;
@@ -953,8 +978,8 @@ async function stAttachDelivery(model) {
 function settlementsExcel() {
   const rows = (settlementsModel && settlementsModel.obligations) || [];
   const cat = stCatalog();
-  const lines = ["заказ;заявка;тип доставки;кто держит долг;период;сумма;состояние"].concat(rows.map((o) =>
-    [stOrderText(o.order_id, o.order_code, cat), stPickupText(o.pickup_id, o.pickup_name, cat), stDeliveryName(o), stWho(o.holder_type, o.holder_id, o.holder_name, cat), stDay(o.period_date), o.amount, stState(o.state)].join(";")));
+  const lines = ["заказ;заявка;тип доставки;кто держит долг;оплата;номер для счёта;whatsapp;период;сумма;состояние"].concat(rows.map((o) =>
+    [stOrderText(o.order_id, o.order_code, cat), stPickupText(o.pickup_id, o.pickup_name, cat), stDeliveryName(o), stWho(o.holder_type, o.holder_id, o.holder_name, cat), stPayLabel(o), o.holder_type === "partner" ? (o.kaspi_phone || "") : "", o.holder_type === "partner" ? (o.whatsapp || "") : "", stDay(o.period_date), o.amount, stState(o.state)].join(";")));
   const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1138,6 +1163,50 @@ async function settlementsKaspiPhone(holderType, holderId) {
   return (res && res.kaspi_phone) || "";
 }
 
+async function settlementsSavePartnerField(inp, kind) {
+  if (!inp || !inp.dataset.stpartner) return;
+  if (settlementsModel && settlementsModel.preview) {
+    if (typeof toast === "function") toast("Это просмотр интерфейса, номер не записывается");
+    return;
+  }
+  const raw = String(inp.value || "").trim();
+  const phone = raw ? stPhone10(inp.value) : "";
+  if (raw && !phone) {
+    inp.value = inp.dataset.stsaved || "";
+    if (typeof toast === "function") toast("Нужен номер Казахстана: 7XXXXXXXXX");
+    return;
+  }
+  const prev = inp.dataset.stsaved ? (stPhone10(inp.dataset.stsaved) || inp.dataset.stsaved) : "";
+  if (phone === prev) { inp.value = phone; return; }
+  const body = { action: "terms_fields", partner_id: inp.dataset.stpartner };
+  if (kind === "wa") body.whatsapp = phone;
+  else body.kaspi_phone = phone;
+  const res = await callEdge("settlements", body);
+  if (!res || res.error || res.success === false) {
+    inp.value = inp.dataset.stsaved || "";
+    if (typeof toast === "function") toast((res && (res.error || res.message)) || "Номер не записался");
+    return;
+  }
+  const savedKaspi = kind === "kaspi" ? (res.kaspi_phone || phone) : null;
+  const savedWa = kind === "wa" ? (res.whatsapp || phone) : null;
+  const id = inp.dataset.stpartner;
+  ((settlementsModel && settlementsModel.obligations) || []).forEach((o) => {
+    if (o.holder_type !== "partner" || o.holder_id !== id) return;
+    if (savedKaspi != null) o.kaspi_phone = savedKaspi;
+    if (savedWa != null) o.whatsapp = savedWa;
+  });
+  if (kind === "kaspi" && settlementsModel) {
+    const rest = (settlementsModel.missing_kaspi || []).filter((x) => !(x.holder_type === "partner" && x.holder_id === id));
+    settlementsModel.missing_kaspi = savedKaspi ? rest : rest.concat([{ holder_type: "partner", holder_id: id }]);
+  }
+  document.querySelectorAll(`[data-stpartner="${CSS.escape(id)}"]`).forEach((el) => {
+    if (kind === "wa" && el.hasAttribute("data-stwa")) { el.value = savedWa || ""; el.dataset.stsaved = savedWa || ""; }
+    if (kind === "kaspi" && el.hasAttribute("data-stkaspi")) { el.value = savedKaspi || ""; el.dataset.stsaved = savedKaspi || ""; }
+  });
+  if (typeof toast === "function") toast(kind === "wa" ? "WhatsApp записан" : "Номер для счёта записан");
+  const y = window.scrollY;
+  Promise.resolve(stRedraw()).then(() => window.scrollTo(0, y));
+}
 async function settlementsSaveKaspi(holderType, holderId, phone) {
   return await callEdge("settlements", { action: "phone_set", holder_type: holderType, holder_id: holderId, kaspi_phone: phone });
 }
