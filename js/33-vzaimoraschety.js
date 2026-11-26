@@ -597,7 +597,9 @@ function stDeliveryName(o) {
   return (hit && hit.name) || "";
 }
 function stPayLabel(o) {
-  if (!o || o.holder_type !== "partner" || !o.holder_id) return "—";
+  if (!o) return "—";
+  if (o.holder_type === "pickup_courier" || o.holder_type === "delivery_courier") return "Каждый день";
+  if (o.holder_type !== "partner" || !o.holder_id) return "—";
   return o.pay_cadence === "monthly" ? "Раз в месяц" : "Каждый день";
 }
 function stPartnerInput(o, kind) {
