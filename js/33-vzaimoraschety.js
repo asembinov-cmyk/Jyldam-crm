@@ -451,6 +451,20 @@ const ST_KASPI_FIND = {
     { key: "paid", label: "Оплачен", field: "paid" },
   ],
 };
+function stDayJumps(scope, key, bag) {
+  if (scope !== "summary") return "";
+  const today = typeof localToday === "function" ? localToday() : "";
+  const days = [
+    ["Сегодня", today],
+    ["Завтра", typeof localDaysAgo === "function" ? localDaysAgo(-1) : ""],
+    ["Вчера", typeof localDaysAgo === "function" ? localDaysAgo(1) : ""],
+  ];
+  const buttons = days.filter((pair) => pair[1]).map(([label, ymd]) => {
+    const on = bag[key + "_from"] === ymd && bag[key + "_to"] === ymd;
+    return `<button class="btn sm ${on ? "primary" : "ghost"}" type="button" data-stdayjump="${stEsc(ymd)}" data-stscope="${stEsc(scope)}" data-stkey="${stEsc(key)}">${stEsc(label)}</button>`;
+  }).join("");
+  return `<div style="display:flex;gap:6px;align-items:center">${buttons}</div>`;
+}
 function stFindBar(scope, spec, rows) {
   const bag = stFindBag(scope);
   const list = rows || [];
@@ -462,7 +476,7 @@ function stFindBar(scope, spec, rows) {
     return `<div class="field" style="margin:0;min-width:170px"><label>${stEsc(p.label)}</label><select data-stscope="${stEsc(scope)}" data-stk="${stEsc(p.key)}"><option value="">Все</option>${vals.map((v) => `<option value="${stEsc(v)}" ${bag[p.key] === v ? "selected" : ""}>${stEsc(v)}</option>`).join("")}</select></div>`;
   }).join("");
   const dates = (spec.dates || []).map((d) => `<div class="field" style="margin:0"><label>${stEsc(d.label)} с</label><input type="date" data-stscope="${stEsc(scope)}" data-stk="${d.key}_from" value="${stEsc(bag[d.key + "_from"] || "")}"></div>
-    <div class="field" style="margin:0"><label>${stEsc(d.label)} по</label><input type="date" data-stscope="${stEsc(scope)}" data-stk="${d.key}_to" value="${stEsc(bag[d.key + "_to"] || "")}"></div>`).join("");
+    <div class="field" style="margin:0"><label>${stEsc(d.label)} по</label><input type="date" data-stscope="${stEsc(scope)}" data-stk="${d.key}_to" value="${stEsc(bag[d.key + "_to"] || "")}"></div>${stDayJumps(scope, d.key, bag)}`).join("");
   return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:0 0 10px">
     <div class="field" style="margin:0;min-width:200px;flex:1"><label>Поиск</label><input data-stscope="${stEsc(scope)}" data-stk="q" value="${stEsc(bag.q || "")}" placeholder="${stEsc(spec.labels.join(", "))}"></div>
     ${picks}${dates}</div>`;
@@ -667,7 +681,7 @@ function stObRow(o, n, pick, cat, m, tab) {
   const partner = tab === "summary" ? stPartnerCells(o, cat) : "";
   const state = tab === "summary" ? stSummaryState(o, m, cat) : stEsc(stState(o.state));
   const action = pick ? (tab === "summary" ? stCancelCell(o) : (stIssueCell(o, m, cat) || "")) : "";
-  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td>${partner}<td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${state}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
+  return `<tr>${stNumCell(n)}${pick ? `<td>${stPickBox(o, m, cat)}</td>` : ""}<td><button class="btn ghost sm" type="button" data-storder="${stEsc(o.order_id)}" title="Открыть карточку заказа">${stEsc(stOrderText(o.order_id, o.order_code, cat))}</button></td><td><button class="btn ghost sm" type="button" data-stpickup="${stEsc(o.pickup_id || "")}">${stEsc(stPickupText(o.pickup_id, o.pickup_name, cat))}</button></td>${delivery}<td>${stHolderCell(o, cat, m, tab)}</td>${partner}<td>${stEsc(stDay(o.period_date))}</td><td>${stMoney(o.amount)}</td><td>${state}</td>${pick ? `<td>${action}</td>` : ""}</tr>`;
 }
 function stObTable(tab, rows, m, cat) {
   const pick = stCanIssue();
@@ -960,7 +974,10 @@ function settlementsBind(root) {
     }
     renderSettlements();
   });
-  root.querySelectorAll("[data-storder]").forEach((b) => b.onclick = () => settlementsOpenOrder(b.dataset.storder));
+  root.querySelectorAll("button[data-storder]:not([data-stissue])").forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    settlementsOpenOrder(b.dataset.storder);
+  });
   root.querySelectorAll("button[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
   root.querySelectorAll("button[data-stopen]").forEach((b) => b.onclick = () => {
     stSummaryOpen.add(b.dataset.stopen);
@@ -1000,6 +1017,20 @@ function settlementsBind(root) {
   if (modeSave) modeSave.onclick = settlementsSaveMode;
   const save = root.querySelector("#st_adm_save");
   if (save) save.onclick = settlementsSaveAdmin;
+  root.querySelectorAll("[data-stdayjump]").forEach((b) => b.onclick = () => {
+    const bag = stFindBag(b.dataset.stscope);
+    const key = b.dataset.stkey || "period";
+    const ymd = b.dataset.stdayjump || "";
+    if (!ymd) return;
+    if (bag[key + "_from"] === ymd && bag[key + "_to"] === ymd) {
+      bag[key + "_from"] = "";
+      bag[key + "_to"] = "";
+    } else {
+      bag[key + "_from"] = ymd;
+      bag[key + "_to"] = ymd;
+    }
+    stRedraw();
+  });
   root.querySelectorAll("[data-stscope]").forEach((el) => {
     if (el.tagName === "SELECT") el.onchange = () => stApplyFindInput(el);
     else el.oninput = () => stApplyFindInput(el);
@@ -1194,9 +1225,9 @@ function settlementsExcel() {
 }
 
 function settlementsOpenOrder(id) {
-  const o = (typeof S !== "undefined" ? (S.orders || []) : []).find((x) => x.id === id || String(x.code) === String(id));
-  if (o && typeof openOrder === "function") { openOrder(o.id); return; }
-  if (typeof toast === "function") toast("Заказ " + id + " откроется из списка заказов");
+  if (!id) return;
+  if (typeof orderModal === "function") { orderModal(id); return; }
+  if (typeof toast === "function") toast("Карточка заказа недоступна");
 }
 function settlementsOpenPickup(id) {
   if (!id) return;
