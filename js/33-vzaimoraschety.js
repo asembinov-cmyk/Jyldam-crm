@@ -618,6 +618,27 @@ function stPayerGroups(orders, cat, m) {
     };
   });
 }
+function stGroupActions(g, m, cat) {
+  if (!stCanIssue()) return "";
+  const open = (g.orders || []).filter(stBillable);
+  const invoiceIds = [...new Set((g.orders || []).filter((o) => o && o.state === "invoiced" && o.invoice_id).map((o) => o.invoice_id))];
+  const cancel = invoiceIds.map((id) => stCancelCell({ state: "invoiced", invoice_id: id })).join("");
+  if (!open.length) return cancel;
+  const fiz = stIsFizlicoRow(g.raw, cat);
+  if (fiz && (open.length > 1 || open.some((o) => !stPhone10(stFizPhoneValue(o))))) {
+    return `<button class="btn sm primary" type="button" data-stopen="${stEsc(g.key)}">Выставить счёт</button>${cancel}`;
+  }
+  if (!fiz && stMissingKaspi(g.raw, m)) return `<span style="color:var(--rust);font-size:12px">Сначала номер Kaspi</span>${cancel}`;
+  const days = open.map((o) => String(o.period_date || "").slice(0, 10)).filter(Boolean).sort();
+  const start = days[0] || "";
+  const end = days[days.length - 1] || start;
+  const amount = open.reduce((s, o) => s + (Number(o.amount) || 0), 0);
+  const ids = open.map((o) => o.order_id).filter(Boolean).join(",");
+  const one = fiz ? open[0] : null;
+  const mark = one ? ` data-stfiz="1" data-storder="${stEsc(one.order_id)}" data-stphone="${stEsc(stPhone10(stFizPhoneValue(one)))}"` : "";
+  const issue = `<button class="btn sm primary" type="button" data-stissue="${stEsc(g.raw.holder_type)}" data-stholder="${stEsc(g.raw.holder_id)}" data-stday="${stEsc(start)}" data-stend="${stEsc(end)}" data-stamount="${amount}" data-storders="${stEsc(ids)}"${mark}>Выставить счёт</button>`;
+  return issue + cancel;
+}
 function stSummaryGrouped(view, m, cat) {
   const spec = stObFind("summary");
   const matched = stSlice(view, spec, "summary").shown.map((row) => row.raw);
@@ -631,13 +652,12 @@ function stSummaryGrouped(view, m, cat) {
   const openOrders = groups.filter((g) => stSummaryOpen.has(g.key)).flatMap((g) => g.orders);
   const body = groups.map((g, n) => {
     const open = stSummaryOpen.has(g.key);
-    const invoiceId = stOpenInvoiceId(g.orders);
-    const cancel = invoiceId ? ` ${stCancelCell({ state: "invoiced", invoice_id: invoiceId })}` : "";
-    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}${cancel}</td></tr>`;
+    const actions = stGroupActions(g, m, cat);
+    const head = `<tr class="st-grow" data-stgroup="${stEsc(g.key)}" title="Показать заказы">${stNumCell(n)}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${stGroupWho(g.raw, cat, m)}</td><td data-label="Тип доставки">${stEsc(g.delivery)}</td><td data-label="Заказов">${g.count}</td><td data-label="Период">${stEsc(g.dayLabel)}</td><td data-label="Сумма">${stMoney(g.amountNum)}</td><td data-label="Состояние">${stEsc(g.state)}</td><td data-label="">${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
     if (!open) return head;
-    return head + `<tr class="st-gbody"><td colspan="7" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
+    return head + `<tr class="st-gbody"><td colspan="8" data-label="">${stObTable("summary", g.orders, m, cat)}</td></tr>`;
   }).join("");
-  const table = `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}</tr></thead><tbody>${body}</tbody></table>`;
+  const table = `<table class="resp-table st-payers"><thead><tr>${stNumHead()}${stTh("summary-payers", "who", "Кто оплачивает долг")}${stTh("summary-payers", "delivery", "Тип доставки")}${stTh("summary-payers", "count", "Заказов")}${stTh("summary-payers", "day", "Период")}${stTh("summary-payers", "amountNum", "Сумма")}${stTh("summary-payers", "state", "Состояние")}<th></th></tr></thead><tbody>${body}</tbody></table>`;
   return barFind + toggle + stPageNote(groups.length, allGroups) + stPickBar(openOrders, m, cat) + table;
 }
 
@@ -722,6 +742,12 @@ function settlementsBind(root) {
   });
   root.querySelectorAll("[data-storder]").forEach((b) => b.onclick = () => settlementsOpenOrder(b.dataset.storder));
   root.querySelectorAll("button[data-stissue]").forEach((b) => b.onclick = () => settlementsIssueRow(b));
+  root.querySelectorAll("button[data-stopen]").forEach((b) => b.onclick = () => {
+    stSummaryOpen.add(b.dataset.stopen);
+    if (typeof toast === "function") toast("У физлица номер и счёт указываются в каждом заказе");
+    const y = window.scrollY;
+    Promise.resolve(stRedraw()).then(() => window.scrollTo(0, y));
+  });
   root.querySelectorAll("[data-stcancel]").forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
     settlementsCancelInvoice(b.dataset.stcancel);
@@ -963,6 +989,7 @@ async function settlementsIssueRow(b) {
   const whoEl = tr && tr.querySelector("[data-stwho]");
   const who = ((whoEl && whoEl.textContent) || "плательщику").replace(/\s+/g, " ").trim();
   const day = b.dataset.stday || "";
+  const end = b.dataset.stend || day;
   const amount = Number(b.dataset.stamount) || 0;
   const phoneInp = tr && tr.querySelector("[data-stfizphone]");
   let phone = "";
@@ -972,23 +999,33 @@ async function settlementsIssueRow(b) {
       if (typeof toast === "function") toast("Сначала укажите номер для удалённого счёта");
       return;
     }
+  } else if (b.dataset.stfiz === "1") {
+    phone = stPhone10(b.dataset.stphone || "");
+    if (!phone) {
+      if (typeof toast === "function") toast("Сначала укажите номер для удалённого счёта");
+      return;
+    }
   }
-  if (!confirm(`Выставить счёт «${who}» за ${stDay(day)} на ${stMoney(amount)}?${phone ? "\nУдалённый счёт уйдёт на " + phone + "." : ""}\nПовторное нажатие второй счёт не создаёт.`)) return;
+  const period = end && end !== day ? `${stDay(day)} — ${stDay(end)}` : stDay(day);
+  if (!confirm(`Выставить счёт «${who}» за ${period} на ${stMoney(amount)}?${phone ? "\nУдалённый счёт уйдёт на " + phone + "." : ""}\nПовторное нажатие второй счёт не создаёт.`)) return;
   b.disabled = true;
   if (phoneInp) {
     try { await settlementsSaveKaspi("order", phoneInp.dataset.stfizphone, phone); }
     catch (e) { /* номер всё равно уходит вместе со счётом */ }
   }
   const orderId = b.dataset.storder || (phoneInp && phoneInp.dataset.stfizphone) || "";
+  const listed = (b.dataset.storders || "").split(",").map((id) => id.trim()).filter(Boolean);
+  const ids = listed.length ? listed : (phone && orderId ? [orderId] : []);
   const res = await callEdge("settlements", {
     action: "issue",
-    logical_key: orderId && phone ? `${b.dataset.stissue}:${b.dataset.stholder}:${day}:${orderId}` : `${b.dataset.stissue}:${b.dataset.stholder}:${day}`,
+    logical_key: listed.length ? `${b.dataset.stissue}:${b.dataset.stholder}:${day}:${end}:${listed.length}` : (orderId && phone ? `${b.dataset.stissue}:${b.dataset.stholder}:${day}:${orderId}` : `${b.dataset.stissue}:${b.dataset.stholder}:${day}`),
     holder_type: b.dataset.stissue,
     holder_id: b.dataset.stholder,
     period_start: day,
-    period_end: day,
+    period_end: end,
     launch: "manual",
-    ...(phone ? { phone, order_ids: [orderId] } : {}),
+    ...(phone ? { phone } : {}),
+    ...(ids.length ? { order_ids: ids } : {}),
   });
   if (!res || res.error || res.success === false) {
     b.disabled = false;
