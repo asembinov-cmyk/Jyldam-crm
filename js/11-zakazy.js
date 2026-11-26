@@ -19,6 +19,14 @@ function visibleOrders(){
    чужого бланка село бы на уже заполненный заказ. */
 function orderFromChat(o){return !!(o&&o.ai_created);}
 function orderNeedsPhoto(o){return !pickupPhotos(o).length&&!orderFromChat(o);}
+// Заказ из чата создаётся сразу, даже если партнёр прислал не всё: ассистент спрашивает
+// недостающее и дописывает заказ. Пока данных нет, отметки filled_at у него тоже нет.
+function orderChatTag(o){
+  if(!orderFromChat(o))return '';
+  return o.filled_at
+    ?'<span class="chat-tag" title="Партнёр прислал данные получателя сообщением в WhatsApp — фото бланка не нужно">из чата</span>'
+    :'<span class="chat-tag wait" title="Заказ из чата WhatsApp: партнёр прислал не все данные, ассистент их запросил">из чата · ждёт данных</span>';
+}
 function genOrderCode(){
   const ex=new Set(S.orders.map(o=>o.code));let c;
   do{c=String(Math.floor(1000000+Math.random()*9000000));}while(ex.has(c));
@@ -291,8 +299,8 @@ async function pickupOrdersModal(pickupId){
     ${list.some(o=>o.track)?`<div class="pom-scan"><input id="pom_scan_input" placeholder="📷 Отсканируйте штрих-код посылки, чтобы найти её заказ…" autocomplete="off"></div>`:''}`;
     if(!list.length)return head+`<div class="empty"><div class="big">Заказов пока нет</div>Нажмите «Добавить заказы» или «Заказы из фото».</div>`;
     const cards=list.slice(0,shown).map((o,i)=>`<div class="pom-order" data-pomcard="${o.id}" data-pomtrack="${esc((o.track||'').toLowerCase())}" data-pomcode="${esc((o.code||'').toLowerCase())}">
-      <div class="pom-head"><b>Заказ #${esc(o.code)}</b>${orderFromChat(o)?'<span class="chat-tag" title="Партнёр прислал данные получателя сообщением в WhatsApp — фото бланка не нужно">из чата</span>':''}<span class="pom-st">${statusBadge(o.status_id)}</span></div>
-      ${orderFromChat(o)&&o.client?`<div class="pom-track">👤 ${esc(o.client)}${o.phone?' · '+esc(phoneDisplay(o.phone)):''}</div>`:''}
+      <div class="pom-head"><b>Заказ #${esc(o.code)}</b>${orderChatTag(o)}<span class="pom-st">${statusBadge(o.status_id)}</span></div>
+      ${orderFromChat(o)&&(o.client||o.phone)?`<div class="pom-track">👤 ${esc([o.client,o.phone?phoneDisplay(o.phone):''].filter(Boolean).join(' · '))}</div>`:''}
       ${o.track?`<div class="pom-track">📦 Штрих-код посылки: <b>${esc(o.track)}</b></div>`:''}
       <div class="pom-photos" data-pomphotos="${o.id}">${photoBlockHtml(o,canEditPhoto)}</div>
       ${(isStaff()||isCourier())?`
@@ -2346,7 +2354,7 @@ function drawOrders(){
       const ph=pickupPhotos(o);
       const photoCell=ph.length
         ? `<img data-ph="${esc(photoPath(ph[0]))}" data-oviewphoto="${esc(photoPath(ph[0]))}" loading="lazy" decoding="async" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
-        : (orderFromChat(o)?'<span class="chat-tag" title="Партнёр прислал данные получателя сообщением в WhatsApp — фото бланка не нужно">из чата</span>':'<span style="color:var(--line)">—</span>');
+        : (orderChatTag(o)||'<span style="color:var(--line)">—</span>');
       return `<tr data-orow="${o.id}" style="cursor:pointer" class="${o.via_integration?'order-row-api':''}" title="${o.via_integration?'Пришёл от партнёра напрямую через API-интеграцию':''}">
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       ${noPhoto?'':`<td data-label="Фото">${photoCell}</td>`}

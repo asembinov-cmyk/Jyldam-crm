@@ -246,7 +246,7 @@ function renderSorting(){
           <input type="file" accept="image/*" capture="environment" id="sortPhotoInput">
         </label>
         <div class="sh-code">
-          <input id="sortCodeInput" type="text" inputmode="numeric" autocomplete="off" maxlength="9" placeholder="или номер с пакета — 7 цифр">
+          <input id="sortCodeInput" type="text" inputmode="numeric" autocomplete="off" maxlength="9" placeholder="или ID с пакета — 7 цифр">
           <button type="button" class="btn" id="sortCodeGo">Найти</button>
         </div>
       </div>
@@ -365,7 +365,7 @@ function sortingOrderDay(o){
 async function sortByCode(raw){
   const code=String(raw||'').replace(/\D/g,'');
   const box=$('sortResult');
-  if(code.length!==7){toast('Номер заказа — 7 цифр');return;}
+  if(code.length!==7){toast('ID заказа — 7 цифр');return;}
   let o=(S.orders||[]).find(x=>String(x.code)===code);
   if(!o){
     try{
@@ -377,7 +377,7 @@ async function sortByCode(raw){
   const msg=(big,text)=>{if(box)box.innerHTML=`<div class="empty" style="padding:20px"><div class="big">${esc(big)}</div><div style="margin-top:8px;color:var(--muted);font-size:14px">${esc(text)}</div></div>`;};
   if(!o){msg('Заказ '+code+' не найден','Проверьте цифры на пакете. Если номер написан неразборчиво — найдите заказ в списке ниже по ФИО или телефону.');return;}
   if(isBaraholkaOrder(o)){msg('Заказ '+code+' — из Барахолки','Такие посылки на склад не привозят. Проверьте цифры на пакете.');return;}
-  if(!orderIsProcessed(o)){msg('Заказ '+code+' ещё не заполнен','В нём нет получателя или типа доставки — куда его класть, пока неизвестно.');return;}
+  if(!orderIsProcessed(o)){msg('Заказ '+code+' ещё не заполнен',orderFromChat(o)?'Партнёр прислал не все данные: нет получателя или типа доставки. Куда класть посылку, пока неизвестно — недостающее запрашивает ассистент WhatsApp, диалог виден в «WhatsApp Ассистент».':'В нём нет получателя или типа доставки — куда его класть, пока неизвестно.');return;}
   const myCity=S.me&&S.me.city_id;
   if(myCity&&sortingCityId(o)!==myCity)toast('Внимание: заказ числится за другим складом — '+cityName(sortingCityId(o)));
   if(box)box.innerHTML='';
