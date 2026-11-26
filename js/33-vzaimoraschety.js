@@ -246,9 +246,15 @@ function stPaintAges() {
     el.textContent = stAgo(el.getAttribute("data-stago"));
   });
 }
+function stPaidClock(iso) {
+  if (!iso || typeof fmtDateTime !== "function") return "";
+  const text = fmtDateTime(iso);
+  if (!text) return "";
+  return `<div style="margin-top:3px;font-size:12px;font-weight:600;color:#1b7a32">${stEsc(text)}</div>`;
+}
 function stStateMark(kind, iso) {
   if (kind === "paid") {
-    return `<span style="display:inline-block;padding:2px 8px;border-radius:8px;background:#e5f6e8;color:#1b7a32;font-weight:700">${stEsc(ST_STATE.paid)}</span>`;
+    return `<span style="display:inline-block;padding:2px 8px;border-radius:8px;background:#e5f6e8;color:#1b7a32;font-weight:700">${stEsc(ST_STATE.paid)}</span>${stPaidClock(iso)}`;
   }
   const age = stAgo(iso);
   const when = age ? `<div data-stago="${stEsc(iso)}" style="margin-top:3px;font-size:12px;font-weight:600;color:#9a3412">${stEsc(age)}</div>` : "";
@@ -257,6 +263,19 @@ function stStateMark(kind, iso) {
 function stInvoiceAt(id, m) {
   const inv = ((m && m.invoices) || []).find((i) => i.id === id);
   return (inv && inv.created_at) || "";
+}
+function stInvoicePaidAt(id, m) {
+  const inv = ((m && m.invoices) || []).find((i) => i.id === id);
+  return (inv && inv.paid_at) || "";
+}
+function stLatestPaidAt(orders, m) {
+  let best = "";
+  (orders || []).forEach((o) => {
+    if (!o || o.state !== "paid") return;
+    const at = stInvoicePaidAt(o.invoice_id, m);
+    if (at && (!best || at > best)) best = at;
+  });
+  return best;
 }
 function stEarliestInvoiceAt(orders, m) {
   let best = "";
@@ -369,7 +388,12 @@ function stSortBag(scope) {
 }
 function stSortRows(rows, scope) {
   const bag = stSortBag(scope);
-  if (!bag.col) return rows;
+  const filterScope = scope === "summary-payers" ? "summary" : scope;
+  const byPaid = !bag.col && filterScope === "summary" && (stFindBag("summary").state || "") === "Оплачено";
+  if (!bag.col && !byPaid) return rows;
+  if (byPaid) {
+    return rows.slice().sort((a, b) => String(b.paidAt || "").localeCompare(String(a.paidAt || "")));
+  }
   const dir = bag.dir === -1 ? -1 : 1;
   const col = bag.col;
   return rows.slice().sort((a, b) => {
@@ -623,6 +647,7 @@ function stObView(rows, cat, m) {
     amount: `${o.amount} ${stMoney(o.amount)}`,
     amountNum: Number(o.amount) || 0,
     state: stState(o.state),
+    paidAt: o.state === "paid" ? stInvoicePaidAt(o.invoice_id, m) : "",
     day: String(o.period_date || "").slice(0, 10),
   }));
 }
@@ -727,6 +752,7 @@ function stPayerGroups(orders, cat, m) {
       count: g.orders.length,
       amountNum: g.amountNum,
       state: g.states.length === 1 ? g.states[0] : "Разные",
+      paidAt: stLatestPaidAt(g.orders, m),
       day: days[0] || "",
       dayLabel: !days.length ? "—" : days.length === 1 ? stDay(days[0]) : `${stDay(days[0])} — ${stDay(days[days.length - 1])}`,
     };
@@ -760,14 +786,14 @@ function stSummaryState(o, m, cat) {
     const btn = stIssueCell(o, m, cat);
     return btn || stEsc(stState(o.state));
   }
-  if (o.state === "paid") return stStateMark("paid");
+  if (o.state === "paid") return stStateMark("paid", stInvoicePaidAt(o.invoice_id, m));
   if (o.state === "invoiced") return stStateMark("invoiced", stInvoiceAt(o.invoice_id, m));
   return stEsc(stState(o.state));
 }
 function stGroupStateCell(g, m, cat) {
   const issue = (g.orders || []).some(stBillable) ? stGroupIssue(g, m, cat) : "";
   if (g.state === "К выплате") return issue || stEsc(g.state);
-  if (g.state === "Оплачено") return stStateMark("paid");
+  if (g.state === "Оплачено") return stStateMark("paid", g.paidAt || stLatestPaidAt(g.orders, m));
   if (g.state === "Выставлен счёт") return stStateMark("invoiced", stEarliestInvoiceAt(g.orders, m));
   return stEsc(g.state) + (issue ? `<div style="margin-top:6px">${issue}</div>` : "");
 }
@@ -1069,7 +1095,7 @@ let stPayListen = false;
 function stPayStamp(m) {
   if (!m) return "";
   const obs = (m.obligations || []).map((o) => [o.id, o.state, o.amount, o.invoice_id].join(":")).join("|");
-  const inv = (m.invoices || []).map((i) => [i.id, i.status, i.amount].join(":")).join("|");
+  const inv = (m.invoices || []).map((i) => [i.id, i.status, i.amount, i.paid_at].join(":")).join("|");
   return [m.debt, m.ready, m.invoiced, m.paid, obs, inv].join("#");
 }
 
