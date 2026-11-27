@@ -1079,7 +1079,15 @@ function settlementsBind(root) {
   const excel = root.querySelector("#st_excel");
   if (excel) excel.onclick = settlementsExcel;
   const reload = root.querySelector("#st_reload");
-  if (reload) reload.onclick = () => { settlementsModel = null; renderSettlements(); };
+  if (reload) reload.onclick = async () => {
+    if (!settlementsModel || settlementsModel.preview || settlementsModel.load_error) { settlementsModel = null; renderSettlements(); return; }
+    const label = reload.textContent;
+    reload.disabled = true;
+    reload.textContent = "Проверяю оплаты…";
+    await stAskReconcile();
+    await stRefreshQuiet();
+    if (reload.isConnected) { reload.disabled = false; reload.textContent = label; }
+  };
   root.querySelectorAll("[data-stclose]").forEach((b) => b.onclick = () => settlementsCloseShift(b.dataset.stclose, b.dataset.stdate));
   const modeSave = root.querySelector("#st_mode_save");
   if (modeSave) modeSave.onclick = settlementsSaveMode;
@@ -1240,8 +1248,8 @@ async function stPullPayment() {
   if (!settlementsModel || settlementsModel.preview || settlementsModel.load_error) return;
   stPayBusy = true;
   try {
-    await stAskReconcile();
-    if (typeof S === "undefined" || S.tab !== "settlements") return;
+    // Только чтение сводки: оплаты сверяет планировщик раз в минуту. Сверка из каждой открытой
+    // вкладки раз в полминуты занимала сервер почти непрерывно и накладывалась на его записи.
     const res = await callEdge("settlements", { action: "summary" });
     if (!res || res.error || res.success === false) return;
     if (typeof S === "undefined" || S.tab !== "settlements") return;
@@ -1286,7 +1294,10 @@ async function renderSettlements() {
   }
   if (!settlementsModel) {
     main.innerHTML = '<div class="empty"><div class="big">Загружаем взаиморасчёты…</div></div>';
-    await stAskReconcile();
+    /* Сверку оплат (reconcile) при открытии НЕ ждём. Сервер после неё записывает весь учёт
+       построчно — это 13–17 секунд, а сама сводка читается за секунду. Оплаты и без того
+       сверяет планировщик каждую минуту (задание settlement-reconcile); немедленная проверка —
+       кнопкой «Обновить». */
     const res = await callEdge("settlements", { action: "summary" });
     if (!res || res.error || res.success === false) {
       const why = (res && (res.error || res.message)) || "Функция взаиморасчётов ещё не опубликована";
@@ -1301,17 +1312,17 @@ async function renderSettlements() {
       Object.assign(settlementsModel, await settlementsLoadKaspi());
     }
     if (settlementsModel && !settlementsModel.preview) await stAttachDelivery(settlementsModel);
+    // Суммы сверяем уже ПОСЛЕ показа экрана: исправление на сервере идёт долго, и ждать его
+    // с пустым экраном незачем. Нашлось что править — сводка перечитается на месте.
     if (settlementsModel && !settlementsModel.preview && !settlementsModel.load_error) {
-      const fixed = await stSyncFees(settlementsModel);
-      if (fixed) {
-        const again = await callEdge("settlements", { action: "summary" });
-        if (again && !again.error && again.success !== false) {
-          const missing = stKeepPayExtras(settlementsModel, again);
-          settlementsModel = again;
-          if (missing) await stAttachDelivery(settlementsModel);
-        }
+      const loaded = settlementsModel;
+      setTimeout(async () => {
+        if (settlementsModel !== loaded || stIssueWaiting) return;
+        const fixed = await stSyncFees(loaded);
+        if (!fixed) return;
         if (typeof toast === "function") toast(`Суммы долга приведены к цене из заказа: ${fixed}`, 6000);
-      }
+        await stRefreshQuiet();
+      }, 0);
     }
   }
   main.innerHTML = settlementsMarkup(settlementsModel);
