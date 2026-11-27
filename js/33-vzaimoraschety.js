@@ -1241,6 +1241,18 @@ async function renderSettlements() {
       Object.assign(settlementsModel, await settlementsLoadKaspi());
     }
     if (settlementsModel && !settlementsModel.preview) await stAttachDelivery(settlementsModel);
+    if (settlementsModel && !settlementsModel.preview && !settlementsModel.load_error) {
+      const fixed = await stSyncFees(settlementsModel);
+      if (fixed) {
+        const again = await callEdge("settlements", { action: "summary" });
+        if (again && !again.error && again.success !== false) {
+          const missing = stKeepPayExtras(settlementsModel, again);
+          settlementsModel = again;
+          if (missing) await stAttachDelivery(settlementsModel);
+        }
+        if (typeof toast === "function") toast(`Суммы долга приведены к цене из заказа: ${fixed}`, 6000);
+      }
+    }
   }
   main.innerHTML = settlementsMarkup(settlementsModel);
   settlementsBind(main);
@@ -1278,6 +1290,55 @@ async function stAttachDelivery(model) {
     o.delivery = nameOf(id);
   });
   model.delivery_loaded = true;
+}
+
+/* СУММА ДОЛГА ДОГОНЯЕТ ЦЕНУ ИЗ ЗАКАЗА (27.11.2026). Долг открывает заборщик галочкой
+   «Оплачено отправителем» в карточке заявки — в этот момент заказ ещё заготовка с курьерским
+   типом доставки, и в долг уходит курьерский тариф. Потом менеджер заказов выбирает
+   «Почтовая»: карточка пересчитывает запомненную цену заказа (order_sum_orig), но сервер
+   взаиморасчётов менять сумму долга менеджеру заказов не даёт (нет права «Взаиморасчёты»),
+   и отказ молча проглатывается. Итог: тип «Почтовая», а сумма курьерская.
+   Поэтому тот, кто выставляет счета, при открытии сводки сверяет открытые долги с ценой в
+   заказе и поправляет расхождения тем же действием fees_set, что и кнопка ✎.
+   Не трогаем: пакеты M и L (их сумму сервер считает сам), долги «в счёте» и «оплачено»,
+   и заказы с нулевой запомненной ценой — обнулять долг автоматом нельзя, это решает человек. */
+async function stSyncFees(model) {
+  if (!stCanIssue() || typeof sb === "undefined" || !sb) return 0;
+  const open = (model.obligations || []).filter((o) => o && o.order_id && !o.unplaced && (o.state === "open" || o.state === "awaiting_admin"));
+  if (!open.length) return 0;
+  const ids = [...new Set(open.map((o) => o.order_id))];
+  const orders = new Map();
+  try {
+    for (let i = 0; i < ids.length; i += 80) {
+      const q = await sb.from("orders").select("id,size,paid_by_sender,order_sum_orig").in("id", ids.slice(i, i + 80));
+      if (q.error) return 0;
+      (q.data || []).forEach((row) => orders.set(row.id, row));
+    }
+  } catch (e) { return 0; }
+  const list = [];
+  const changes = [];
+  for (const ob of open) {
+    const order = orders.get(ob.order_id);
+    if (!order || !order.paid_by_sender) continue;
+    const size = String(order.size || "S").toUpperCase();
+    if (size === "M" || size === "L") continue;
+    if (order.order_sum_orig == null || order.order_sum_orig === "") continue;
+    const fee = Number(order.order_sum_orig);
+    if (!Number.isFinite(fee) || fee <= 0 || fee === Number(ob.amount)) continue;
+    list.push({ order_id: ob.order_id, fee });
+    changes.push({ order: ob.order_code || ob.order_id, old: Number(ob.amount) || 0, new: fee });
+  }
+  if (!list.length) return 0;
+  let res = null;
+  try { res = await callEdge("settlements", { action: "fees_set", orders: list }); } catch (e) { res = null; }
+  if (!res || res.error || res.success === false || !res.updated) return 0;
+  if (typeof logAction === "function") {
+    logAction("update", "orders", {
+      entity_label: `взаиморасчёты: сумма долга приведена к цене из заказа — ${res.updated}`,
+      meta: { source: "settlements-sync", count: res.updated, orders: changes.slice(0, 100) },
+    });
+  }
+  return res.updated;
 }
 
 function settlementsExcel() {
