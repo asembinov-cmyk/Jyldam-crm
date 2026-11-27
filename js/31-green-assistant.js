@@ -27,7 +27,7 @@ const GA_AI_LOG_LIMIT=60;
 const GA_AI_MODELS=[['claude-opus-5-5','Opus 5.5 — точнее'],['claude-sonnet-5-5','Sonnet 5.5 — дешевле'],['claude-haiku-5-5','Haiku 5.5 — самый дешёвый']];
 const GA_AI_OUT_RU={reply:'ответил',pickup:'заявка',order:'заказ',handoff:'передал менеджеру',skipped:'промолчал',error:'сбой'};
 // Приём заказов сообщением появился в функции этой версии; на более старой блок честно говорит, что её нужно выложить.
-const GA_AI_ORDERS_FN='2026-11-26.5';
+const GA_AI_ORDERS_FN='2026-11-27.2';
 
 let gaAi=null;            // строка green_ai_settings; null — ещё не грузили
 let gaAiErr='';
