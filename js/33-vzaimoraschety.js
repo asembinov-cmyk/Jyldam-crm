@@ -1158,8 +1158,83 @@ async function stAskReconcile() {
   catch (e) { /* сводка откроется и со статусом, который уже записан */ }
 }
 
+/* ПЕРЕРИСОВКА НА МЕСТЕ: без «Загружаем…», с прежней прокруткой и курсором. Набранное в поле,
+   которое сейчас в фокусе (номер для счёта), переносится в новую разметку — иначе обновление
+   стирало бы его под руками. */
+function stPaintInPlace() {
+  const main = $("main");
+  if (!main || !settlementsModel) return;
+  const y = window.scrollY;
+  const active = document.activeElement;
+  const inMain = active && active.tagName === "INPUT" && main.contains(active) && active.type !== "checkbox" && active.type !== "radio";
+  const sel = inMain ? "input" + Object.keys(active.dataset).map((k) => `[data-${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}="${String(active.dataset[k]).replace(/["\\]/g, "\\$&")}"]`).join("") : "";
+  const typed = inMain ? active.value : "";
+  const pos = inMain && typeof active.selectionStart === "number" ? active.selectionStart : null;
+  main.innerHTML = settlementsMarkup(settlementsModel);
+  settlementsBind(main);
+  window.scrollTo(0, y);
+  if (sel && sel !== "input") {
+    let next = null;
+    try { next = main.querySelector(sel); } catch (e) { next = null; }
+    if (next) {
+      next.value = typed;
+      next.focus();
+      if (pos != null) try { next.setSelectionRange(pos, pos); } catch (e) {}
+    }
+  }
+}
+
+/* ОБНОВЛЕНИЕ БЕЗ ПЕРЕЗАГРУЗКИ ЭКРАНА (27.11.2026). Раньше после каждого счёта модель
+   сбрасывалась и раздел рисовался заново с «Загружаем взаиморасчёты…»: прокрутка уезжала
+   наверх, и выставить счета подряд было нельзя. Теперь сводка перечитывается в фоне. */
+async function stRefreshQuiet() {
+  if (typeof S === "undefined" || S.tab !== "settlements") return;
+  if (!settlementsModel || settlementsModel.preview || settlementsModel.load_error) { settlementsModel = null; await renderSettlements(); return; }
+  let res = null;
+  try { res = await callEdge("settlements", { action: "summary" }); } catch (e) { res = null; }
+  if (!res || res.error || res.success === false) return;
+  if (typeof S === "undefined" || S.tab !== "settlements") return;
+  if (stIssueWaiting) return;   // пока шёл запрос, в очередь поставили ещё счёт — обновим после него
+  const missing = stKeepPayExtras(settlementsModel, res);
+  settlementsModel = res;
+  if (missing) await stAttachDelivery(settlementsModel);
+  if (typeof S === "undefined" || S.tab !== "settlements") return;
+  stPaintInPlace();
+}
+
+/* ОЧЕРЕДЬ СЧЕТОВ. Нажатия «Выставить счёт» не ждут друг друга на экране, но на сервер уходят
+   СТРОГО ПО ОДНОМУ: сервер выдаёт номер счёта по своей копии учёта, и два одновременных
+   запроса получили бы один и тот же номер. Пока очередь не пуста, фоновая проверка оплат
+   стоит — она пишет тот же учёт. */
+let stIssueChain = Promise.resolve();
+let stIssueWaiting = 0;
+function stIssueEnqueue(job) {
+  stIssueWaiting += 1;
+  stIssueChain = stIssueChain.then(job).catch((e) => console.error("settlements issue", e)).then(async () => {
+    stIssueWaiting -= 1;
+    if (!stIssueWaiting) await stRefreshQuiet();
+  });
+  return stIssueChain;
+}
+// Счёт выставлен — отмечаем это в памяти сразу, не дожидаясь перечитывания сводки.
+function stMarkIssued(inv, sel) {
+  const m = settlementsModel;
+  if (!m) return;
+  const hit = [];
+  (m.obligations || []).forEach((o) => {
+    if (!o || o.state !== "open" || o.holder_type !== sel.type || String(o.holder_id) !== String(sel.holder)) return;
+    if (sel.orders.length ? !sel.orders.includes(String(o.order_id)) : (String(o.period_date) < sel.day || String(o.period_date) > sel.end)) return;
+    o.state = "invoiced";
+    o.invoice_id = inv.id || o.invoice_id || "";
+    hit.push(o.order_id);
+  });
+  if (inv.id && !(m.invoices || []).some((i) => i.id === inv.id)) {
+    m.invoices = (m.invoices || []).concat([{ id: inv.id, amount: inv.amount, status: inv.status || "pending", test: !!inv.test, order_ids: hit, created_at: new Date().toISOString(), paid_at: null }]);
+  }
+}
+
 async function stPullPayment() {
-  if (stPayBusy) return;
+  if (stPayBusy || stIssueWaiting) return;
   if (typeof S === "undefined" || S.tab !== "settlements") { stStopPayWatch(); return; }
   if (typeof document !== "undefined" && document.hidden) return;
   if (!settlementsModel || settlementsModel.preview || settlementsModel.load_error) return;
@@ -1171,27 +1246,12 @@ async function stPullPayment() {
     if (!res || res.error || res.success === false) return;
     if (typeof S === "undefined" || S.tab !== "settlements") return;
     if (stPayStamp(res) === stPayStamp(settlementsModel)) { stPaintAges(); return; }
+    if (stIssueWaiting) return;
     const missing = stKeepPayExtras(settlementsModel, res);
     settlementsModel = res;
     if (missing) await stAttachDelivery(settlementsModel);
     if (typeof S === "undefined" || S.tab !== "settlements") return;
-    const y = window.scrollY;
-    const active = document.activeElement;
-    const scope = active && active.dataset ? active.dataset.stscope : "";
-    const key = active && active.dataset ? active.dataset.stk : "";
-    const pos = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
-    const main = $("main");
-    if (!main) return;
-    main.innerHTML = settlementsMarkup(settlementsModel);
-    settlementsBind(main);
-    window.scrollTo(0, y);
-    if (scope && key) {
-      const next = main.querySelector(`[data-stscope="${scope}"][data-stk="${key}"]`);
-      if (next) {
-        next.focus();
-        if (pos != null) try { next.setSelectionRange(pos, pos); } catch (e) {}
-      }
-    }
+    stPaintInPlace();
   } finally {
     stPayBusy = false;
   }
@@ -1422,9 +1482,12 @@ async function settlementsIssueSelected(root) {
   if (!confirm(`Выставить ${list.length} ${word} по ${picked.length} проводкам на ${stMoney(sum)}?${fizNote}`)) return;
   const go = root.querySelector("#stIssueSelected");
   if (go) go.disabled = true;
+  picked.forEach((c) => { c.disabled = true; });
+  await stIssueEnqueue(async () => {
   let ok = 0;
   const fails = [];
   for (const g of list) {
+    if (go && go.isConnected) go.textContent = `Выставляю ${ok + fails.length + 1} из ${list.length}…`;
     const res = await callEdge("settlements", {
       action: "issue",
       logical_key: g.order ? `${g.type}:${g.holder}:${g.day}:${g.order}` : `${g.type}:${g.holder}:${g.day}`,
@@ -1436,11 +1499,13 @@ async function settlementsIssueSelected(root) {
       ...(g.order ? { phone: g.phone, order_ids: [g.order] } : {}),
     });
     if (!res || res.error || res.success === false) fails.push((res && (res.error || res.message)) || "Счёт не выставлен");
-    else ok += 1;
+    else {
+      ok += 1;
+      stMarkIssued(res.invoice || {}, { type: g.type, holder: g.holder, day: g.day, end: g.day, orders: g.order ? [String(g.order)] : [] });
+    }
   }
-  if (typeof toast === "function") toast(fails.length ? `Выставлено ${ok}. Не вышло: ${fails[0]}` : `Выставлено счетов: ${ok}`);
-  settlementsModel = null;
-  renderSettlements();
+  if (typeof toast === "function") toast(fails.length ? `Выставлено ${ok}. Не вышло: ${fails[0]}` : `Выставлено счетов: ${ok}`, 6000);
+  });
 }
 
 async function settlementsCancelInvoice(id) {
@@ -1464,8 +1529,7 @@ async function settlementsCancelInvoice(id) {
     } catch (e) { /* долг уже открыт, цену можно поправить сохранением заказа */ }
   }
   if (typeof toast === "function") toast("Счёт отменён");
-  settlementsModel = null;
-  renderSettlements();
+  await stRefreshQuiet();
 }
 
 /* Окно исправления суммы. Что оно делает и чего не делает:
@@ -1534,8 +1598,7 @@ async function settlementsFixAmount(orderId) {
       });
     }
     toast(`Сумма исправлена: ${stMoney(old)} → ${stMoney(fee)}`);
-    settlementsModel = null;
-    renderSettlements();
+    stRefreshQuiet();
   });
 }
 
@@ -1556,14 +1619,14 @@ async function settlementsIssueRow(b) {
   const period = end && end !== day ? `${stDay(day)} — ${stDay(end)}` : stDay(day);
   if (!confirm(`Выставить счёт «${who}» за ${period} на ${stMoney(amount)}?${phone ? "\nУдалённый счёт уйдёт на " + phone + "." : ""}\nПовторное нажатие второй счёт не создаёт.`)) return;
   b.disabled = true;
-  if (phoneInp) {
-    try { await settlementsSaveKaspi("order", phoneInp.dataset.stfizphone, phone); }
-    catch (e) { /* номер всё равно уходит вместе со счётом */ }
-  }
-  const orderId = b.dataset.storder || (phoneInp && phoneInp.dataset.stfizphone) || "";
+  const label = b.textContent;
+  b.textContent = stIssueWaiting ? "В очереди…" : "Выставляется…";
+  const fizOrder = phoneInp ? phoneInp.dataset.stfizphone : "";
+  const orderId = b.dataset.storder || fizOrder || "";
   const listed = (b.dataset.storders || "").split(",").map((id) => id.trim()).filter(Boolean);
   const ids = listed.length ? listed : (phone && orderId ? [orderId] : []);
-  const res = await callEdge("settlements", {
+  const sel = { type: b.dataset.stissue, holder: b.dataset.stholder, day, end, orders: ids.map(String) };
+  const body = {
     action: "issue",
     logical_key: listed.length ? `${b.dataset.stissue}:${b.dataset.stholder}:${day}:${end}:${listed.length}` : (orderId && phone ? `${b.dataset.stissue}:${b.dataset.stholder}:${day}:${orderId}` : `${b.dataset.stissue}:${b.dataset.stholder}:${day}`),
     holder_type: b.dataset.stissue,
@@ -1573,16 +1636,34 @@ async function settlementsIssueRow(b) {
     launch: "manual",
     ...(phone ? { phone } : {}),
     ...(ids.length ? { order_ids: ids } : {}),
+  };
+  // Страница не перезагружается: счёт уходит в очередь, строка помечается на месте, и можно
+  // сразу нажимать следующую. Сводка перечитается в фоне, когда очередь опустеет.
+  stIssueEnqueue(async () => {
+    if (b.isConnected) b.textContent = "Выставляется…";
+    if (fizOrder) {
+      try { await settlementsSaveKaspi("order", fizOrder, phone); }
+      catch (e) { /* номер всё равно уходит вместе со счётом */ }
+    }
+    let res = null;
+    try { res = await callEdge("settlements", body); } catch (e) { res = { error: "нет связи с сервером" }; }
+    if (!res || res.error || res.success === false) {
+      if (b.isConnected) { b.disabled = false; b.textContent = label; }
+      if (typeof toast === "function") toast(`${who}: ${(res && (res.error || res.message)) || "счёт не выставлен"}`, 6000);
+      return;
+    }
+    const inv = res.invoice || {};
+    stMarkIssued(inv, sel);
+    if (b.isConnected) {
+      const cell = b.closest("td");
+      const row = b.closest("tr");
+      const stateCell = cell && cell.previousElementSibling;
+      if (stateCell) stateCell.innerHTML = stStateMark("invoiced", new Date().toISOString());
+      if (row) row.querySelectorAll(".stChk").forEach((c) => { c.checked = false; c.disabled = true; });
+      b.remove();
+    }
+    if (typeof toast === "function") toast(inv.test ? `${who}: тестовый счёт записан, в Kaspi не уходил` : `${who}: счёт выставлен · ${stMoney(inv.amount || amount)}`);
   });
-  if (!res || res.error || res.success === false) {
-    b.disabled = false;
-    if (typeof toast === "function") toast((res && (res.error || res.message)) || "Счёт не выставлен");
-    return;
-  }
-  const inv = res.invoice || {};
-  if (typeof toast === "function") toast(inv.test ? "Тестовый счёт записан, в Kaspi не уходил" : `Счёт выставлен · ${stMoney(inv.amount || amount)}`);
-  settlementsModel = null;
-  renderSettlements();
 }
 
 async function settlementsKaspiPhone(holderType, holderId) {
