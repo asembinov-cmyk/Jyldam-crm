@@ -455,7 +455,8 @@ const SALES_MARGIN_NEW_POST=110;   // почтовая доля у нового 
 const SALES_MARGIN_NEW_COUR=0;     // курьерская — надбавки нет
 function partnerModal(id){
   const p=id?S.partners.find(x=>x.id===id):{name:'',city_id:'',district_id:'',address:'',phone:'',sales_id:'',processor_id:'',tariff_post:'',tariff_courier:'',
-    sales_margin_fixed:SALES_MARGIN_NEW_POST,sales_margin_courier:SALES_MARGIN_NEW_COUR};
+    sales_margin_fixed:SALES_MARGIN_NEW_POST,sales_margin_courier:SALES_MARGIN_NEW_COUR,
+    chat_orders:true}; // приём заказов сообщением включён всем партнёрам (решение владельца 27.11.2026) — новому тоже
   const dOpts=cid=>S.districts.filter(d=>!cid||d.city_id===cid);
   // «Физ лицо Алматы» и «Физ лицо Астана» — не магазины, а разовые клиенты: адрес и район
   // у каждого заказа свои (для этого в карточке заказа есть отдельное поле
