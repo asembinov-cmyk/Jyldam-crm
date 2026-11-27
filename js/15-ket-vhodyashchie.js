@@ -895,7 +895,7 @@ function drawInboundOrders(){
   if(inbPage<1)inbPage=1;
   const startIdx=(inbPage-1)*inbPerPage;
   const rows=lazy?allRows:allRows.slice(startIdx,startIdx+inbPerPage); // в быстром режиме страница уже готова с сервера
-  const admin=(isAdmin()||can('ket_orders','delete'))&&!(typeof orderDeleteBlocked==='function'&&orderDeleteBlocked());
+  const admin=isAdmin()||can('ket_orders','delete');
   if(inbSelectAll)allRows.forEach(o=>inbSelected.add(o.id));
   const colCount=19+(admin?1:0);
   $('main').innerHTML=`
@@ -1152,7 +1152,6 @@ function updateInbAllChk(allRows){
   chk.indeterminate=selected>0&&selected<total;
 }
 async function delInboundOrder(id){
-  if(typeof orderDeleteBlocked==='function'&&orderDeleteBlocked()){toast('Удаление заказов для этой учётной записи закрыто');return;}
   if(!isAdmin()&&!can('ket_orders','delete')){toast('Нет прав на удаление заказов партнёров');return;}
   const o=(S.inbound_orders||[]).find(x=>x.id===id);if(!o)return;
   if(!confirm(`Удалить заказ КЕТ «${o.external_id||''}»?\n\nЭто действие нельзя отменить. Остатки на складе (если уже списаны) затронуты не будут.`))return;
@@ -1169,7 +1168,6 @@ async function delInboundOrder(id){
 }
 // массовое удаление отмеченных галочками заказов КЕТ — нужно право на удаление в модуле «Заказы партнёров»
 async function delInboundOrdersBulk(){
-  if(typeof orderDeleteBlocked==='function'&&orderDeleteBlocked()){toast('Удаление заказов для этой учётной записи закрыто');return;}
   if(!isAdmin()&&!can('ket_orders','delete'))return;
   const ids=[...inbSelected];
   if(!ids.length)return;
