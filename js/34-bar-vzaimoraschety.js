@@ -15,7 +15,8 @@ let barSetCache = null;
 let barSetGen = 0;
 let barSetBusy = false;
 const barSetOpen = new Set();
-const barSetPhones = {};
+const barSetKaspi = {};
+const barSetWa = {};
 const BAR_FIND = {
   labels: ["Партнёр", "Заказ", "Сумма"],
   text: ["who", "codes", "amount"],
@@ -64,11 +65,21 @@ function barSetCatalog(partners) {
 }
 function barSetWho(order, cat) {
   const linked = order && order.partner_id && cat.byId.get(order.partner_id);
-  if (linked && linked.name) return { name: String(linked.name), phone: linked.phone || "" };
+  if (linked && linked.name) return { name: String(linked.name), id: linked.id || "", phone: linked.phone || "" };
   const named = cat.byName.get(barSetKey(order && order.sender));
-  if (named && named.name) return { name: String(named.name), phone: named.phone || "" };
+  if (named && named.name) return { name: String(named.name), id: named.id || "", phone: named.phone || "" };
   const sender = String((order && order.sender) || "").trim();
-  return { name: sender || "Партнёр не указан", phone: "" };
+  return { name: sender || "Партнёр не указан", id: "", phone: "" };
+}
+function barSetDeliveryName(id) {
+  if (!id) return "";
+  if (typeof deliveryName === "function") return deliveryName(id) || "";
+  const hit = ((typeof S !== "undefined" && S.delivery) || []).find((d) => d.id === id);
+  return (hit && hit.name) || "";
+}
+function barSetPayLabel(cadence, partnerId) {
+  if (!partnerId) return "—";
+  return cadence === "monthly" ? "Раз в месяц" : "Каждый день";
 }
 function barSetLine(order) {
   const partnerPays = !!(order && order.paid_by_sender);
@@ -102,12 +113,14 @@ function barSetStateLabel(row) {
   if (row.state === "invoiced") return "Выставлен счёт";
   return "К выплате";
 }
-function barSetRows(orders, partners, invoices) {
+function barSetRows(orders, partners, invoices, terms) {
   const cat = barSetCatalog(partners);
   const latest = barSetLatest(invoices);
+  const book = terms || {};
   return (orders || []).map((o) => {
     const line = barSetLine(o);
     const who = barSetWho(o, cat);
+    const term = (who.id && book[who.id]) || {};
     const inv = latest.get(o.id) || null;
     const state = barSetOrderState(inv);
     return {
@@ -115,7 +128,12 @@ function barSetRows(orders, partners, invoices) {
       code: o.code || "",
       client: o.client || "",
       who: who.name,
+      partnerId: who.id || "",
       phone: who.phone || "",
+      kaspi: term.kaspi_phone || who.phone || "",
+      whatsapp: term.whatsapp || "",
+      cadence: term.cadence || "",
+      deliveryId: o.delivery_id || "",
       day: barSetDay(o),
       partnerPays: line.partnerPays,
       amount: line.amount,
@@ -130,10 +148,15 @@ function barSetGroups(rows) {
   (rows || []).forEach((row) => {
     let g = map.get(row.who);
     if (!g) {
-      g = { key: row.who, who: row.who, phone: "", orders: [], days: [] };
+      g = { key: row.who, who: row.who, partnerId: "", phone: "", kaspi: "", whatsapp: "", cadence: "", deliveries: [], orders: [], days: [] };
       map.set(row.who, g);
     }
+    if (!g.partnerId && row.partnerId) g.partnerId = row.partnerId;
     if (!g.phone && row.phone) g.phone = row.phone;
+    if (!g.kaspi && row.kaspi) g.kaspi = row.kaspi;
+    if (!g.whatsapp && row.whatsapp) g.whatsapp = row.whatsapp;
+    if (!g.cadence && row.cadence) g.cadence = row.cadence;
+    if (row.deliveryId && !g.deliveries.includes(row.deliveryId)) g.deliveries.push(row.deliveryId);
     g.orders.push(row);
     if (row.day) g.days.push(row.day);
   });
@@ -151,7 +174,11 @@ function barSetGroups(rows) {
       raw: g,
       key: g.key,
       who: g.who,
-      phone: barSetPhones[g.key] != null ? barSetPhones[g.key] : barSetPhone10(g.phone),
+      partnerId: g.partnerId,
+      pay: barSetPayLabel(g.cadence, g.partnerId),
+      delivery: g.deliveries.map(barSetDeliveryName).filter(Boolean).join(", ") || "—",
+      kaspi: g.partnerId && barSetKaspi[g.partnerId] != null ? barSetKaspi[g.partnerId] : barSetPhone10(g.kaspi || g.phone),
+      whatsapp: g.partnerId && barSetWa[g.partnerId] != null ? barSetWa[g.partnerId] : (g.whatsapp || ""),
       codes: g.orders.map((o) => o.code).join(" "),
       count: debt.length,
       recipient: g.orders.length - debt.length,
@@ -215,6 +242,25 @@ function barSetKassaName(row) {
   const title = String((row && row.title) || "").trim();
   return title || "Второй кассир";
 }
+function barSetPartnerField(partnerId, kind, value) {
+  if (!partnerId) return "—";
+  if (!barSetCanIssue()) return barSetEsc(value || "—");
+  const mark = kind === "wa" ? "data-barwa" : "data-barkaspi";
+  const title = kind === "wa" ? "WhatsApp" : "Номер для счёта";
+  return `<input class="st-partner-field" ${mark}="${barSetEsc(partnerId)}" data-stsaved="${barSetEsc(value || "")}" value="${barSetEsc(value || "")}" inputmode="tel" autocomplete="off" placeholder="${title}" title="${title}" style="width:132px;padding:4px 8px">`;
+}
+function barSetWaCell(g) {
+  const field = barSetPartnerField(g.partnerId, "wa", g.whatsapp);
+  if (field === "—") return "—";
+  const btn = typeof stWaChatBtn === "function" ? stWaChatBtn(g.whatsapp) : "";
+  return field + btn;
+}
+function barSetWhoCell(g) {
+  const name = g.partnerId
+    ? `<button class="btn ghost sm" type="button" data-barpartner="${barSetEsc(g.partnerId)}" title="Открыть карточку партнёра">${barSetEsc(g.who)}</button>`
+    : barSetEsc(g.who);
+  return `<span class="st-gmark">${barSetOpen.has(g.key) ? "▼" : "▶"}</span> ${name}`;
+}
 function barSetIssueCell(g) {
   if (!barSetCanIssue() || !g.open.length) return "";
   return `<button class="btn sm primary" type="button" data-barissue="${barSetEsc(g.key)}">Выставить счёт</button>`;
@@ -276,8 +322,8 @@ function barSetKaspiBlock(bills, kassaName) {
 }
 
 function barSetMarkup() {
-  const model = barSetCache || { orders: [], partners: [], invoices: [], kassa: "Второй кассир", error: "" };
-  const groups = barSetGroups(barSetRows(model.orders, model.partners, model.invoices));
+  const model = barSetCache || { orders: [], partners: [], invoices: [], terms: {}, kassa: "Второй кассир", error: "" };
+  const groups = barSetGroups(barSetRows(model.orders, model.partners, model.invoices, model.terms));
   const spec = BAR_FIND;
   const shown = typeof stSortRows === "function"
     ? stSortRows(typeof stSlice === "function" ? stSlice(groups, spec, "barset").shown : groups, "barset")
@@ -288,19 +334,15 @@ function barSetMarkup() {
   const recipientSum = groups.reduce((s, g) => s + g.recipientSum, 0);
   const find = typeof stFindBar === "function" ? stFindBar("barset", spec, groups) : "";
   const note = typeof stPageNote === "function" ? stPageNote(shown.length, groups.length, true) : "";
-  const head = `${typeof stNumHead === "function" ? stNumHead() : "<th>№</th>"}${typeof stTh === "function" ? stTh("barset", "who", "Кто оплачивает долг") : "<th>Кто оплачивает долг</th>"}<th>Номер для счёта</th>${typeof stTh === "function" ? `${stTh("barset", "count", "Заказов")}${stTh("barset", "day", "Период")}${stTh("barset", "amountNum", "Сумма")}${stTh("barset", "state", "Состояние")}` : "<th>Заказов</th><th>Период</th><th>Сумма</th><th>Состояние</th>"}<th></th>`;
+  const head = `${typeof stNumHead === "function" ? stNumHead() : "<th>№</th>"}${typeof stTh === "function" ? `${stTh("barset", "who", "Кто оплачивает долг")}${stTh("barset", "pay", "Оплата")}` : "<th>Кто оплачивает долг</th><th>Оплата</th>"}<th>Номер для счёта</th><th>WhatsApp</th>${typeof stTh === "function" ? `${stTh("barset", "delivery", "Тип доставки")}${stTh("barset", "count", "Заказов")}${stTh("barset", "day", "Период")}${stTh("barset", "amountNum", "Сумма")}${stTh("barset", "state", "Состояние")}` : "<th>Тип доставки</th><th>Заказов</th><th>Период</th><th>Сумма</th><th>Состояние</th>"}<th></th>`;
   const body = model.error
     ? `<div class="empty"><div class="big">Список не загрузился</div>${barSetEsc(model.error)}</div>`
     : !shown.length
       ? (typeof stMiss === "function" ? stMiss(groups.length, `<div class="empty"><div class="big">За этот период заказов барахолки нет</div>Выберите другие даты.</div>`) : `<div class="empty"><div class="big">Записей нет</div></div>`)
       : `<table class="resp-table st-payers"><thead><tr>${head}</tr></thead><tbody>${shown.map((g, n) => {
-          const open = barSetOpen.has(g.key);
-          const phone = barSetCanIssue()
-            ? `<input class="st-partner-field" data-barphone="${barSetEsc(g.key)}" value="${barSetEsc(g.phone || "")}" inputmode="tel" autocomplete="off" placeholder="Номер для счёта" title="Номер для счёта" style="width:132px;padding:4px 8px">`
-            : barSetEsc(g.phone || "—");
           const actions = barSetCancelCell(g);
-          const row = `<tr class="st-grow" data-bargroup="${barSetEsc(g.key)}" title="Показать заказы">${typeof stNumCell === "function" ? stNumCell(n) : `<td>${n + 1}</td>`}<td data-label="Кто оплачивает долг"><span class="st-gmark">${open ? "▼" : "▶"}</span> ${barSetEsc(g.who)}</td><td data-label="Номер для счёта">${phone}</td><td data-label="Заказов">${g.count}${g.recipient ? ` + ${g.recipient}` : ""}</td><td data-label="Период">${barSetEsc(g.dayLabel)}</td><td data-label="Сумма">${barSetMoney(g.amountNum)}</td><td data-label="Состояние">${barSetStateCell(g)}</td><td>${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
-          return open ? row + `<tr class="st-gbody"><td colspan="8">${barSetOrderTable(g.raw.orders)}</td></tr>` : row;
+          const row = `<tr class="st-grow" data-bargroup="${barSetEsc(g.key)}" title="Показать заказы">${typeof stNumCell === "function" ? stNumCell(n) : `<td>${n + 1}</td>`}<td data-label="Кто оплачивает долг">${barSetWhoCell(g)}</td><td data-label="Оплата">${barSetEsc(g.pay)}</td><td data-label="Номер для счёта">${barSetPartnerField(g.partnerId, "kaspi", g.kaspi)}</td><td data-label="WhatsApp">${barSetWaCell(g)}</td><td data-label="Тип доставки">${barSetEsc(g.delivery)}</td><td data-label="Заказов">${g.count}${g.recipient ? ` + ${g.recipient}` : ""}</td><td data-label="Период">${barSetEsc(g.dayLabel)}</td><td data-label="Сумма">${barSetMoney(g.amountNum)}</td><td data-label="Состояние">${barSetStateCell(g)}</td><td>${actions ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>` : ""}</td></tr>`;
+          return barSetOpen.has(g.key) ? row + `<tr class="st-gbody"><td colspan="11">${barSetOrderTable(g.raw.orders)}</td></tr>` : row;
         }).join("")}</tbody></table>`;
   const bills = barSetBills(model.invoices, model.kassa);
   return `<div class="page-head"><div><h1>Взаиморасчёты</h1>
@@ -326,7 +368,7 @@ function barSetMarkup() {
 async function barSetRead(apply) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    let q = sb.from("orders").select("id,code,client,sender,partner_id,pickup_date,created_at,order_sum,order_sum_orig,paid_by_sender").eq("calc_group", "baraholka");
+    let q = sb.from("orders").select("id,code,client,sender,partner_id,pickup_date,created_at,order_sum,order_sum_orig,paid_by_sender,delivery_id").eq("calc_group", "baraholka");
     const res = await apply(q).range(from, from + 999);
     if (res.error) throw new Error(res.error.message || "Заказы барахолки не прочитались");
     const chunk = res.data || [];
@@ -377,8 +419,8 @@ async function barSetCashier() {
 }
 
 function barSetCsv() {
-  const model = barSetCache || { orders: [], partners: [], invoices: [] };
-  const groups = barSetGroups(barSetRows(model.orders, model.partners, model.invoices));
+  const model = barSetCache || { orders: [], partners: [], invoices: [], terms: {} };
+  const groups = barSetGroups(barSetRows(model.orders, model.partners, model.invoices, model.terms));
   const lines = ["кто оплачивает долг;заказов партнёра;сумма;к выплате;в счёте;оплачено;состояние"];
   groups.forEach((g) => lines.push([g.who, g.count, g.amountNum, g.openSum, g.pendingSum, g.paidSum, g.state].join(";")));
   const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
@@ -433,13 +475,79 @@ function barSetSort(scope, col) {
   else { bag.col = col; bag.dir = 1; }
   barSetPaint();
 }
+function barSetPartnerIds(orders, partners) {
+  const cat = barSetCatalog(partners);
+  return [...new Set((orders || []).map((o) => (o && o.partner_id) || barSetWho(o, cat).id).filter(Boolean))];
+}
+async function barSetTerms(ids) {
+  const out = {};
+  const uniq = [...new Set((ids || []).filter(Boolean))];
+  if (!uniq.length || typeof callEdge !== "function") return out;
+  await Promise.all(uniq.map(async (id) => {
+    const res = await callEdge("settlements", { action: "terms_get", partner_id: id });
+    if (res && !res.error) out[id] = res.terms || {};
+  }));
+  return out;
+}
+async function barSetSaveField(inp, kind) {
+  if (!inp) return;
+  const id = inp.dataset.barkaspi || inp.dataset.barwa;
+  if (!id) return;
+  const raw = String(inp.value || "").trim();
+  const phone = raw ? barSetPhone10(inp.value) : "";
+  if (raw && !phone) {
+    inp.value = inp.dataset.stsaved || "";
+    if (typeof toast === "function") toast("Нужен номер Казахстана: 7XXXXXXXXX");
+    return;
+  }
+  const prev = inp.dataset.stsaved ? (barSetPhone10(inp.dataset.stsaved) || inp.dataset.stsaved) : "";
+  if (phone === prev) { inp.value = phone; return; }
+  const body = { action: "terms_fields", partner_id: id };
+  if (kind === "wa") body.whatsapp = phone;
+  else body.kaspi_phone = phone;
+  const res = await callEdge("settlements", body);
+  if (!res || res.error || res.success === false) {
+    inp.value = inp.dataset.stsaved || "";
+    if (kind === "wa") barSetWa[id] = inp.value;
+    else barSetKaspi[id] = inp.value;
+    if (typeof toast === "function") toast((res && (res.error || res.message)) || "Номер не записался");
+    return;
+  }
+  const saved = kind === "wa" ? (res.whatsapp || phone) : (res.kaspi_phone || phone);
+  inp.value = saved;
+  inp.dataset.stsaved = saved;
+  if (kind === "wa") barSetWa[id] = saved;
+  else barSetKaspi[id] = saved;
+  if (barSetCache) {
+    barSetCache.terms = barSetCache.terms || {};
+    const row = barSetCache.terms[id] || (barSetCache.terms[id] = {});
+    if (kind === "wa") row.whatsapp = saved;
+    else row.kaspi_phone = saved;
+  }
+  if (typeof toast === "function") toast(kind === "wa" ? "WhatsApp записан" : "Номер для счёта записан");
+}
+async function barSetOpenPartner(id) {
+  if (!id) return;
+  if (typeof S !== "undefined" && !((S.partners || []).some((p) => p.id === id)) && typeof sb !== "undefined" && sb) {
+    try {
+      const res = await sb.from("partners").select("*").eq("id", id).maybeSingle();
+      if (res && res.data) {
+        S.partners = S.partners || [];
+        S.partners.push(res.data);
+      }
+    } catch (e) { /* карточка откроется, если партнёр уже есть в справочнике */ }
+  }
+  if (typeof settlementsOpenPartner === "function") settlementsOpenPartner(id);
+  else if (typeof partnerModal === "function") partnerModal(id);
+  else if (typeof toast === "function") toast("Карточка партнёра не найдена");
+}
 async function barSetIssue(key) {
   if (barSetBusy) return;
   const model = barSetCache || { orders: [], partners: [], invoices: [] };
-  const group = barSetGroups(barSetRows(model.orders, model.partners, model.invoices)).find((g) => g.key === key);
+  const group = barSetGroups(barSetRows(model.orders, model.partners, model.invoices, model.terms)).find((g) => g.key === key);
   if (!group || !group.open.length) { if (typeof toast === "function") toast("Нет заказов для счёта"); return; }
-  const input = document.querySelector(`[data-barphone="${CSS.escape(key)}"]`);
-  const phone = barSetPhone10(input ? input.value : group.phone);
+  const input = group.partnerId ? document.querySelector(`[data-barkaspi="${CSS.escape(group.partnerId)}"]`) : null;
+  const phone = barSetPhone10(input ? input.value : group.kaspi);
   if (!phone) { if (typeof toast === "function") toast("Номер для счёта: 10 цифр, начинается с 7"); return; }
   const sum = group.open.reduce((s, o) => s + o.amount, 0);
   if (!confirm(`На номер +7${phone} уйдёт счёт барахолки на ${barSetMoney(sum)} через вторую кассу Kaspi. Продолжить?`)) return;
@@ -493,9 +601,27 @@ function barSetBind(root) {
       barSetSort(scope, th.dataset.stcol);
     };
   });
-  root.querySelectorAll("[data-barphone]").forEach((el) => {
+  root.querySelectorAll("[data-barkaspi],[data-barwa]").forEach((el) => {
     el.onclick = (e) => e.stopPropagation();
-    el.oninput = () => { barSetPhones[el.dataset.barphone] = el.value; };
+    el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+    el.oninput = () => {
+      const id = el.dataset.barkaspi || el.dataset.barwa;
+      if (!id) return;
+      if (el.dataset.barkaspi) barSetKaspi[id] = el.value;
+      else barSetWa[id] = el.value;
+    };
+    el.onchange = () => barSetSaveField(el, el.dataset.barwa ? "wa" : "kaspi");
+  });
+  root.querySelectorAll("[data-barpartner]").forEach((btn) => {
+    btn.onclick = (e) => { e.stopPropagation(); barSetOpenPartner(btn.dataset.barpartner); };
+  });
+  root.querySelectorAll("[data-stwachat]").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const cell = btn.closest("td");
+      const inp = cell && cell.querySelector("[data-barwa]");
+      if (typeof stOpenWaChat === "function") stOpenWaChat(inp ? inp.value : btn.dataset.stwachat);
+    };
   });
   root.querySelectorAll("[data-bargroup]").forEach((tr) => {
     tr.onclick = (e) => {
@@ -555,12 +681,13 @@ async function renderBarSettlements() {
       const orders = await barSetFetch(barSetFrom, barSetTo);
       const partners = await barSetPartners();
       const invoices = await barSetInvoices(orders.map((o) => o.id).filter(Boolean));
+      const terms = await barSetTerms(barSetPartnerIds(orders, partners));
       const cashier = await barSetCashier();
       if (gen !== barSetGen || (typeof S !== "undefined" && S.tab !== "barsettlements")) return;
-      barSetCache = { from: barSetFrom, to: barSetTo, orders, partners, invoices, kassa: barSetKassaName(cashier), error: "" };
+      barSetCache = { from: barSetFrom, to: barSetTo, orders, partners, invoices, terms, kassa: barSetKassaName(cashier), error: "" };
     } catch (e) {
       if (gen !== barSetGen) return;
-      barSetCache = { from: barSetFrom, to: barSetTo, orders: [], partners: [], invoices: [], kassa: "Второй кассир", error: (e && e.message) || "Список не загрузился" };
+      barSetCache = { from: barSetFrom, to: barSetTo, orders: [], partners: [], invoices: [], terms: {}, kassa: "Второй кассир", error: (e && e.message) || "Список не загрузился" };
     }
   }
   if (typeof S !== "undefined" && S.tab !== "barsettlements") return;
