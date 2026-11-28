@@ -319,10 +319,10 @@ async function pickupOrdersModal(pickupId){
         <option value="M" ${o.size==='M'?'selected':''}>M — средний</option>
         <option value="L" ${o.size==='L'?'selected':''}>L — большой</option>
       </select></div>
-      <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${o.order_sum!=null?esc(o.order_sum):''}" placeholder="—" ${o.paid_by_sender?'disabled':''}></div>
+      <div class="pom-sumrow"><span>Сумма заказа (₸)</span><input type="number" min="0" class="pom-sum" data-pomsum="${o.id}" value="${esc(orderFaceSumInput(o))}" placeholder="—" ${o.paid_by_sender?'disabled':''}></div>
       `:''}
       ${(isStaff()||isCourier())?`
-      <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем <span class="pom-paidhint">(сумма станет 0)</span></label>
+      <label class="pom-paid pom-paidorder"><input type="checkbox" data-pompaid="${o.id}" ${o.paid_by_sender?'checked':''}> Оплачено отправителем <span class="pom-paidhint">(получатель не платит, во взаиморасчётах — тариф партнёра)</span></label>
       ${typeof settlementsPickupExtra==='function'?settlementsPickupExtra(o):''}
       `:''}
     </div>`).join('');
@@ -447,10 +447,13 @@ async function pickupOrdersModal(pickupId){
               // запоминаем исходную сумму и обнуляем — если сумма уже 0 (например, тариф партнёра
               // и так 0), пытаемся подтянуть условную сумму из карточки партнёра, чтобы не потерять
               // её для Калькуляции
-              let orig=(o.order_sum!=null?o.order_sum:0);
+              let orig=(o.order_sum!=null?+o.order_sum:0);
+              if(!orig&&o.order_sum_orig!=null&&o.order_sum_orig!=='')orig=+o.order_sum_orig;
               if(!orig){
                 const pt=(S.partners||[]).find(x=>x.id===o.partner_id);
-                if(pt&&pt.direct_pay_amount!=null)orig=pt.direct_pay_amount;
+                const price=pt&&typeof orderTariffPrice==='function'?orderTariffPrice(pt,o):null;
+                if(price!=null)orig=price;
+                else if(pt&&pt.direct_pay_amount!=null)orig=pt.direct_pay_amount;
               }
               patch={paid_by_sender:true,order_sum_orig:orig,order_sum:0,cost:0};
             }else{
@@ -473,10 +476,9 @@ async function pickupOrdersModal(pickupId){
               {field:'paid_by_sender',label:FIELD_LABEL.paid_by_sender,old:v?'нет':'да',new:v?'да':'нет'},
               {field:'order_sum',label:FIELD_LABEL.order_sum,old:beforeSum!=null?String(beforeSum):'—',new:String(o.order_sum)},
             ]});
-            toast(v?'Оплачено отправителем · сумма 0':'Снято · сумма возвращена');
-            // обновляем поле суммы и его доступность
+            toast(v?'Оплачено отправителем · во взаиморасчётах тариф партнёра':'Снято · сумма возвращена');
             const sumInp=wrap.querySelector(`[data-pomsum="${o.id}"]`);
-            if(sumInp){sumInp.value=o.order_sum!=null?o.order_sum:'';sumInp.disabled=!!o.paid_by_sender;}
+            if(sumInp){sumInp.value=orderFaceSumInput(o);sumInp.disabled=!!o.paid_by_sender;}
             if(!v)wrap.querySelectorAll(`input[name="stpay-${o.id}"]`).forEach(r=>{r.checked=false;});
             renderDashboardIfActive();
           }catch(e){chk.checked=!v;toast('Не удалось сохранить');}
@@ -1238,7 +1240,7 @@ function ordersExcludePartnersModal(){
    и прав, и таблица собирается одной строкой шаблона. Раскладывать её на модель
    колонок ради перетаскивания — большая правка в самом нагруженном месте.
 
-   Крайние колонки не двигаются: слева галочка выбора, справа кнопки действий.
+   Крайние колонки не двигаются: слева номер строки и галочка выбора, справа кнопки действий.
    Их перенос в середину только ломал бы строку. */
 const ORDERS_COL_ORDER_KEY='jyldam-orders-col-order';
 function ordersColOrderLoad(){
@@ -1248,11 +1250,15 @@ function ordersColOrderLoad(){
 function ordersColOrderSave(arr){
   try{localStorage.setItem(ORDERS_COL_ORDER_KEY,JSON.stringify(arr));}catch(e){}
 }
-// Подвижный диапазон — всё между галочкой и колонкой действий.
+// Подвижный диапазон — всё между номером строки, галочкой и колонкой действий.
 function ordersMovableRange(table){
   const ths=[...table.querySelectorAll('thead th')];
   let from=0,to=ths.length-1;
-  if(ths[0]&&!ths[0].textContent.trim())from=1;      // галочка «выбрать все»
+  while(from<=to){
+    const t=ths[from].textContent.trim();
+    if(t===''||t==='№')from++;
+    else break;
+  }
   if(ths[to]&&!ths[to].textContent.trim())to=to-1;   // кнопки действий
   return {from,to,ths};
 }
@@ -2357,15 +2363,16 @@ function drawOrders(){
   const pickupCourierCol=!ordersMode;
   const sortCls=col=>'fin-th fin-sortable'+(ordersSort.col===col?(ordersSort.dir===1?' fin-sort-asc':' fin-sort-desc'):'');
   el.innerHTML=ordersDupBarHtml(allRows.length)+`<div class="table-scroll"><table class="resp-table resp-collapse orders-tbl"><thead><tr>
-    ${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th>${barGrid?'':'<th>Дата доставки</th>'}<th class="${sortCls('sender')}" data-osort="sender">Отправитель</th>${pickupCourierCol?`<th class="${sortCls('courier')}" data-osort="courier">Курьер заборщик</th>`:''}<th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
+    <th class="ord-n">№</th>${staff?'<th style="width:34px"><input type="checkbox" id="ketChkAll" title="Выбрать все"></th>':''}${noPhoto?'':'<th>Фото</th>'}<th>ID</th><th>Дата забора</th>${barGrid?'':'<th>Дата доставки</th>'}<th class="${sortCls('sender')}" data-osort="sender">Отправитель</th>${pickupCourierCol?`<th class="${sortCls('courier')}" data-osort="courier">Курьер заборщик</th>`:''}<th>ФИО клиента</th><th>Телефон</th><th>Вес</th>
     <th>Тип доставки</th>${(ordersMode!=='mail'&&!barGrid)?'<th>Город</th>':''}<th>Адрес</th>${staff?'<th>Стоимость</th><th>Кто платит</th>':''}<th>Трек-код</th>
     <th>Статус</th><th></th></tr></thead>
-    <tbody>${rows.map(o=>{
+    <tbody>${rows.map((o,i)=>{
       const ph=pickupPhotos(o);
       const photoCell=ph.length
         ? `<img data-ph="${esc(photoPath(ph[0]))}" data-oviewphoto="${esc(photoPath(ph[0]))}" loading="lazy" decoding="async" style="width:38px;height:38px;object-fit:cover;border-radius:7px;cursor:pointer;border:1px solid var(--line)" title="Фото: ${ph.length}">${ph.length>1?`<span style="font-size:11px;color:var(--muted);margin-left:3px">×${ph.length}</span>`:''}`
         : (orderChatTag(o)||'<span style="color:var(--line)">—</span>');
       return `<tr data-orow="${o.id}" style="cursor:pointer" class="${o.via_integration?'order-row-api':''}" title="${o.via_integration?'Пришёл от партнёра напрямую через API-интеграцию':''}">
+      <td data-label="№" class="ord-n">${startIdx+i+1}</td>
       ${staff?`<td data-label="" onclick="event.stopPropagation()"><input type="checkbox" class="ketChk" data-ketchk="${o.id}" ${ketSelected.has(o.id)?'checked':''} ${o.ket_id?'title="Уже отправлен в KET"':''}></td>`:''}
       ${noPhoto?'':`<td data-label="Фото">${photoCell}</td>`}
       <td data-label="ID"><strong style="font-family:'Fraunces',serif">${esc(o.code)}</strong>${copyBtn(o.code)}${o.ket_id?`<span class="ket-badge" title="Отправлен в KET${o.ket_id?' · ID '+esc(o.ket_id):''}">KET ✓</span>`:''}</td>
@@ -2385,7 +2392,7 @@ function drawOrders(){
       <td data-label="Тип доставки">${o.delivery_id?esc(deliveryName(o.delivery_id)):'—'}</td>
       ${(ordersMode!=='mail'&&!barGrid)?`<td data-label="Город">${isCourierDelivery(o.delivery_id)?esc(courierCityName(o.courier_city_id)):(o.city_id?esc(cityName(o.city_id)):'—')}</td>`:''}
       <td data-label="Адрес">${esc(o.address)||'—'}</td>
-      ${staff?`<td data-label="Стоимость">${orderSum(o)?esc(orderSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Кто платит">${senderPayCell(o)}</td>`:''}
+      ${staff?`<td data-label="Стоимость">${orderFaceSum(o)?esc(orderFaceSum(o).toLocaleString('ru-RU'))+' ₸':'—'}</td><td data-label="Кто платит">${senderPayCell(o)}</td>`:''}
       <td data-label="Трек-код">${o.track?esc(o.track)+copyBtn(o.track):'—'}${
         (o.ket_last_error&&!(o.ket_id&&String(o.ket_id)!=='0'))
           ? `<small class="cell-time" style="color:var(--rust)" title="${esc(o.ket_last_error)}">KET: ${esc(String(o.ket_last_error).slice(0,60))}</small>`
@@ -2613,7 +2620,7 @@ function drawCourierOrderCards(el,rows){
   const shiftBar=typeof settlementsShiftBar==='function'?settlementsShiftBar():'';
   el.innerHTML=shiftBar+`<div class="cour-cards">${rows.map(o=>{
     const ph=phoneStored(o.phone);
-    const sum=orderSum(o)?orderSum(o).toLocaleString('ru-RU')+' ₸':'—';
+    const sum=orderFaceSum(o)?orderFaceSum(o).toLocaleString('ru-RU')+' ₸':'—';
     const city=isCourierDelivery(o.delivery_id)?courierCityName(o.courier_city_id):'';
     return `<div class="cour-card" data-card="${o.id}">
       <div class="cc-head" data-toggle="${o.id}">
@@ -2761,6 +2768,24 @@ function orderTariffPrice(partner, order){
   const base=courier?sizes[size].courier:sizes[size].mail;
   const bar=typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(order);
   return base+weightSurcharge(order.weight,courier,bar);
+}
+// Сумма, которую видит человек. «Оплачено отправителем» обнуляет order_sum:
+// получатель ничего не платит. Тариф из карточки партнёра при этом лежит в
+// order_sum_orig — его же берут взаиморасчёты. В карточке и в гриде показываем его,
+// а не ноль.
+function orderFaceSum(o){
+  if(!o)return 0;
+  if(o.paid_by_sender&&o.order_sum_orig!=null&&o.order_sum_orig!==''){
+    const n=+o.order_sum_orig;
+    if(!isNaN(n))return n;
+  }
+  return orderSum(o);
+}
+function orderFaceSumInput(o){
+  if(!o)return '';
+  if(o.paid_by_sender&&o.order_sum_orig!=null&&o.order_sum_orig!=='')return o.order_sum_orig;
+  if(o.order_sum!=null&&o.order_sum!=='')return o.order_sum;
+  return '';
 }
 function orderRememberedPrice(order){
   if(order.paid_by_sender)return order.order_sum_orig==null||order.order_sum_orig===''?0:+order.order_sum_orig;
@@ -3182,7 +3207,7 @@ function orderModal(id,readonly){
       <div class="field"><label>ФИО клиента${cardBar?' *':''}</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
       <div class="field"><label class="lbl-call">Телефон клиента <span style="color:var(--rust)">*</span>${typeof callBtn==='function'?callBtn(d.phone,o&&o.id||'','o_phone'):''}</label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс${cardBar?' *':''}</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span><div id="o_index_info" class="idx-info"></div></div>
-      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>
+      <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${esc(orderFaceSumInput(d))}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную. Если стоит «Оплачено отправителем», здесь виден тариф партнёра: получатель не платит, а эта сумма уходит во взаиморасчёты.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(получатель не платит, во взаиморасчётах — тариф партнёра)</span></label>
         <div id="o_payvia" style="margin-top:8px;${d.paid_by_sender?'':'display:none'}">
           <label class="o-paidorder"><input type="radio" name="o_payvia" value="partner_self" ${d.sender_pay_via==='partner_self'?'checked':''} ${dis}> Платит партнёр по своим условиям</label>
           <label class="o-paidorder"><input type="radio" name="o_payvia" value="pickup_gold" ${d.sender_pay_via==='pickup_gold'?'checked':''} ${dis}> Курьер получил на свой Kaspi Gold</label>
@@ -3350,8 +3375,9 @@ function orderModal(id,readonly){
       if($('o_paidorder')){
         const paidNow=$('o_paidorder').checked;
         if(paidNow){
-          // берём именно то, что было ДО обнуления (dataset.prevsum) — поле o_sum на момент
-          // сохранения уже показывает 0, читать его напрямую сюда нельзя
+          // Получателю в базу пишется 0. Тариф, который видно в поле, уже лежит в
+          // dataset.prevsum: при открытии карточки это order_sum_orig, при включении
+          // галочки — тариф партнёра. Само поле при сохранении не читаем.
           const prevSum=$('o_paidorder').dataset.prevsum;
           /* Запоминаем при первом включении. У НОВОГО заказа, открытого с готовой
              отметкой (сканер Барахолки у партнёра с тарифом 0), `prevsum` взяться неоткуда:
@@ -3814,17 +3840,20 @@ function orderModal(id,readonly){
     // галочка «Оплачен заказ»: обнуляет поле суммы и блокирует его (исходная вернётся при снятии)
     const paidChk=$('o_paidorder');
     if(paidChk){
-      paidChk.dataset.prevsum=(d.order_sum!=null&&d.order_sum!=='')?String(d.order_sum):''; // помним сумму до обнуления
+      paidChk.dataset.prevsum=d.paid_by_sender
+        ?String(d.order_sum_orig!=null&&d.order_sum_orig!==''?d.order_sum_orig:(d.order_sum!=null?d.order_sum:''))
+        :(d.order_sum!=null&&d.order_sum!==''?String(d.order_sum):'');
       paidChk.onchange=()=>{
         const se=$('o_sum');if(!se)return;
         if(paidChk.checked){
-          // если поле суммы пустое (например, только что автоматически поставили галочку из-за
-          // нулевого тарифа) — подставляем условную сумму из карточки партнёра, а не оставляем пусто
-          if(!se.value.trim()){
-            const pt=findPartner();
-            if(pt&&pt.direct_pay_amount!=null)se.value=pt.direct_pay_amount;
+          // Ноль в ячейке листа — не «доставка бесплатная». Получатель не платит,
+          // а во взаиморасчёты идёт тариф из карточки партнёра. Поле его и показывает.
+          if(!se.value.trim()||parseFloat(se.value)===0){
+            const price=deliveryTariffPrice(findPartner(),val('o_delivery'),($('o_size')||{}).value,val('o_weight'),typeof isBaraholkaOrder==='function'&&isBaraholkaOrder(d));
+            if(price!=null)se.value=price;
+            else{const pt=findPartner();if(pt&&pt.direct_pay_amount!=null)se.value=pt.direct_pay_amount;}
           }
-          paidChk.dataset.prevsum=se.value;se.value='0';se.disabled=true;sumTouched=true;
+          paidChk.dataset.prevsum=se.value;se.disabled=true;sumTouched=true;
           const box=$('o_payvia');if(box)box.style.display='';
         }
         else{se.disabled=false;se.value=paidChk.dataset.prevsum||'';sumTouched=(se.value!=='');

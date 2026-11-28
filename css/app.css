@@ -136,6 +136,9 @@
   /* Номер заказа не переносится: «KZ-571000» рвалось пополам, и строка таблицы
      вырастала вдвое по высоте. На телефоне карточка не страдает — там своя вёрстка. */
   .orders-tbl td[data-label="ID"]{white-space:nowrap}
+  /* Порядковый номер строки. Считается сверху вниз по текущему порядку грида:
+     первая видимая строка первой страницы — всегда 1, дальше 2, 3… */
+  .orders-tbl th.ord-n,.orders-tbl td.ord-n{width:46px;min-width:46px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;padding-right:8px}
   /* «Сортировка»: в столбце статуса теперь три строки — отметка, кто принял и когда.
      Без запаса по ширине столбец сжимался и резал имя кладовщика. */
   .sorting-tbl td[data-label="Кто принял"]{min-width:170px;white-space:nowrap}
@@ -1397,6 +1400,7 @@
        В «Заявках на забор» действия оставляем: там это «Заказы» и «Изменить», то есть
        единственный вход внутрь заявки. */
     .orders-tbl tr:not(.open) td.cell-actions{display:none}
+    .orders-tbl tr:not(.open) td[data-label="№"]{display:flex;border-bottom:1px solid #e4e9f2}
     .orders-tbl tr:not(.open) td[data-label="Телефон"]{display:flex;border-bottom:1px solid #e4e9f2}
     .show-more{display:block;width:100%;margin:4px 0 6px;justify-content:center}
     .list-count{display:block;text-align:center;font-size:12px;color:var(--muted);padding:4px 0 2px}
