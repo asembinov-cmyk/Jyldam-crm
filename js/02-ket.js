@@ -1629,6 +1629,7 @@ function buildNav(opts){
     if(canMod('sorting'))money.push({k:'sorting',label:'Сортировка',icon:'scan'});
     if(canMod('finance'))money.push({k:'finance',label:'Финансы',icon:'finance'});
     if(canMod('settlements'))money.push({k:'settlements',label:'Взаиморасчёты',icon:'settlements'});
+    if(canMod('baraholka')&&canMod('settlements'))money.push({k:'barsettlements',label:'Взаиморасчёты барахолки',icon:'settlements'});
     if(canMod('calc'))money.push({k:'calc',label:'Калькуляция',icon:'calc'});
     if(money.length)groups.push({title:'Деньги/Склад',items:money});
 
@@ -1666,6 +1667,7 @@ function buildNav(opts){
     const items=[];
     if(can('pickups','view'))items.push({k:'pickups',label:'Мои заборы',icon:'pickups'});
     if(can('orders','view'))items.push({k:'orders',label:'Мои заказы',icon:'orders'});
+    if(can('baraholka','view')&&can('settlements','view'))items.push({k:'barsettlements',label:'Взаиморасчёты барахолки',icon:'settlements'});
     const COURIER_EXTRA=[
       ['baraholka','Барахолка','baraholka'],['whatsapp','WhatsApp СЗК','whatsapp'],['greenapi','WhatsApp Ассистент приёма заявок','assistant'],['telephony','Телефония','phone'],
       ['intercity','Отправки межгород','intercity'],['sorting','Сортировка','scan'],
