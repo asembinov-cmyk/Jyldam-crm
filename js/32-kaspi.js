@@ -63,8 +63,13 @@ async function kaspiAttach(o,ro){
   const sum=$('o_sum'), f=sum&&sum.closest('.field');
   if(!f||!isStaff())return;
   const box=document.createElement('div');
-  box.className='field kaspi-box';box.id='kaspiBox';
-  f.insertAdjacentElement('afterend',box);
+  box.className='field full kaspi-box';box.id='kaspiBox';
+  /* Блок стоит ВНИЗУ карточки, под «Историей» (просьба владельца 28.11.2026): под суммой он
+     раздвигал поля, которые заполняют. У нового заказа истории ещё нет — тогда в конец той же
+     колонки, где сумма. */
+  const hist=$('o_hist'), anchor=hist&&hist.closest('.field');
+  if(anchor)anchor.insertAdjacentElement('afterend',box);
+  else f.parentElement.appendChild(box);
   box.innerHTML='<span class="hint">Kaspi Pay: проверяем…</span>';
   await kaspiCfgLoad();
   if(kaspiCfg===null){box.remove();return;}
