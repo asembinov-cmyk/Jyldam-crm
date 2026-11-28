@@ -444,8 +444,8 @@ function stNumCell(i) {
   return `<td class="st-num" data-label="№" style="color:var(--muted)">${i + 1}</td>`;
 }
 const ST_OB_FIND = {
-  labels: ["Заказ", "Заявка", "Сумма"],
-  text: ["order", "pickup", "amount"],
+  labels: ["Заказ", "Заявка", "Кто держит долг", "Сумма"],
+  text: ["order", "pickup", "who", "amount"],
   picks: [
     { key: "who", label: "Кто держит долг" },
     { key: "state", label: "Состояние" },
