@@ -3127,7 +3127,7 @@ function orderModal(id,readonly){
       <div class="field"${barHide}><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full" id="fizlicoPickupAddrField" style="${(_initPartner&&isFizlicoPartner(_initPartner))?'':'display:none'}"><label>Адрес откуда забрали (физ. лицо)</label><input id="o_fizlico_pickup_addr" value="${esc(d.fizlico_pickup_address||'')}" placeholder="реальный адрес, где забрали посылку у этого клиента" ${dis}></div>
       <div class="field"><label>ФИО клиента${cardBar?' *':''}</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
-      <div class="field"><label>Телефон клиента${cardBar?'':' <span style="color:var(--rust)">*</span>'}</label><input id="o_phone" inputmode="numeric" ${dis}></div>
+      <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс${cardBar?' *':''}</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span><div id="o_index_info" class="idx-info"></div></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>
         <div id="o_payvia" style="margin-top:8px;${d.paid_by_sender?'':'display:none'}">
@@ -3172,10 +3172,9 @@ function orderModal(id,readonly){
       </div>
     </div>`,
     ro?null:(saveOrderCard=async()=>{
-      // телефон клиента обязателен — КРОМЕ Барахолки (просьба владельца 28.11.2026): там заказ
-      // можно сохранить без номера. Набранный наполовину номер не сохраняем нигде.
+      // телефон клиента обязателен
       const phoneDigits=phoneVal('o_phone');
-      if(cardBar?(phoneDigits&&phoneDigits.length<10):(!phoneDigits||phoneDigits.length<10)){toast(cardBar?'Номер телефона введён не полностью — допишите его или сотрите':'Укажите номер телефона клиента');const pf=$('o_phone');if(pf){pf.focus();pf.style.borderColor='var(--rust)';}return false;}
+      if(!phoneDigits||phoneDigits.length<10){toast('Укажите номер телефона клиента');const pf=$('o_phone');if(pf){pf.focus();pf.style.borderColor='var(--rust)';}return false;}
       // тип доставки обязателен — без него заказ не считается обработанным (например, для
       // «Сортировки» на складе) и непонятно, какой набор полей (курьер/почта) заполнять
       if(!val('o_delivery')){toast('Выберите тип доставки');const df=$('o_delivery');if(df){df.focus();df.style.borderColor='var(--rust)';}return false;}
@@ -3406,7 +3405,7 @@ function orderModal(id,readonly){
   attachPhone('o_phone',d.phone);
   // Подсказка «такой клиент уже есть» (js/26, подключён ниже — зовём по имени с проверкой).
   if(typeof ocsAttach==='function')ocsAttach(o,cardBar,ro);
-  if(typeof kaspiAttach==='function')kaspiAttach(o,ro);   // счёт Kaspi Pay — js/32
+  if(typeof kaspiAttach==='function')kaspiAttach(o,ro,cardBar);   // счёт Kaspi Pay — js/32
   // Пока менеджер правит карточку, захват заказа в «Заполнении» продлевается: иначе
   // через десять минут работы заказ возвращается в общую очередь и достаётся соседу.
   // Слушаем сам модальный блок — он же и умрёт вместе с карточкой, снимать нечего.

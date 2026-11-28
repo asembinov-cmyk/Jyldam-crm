@@ -57,9 +57,12 @@ async function kaspiCfgLoad(force){
 }
 
 /* Блок встаёт под полем «Сумма заказа». Вызывается из orderModal (js/11). */
-async function kaspiAttach(o,ro){
+async function kaspiAttach(o,ro,bar){
   kaspiWait=null;
   if(kaspiTimer){clearInterval(kaspiTimer);kaspiTimer=null;}
+  // В Барахолке блока нет вовсе (просьба владельца 28.11.2026): счёт клиенту там не выставляют,
+  // а лишний блок с полем номера мешал заполнять и сохранять карточку.
+  if(bar)return;
   const sum=$('o_sum'), f=sum&&sum.closest('.field');
   if(!f||!isStaff())return;
   const box=document.createElement('div');
