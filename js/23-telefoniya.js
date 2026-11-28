@@ -18,6 +18,7 @@ const TEL_CALL_COLS = 'id,direction,from_number,to_number,phone10,did,queue,oper
 const TEL_DIR_RU    = {in:'входящий', out:'исходящий', robot:'робот'};
 const TEL_STATUS_RU = {ringing:['звонит','#2563eb'], answered:['отвечен','#16a34a'], missed:['пропущен','#dc2626'],
   abandoned:['не дождался','#dc2626'], busy:['занято','#b45309'], failed:['не прошёл','#6b7280'],
+  noanswer:['не ответили','#6b7280'],
   voicemail:['голосовая почта','#b45309']};
 const TEL_KIND_RU   = {client:'клиент', partner:'партнёр', courier:'курьер', staff:'сотрудник',
   unknown:'неизвестный', blacklist:'чёрный список'};
@@ -241,7 +242,7 @@ function telCallsTableHtml(){
       <td data-label="Исход"><span style="color:${st[1]}">${esc(st[0])}</span>${c.result_code?`<div class="hint" style="margin:2px 0 0">${esc(c.result_code)}</div>`:''}</td>
       <td data-label="Ждал">${esc(telSec(c.wait_sec))}</td>
       <td data-label="Разговор">${esc(telSec(c.talk_sec))}</td>
-      <td data-label="Запись">${c.recording_path?'есть':'—'}</td>
+      <td data-label="Запись">${c.recording_path?(typeof telRecBtn==='function'?telRecBtn(c.id):'есть'):'—'}</td>
     </tr>`;
   }).join('');
   return `<div class="table-scroll"><table class="resp-table"><thead><tr>

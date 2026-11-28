@@ -1200,7 +1200,7 @@ function inboundOrderModal(id){
     <div><b>Поступил:</b> ${o.created_at?esc(fmtDateTime(o.created_at)):'—'}</div>
     <div><b>Партнёр:</b> ${esc(inboundOrderShopLabel(o))}</div>
     <div><b>Тип доставки:</b> ${esc(inboundDeliveryLabel(o))}</div>
-    <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')}</div>
+    <div><b>Клиент:</b> ${esc(o.client||'—')} · ${esc(o.phone||'—')} ${typeof callBtn==='function'?callBtn(o.phone,''):''}</div>
     <div><b>Адрес:</b> ${esc(o.address||'—')}</div>
     <div><b>Город / индекс:</b> ${esc(o.city||'—')} ${o.index?('· '+esc(o.index)):''}</div>
     <div><b>Вес:</b> ${o.weight?esc(fmtWeight(o.weight))+' кг':'—'}</div>

@@ -2407,3 +2407,26 @@ td .chat-tag{margin-left:0}
 .st-fix{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:8px;width:28px;height:28px;line-height:1;font-size:14px;cursor:pointer;padding:0}
 .st-fix:hover{color:var(--rust);border-color:var(--rust)}
 @media (max-width:760px),(pointer:coarse){.st-fix{width:44px;height:44px;font-size:17px}}
+
+/* ===== Звонок из карточки и записи разговоров (28.11.2026) ===== */
+.lbl-call{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.call-btn{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--moss);border-radius:999px;background:#fff;color:var(--moss);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;line-height:1.2;white-space:nowrap}
+.call-btn svg{width:14px;height:14px;flex:none}
+.call-btn:hover{background:var(--moss);color:#fff}
+.call-btn:disabled{opacity:.55;cursor:default}
+.rec-btn{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.rec-btn:hover{border-color:var(--moss);color:var(--moss)}
+.rec-btn:disabled{opacity:.6;cursor:default}
+.rec-audio{display:block;width:100%;max-width:340px;height:36px;margin-top:6px}
+.ocall-rec{margin-top:6px}
+.ohist-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-align:left}
+.ohist-toggle:hover{border-color:var(--moss)}
+.ohist-toggle .ohist-chev{transition:transform .15s;color:var(--muted)}
+.ohist-toggle.open .ohist-chev{transform:rotate(90deg)}
+.ohist-wrap .ohist{margin-top:8px}
+.ohist[hidden]{display:none}
+@media(max-width:760px),(pointer:coarse){
+  .call-btn{min-height:36px;padding:6px 14px;font-size:14px}
+  .rec-btn{min-height:40px;padding:8px 14px;font-size:14px}
+  .ohist-toggle{min-height:44px;font-size:15px}
+}

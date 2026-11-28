@@ -224,16 +224,24 @@ function sfOnSession(e){
   sfRender();
 }
 
-function sfDial(raw){
+/* ЗАКАЗ, ИЗ КАРТОЧКИ КОТОРОГО ЗВОНЯТ. Номер подставляется кнопкой «Позвонить» в карточке;
+   если человек наберёт этот же номер руками из панели — заказ всё равно привяжется.
+   Станции заказ уходит заголовком X-Jy-Order: по нему звонок и запись попадают в «Историю». */
+let sfCard=null;      // {num:'7XXXXXXXXXX', orderId}
+function sfDial(raw,opts){
   if(sfState!=='online'||sfSession)return;
   // Оставляем только то, что бывает в номере. Пробелы, скобки и дефисы человек вставляет
   // вместе с номером из карточки — их просто убираем.
   const num=String(raw||'').replace(/[^\d+*#]/g,'');
   if(!num){sfNote='Введите номер';sfRender();return;}
   sfPeer=num;sfCall='out';sfNote='';
+  let orderId=(opts&&opts.orderId)||'';
+  if(!orderId&&sfCard&&sfCard.num.slice(-10)===num.replace(/\D/g,'').slice(-10))orderId=sfCard.orderId||'';
+  const hdr=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)?['X-Jy-Order: '+orderId.toLowerCase()]:[];
   let s;
   try{
     s=sfUA.call('sip:'+num+'@'+sfDomain,{
+      extraHeaders:hdr,
       mediaConstraints:{audio:true,video:false},
       pcConfig:SF_PC,
       rtcOfferConstraints:{offerToReceiveAudio:true,offerToReceiveVideo:false},
@@ -464,4 +472,88 @@ document.addEventListener('click',e=>{
   if(!b)return;
   e.preventDefault();e.stopPropagation();
   cbCall(b);
+},true);
+
+/* ================= «ПОЗВОНИТЬ» В КАРТОЧКЕ ЗАКАЗА (28.11.2026) =================
+   Одна кнопка на все разделы: «Заказы заборов», Барахолка, SPA трафик. Номер берётся из
+   карточки, набирать ничего не нужно.
+   • Сотрудник с телефоном в CRM (есть во вкладке «Операторы») — звонок идёт из браузера.
+   • Остальные, в первую очередь курьеры, — обратный звонок: станция звонит человеку на
+     мобильный и соединяет с клиентом. Клиент в обоих случаях видит номер компании.
+   Кнопки нет вовсе, если человеку звонить нечем: ни телефона в CRM, ни линии. */
+function callAvailable(){return !!sfOp||!!cbReady;}
+// field — id поля с телефоном: тогда берём то, что в нём набрано СЕЙЧАС, а не сохранённое.
+function callBtn(phone,orderId,field){
+  if(!callAvailable())return '';
+  const d=typeof phoneStored==='function'?phoneStored(String(phone||'')):String(phone||'').replace(/\D/g,'').slice(-10);
+  if(!d&&!field)return '';
+  return `<button type="button" class="call-btn" data-call="${esc(d)}" data-callorder="${esc(orderId||'')}"${field?` data-callfield="${esc(field)}"`:''} title="Позвонить клиенту">${SF_ICON}<span>Позвонить</span></button>`;
+}
+async function callFromCard(btn){
+  let raw=btn.dataset.call||'';
+  if(btn.dataset.callfield){
+    const f=document.getElementById(btn.dataset.callfield);
+    const live=f?(f.dataset.phone||f.value||''):'';
+    if(String(live).replace(/\D/g,'').length)raw=live;
+  }
+  const d=String(raw).replace(/\D/g,'');
+  const num=d.length===10?d:(d.length===11&&(d[0]==='7'||d[0]==='8')?d.slice(1):'');
+  if(!num){toast('В карточке нет номера телефона или он записан не полностью',5000);return;}
+  const orderId=btn.dataset.callorder||'';
+  if(sfOp){
+    sfCard={num:'7'+num,orderId};
+    sfNum='7'+num;sfOpen=true;
+    if(sfSession){sfRender();toast('Сначала завершите текущий разговор');return;}
+    if(sfState!=='online'){sfRender();toast('Номер подставлен. Нажмите «Выйти на линию», затем «Позвонить»',6000);return;}
+    sfDial('7'+num,{orderId});
+    return;
+  }
+  if(cbReady&&orderId){
+    btn.dataset.cb='order:'+orderId;
+    await cbCall(btn);
+    delete btn.dataset.cb;
+    return;
+  }
+  toast('Звонки из CRM вам не подключены — попросите администратора добавить вас в «Телефония» → «Операторы»',7000);
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-call]');
+  if(!b)return;
+  e.preventDefault();e.stopPropagation();
+  callFromCard(b);
+},true);
+
+/* ЗАПИСЬ РАЗГОВОРА. Файл лежит на сервере станции; мост отдаёт его только сотруднику,
+   которому база разрешила слушать. Поэтому качаем с токеном входа и играем из памяти,
+   а не ссылкой — ссылку можно было бы переслать кому угодно. */
+function telRecBtn(callId){
+  return `<button type="button" class="rec-btn" data-rec="${esc(callId)}" title="Прослушать запись разговора">▶ Слушать</button>`;
+}
+async function telRecPlay(btn){
+  const id=btn.dataset.rec;
+  if(!id||btn.disabled)return;
+  btn.disabled=true;const was=btn.textContent;btn.textContent='Загружаю…';
+  try{
+    const {data:sess}=await sb.auth.getSession();
+    const token=sess&&sess.session?sess.session.access_token:'';
+    const r=await fetch(SF_BRIDGE+'/api/call/rec?id='+encodeURIComponent(id),{headers:{Authorization:'Bearer '+token}});
+    if(!r.ok){
+      const j=await r.json().catch(()=>({}));
+      toast((j&&j.message)||'Запись не открылась',6000);
+      btn.disabled=false;btn.textContent=was;return;
+    }
+    const url=URL.createObjectURL(await r.blob());
+    const a=document.createElement('audio');
+    a.controls=true;a.autoplay=true;a.src=url;a.className='rec-audio';
+    btn.replaceWith(a);
+  }catch(e){
+    toast('Нет связи с сервером телефонии',5000);
+    btn.disabled=false;btn.textContent=was;
+  }
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-rec]');
+  if(!b)return;
+  e.preventDefault();e.stopPropagation();
+  telRecPlay(b);
 },true);

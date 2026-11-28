@@ -2970,7 +2970,7 @@ function orderHistoryInner(o){
   else if(o.pickup_id)rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'по заявке на забор, пачкой'));
   else if(o._histLoaded)rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'кто — не записано'));
   else rows.push(ohistRow('＋','Создан',ohistWhen(o.created_at),'ищем в журнале…'));
-  if(onlyCreated)return rows.join('');
+  if(onlyCreated)return rows.join('')+orderCallsRows(o);
   // 2. Кто заполнил. Настоящая отметка — из модуля «Заполнение»; у заказов до её появления
   //    имя восстанавливается по журналу правок, и это подписано отдельно (раздел 8c).
   // У заказов из реестра отметка о заполнении ставится при создании, и имени в ней нет:
@@ -2987,12 +2987,65 @@ function orderHistoryInner(o){
   if(o.sorted_at)rows.push(ohistRow('📦','Принят на складе',
     `<b>${esc(o.sorted_by_name||'—')}</b> · ${ohistWhen(o.sorted_at)}`));
   else rows.push(ohistRow('📦','Принят на складе','—','ещё не принят'));
-  return rows.join('');
+  // 4. Курьеры. Заборщик назначается на ЗАЯВКУ, а не на заказ (раздел 6), поэтому идём через неё.
+  const pk=o.pickup_id?(S.pickups||[]).find(x=>x.id===o.pickup_id):null;
+  const pc=pk&&pk.courier_id?(S.couriers||[]).find(x=>x.id===pk.courier_id):null;
+  if(pc)rows.push(ohistRow('🚚','Забрал курьер',`<b>${esc(pc.fio||pc.name||'—')}</b>${pk.pickup_date?' · '+esc(fmtDate(pk.pickup_date)):''}`));
+  else if(o.pickup_id)rows.push(ohistRow('🚚','Забрал курьер','—',pk?'курьер в заявке не назначен':'заявка не загружена'));
+  const dc=o.order_courier_id?(S.order_couriers||[]).find(x=>x.id===o.order_courier_id):null;
+  if(dc)rows.push(ohistRow('🛵','Курьер доставки',`<b>${esc(dc.fio||dc.name||'—')}</b>${o.deliver_date?' · '+esc(fmtDate(o.deliver_date)):''}`));
+  if(o.ket_id)rows.push(ohistRow('↗','Отправлен в KET',`№ ${esc(o.ket_id)}${o.ket_synced_at?' · '+ohistWhen(o.ket_synced_at):''}`));
+  return rows.join('')+orderCallsRows(o);
+}
+/* ЗВОНКИ ПО ЗАКАЗУ — из журнала станции (tel_calls, db/77): кто звонил, когда, сколько
+   говорили, и запись разговора. Читает функция базы tel_calls_for_order: курьеру она не
+   отдаёт ничего — в записях чужие разговоры с клиентом. */
+const OCALL_DIR={in:'входящий',out:'исходящий'};
+const OCALL_STATUS={answered:'',missed:'пропущен',noanswer:'не ответили',busy:'занято',failed:'не прошёл'};
+function ocallDur(s){s=Math.max(0,+s||0);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+function orderCallsRows(o){
+  if(o._calls===undefined)return o._callsAsked?ohistRow('📞','Звонки','загружаем…'):'';
+  if(o._calls===null)return ohistRow('📞','Звонки','—','журнал звонков недоступен');
+  if(!o._calls.length)return ohistRow('📞','Звонки','—','по этому заказу не звонили');
+  return o._calls.map(c=>{
+    const who=c.operator_name?`<b>${esc(c.operator_name)}</b>`:(c.direction==='in'?'<b>клиент</b>':'<b>—</b>');
+    const st=OCALL_STATUS[c.status];
+    const parts=[who,esc(fmtDateTime(c.started_at)),OCALL_DIR[c.direction]||''];
+    if(c.status==='answered')parts.push(ocallDur(c.talk_sec));
+    const note=[c.kind==='callback'?'через станцию, с мобильного':'',st||''].filter(Boolean).join(' · ');
+    const rec=c.has_rec&&typeof telRecBtn==='function'?`<div class="ocall-rec">${telRecBtn(c.id)}</div>`:(c.status==='answered'?'<small>записи нет</small>':'');
+    return ohistRow('📞',c.direction==='in'?'Звонил клиент':'Звонок клиенту',parts.filter(Boolean).join(' · ')+rec,note);
+  }).join('');
+}
+async function orderCallsLoad(o){
+  if(!o||!o.id||o._callsAsked)return;
+  o._callsAsked=true;
+  const box=$('o_hist');if(box)box.innerHTML=orderHistoryInner(o);
+  try{
+    const {data,error}=await sb.rpc('tel_calls_for_order',{p_order:o.id});
+    o._calls=error?null:(data||[]);
+  }catch(e){o._calls=null;}
+  const b2=$('o_hist');if(b2)b2.innerHTML=orderHistoryInner(o);
+}
+function orderHistoryBind(o){
+  const t=$('o_hist_toggle'),box=$('o_hist');
+  if(!t||!box)return;
+  t.onclick=()=>{
+    const open=box.hidden;
+    box.hidden=!open;
+    t.setAttribute('aria-expanded',open?'true':'false');
+    t.classList.toggle('open',open);
+    if(open)orderCallsLoad(o);
+  };
 }
 function orderHistoryHtml(o){
   if(!o||!o.id)return '';
-  return `<div class="field full"><label>История</label>
-    <div class="ohist" id="o_hist">${orderHistoryInner(o)}</div></div>`;
+  /* ИСТОРИЯ РАСКРЫВАЕТСЯ ПО НАЖАТИЮ (просьба владельца 28.11.2026) и при открытии карточки
+     всегда свёрнута: в ней теперь и курьеры, и звонки с записями — в развёрнутом виде она
+     отодвигала бы поля, которые заполняют. Звонки подгружаются при первом раскрытии. */
+  return `<div class="field full ohist-wrap">
+    <button type="button" class="ohist-toggle" id="o_hist_toggle" aria-expanded="false"><span>История заказа</span><span class="ohist-chev">▸</span></button>
+    <div class="ohist" id="o_hist" hidden>${orderHistoryInner(o)}</div></div>`;
 }
 // Догружает то, чего нет в самом заказе. Два запроса максимум, и только при открытии
 // карточки: журнал большой, держать его в памяти вкладки незачем.
@@ -3127,7 +3180,7 @@ function orderModal(id,readonly){
       <div class="field"${barHide}><label>Город забора <span style="color:var(--muted);font-weight:400;font-size:11px">(откуда забрали)</span></label><select id="o_pickupcity" ${dis}><option value="">—</option>${S.cities.map(c=>`<option value="${c.id}" ${d.pickup_city_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="field full" id="fizlicoPickupAddrField" style="${(_initPartner&&isFizlicoPartner(_initPartner))?'':'display:none'}"><label>Адрес откуда забрали (физ. лицо)</label><input id="o_fizlico_pickup_addr" value="${esc(d.fizlico_pickup_address||'')}" placeholder="реальный адрес, где забрали посылку у этого клиента" ${dis}></div>
       <div class="field"><label>ФИО клиента${cardBar?' *':''}</label><input id="o_client" value="${esc(d.client)}" ${dis}></div>
-      <div class="field"><label>Телефон клиента <span style="color:var(--rust)">*</span></label><input id="o_phone" inputmode="numeric" ${dis}></div>
+      <div class="field"><label class="lbl-call">Телефон клиента <span style="color:var(--rust)">*</span>${typeof callBtn==='function'?callBtn(d.phone,o&&o.id||'','o_phone'):''}</label><input id="o_phone" inputmode="numeric" ${dis}></div>
       <div class="field mail-only" style="${isCourierDelivery(d.delivery_id)?'display:none':''}"><label>Индекс${cardBar?' *':''}</label><input id="o_index" inputmode="numeric" maxlength="6" placeholder="010010" value="${esc(d.index)}" ${dis}><span class="hint">Ровно 6 цифр. По нему Казпочта выдаёт трек и маршрутизирует посылку, он же печатается на бланке.</span><div id="o_index_info" class="idx-info"></div></div>
       <div class="field"><label>Сумма заказа (₸)</label><input type="number" min="0" id="o_sum" value="${d.order_sum!=null&&d.order_sum!==''?esc(d.order_sum):''}" ${dis} ${d.paid_by_sender?'disabled':''}><span class="hint">Подставляется из размера пакета или тарифа партнёра по типу доставки. Можно изменить вручную.</span>${isStaff()?`<label class="o-paidorder"><input type="checkbox" id="o_paidorder" ${d.paid_by_sender?'checked':''} ${dis}> Оплачено отправителем <span style="font-weight:400;color:var(--muted);font-size:12px">(сумма станет 0)</span></label>
         <div id="o_payvia" style="margin-top:8px;${d.paid_by_sender?'':'display:none'}">
@@ -3635,6 +3688,7 @@ function orderModal(id,readonly){
     const redrawOPhotos=()=>{const pc=$('o_photos');if(!pc)return;pc.innerHTML=orderBigPhotoInner(o,!ro);bindBig();};
     bindBig();
     orderHistoryLoad(o); // «кто завёл заказ» лежит в журнале, а не в самом заказе
+    orderHistoryBind(o);  // история свёрнута; звонки и записи грузятся при раскрытии
   }
   if(!ro){
     const fillCouriers=cityId=>{
